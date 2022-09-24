@@ -1,0 +1,3 @@
+[submodule "Wraith/Libs/GLFW"]
+	path = Wraith/Libs/GLFW
+	url = https://github.com/TheCherno/glfw
