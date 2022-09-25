@@ -31,6 +31,8 @@ namespace Wraith
 			return ss.str();
 		}
 
+		EVENT_CLASS_TYPE(KeyPressed)
+
 	private:
 		int m_RepeatCount;
 	};

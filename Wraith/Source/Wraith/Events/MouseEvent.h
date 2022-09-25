@@ -27,7 +27,7 @@ namespace Wraith
 		float m_MouseX, m_MouseY;
 	};
 
-	class WRAITH_API MouseScrolledEvent : public EventCore
+	class WRAITH_API MouseScrolledEvent : public Event
 	{
 	public:
 		MouseScrolledEvent( float xOffset, float yOffset)
@@ -50,7 +50,7 @@ namespace Wraith
 		float m_XOffset, m_YOffset;
 	};
 
-	class WRAITH_API MouseButtonEvent : public EventCore
+	class WRAITH_API MouseButtonEvent : public Event
 	{
 	public:
 		inline int GetMouseButton() const { return m_Button; }
