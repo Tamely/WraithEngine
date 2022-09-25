@@ -12,9 +12,9 @@ outputdir = "%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}"
 
 -- Include directories relative to root folder (solution directory)
 IncludeDir = {}
-IncludeDir["GLFW"] = "Wraith/Libs/GLFW/include"
+IncludeDir["GLFW"] = "Wraith/vendor/GLFW/include"
 
-include "Wraith/Libs/GLFW"
+include "Wraith/vendor/GLFW"
 	
 project "Wraith"
 	location "Wraith"
@@ -25,19 +25,19 @@ project "Wraith"
 	objdir ("bin-int/" .. outputdir .. "/%{prj.name}")
 
 	pchheader "wpch.h"
-	pchsource "Wraith/Source/wpch.cpp"
+	pchsource "Wraith/src/wpch.cpp"
 	
 	files
 	{
-		"%{prj.name}/Source/**.h",
-		"%{prj.name}/Source/**.cpp",
-		"%{prj.name}/Source/**.hpp"
+		"%{prj.name}/src/**.h",
+		"%{prj.name}/src/**.cpp",
+		"%{prj.name}/src/**.hpp"
 	}
 	
 	includedirs
 	{
-		"%{prj.name}/Source",
-		"%{prj.name}/Libs/spdlog/include",
+		"%{prj.name}/src",
+		"%{prj.name}/vendor/spdlog/include",
 		"%{IncludeDir.GLFW}"
 	}
 
@@ -88,15 +88,15 @@ project "Sandbox"
 	
 	files
 	{
-		"%{prj.name}/Source/**.h",
-		"%{prj.name}/Source/**.cpp",
-		"%{prj.name}/Source/**.hpp"
+		"%{prj.name}/src/**.h",
+		"%{prj.name}/src/**.cpp",
+		"%{prj.name}/src/**.hpp"
 	}
 	
 	includedirs
 	{
-		"Wraith/Libs/spdlog/include",
-		"Wraith/Source"
+		"Wraith/vendor/spdlog/include",
+		"Wraith/src"
 	}
 	
 	links
