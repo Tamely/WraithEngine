@@ -2,10 +2,9 @@
 
 #include "Event.h"
 
-namespace Wraith
-{
-	class WRAITH_API MouseMovedEvent : public Event
-	{
+namespace Wraith {
+
+	class WRAITH_API MouseMovedEvent : public Event {
 	public:
 		MouseMovedEvent(float x, float y)
 			: m_MouseX(x), m_MouseY(y) {}
@@ -22,15 +21,13 @@ namespace Wraith
 
 		EVENT_CLASS_TYPE(MouseMoved)
 		EVENT_CLASS_CATEGORY(EventCategoryMouse | EventCategoryInput)
-	
 	private:
 		float m_MouseX, m_MouseY;
 	};
 
-	class WRAITH_API MouseScrolledEvent : public Event
-	{
+	class WRAITH_API MouseScrolledEvent : public Event {
 	public:
-		MouseScrolledEvent( float xOffset, float yOffset)
+		MouseScrolledEvent(float xOffset, float yOffset)
 			: m_XOffset(xOffset), m_YOffset(yOffset) {}
 
 		inline float GetXOffset() const { return m_XOffset; }
@@ -44,14 +41,12 @@ namespace Wraith
 		}
 
 		EVENT_CLASS_TYPE(MouseScrolled)
-		EVENT_CLASS_CATEGORY(EventCategoryMouse | EventCategoryInput)
-
+			EVENT_CLASS_CATEGORY(EventCategoryMouse | EventCategoryInput)
 	private:
 		float m_XOffset, m_YOffset;
 	};
 
-	class WRAITH_API MouseButtonEvent : public Event
-	{
+	class WRAITH_API MouseButtonEvent : public Event {
 	public:
 		inline int GetMouseButton() const { return m_Button; }
 
@@ -63,8 +58,7 @@ namespace Wraith
 		int m_Button;
 	};
 
-	class WRAITH_API MouseButtonPressedEvent : public MouseButtonEvent
-	{
+	class WRAITH_API MouseButtonPressedEvent : public MouseButtonEvent {
 	public:
 		MouseButtonPressedEvent(int button)
 			: MouseButtonEvent(button) {}
@@ -78,8 +72,8 @@ namespace Wraith
 
 		EVENT_CLASS_TYPE(MouseButtonPressed)
 	};
-	class WRAITH_API MouseButtonReleasedEvent : public MouseButtonEvent
-	{
+
+	class WRAITH_API MouseButtonReleasedEvent : public MouseButtonEvent {
 	public:
 		MouseButtonReleasedEvent(int button)
 			: MouseButtonEvent(button) {}

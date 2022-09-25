@@ -8,7 +8,7 @@ workspace "Wraith"
 		"Dist"
 	}
 	
-outputdir = "${cgf.buildcfg}-%{cfg.system}-%{cfg.architecture}"
+outputdir = "%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}"
 
 -- Include directories relative to root folder (solution directory)
 IncludeDir = {}
@@ -21,8 +21,8 @@ project "Wraith"
 	kind "SharedLib"
 	language "C++"
 	
-	targetdir ("bin/" .. outputdir .. "/%(prj.name}")
-	objdir ("bin-int/" .. outputdir .. "/%(prj.name}")
+	targetdir ("bin/" .. outputdir .. "/%{prj.name}")
+	objdir ("bin-int/" .. outputdir .. "/%{prj.name}")
 
 	pchheader "wpch.h"
 	pchsource "Wraith/Source/wpch.cpp"
@@ -48,7 +48,7 @@ project "Wraith"
 	}
 	
 	filter "system:windows"
-		cppdialect "C++20"
+		cppdialect "C++17"
 		staticruntime "On"
 		systemversion "latest"
 		
@@ -60,19 +60,22 @@ project "Wraith"
 		
 		postbuildcommands
 		{
-			("{COPY} %{cfg.buildtarget.relpath} ../bin/" .. outputdir .. "Sandbox")
+			("{COPY} %{cfg.buildtarget.relpath} ../bin/" .. outputdir .. "/Sandbox")
 		}
 		
 	filter "configurations:Debug"
 		defines "W_DEBUG"
+		buildoptions "/MDd"
 		symbols "On"
 		
 	filter "configurations:Release"
 		defines "W_RELEASE"
+		buildoptions "/MD"
 		optimize "On"
 		
 	filter "configurations:Dist"
 		defines "W_DIST"
+		buildoptions "/MD"
 		optimize "On"
 		
 project "Sandbox"
@@ -80,8 +83,8 @@ project "Sandbox"
 	kind "ConsoleApp"
 	language "C++"
 	
-	targetdir ("bin/" .. outputdir .. "/%(prj.name}")
-	objdir ("bin-int/" .. outputdir .. "/%(prj.name}")
+	targetdir ("bin/" .. outputdir .. "/%{prj.name}")
+	objdir ("bin-int/" .. outputdir .. "/%{prj.name}")
 	
 	files
 	{
@@ -102,7 +105,7 @@ project "Sandbox"
 	}
 	
 	filter "system:windows"
-		cppdialect "C++20"
+		cppdialect "C++17"
 		staticruntime "On"
 		systemversion "latest"
 		
@@ -113,13 +116,16 @@ project "Sandbox"
 		
 	filter "configurations:Debug"
 		defines "W_DEBUG"
+		buildoptions "/MDd"
 		symbols "On"
 		
 	filter "configurations:Release"
 		defines "W_RELEASE"
+		buildoptions "/MD"
 		optimize "On"
 		
 	filter "configurations:Dist"
 		defines "W_DIST"
+		buildoptions "/MD"
 		optimize "On"
 	

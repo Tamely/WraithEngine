@@ -6,8 +6,7 @@
 
 namespace Wraith
 {
-	class WRAITH_API Log
-	{
+	class WRAITH_API Log {
 	public:
 		static void Init();
 

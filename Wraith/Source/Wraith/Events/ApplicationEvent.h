@@ -2,10 +2,9 @@
 
 #include "Event.h"
 
-namespace Wraith
-{
-	class WRAITH_API WindowResizeEvent : public Event
-	{
+namespace Wraith {
+
+	class WRAITH_API WindowResizeEvent : public Event {
 	public:
 		WindowResizeEvent(unsigned int width, unsigned int height)
 			: m_Width(width), m_Height(height) {}
@@ -13,8 +12,7 @@ namespace Wraith
 		inline unsigned int GetWidth() const { return m_Width; }
 		inline unsigned int GetHeight() const { return m_Height; }
 
-		std::string ToString() const override
-		{
+		std::string ToString() const override {
 			std::stringstream ss;
 			ss << "WindowResizeEvent: " << m_Width << ", " << m_Height;
 			return ss.str();
@@ -26,8 +24,7 @@ namespace Wraith
 		unsigned int m_Width, m_Height;
 	};
 
-	class WRAITH_API WindowCloseEvent : public Event
-	{
+	class WRAITH_API WindowCloseEvent : public Event {
 	public:
 		WindowCloseEvent() {}
 
@@ -35,8 +32,7 @@ namespace Wraith
 		EVENT_CLASS_CATEGORY(EventCategoryApplication)
 	};
 
-	class WRAITH_API AppTickEvent : public Event
-	{
+	class WRAITH_API AppTickEvent : public Event {
 	public:
 		AppTickEvent() {}
 
@@ -44,8 +40,7 @@ namespace Wraith
 		EVENT_CLASS_CATEGORY(EventCategoryApplication)
 	};
 
-	class WRAITH_API AppUpdateEvent : public Event
-	{
+	class WRAITH_API AppUpdateEvent : public Event {
 	public:
 		AppUpdateEvent() {}
 
@@ -53,8 +48,7 @@ namespace Wraith
 		EVENT_CLASS_CATEGORY(EventCategoryApplication)
 	};
 
-	class WRAITH_API AppRenderEvent : public Event
-	{
+	class WRAITH_API AppRenderEvent : public Event {
 	public:
 		AppRenderEvent() {}
 

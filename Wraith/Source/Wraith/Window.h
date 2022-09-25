@@ -7,8 +7,7 @@
 
 namespace Wraith {
 
-	struct WindowProps
-	{
+	struct WindowProps {
 		std::string Title;
 		unsigned int Width;
 		unsigned int Height;
