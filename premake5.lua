@@ -13,8 +13,12 @@ outputdir = "%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}"
 -- Include directories relative to root folder (solution directory)
 IncludeDir = {}
 IncludeDir["GLFW"] = "Wraith/vendor/GLFW/include"
+IncludeDir["Glad"] = "Wraith/vendor/Glad/include"
+IncludeDir["ImGui"] = "Wraith/vendor/imgui"
 
 include "Wraith/vendor/GLFW"
+include "Wraith/vendor/Glad"
+include "Wraith/vendor/ImGui"
 	
 project "Wraith"
 	location "Wraith"
@@ -38,12 +42,16 @@ project "Wraith"
 	{
 		"%{prj.name}/src",
 		"%{prj.name}/vendor/spdlog/include",
-		"%{IncludeDir.GLFW}"
+		"%{IncludeDir.GLFW}",
+		"%{IncludeDir.Glad}",
+		"%{IncludeDir.ImGui}"
 	}
 
 	links
 	{
 		"GLFW",
+		"Glad",
+		"ImGui",
 		"opengl32.lib"
 	}
 	
@@ -55,7 +63,8 @@ project "Wraith"
 		defines
 		{
 			"W_PLATFORM_WINDOWS",
-			"W_BUILD_DLL"
+			"W_BUILD_DLL",
+			"GLFW_INCLUDE_NONE"
 		}
 		
 		postbuildcommands

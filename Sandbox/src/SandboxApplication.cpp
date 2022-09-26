@@ -18,6 +18,7 @@ class Sandbox : public Wraith::Application {
 public:
 	Sandbox() {
 		PushLayer(new ExampleLayer());
+		PushOverlay(new Wraith::ImGuiLayer());
 	}
 
 	~Sandbox() {
