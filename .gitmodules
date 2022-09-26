@@ -1,6 +1,3 @@
-[submodule "Wraith/vendor/GLFW"]
-	path = Wraith/vendor/GLFW
-	url = https://github.com/TheCherno/glfw
 [submodule "Wraith/vendor/imgui"]
 	path = Wraith/vendor/imgui
 	url = https://github.com/TheCherno/imgui
