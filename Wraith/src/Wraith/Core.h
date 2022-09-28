@@ -10,6 +10,10 @@
 	#error Wraith only supports Windows!
 #endif
 
+#ifdef W_DEBUG
+	#define W_ENABLE_ASSERTS
+#endif
+
 #ifdef W_ENABLE_ASSERTS
 	#define W_ASSERT(w, ...) {if (!(x)) { W_ERROR("Assertation Failed: {0}", __VA_ARGS__); __debugbreak(); } }
 	#define W_CORE_ASSERT(w, ...) { if (!(x)) { W_CORE_ERROR("Assertation Failed: {0}", __VA_ARGS__); __debugbreak(); } }
