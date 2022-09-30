@@ -6,11 +6,15 @@ public:
 		: Layer("Example") {}
 
 	void OnUpdate() override {
-		W_INFO("ExampleLayer::Update");
+		if (Wraith::Input::IsKeyPressed(W_KEY_TAB))
+			W_TRACE("Tab key is pressed!");
 	}
 
 	void OnEvent(Wraith::Event& event) override {
-		W_TRACE("{0}", event);
+		if (event.GetEventType() == Wraith::EventType::KeyPressed) {
+			Wraith::KeyPressedEvent& e = (Wraith::KeyPressedEvent&)event;
+			W_TRACE("{0}", (char)e.GetKeyCode());
+		}
 	}
 };
 
