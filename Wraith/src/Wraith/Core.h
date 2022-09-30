@@ -15,11 +15,11 @@
 #endif
 
 #ifdef W_ENABLE_ASSERTS
-	#define W_ASSERT(w, ...) {if (!(x)) { W_ERROR("Assertation Failed: {0}", __VA_ARGS__); __debugbreak(); } }
-	#define W_CORE_ASSERT(w, ...) { if (!(x)) { W_CORE_ERROR("Assertation Failed: {0}", __VA_ARGS__); __debugbreak(); } }
+	#define W_ASSERT(x, ...) {if (!(x)) { W_ERROR("Assertation Failed: {0}", __VA_ARGS__); __debugbreak(); } }
+	#define W_CORE_ASSERT(x, ...) { if (!(x)) { W_CORE_ERROR("Assertation Failed: {0}", __VA_ARGS__); __debugbreak(); } }
 #else
-	#define W_ASSERT(w, ...)
-	#define W_CORE_ASSERT(w, ...)
+	#define W_ASSERT(x, ...)
+	#define W_CORE_ASSERT(x, ...)
 #endif
 
 #define BIT(x) (1 << x)
