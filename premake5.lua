@@ -110,6 +110,7 @@ project "Sandbox"
 	{
 		"Wraith/vendor/spdlog/include",
 		"Wraith/src",
+		"Wraith/vendor",
 		"%{IncludeDir.glm}"
 	}
 	

@@ -7,6 +7,8 @@
 #include "Wraith/Events/Event.h"
 #include "Wraith/Events/ApplicationEvent.h"
 
+#include "Wraith/ImGui/ImGuiLayer.h"
+
 namespace Wraith {
 
 	class WRAITH_API Application {
@@ -28,6 +30,7 @@ namespace Wraith {
 		bool OnWindowClose(WindowCloseEvent& e);
 
 		std::unique_ptr<Window> m_Window;
+		ImGuiLayer* m_ImGuiLayer;
 		bool m_Running = true;
 		LayerStack m_LayerStack;
 	private:

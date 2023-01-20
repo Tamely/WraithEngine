@@ -1,5 +1,7 @@
 #include <Wraith.h>
 
+#include "imgui/imgui.h"
+
 class ExampleLayer : public Wraith::Layer {
 public:
 	ExampleLayer()
@@ -8,6 +10,12 @@ public:
 	void OnUpdate() override {
 		if (Wraith::Input::IsKeyPressed(W_KEY_TAB))
 			W_TRACE("Tab key is pressed!");
+	}
+
+	virtual void OnImGuiRender() override {
+		ImGui::Begin("Test");
+		ImGui::Text("Hello World");
+		ImGui::End();
 	}
 
 	void OnEvent(Wraith::Event& event) override {
@@ -22,7 +30,6 @@ class Sandbox : public Wraith::Application {
 public:
 	Sandbox() {
 		PushLayer(new ExampleLayer());
-		PushOverlay(new Wraith::ImGuiLayer());
 	}
 
 	~Sandbox() {
