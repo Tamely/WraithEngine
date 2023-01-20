@@ -16,6 +16,7 @@ IncludeDir = {}
 IncludeDir["GLFW"] = "Wraith/vendor/GLFW/include"
 IncludeDir["Glad"] = "Wraith/vendor/Glad/include"
 IncludeDir["ImGui"] = "Wraith/vendor/imgui"
+IncludeDir["glm"] = "Wraith/vendor/glm"
 
 include "Wraith/vendor/GLFW"
 include "Wraith/vendor/Glad"
@@ -46,7 +47,8 @@ project "Wraith"
 		"%{prj.name}/vendor/spdlog/include",
 		"%{IncludeDir.GLFW}",
 		"%{IncludeDir.Glad}",
-		"%{IncludeDir.ImGui}"
+		"%{IncludeDir.ImGui}",
+		"%{IncludeDir.glm}"
 	}
 
 	links
@@ -107,7 +109,8 @@ project "Sandbox"
 	includedirs
 	{
 		"Wraith/vendor/spdlog/include",
-		"Wraith/src"
+		"Wraith/src",
+		"%{IncludeDir.glm}"
 	}
 	
 	links
