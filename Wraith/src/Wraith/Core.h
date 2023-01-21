@@ -1,11 +1,15 @@
 #pragma once
 
 #ifdef W_PLATFORM_WINDOWS
+#if W_DYNAMIC_LINK
 	#ifdef W_BUILD_DLL
 		#define WRAITH_API __declspec(dllexport)
 	#else
 		#define WRAITH_API __declspec(dllimport)
 	#endif
+#else
+	#define WRAITH_API
+#endif
 #else
 	#error Wraith only supports Windows!
 #endif
