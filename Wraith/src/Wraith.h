@@ -12,6 +12,16 @@
 
 #include "Wraith/ImGui/ImGuiLayer.h"
 
+// --- Renderer -----
+#include "Wraith/Renderer/Renderer.h"
+#include "Wraith/Renderer/RenderCommand.h"
+
+#include "Wraith/Renderer/Buffer.h"
+#include "Wraith/Renderer/Shader.h"
+#include "Wraith/Renderer/VertexArray.h"
+
+#include "Wraith/Renderer/OrthographicCamera.h"
+
 // --- Entry Point ---
 #include "Wraith/EntryPoint.h"
 // -------------------
