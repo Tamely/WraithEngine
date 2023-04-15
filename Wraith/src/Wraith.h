@@ -6,6 +6,8 @@
 #include "Wraith/Layer.h"
 #include "Wraith/Log.h"
 
+#include "Wraith/Core/Timestep.h"
+
 #include "Wraith/Input.h"
 #include "Wraith/KeyCodes.h"
 #include "Wraith/MouseButtonCodes.h"

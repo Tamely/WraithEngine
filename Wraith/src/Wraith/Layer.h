@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Wraith/Core.h"
+#include "Wraith/Core/Timestep.h"
 #include "Wraith/Events/Event.h"
 
 namespace Wraith {
@@ -11,7 +12,7 @@ namespace Wraith {
 
 		virtual void OnAttach() {}
 		virtual void OnDetach() {}
-		virtual void OnUpdate() {}
+		virtual void OnUpdate(Timestep ts) {}
 		virtual void OnImGuiRender() {}
 		virtual void OnEvent(Event& event) {}
 

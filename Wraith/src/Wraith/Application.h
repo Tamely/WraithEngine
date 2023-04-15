@@ -7,13 +7,9 @@
 #include "Wraith/Events/Event.h"
 #include "Wraith/Events/ApplicationEvent.h"
 
+#include "Wraith/Core/Timestep.h"
+
 #include "Wraith/ImGui/ImGuiLayer.h"
-
-#include "Wraith/Renderer/Shader.h"
-#include "Wraith/Renderer/Buffer.h"
-#include "Wraith/Renderer/VertexArray.h"
-
-#include "Wraith/Renderer/OrthographicCamera.h"
 
 namespace Wraith {
 
@@ -35,10 +31,12 @@ namespace Wraith {
 	private:
 		bool OnWindowClose(WindowCloseEvent& e);
 
+	private:
 		std::unique_ptr<Window> m_Window;
 		ImGuiLayer* m_ImGuiLayer;
 		bool m_Running = true;
 		LayerStack m_LayerStack;
+		float m_LastFrameTime = 0.0f;
 	private:
 		static Application* s_Instance;
 	};
