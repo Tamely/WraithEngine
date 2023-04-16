@@ -93,7 +93,7 @@ public:
 			}
 		)";
 
-		m_Shader.reset(Wraith::Shader::Create(vertexSrc, fragmentSrc));
+		m_Shader = Wraith::Shader::Create("VertexPosColor", vertexSrc, fragmentSrc);
 
 		std::string flatColorShaderVertexSrc = R"(
 			#version 330 core
@@ -127,15 +127,15 @@ public:
 			}
 		)";
 
-		m_FlatColorShader.reset(Wraith::Shader::Create(flatColorShaderVertexSrc, flatColorShaderFragmentSrc));
+		m_FlatColorShader = Wraith::Shader::Create("FlatColor", flatColorShaderVertexSrc, flatColorShaderFragmentSrc);
 
-		m_TextureShader.reset(Wraith::Shader::Create("assets/shaders/Texture.glsl"));
+		auto textureShader = m_ShaderLibrary.Load("assets/shaders/Texture.glsl");
 
 		m_Texture = Wraith::Texture2D::Create("assets/textures/Checkerboard.png");
 		m_CatTexture = Wraith::Texture2D::Create("assets/textures/Cat.png");
 
-		std::dynamic_pointer_cast<Wraith::OpenGLShader>(m_TextureShader)->Bind();
-		std::dynamic_pointer_cast<Wraith::OpenGLShader>(m_TextureShader)->UploadUniformInt("u_Texture", 0);
+		std::dynamic_pointer_cast<Wraith::OpenGLShader>(textureShader)->Bind();
+		std::dynamic_pointer_cast<Wraith::OpenGLShader>(textureShader)->UploadUniformInt("u_Texture", 0);
 	}
 
 	void OnUpdate(Wraith::Timestep ts) override {
@@ -178,11 +178,13 @@ public:
 			}
 		}
 
+		auto textureShader = m_ShaderLibrary.Get("Texture");
+
 		m_Texture->Bind();
-		Wraith::Renderer::Submit(m_TextureShader, m_SquareVA, glm::scale(glm::mat4(1.0f), glm::vec3(1.5f)));
+		Wraith::Renderer::Submit(textureShader, m_SquareVA, glm::scale(glm::mat4(1.0f), glm::vec3(1.5f)));
 
 		m_CatTexture->Bind();
-		Wraith::Renderer::Submit(m_TextureShader, m_SquareVA, glm::scale(glm::mat4(1.0f), glm::vec3(1.5f)));
+		Wraith::Renderer::Submit(textureShader, m_SquareVA, glm::scale(glm::mat4(1.0f), glm::vec3(1.5f)));
 
 		// Triangle
 		// Wraith::Renderer::Submit(m_Shader, m_VertexArray);
@@ -201,10 +203,11 @@ public:
 	}
 
 private:
+	Wraith::ShaderLibrary m_ShaderLibrary;
 	Wraith::Ref<Wraith::Shader> m_Shader;
 	Wraith::Ref<Wraith::VertexArray> m_VertexArray;
 
-	Wraith::Ref<Wraith::Shader> m_FlatColorShader, m_TextureShader;
+	Wraith::Ref<Wraith::Shader> m_FlatColorShader;
 	Wraith::Ref<Wraith::VertexArray> m_SquareVA;
 
 	Wraith::Ref<Wraith::Texture2D> m_Texture, m_CatTexture;
