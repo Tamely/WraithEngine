@@ -165,6 +165,7 @@ public:
 		m_TextureShader.reset(Wraith::Shader::Create(textureShaderVertexSrc, textureShaderFragmentSrc));
 
 		m_Texture = Wraith::Texture2D::Create("assets/textures/Checkerboard.png");
+		m_CatTexture = Wraith::Texture2D::Create("assets/textures/Cat.png");
 
 		std::dynamic_pointer_cast<Wraith::OpenGLShader>(m_TextureShader)->Bind();
 		std::dynamic_pointer_cast<Wraith::OpenGLShader>(m_TextureShader)->UploadUniformInt("u_Texture", 0);
@@ -213,6 +214,9 @@ public:
 		m_Texture->Bind();
 		Wraith::Renderer::Submit(m_TextureShader, m_SquareVA, glm::scale(glm::mat4(1.0f), glm::vec3(1.5f)));
 
+		m_CatTexture->Bind();
+		Wraith::Renderer::Submit(m_TextureShader, m_SquareVA, glm::scale(glm::mat4(1.0f), glm::vec3(1.5f)));
+
 		// Triangle
 		// Wraith::Renderer::Submit(m_Shader, m_VertexArray);
 
@@ -236,7 +240,7 @@ private:
 	Wraith::Ref<Wraith::Shader> m_FlatColorShader, m_TextureShader;
 	Wraith::Ref<Wraith::VertexArray> m_SquareVA;
 
-	Wraith::Ref<Wraith::Texture2D> m_Texture;
+	Wraith::Ref<Wraith::Texture2D> m_Texture, m_CatTexture;
 
 	Wraith::OrthographicCamera m_Camera;
 	glm::vec3 m_CameraPosition;
