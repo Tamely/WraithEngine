@@ -32,7 +32,7 @@ namespace Wraith {
 		uint32_t Offset;
 		bool Normalized;
 
-		BufferElement() {}
+		BufferElement() = default;
 
 		BufferElement(ShaderDataType type, const std::string& name, bool normalized = false)
 			: Name(name), Type(type), Size(ShaderDataTypeSize(type)), Offset(0), Normalized(normalized) { }
@@ -59,7 +59,7 @@ namespace Wraith {
 
 	class BufferLayout {
 	public:
-		BufferLayout() {}
+		BufferLayout() = default;
 
 		BufferLayout(const std::initializer_list<BufferElement>& elements)
 			: m_Elements(elements) {
@@ -91,7 +91,7 @@ namespace Wraith {
 
 	class VertexBuffer {
 	public:
-		virtual ~VertexBuffer() {}
+		virtual ~VertexBuffer() = default;
 
 		virtual void Bind() const = 0;
 		virtual void Unbind() const = 0;
@@ -104,7 +104,7 @@ namespace Wraith {
 
 	class IndexBuffer {
 	public:
-		virtual ~IndexBuffer() {}
+		virtual ~IndexBuffer() = default;
 
 		virtual void Bind() const = 0;
 		virtual void Unbind() const = 0;
