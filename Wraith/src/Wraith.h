@@ -11,6 +11,7 @@
 #include "Wraith/Input.h"
 #include "Wraith/KeyCodes.h"
 #include "Wraith/MouseButtonCodes.h"
+#include "Wraith/OrthographicCameraController.h"
 
 #include "Wraith/ImGui/ImGuiLayer.h"
 
@@ -24,6 +25,7 @@
 #include "Wraith/Renderer/VertexArray.h"
 
 #include "Wraith/Renderer/OrthographicCamera.h"
+// -------------------
 
 // --- Entry Point ---
 #include "Wraith/EntryPoint.h"

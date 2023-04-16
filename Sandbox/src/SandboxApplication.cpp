@@ -11,7 +11,7 @@ class ExampleLayer : public Wraith::Layer
 {
 public:
 	ExampleLayer()
-		: Layer("Example"), m_Camera(-1.6f, 1.6f, -0.9f, 0.9f), m_CameraPosition(0.0f) {
+		: Layer("Example"), m_CameraController(16.0f/9.0f) {
 		m_VertexArray.reset(Wraith::VertexArray::Create());
 
 		// X Y Z R G B A
@@ -139,33 +139,16 @@ public:
 	}
 
 	void OnUpdate(Wraith::Timestep ts) override {
-		if (Wraith::Input::IsKeyPressed(W_KEY_LEFT))
-			m_CameraPosition.x -= m_CameraMoveSpeed * ts;
-		else if (Wraith::Input::IsKeyPressed(W_KEY_RIGHT))
-			m_CameraPosition.x += m_CameraMoveSpeed * ts;
+		// Update
+		m_CameraController.OnUpdate(ts);
 
-		if (Wraith::Input::IsKeyPressed(W_KEY_UP))
-			m_CameraPosition.y += m_CameraMoveSpeed * ts;
-		else if (Wraith::Input::IsKeyPressed(W_KEY_DOWN))
-			m_CameraPosition.y -= m_CameraMoveSpeed * ts;
-
-		if (Wraith::Input::IsKeyPressed(W_KEY_A))
-			m_CameraRotation += m_CameraRotationSpeed * ts;
-		if (Wraith::Input::IsKeyPressed(W_KEY_D))
-			m_CameraRotation -= m_CameraRotationSpeed * ts;
-
+		// Render
 		Wraith::RenderCommand::SetClearColor({ 0.1f, 0.1f, 0.1f, 1 });
 		Wraith::RenderCommand::Clear();
 
-		m_Camera.SetPosition(m_CameraPosition);
-		m_Camera.SetRotation(m_CameraRotation);
-
-		Wraith::Renderer::BeginScene(m_Camera);
+		Wraith::Renderer::BeginScene(m_CameraController.GetCamera());
 
 		glm::mat4 scale = glm::scale(glm::mat4(1.0f), glm::vec3(0.1f));
-
-		glm::vec4 blueColor(0.2f, 0.3f, 0.8f, 1.0f);
-		glm::vec4 redColor(0.8f, 0.2f, 0.3f, 1.0f);
 
 		std::dynamic_pointer_cast<Wraith::OpenGLShader>(m_FlatColorShader)->Bind();
 		std::dynamic_pointer_cast<Wraith::OpenGLShader>(m_FlatColorShader)->UploadUniformFloat3("u_Color", m_SquareColor);
@@ -198,8 +181,8 @@ public:
 		ImGui::End();
 	}
 
-	void OnEvent(Wraith::Event& event) override {
-
+	void OnEvent(Wraith::Event& e) override {
+		m_CameraController.OnEvent(e);
 	}
 
 private:
@@ -212,13 +195,7 @@ private:
 
 	Wraith::Ref<Wraith::Texture2D> m_Texture, m_CatTexture;
 
-	Wraith::OrthographicCamera m_Camera;
-	glm::vec3 m_CameraPosition;
-	float m_CameraMoveSpeed = 5.0f;
-
-	float m_CameraRotation = 0.0f;
-	float m_CameraRotationSpeed = 180.0f;
-
+	Wraith::OrthographicCameraController m_CameraController;
 	glm::vec3 m_SquareColor = { 0.2f, 0.3f, 0.4f };
 };
 
