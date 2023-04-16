@@ -21,7 +21,7 @@ public:
 			 0.0f,  0.5f, 0.0f, 0.8f, 0.8f, 0.2f, 1.0f
 		};
 
-		std::shared_ptr<Wraith::VertexBuffer> vertexBuffer;
+		Wraith::Ref<Wraith::VertexBuffer> vertexBuffer;
 		vertexBuffer.reset(Wraith::VertexBuffer::Create(vertices, sizeof(vertices)));
 		Wraith::BufferLayout layout = {
 			{ Wraith::ShaderDataType::Float3, "a_Position" },
@@ -31,7 +31,7 @@ public:
 		m_VertexArray->AddVertexBuffer(vertexBuffer);
 
 		uint32_t indices[3] = { 0, 1, 2 };
-		std::shared_ptr<Wraith::IndexBuffer> indexBuffer;
+		Wraith::Ref<Wraith::IndexBuffer> indexBuffer;
 		indexBuffer.reset(Wraith::IndexBuffer::Create(indices, sizeof(indices) / sizeof(uint32_t)));
 		m_VertexArray->SetIndexBuffer(indexBuffer);
 
@@ -44,7 +44,7 @@ public:
 			-0.5f,  0.5f, 0.0f
 		};
 
-		std::shared_ptr<Wraith::VertexBuffer> squareVB;
+		Wraith::Ref<Wraith::VertexBuffer> squareVB;
 		squareVB.reset(Wraith::VertexBuffer::Create(squareVertices, sizeof(squareVertices)));
 		squareVB->SetLayout({
 			{ Wraith::ShaderDataType::Float3, "a_Position" }
@@ -52,7 +52,7 @@ public:
 		m_SquareVA->AddVertexBuffer(squareVB);
 
 		uint32_t squareIndices[6] = { 0, 1, 2, 2, 3, 0 };
-		std::shared_ptr<Wraith::IndexBuffer> squareIB;
+		Wraith::Ref<Wraith::IndexBuffer> squareIB;
 		squareIB.reset(Wraith::IndexBuffer::Create(squareIndices, sizeof(squareIndices) / sizeof(uint32_t)));
 		m_SquareVA->SetIndexBuffer(squareIB);
 
@@ -176,11 +176,11 @@ public:
 	}
 
 private:
-	std::shared_ptr<Wraith::Shader> m_Shader;
-	std::shared_ptr<Wraith::VertexArray> m_VertexArray;
+	Wraith::Ref<Wraith::Shader> m_Shader;
+	Wraith::Ref<Wraith::VertexArray> m_VertexArray;
 
-	std::shared_ptr<Wraith::Shader> m_FlatColorShader;
-	std::shared_ptr<Wraith::VertexArray> m_SquareVA;
+	Wraith::Ref<Wraith::Shader> m_FlatColorShader;
+	Wraith::Ref<Wraith::VertexArray> m_SquareVA;
 
 	Wraith::OrthographicCamera m_Camera;
 	glm::vec3 m_CameraPosition;
