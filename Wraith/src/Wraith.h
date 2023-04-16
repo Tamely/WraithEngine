@@ -20,6 +20,7 @@
 
 #include "Wraith/Renderer/Buffer.h"
 #include "Wraith/Renderer/Shader.h"
+#include "Wraith/Renderer/Texture.h"
 #include "Wraith/Renderer/VertexArray.h"
 
 #include "Wraith/Renderer/OrthographicCamera.h"

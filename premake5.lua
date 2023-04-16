@@ -17,6 +17,7 @@ IncludeDir["GLFW"] = "Wraith/vendor/GLFW/include"
 IncludeDir["Glad"] = "Wraith/vendor/Glad/include"
 IncludeDir["ImGui"] = "Wraith/vendor/imgui"
 IncludeDir["glm"] = "Wraith/vendor/glm"
+IncludeDir["stb_image"] = "Wraith/vendor/stb_image"
 
 include "Wraith/vendor/GLFW"
 include "Wraith/vendor/Glad"
@@ -39,7 +40,10 @@ project "Wraith"
 	{
 		"%{prj.name}/src/**.h",
 		"%{prj.name}/src/**.cpp",
-		"%{prj.name}/src/**.hpp"
+		"%{prj.name}/vendor/stb_image/**.h",
+		"%{prj.name}/vendor/stb_image/**.cpp",
+		"%{prj.name}/vendor/glm/glm/**.hpp",
+		"%{prj.name}/vendor/glm/glm/**.inl"
 	}
 
 	defines
@@ -54,7 +58,8 @@ project "Wraith"
 		"%{IncludeDir.GLFW}",
 		"%{IncludeDir.Glad}",
 		"%{IncludeDir.ImGui}",
-		"%{IncludeDir.glm}"
+		"%{IncludeDir.glm}",
+		"%{IncludeDir.stb_image}"
 	}
 
 	links
