@@ -1,0 +1,7 @@
+[14:45:19] [info] WRAITH: Initializing GLFW
+[14:45:20] [info] WRAITH: Creating window Wraith Engine (1280, 720)
+[14:45:21] [info] WRAITH: OpenGL Info:
+[14:45:21] [info] WRAITH:    Vendor: NVIDIA Corporation
+[14:45:21] [info] WRAITH:    Renderer: NVIDIA GeForce RTX 2060/PCIe/SSE2
+[14:45:21] [info] WRAITH:    Version: 4.6.0 NVIDIA 527.37
+[14:45:58] [info] WRAITH: Terminating GLFW
