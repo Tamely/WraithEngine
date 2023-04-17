@@ -16,8 +16,7 @@ ExampleLayer::ExampleLayer()
 		 0.0f,  0.5f, 0.0f, 0.8f, 0.8f, 0.2f, 1.0f
 	};
 
-	Wraith::Ref<Wraith::VertexBuffer> vertexBuffer;
-	vertexBuffer.reset(Wraith::VertexBuffer::Create(vertices, sizeof(vertices)));
+	Wraith::Ref<Wraith::VertexBuffer> vertexBuffer = Wraith::VertexBuffer::Create(vertices, sizeof(vertices));
 	Wraith::BufferLayout layout = {
 		{ Wraith::ShaderDataType::Float3, "a_Position" },
 		{ Wraith::ShaderDataType::Float4, "a_Color" }
@@ -26,8 +25,7 @@ ExampleLayer::ExampleLayer()
 	m_VertexArray->AddVertexBuffer(vertexBuffer);
 
 	uint32_t indices[3] = { 0, 1, 2 };
-	Wraith::Ref<Wraith::IndexBuffer> indexBuffer;
-	indexBuffer.reset(Wraith::IndexBuffer::Create(indices, sizeof(indices) / sizeof(uint32_t)));
+	Wraith::Ref<Wraith::IndexBuffer> indexBuffer = Wraith::IndexBuffer::Create(indices, sizeof(indices) / sizeof(uint32_t));
 	m_VertexArray->SetIndexBuffer(indexBuffer);
 
 	m_SquareVA = Wraith::VertexArray::Create();
@@ -40,8 +38,7 @@ ExampleLayer::ExampleLayer()
 		-0.5f,  0.5f, 0.0f, 0.0f, 1.0f,
 	};
 
-	Wraith::Ref<Wraith::VertexBuffer> squareVB;
-	squareVB.reset(Wraith::VertexBuffer::Create(squareVertices, sizeof(squareVertices)));
+	Wraith::Ref<Wraith::VertexBuffer> squareVB = Wraith::VertexBuffer::Create(squareVertices, sizeof(squareVertices));
 	squareVB->SetLayout({
 		{ Wraith::ShaderDataType::Float3, "a_Position" },
 		{ Wraith::ShaderDataType::Float2, "a_TexCoord" }
@@ -49,8 +46,7 @@ ExampleLayer::ExampleLayer()
 	m_SquareVA->AddVertexBuffer(squareVB);
 
 	uint32_t squareIndices[6] = { 0, 1, 2, 2, 3, 0 };
-	Wraith::Ref<Wraith::IndexBuffer> squareIB;
-	squareIB.reset(Wraith::IndexBuffer::Create(squareIndices, sizeof(squareIndices) / sizeof(uint32_t)));
+	Wraith::Ref<Wraith::IndexBuffer> squareIB = Wraith::IndexBuffer::Create(squareIndices, sizeof(squareIndices) / sizeof(uint32_t));
 	m_SquareVA->SetIndexBuffer(squareIB);
 
 	std::string vertexSrc = R"(

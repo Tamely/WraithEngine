@@ -164,6 +164,12 @@ namespace Wraith {
 		glUseProgram(0);
 	}
 
+	void OpenGLShader::SetIntArray(const std::string& name, int* values, uint32_t count) {
+		W_PROFILE_FUNCTION();
+
+		UploadUniformIntArray(name, values, count);
+	}
+
 	void OpenGLShader::SetInt(const std::string& name, int value) {
 		W_PROFILE_FUNCTION();
 
@@ -192,6 +198,11 @@ namespace Wraith {
 		W_PROFILE_FUNCTION();
 
 		UploadUniformMat4(name, value);
+	}
+
+	void OpenGLShader::UploadUniformIntArray(const std::string& name, int* values, uint32_t count) {
+		GLint location = glGetUniformLocation(m_RendererID, name.c_str());
+		glUniform1iv(location, count, values);
 	}
 
 	void OpenGLShader::UploadUniformInt(const std::string& name, int value) {
