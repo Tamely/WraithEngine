@@ -34,7 +34,7 @@ namespace Wraith {
 		m_Data.Width = props.Width;
 		m_Data.Height = props.Height;
 
-		if (!s_GLFWWindowCount == 0) {
+		if (s_GLFWWindowCount == 0) {
 			W_CORE_INFO("Initializing GLFW");
 			int success = glfwInit();
 			W_CORE_ASSERT(success, "Could not intialize GLFW!");
