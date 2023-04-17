@@ -13,3 +13,4 @@ Sandbox/imgui.ini
 Sandbox/WraithProfile-Runtime.json
 Sandbox/WraithProfile-Shutdown.json
 Sandbox/WraithProfile-Startup.json
+*.log
