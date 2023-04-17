@@ -26,7 +26,3 @@
 
 #include "Wraith/Renderer/OrthographicCamera.h"
 // -------------------
-
-// --- Entry Point ---
-#include "Wraith/Core/EntryPoint.h"
-// -------------------

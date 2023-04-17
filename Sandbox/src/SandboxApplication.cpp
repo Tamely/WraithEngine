@@ -1,4 +1,5 @@
 #include <Wraith.h>
+#include <Wraith/Core/EntryPoint.h>
 
 #include "Platform/OpenGL/OpenGLShader.h"
 
@@ -7,12 +8,14 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include "Sandbox2D.h"
+
 class ExampleLayer : public Wraith::Layer
 {
 public:
 	ExampleLayer()
 		: Layer("Example"), m_CameraController(16.0f/9.0f, true) {
-		m_VertexArray.reset(Wraith::VertexArray::Create());
+		m_VertexArray = Wraith::VertexArray::Create();
 
 		// X Y Z R G B A
 		float vertices[3 * 7] = {
@@ -35,7 +38,7 @@ public:
 		indexBuffer.reset(Wraith::IndexBuffer::Create(indices, sizeof(indices) / sizeof(uint32_t)));
 		m_VertexArray->SetIndexBuffer(indexBuffer);
 
-		m_SquareVA.reset(Wraith::VertexArray::Create());
+		m_SquareVA = Wraith::VertexArray::Create();
 
 		// X Y Z TEX-X TEX-Y
 		float squareVertices[5 * 4] = {
@@ -202,7 +205,8 @@ private:
 class Sandbox : public Wraith::Application {
 public:
 	Sandbox() {
-		PushLayer(new ExampleLayer());
+		//PushLayer(new ExampleLayer());
+		PushLayer(new Sandbox2D());
 	}
 
 	~Sandbox() {
