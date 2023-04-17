@@ -17,6 +17,7 @@
 
 // --- Renderer -----
 #include "Wraith/Renderer/Renderer.h"
+#include "Wraith/Renderer/Renderer2D.h"
 #include "Wraith/Renderer/RenderCommand.h"
 
 #include "Wraith/Renderer/Buffer.h"
