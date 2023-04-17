@@ -19,10 +19,6 @@ namespace Wraith {
 		W_CORE_ERROR("GLFW Error ({0}): {1}", error, description);
 	}
 
-	Window* Window::Create(const WindowProps& props) {
-		return new WindowsWindow(props);
-	}
-
 	WindowsWindow::WindowsWindow(const WindowProps& props) {
 		W_PROFILE_FUNCTION();
 
@@ -50,7 +46,7 @@ namespace Wraith {
 		}
 
 		W_CORE_INFO("Creating window {0} ({1}, {2})", props.Title, props.Width, props.Height);
-#if W_DEBUG
+#ifdef W_DEBUG
 		if (Renderer::GetAPI() == RendererAPI::API::OpenGL) glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
 #endif
 		m_Window = glfwCreateWindow((int)props.Width, (int)props.Height, m_Data.Title.c_str(), nullptr, nullptr);
