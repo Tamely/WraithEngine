@@ -11,7 +11,7 @@
 
 namespace Wraith {
 
-	static bool s_GLFWInitialized = false;
+	static uint8_t s_GLFWWindowCount = 0;
 
 	static void GLFWErrorCallback(int error, const char* description) {
 		W_CORE_ERROR("GLFW Error ({0}): {1}", error, description);
@@ -34,16 +34,16 @@ namespace Wraith {
 		m_Data.Width = props.Width;
 		m_Data.Height = props.Height;
 
-		if (!s_GLFWInitialized) {
-			// TODO: glfwTerminate on system shutdown
+		if (!s_GLFWWindowCount == 0) {
+			W_CORE_INFO("Initializing GLFW");
 			int success = glfwInit();
 			W_CORE_ASSERT(success, "Could not intialize GLFW!");
 			glfwSetErrorCallback(GLFWErrorCallback);
-			s_GLFWInitialized = true;
 		}
 
 		W_CORE_INFO("Creating window {0} ({1}, {2})", props.Title, props.Width, props.Height);
 		m_Window = glfwCreateWindow((int)props.Width, (int)props.Height, m_Data.Title.c_str(), nullptr, nullptr);
+		++s_GLFWWindowCount;
 
 		m_Context = CreateScope<OpenGLContext>(m_Window);
 
@@ -138,6 +138,11 @@ namespace Wraith {
 
 	void WindowsWindow::Shutdown() {
 		glfwDestroyWindow(m_Window);
+
+		if (--s_GLFWWindowCount == 0) {
+			W_CORE_INFO("Terminating GLFW");
+			glfwTerminate();
+		}
 	}
 
 	void WindowsWindow::OnUpdate() {
