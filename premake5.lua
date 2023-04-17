@@ -75,7 +75,6 @@ project "Wraith"
 		
 		defines
 		{
-			"W_PLATFORM_WINDOWS",
 			"W_BUILD_DLL",
 			"GLFW_INCLUDE_NONE"
 		}
@@ -128,11 +127,6 @@ project "Sandbox"
 	
 	filter "system:windows"
 		systemversion "latest"
-		
-		defines
-		{
-			"W_PLATFORM_WINDOWS"
-		}
 		
 	filter "configurations:Debug"
 		defines "W_DEBUG"
