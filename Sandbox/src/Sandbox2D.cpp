@@ -11,10 +11,13 @@ Sandbox2D::Sandbox2D()
 	: Layer("Sandbox2D"), m_CameraController(16.0f/9.0f) {}
 
 void Sandbox2D::OnAttach() {
+	W_PROFILE_FUNCTION();
+
 	m_CheckerboardTexture = Wraith::Texture2D::Create("assets/textures/Checkerboard.png");
 }
 
 void Sandbox2D::OnDetach() {
+	W_PROFILE_FUNCTION();
 
 }
 
@@ -22,10 +25,7 @@ void Sandbox2D::OnUpdate(Wraith::Timestep ts) {
 	W_PROFILE_FUNCTION();
 
 	// Update
-	{
-		W_PROFILE_SCOPE("CameraController::OnUpdate");
-		m_CameraController.OnUpdate(ts);
-	}
+	m_CameraController.OnUpdate(ts);
 
 	// Render
 	Wraith::RenderCommand::SetClearColor({ 0.1f, 0.1f, 0.1f, 1 });

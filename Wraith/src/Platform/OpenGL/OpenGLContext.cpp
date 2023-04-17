@@ -12,6 +12,8 @@ namespace Wraith {
 	}
 
 	void OpenGLContext::Init() {
+		W_PROFILE_FUNCTION();
+
 		glfwMakeContextCurrent(m_WindowHandle);
 		int status = gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 		W_CORE_ASSERT(status, "Failed to initialize Glad!");
@@ -23,6 +25,8 @@ namespace Wraith {
 	}
 
 	void OpenGLContext::SwapBuffers() {
+		W_PROFILE_FUNCTION();
+
 		glfwSwapBuffers(m_WindowHandle);
 	}
 }

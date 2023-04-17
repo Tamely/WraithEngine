@@ -28,19 +28,15 @@ namespace Wraith {
         int m_ProfileCount;
     public:
         Instrumentor()
-            : m_CurrentSession(nullptr), m_ProfileCount(0)
-        {
-        }
+            : m_CurrentSession(nullptr), m_ProfileCount(0) {}
 
-        void BeginSession(const std::string& name, const std::string& filepath = "results.json")
-        {
+        void BeginSession(const std::string& name, const std::string& filepath = "results.json") {
             m_OutputStream.open(filepath);
             WriteHeader();
             m_CurrentSession = new InstrumentationSession{ name };
         }
 
-        void EndSession()
-        {
+        void EndSession() {
             WriteFooter();
             m_OutputStream.close();
             delete m_CurrentSession;
@@ -48,8 +44,7 @@ namespace Wraith {
             m_ProfileCount = 0;
         }
 
-        void WriteProfile(const ProfileResult& result)
-        {
+        void WriteProfile(const ProfileResult& result) {
             if (m_ProfileCount++ > 0)
                 m_OutputStream << ",";
 
@@ -69,20 +64,17 @@ namespace Wraith {
             m_OutputStream.flush();
         }
 
-        void WriteHeader()
-        {
+        void WriteHeader() {
             m_OutputStream << "{\"otherData\": {},\"traceEvents\":[";
             m_OutputStream.flush();
         }
 
-        void WriteFooter()
-        {
+        void WriteFooter() {
             m_OutputStream << "]}";
             m_OutputStream.flush();
         }
 
-        static Instrumentor& Get()
-        {
+        static Instrumentor& Get() {
             static Instrumentor instance;
             return instance;
         }
@@ -92,19 +84,16 @@ namespace Wraith {
     {
     public:
         InstrumentationTimer(const char* name)
-            : m_Name(name), m_Stopped(false)
-        {
+            : m_Name(name), m_Stopped(false) {
             m_StartTimepoint = std::chrono::high_resolution_clock::now();
         }
 
-        ~InstrumentationTimer()
-        {
+        ~InstrumentationTimer() {
             if (!m_Stopped)
                 Stop();
         }
 
-        void Stop()
-        {
+        void Stop() {
             auto endTimepoint = std::chrono::high_resolution_clock::now();
 
             long long start = std::chrono::time_point_cast<std::chrono::microseconds>(m_StartTimepoint).time_since_epoch().count();

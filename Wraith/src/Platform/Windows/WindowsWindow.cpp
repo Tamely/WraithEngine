@@ -22,14 +22,20 @@ namespace Wraith {
 	}
 
 	WindowsWindow::WindowsWindow(const WindowProps& props) {
+		W_PROFILE_FUNCTION();
+
 		Init(props);
 	}
 
 	WindowsWindow::~WindowsWindow() {
+		W_PROFILE_FUNCTION();
+
 		Shutdown();
 	}
 
 	void WindowsWindow::Init(const WindowProps& props) {
+		W_PROFILE_FUNCTION();
+
 		m_Data.Title = props.Title;
 		m_Data.Width = props.Width;
 		m_Data.Height = props.Height;
@@ -137,6 +143,8 @@ namespace Wraith {
 	}
 
 	void WindowsWindow::Shutdown() {
+		W_PROFILE_FUNCTION();
+
 		glfwDestroyWindow(m_Window);
 
 		if (--s_GLFWWindowCount == 0) {
@@ -146,11 +154,15 @@ namespace Wraith {
 	}
 
 	void WindowsWindow::OnUpdate() {
+		W_PROFILE_FUNCTION();
+
 		glfwPollEvents();
 		m_Context->SwapBuffers();
 	}
 
 	void WindowsWindow::SetVSync(bool enabled) {
+		W_PROFILE_FUNCTION();
+
 		if (enabled)
 			glfwSwapInterval(1);
 		else

@@ -16,6 +16,8 @@ namespace Wraith {
 	Application* Application::s_Instance = nullptr;
 
 	Application::Application() {
+		W_PROFILE_FUNCTION();
+
 		W_CORE_ASSERT(!s_Instance, "Application already exists!");
 		s_Instance = this;
 
@@ -28,19 +30,27 @@ namespace Wraith {
 		PushOverlay(m_ImGuiLayer);
 	}
 
-	Application::~Application() {}
+	Application::~Application() {
+		W_PROFILE_FUNCTION();
+	}
 
 	void Application::PushLayer(Layer* layer) {
+		W_PROFILE_FUNCTION();
+
 		m_LayerStack.PushLayer(layer);
 		layer->OnAttach();
 	}
 
 	void Application::PushOverlay(Layer* layer) {
+		W_PROFILE_FUNCTION();
+
 		m_LayerStack.PushOverlay(layer);
 		layer->OnAttach();
 	}
 
 	void Application::OnEvent(Event& e) {
+		W_PROFILE_FUNCTION();
+
 		EventDispatcher dispatcher(e);
 		dispatcher.Dispatch<WindowCloseEvent>(BIND_EVENT_FN(OnWindowClose));
 		dispatcher.Dispatch<WindowResizeEvent>(BIND_EVENT_FN(OnWindowResize));
@@ -53,6 +63,8 @@ namespace Wraith {
 	}
 
 	void Application::Run() {
+		W_PROFILE_FUNCTION();
+
 		while (m_Running) {
 			float time = (float)glfwGetTime(); // Platform::GetTime
 			Timestep timestep = time - m_LastFrameTime;
@@ -78,6 +90,8 @@ namespace Wraith {
 	}
 
 	bool Application::OnWindowResize(WindowResizeEvent& e) {
+		W_PROFILE_FUNCTION();
+
 		if (e.GetWidth() == 0 || e.GetHeight() == 0) {
 			m_Minimized = true;
 			return false;
