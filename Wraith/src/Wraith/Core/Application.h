@@ -11,14 +11,14 @@
 
 #include "Wraith/ImGui/ImGuiLayer.h"
 
+int main(int argc, char** argv);
+
 namespace Wraith {
 
 	class WRAITH_API Application {
 	public:
 		Application();
 		virtual ~Application();
-
-		void Run();
 
 		void OnEvent(Event& e);
 
@@ -29,6 +29,8 @@ namespace Wraith {
 
 		inline static Application& Get() { return *s_Instance; }
 	private:
+		void Run();
+
 		bool OnWindowClose(WindowCloseEvent& e);
 		bool OnWindowResize(WindowResizeEvent& e);
 	private:
@@ -40,6 +42,7 @@ namespace Wraith {
 		float m_LastFrameTime = 0.0f;
 	private:
 		static Application* s_Instance;
+		friend int ::main(int argc, char** argv);
 	};
 
 	// To be defined in CLIENT
