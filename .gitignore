@@ -10,3 +10,6 @@ x64/
 *.vcxproj
 *.filters
 Sandbox/imgui.ini
+Sandbox/WraithProfile-Runtime.json
+Sandbox/WraithProfile-Shutdown.json
+Sandbox/WraithProfile-Startup.json

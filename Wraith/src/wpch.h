@@ -15,6 +15,8 @@
 
 #include "Wraith/Core/Log.h"
 
+#include "Wraith/Debug/Instrumentor.h"
+
 #ifdef W_PLATFORM_WINDOWS
 	#include <Windows.h>
 #endif

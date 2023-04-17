@@ -7,14 +7,17 @@ extern Wraith::Application* Wraith::CreateApplication();
 int main(int argc, char** argv) {
 	Wraith::Log::Init();
 
-	W_CORE_WARN("Initialized Log!");
-	int a = 5;
-	W_INFO("Hello! Var={0}", a);
-
+	W_PROFILE_BEGIN_SESSION("Startup", "WraithProfile-Startup.json");
 	const auto app = Wraith::CreateApplication();
-	app->Run();
+	W_PROFILE_END_SESSION();
 
+	W_PROFILE_BEGIN_SESSION("Startup", "WraithProfile-Runtime.json");
+	app->Run();
+	W_PROFILE_END_SESSION();
+
+	W_PROFILE_BEGIN_SESSION("Startup", "WraithProfile-Shutdown.json");
 	delete app;
+	W_PROFILE_END_SESSION();
 }
 
 #endif
