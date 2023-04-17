@@ -113,7 +113,11 @@ namespace Wraith {
 			return;
 		}
 
-		for (auto id : glShaderIDs) glDetachShader(program, id);
+		for (auto id : glShaderIDs) {
+			glDetachShader(program, id);
+			glDeleteShader(id);
+		}
+
 		m_RendererID = program;
 	}
 
