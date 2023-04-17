@@ -1,7 +1,7 @@
 #include "wpch.h"
 #include "WindowsInput.h"
 
-#include "Wraith/Application.h"
+#include "Wraith/Core/Application.h"
 #include <GLFW/glfw3.h>
 
 namespace Wraith {

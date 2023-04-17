@@ -3,7 +3,7 @@
 #include "Core.h"
 
 #include "Window.h"
-#include "Wraith/LayerStack.h"
+#include "Wraith/Core/LayerStack.h"
 #include "Wraith/Events/Event.h"
 #include "Wraith/Events/ApplicationEvent.h"
 

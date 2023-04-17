@@ -2,16 +2,16 @@
 
 // FOR USE BY WRAITH APPLICATIONS ONLY
 
-#include "Wraith/Application.h"
-#include "Wraith/Layer.h"
-#include "Wraith/Log.h"
+#include "Wraith/Core/Application.h"
+#include "Wraith/Core/Layer.h"
+#include "Wraith/Core/Log.h"
 
 #include "Wraith/Core/Timestep.h"
 
-#include "Wraith/Input.h"
-#include "Wraith/KeyCodes.h"
-#include "Wraith/MouseButtonCodes.h"
-#include "Wraith/OrthographicCameraController.h"
+#include "Wraith/Core/Input.h"
+#include "Wraith/Core/KeyCodes.h"
+#include "Wraith/Core/MouseButtonCodes.h"
+#include "Wraith/Renderer/OrthographicCameraController.h"
 
 #include "Wraith/ImGui/ImGuiLayer.h"
 
@@ -28,5 +28,5 @@
 // -------------------
 
 // --- Entry Point ---
-#include "Wraith/EntryPoint.h"
+#include "Wraith/Core/EntryPoint.h"
 // -------------------

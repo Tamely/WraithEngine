@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Wraith/Layer.h"
+#include "Wraith/Core/Layer.h"
 
 #include "Wraith/Events/ApplicationEvent.h"
 #include "Wraith/Events/KeyEvent.h"

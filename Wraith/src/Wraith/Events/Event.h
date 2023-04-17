@@ -1,7 +1,7 @@
 #pragma once
 
 #include "wpch.h"
-#include "Wraith/Core.h"
+#include "Wraith/Core/Core.h"
 
 namespace Wraith {
 

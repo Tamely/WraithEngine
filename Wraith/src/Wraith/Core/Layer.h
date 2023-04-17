@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Wraith/Core.h"
+#include "Wraith/Core/Core.h"
 #include "Wraith/Core/Timestep.h"
 #include "Wraith/Events/Event.h"
 

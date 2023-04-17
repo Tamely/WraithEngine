@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Wraith/Core.h"
+#include "Wraith/Core/Core.h"
 
 namespace Wraith {
 	class WRAITH_API Input {

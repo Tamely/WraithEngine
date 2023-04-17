@@ -1,7 +1,7 @@
 #include "wpch.h"
 #include "Application.h"
 
-#include "Wraith/Log.h"
+#include "Wraith/Core/Log.h"
 
 #include "Wraith/Renderer/Renderer.h"
 

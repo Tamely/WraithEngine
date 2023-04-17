@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Wraith/Input.h"
+#include "Wraith/Core/Input.h"
 
 namespace Wraith {
 	class WindowsInput : public Input {

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Wraith/Window.h"
+#include "Wraith/Core/Window.h"
 #include "Wraith/Renderer/GraphicsContext.h"
 
 #include <GLFW/glfw3.h>

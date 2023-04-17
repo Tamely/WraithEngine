@@ -1,8 +1,8 @@
 #include "wpch.h"
 #include "OrthographicCameraController.h"
 
-#include "Wraith/Input.h"
-#include "Wraith/KeyCodes.h"
+#include "Wraith/Core/Input.h"
+#include "Wraith/Core/KeyCodes.h"
 
 namespace Wraith {
 	OrthographicCameraController::OrthographicCameraController(float aspectRatio, bool rotation)

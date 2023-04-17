@@ -13,7 +13,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "Wraith/Log.h"
+#include "Wraith/Core/Log.h"
 
 #ifdef W_PLATFORM_WINDOWS
 	#include <Windows.h>
