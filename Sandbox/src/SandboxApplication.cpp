@@ -11,7 +11,7 @@ class ExampleLayer : public Wraith::Layer
 {
 public:
 	ExampleLayer()
-		: Layer("Example"), m_CameraController(16.0f/9.0f) {
+		: Layer("Example"), m_CameraController(16.0f/9.0f, true) {
 		m_VertexArray.reset(Wraith::VertexArray::Create());
 
 		// X Y Z R G B A
