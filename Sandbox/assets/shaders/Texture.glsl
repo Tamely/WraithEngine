@@ -38,7 +38,7 @@ uniform sampler2D u_Textures[32];
 void main()
 {
 	vec4 texColor = v_Color;
-	switch(int(V_TexIndex)) 
+	switch(int(v_TexIndex)) 
 	{
 		case 0: texColor *= texture(u_Textures[0], v_TexCoord * v_TilingFactor); break;
 		case 1: texColor *= texture(u_Textures[1], v_TexCoord * v_TilingFactor); break;

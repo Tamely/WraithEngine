@@ -48,6 +48,10 @@ namespace Wraith {
 		layer->OnAttach();
 	}
 
+	void Application::Close() {
+		m_Running = false;
+	}
+
 	void Application::OnEvent(Event& e) {
 		W_PROFILE_FUNCTION();
 
