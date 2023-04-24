@@ -10,7 +10,11 @@ x64/
 *.vcxproj
 *.filters
 Sandbox/imgui.ini
+Wraith-Editor/imgui.ini
 Sandbox/WraithProfile-Runtime.json
 Sandbox/WraithProfile-Shutdown.json
 Sandbox/WraithProfile-Startup.json
+Wraith-Editor/WraithProfile-Runtime.json
+Wraith-Editor/WraithProfile-Shutdown.json
+Wraith-Editor/WraithProfile-Startup.json
 *.log

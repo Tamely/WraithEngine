@@ -19,9 +19,11 @@ IncludeDir["ImGui"] = "Wraith/vendor/imgui"
 IncludeDir["glm"] = "Wraith/vendor/glm"
 IncludeDir["stb_image"] = "Wraith/vendor/stb_image"
 
-include "Wraith/vendor/GLFW"
-include "Wraith/vendor/Glad"
-include "Wraith/vendor/ImGui"
+group "Dependencies"
+	include "Wraith/vendor/GLFW"
+	include "Wraith/vendor/Glad"
+	include "Wraith/vendor/ImGui"
+group ""
 	
 project "Wraith"
 	location "Wraith"
@@ -97,6 +99,55 @@ project "Wraith"
 		
 project "Sandbox"
 	location "Sandbox"
+	kind "ConsoleApp"
+	language "C++"
+	cppdialect "C++17"
+	staticruntime "on"
+	
+	targetdir ("bin/" .. outputdir .. "/%{prj.name}")
+	objdir ("bin-int/" .. outputdir .. "/%{prj.name}")
+	
+	files
+	{
+		"%{prj.name}/src/**.h",
+		"%{prj.name}/src/**.cpp",
+		"%{prj.name}/src/**.hpp"
+	}
+	
+	includedirs
+	{
+		"Wraith/vendor/spdlog/include",
+		"Wraith/src",
+		"Wraith/vendor",
+		"%{IncludeDir.glm}"
+	}
+	
+	links
+	{
+		"Wraith"
+	}
+	
+	filter "system:windows"
+		systemversion "latest"
+		
+	filter "configurations:Debug"
+		defines "W_DEBUG"
+		runtime "Debug"
+		symbols "on"
+		
+	filter "configurations:Release"
+		defines "W_RELEASE"
+		runtime "Release"
+		optimize "on"
+		
+	filter "configurations:Dist"
+		defines "W_DIST"
+		runtime "Release"
+		optimize "on"
+		symbols "off"
+	
+project "Wraith-Editor"
+	location "Wraith-Editor"
 	kind "ConsoleApp"
 	language "C++"
 	cppdialect "C++17"

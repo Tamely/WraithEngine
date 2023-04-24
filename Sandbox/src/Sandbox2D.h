@@ -19,7 +19,6 @@ private:
 
 	Wraith::Ref<Wraith::VertexArray> m_SquareVA;
 	Wraith::Ref<Wraith::Shader> m_FlatColorShader;
-	Wraith::Ref<Wraith::Framebuffer> m_Framebuffer;
 
 	Wraith::Ref<Wraith::Texture2D> m_CheckerboardTexture;
 

@@ -17,7 +17,7 @@ namespace Wraith {
 
 	class WRAITH_API Application {
 	public:
-		Application();
+		Application(const std::string& name = "Wraith App");
 		virtual ~Application();
 
 		void OnEvent(Event& e);
