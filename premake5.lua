@@ -1,6 +1,6 @@
 workspace "Wraith"
-	architecture "x64"
-	startproject "Sandbox"
+	architecture "x86_64"
+	startproject "Wraith-Editor"
 	
 	configurations
 	{
