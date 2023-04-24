@@ -19,10 +19,9 @@ private:
 
 	Wraith::Ref<Wraith::VertexArray> m_SquareVA;
 	Wraith::Ref<Wraith::Shader> m_FlatColorShader;
+	Wraith::Ref<Wraith::Framebuffer> m_Framebuffer;
 
 	Wraith::Ref<Wraith::Texture2D> m_CheckerboardTexture;
-	Wraith::Ref<Wraith::Texture2D> m_SpriteSheet;
-	Wraith::Ref<Wraith::SubTexture2D> m_TextureStairs, m_TextureBarrel, m_TextureTree;
 
 	glm::vec4 m_SquareColor = { 0.2f, 0.3f, 0.8f, 1.0f };
 

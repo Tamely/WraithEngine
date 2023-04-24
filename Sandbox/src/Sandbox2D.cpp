@@ -14,6 +14,11 @@ void Sandbox2D::OnAttach() {
 	W_PROFILE_FUNCTION();
 
 	m_CheckerboardTexture = Wraith::Texture2D::Create("assets/textures/Checkerboard.png");
+
+	Wraith::FramebufferSpecification framebufferSpecification;
+	framebufferSpecification.Width = 1280;
+	framebufferSpecification.Height = 720;
+	m_Framebuffer = Wraith::Framebuffer::Create(framebufferSpecification);
 }
 
 void Sandbox2D::OnDetach() {
@@ -29,8 +34,15 @@ void Sandbox2D::OnUpdate(Wraith::Timestep ts) {
 
 	// Render
 	Wraith::Renderer2D::ResetStats();
+	m_Framebuffer->Bind();
 	Wraith::RenderCommand::SetClearColor({ 0.1f, 0.1f, 0.1f, 1 });
 	Wraith::RenderCommand::Clear();
+
+	Wraith::Renderer2D::BeginScene(m_CameraController.GetCamera());
+	Wraith::Renderer2D::DrawQuad({ 0.5f, -0.5f }, { 0.5f, 0.75f }, m_SquareColor);
+	Wraith::Renderer2D::EndScene();
+
+	m_Framebuffer->Unbind();
 }
 
 void Sandbox2D::OnImGuiRender() {
@@ -90,8 +102,8 @@ void Sandbox2D::OnImGuiRender() {
 		ImGui::Text("Vertices: %d", stats.GetTotalVertexCount());
 		ImGui::Text("Indices: %d", stats.GetTotalIndexCount());
 
-		uint32_t textureID = m_CheckerboardTexture->GetRendererID();
-		ImGui::Image((void*)textureID, ImVec2(256.0f, 256.0f));
+		uint32_t textureID = m_Framebuffer->GetColorAttachmentRendererID();
+		ImGui::Image((void*)textureID, ImVec2(1280.0f, 720.0f));
 
 		ImGui::End();
 	}
