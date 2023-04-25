@@ -1,6 +1,7 @@
 #pragma once
 
 #include <glm/glm.hpp>
+#include "Wraith/Renderer/Texture.h"
 
 namespace Wraith {
 	struct TagComponent {
@@ -30,5 +31,14 @@ namespace Wraith {
 		SpriteRendererComponent(const SpriteRendererComponent&) = default;
 		SpriteRendererComponent(const glm::vec4& Color)
 			: Color(Color) {}
+	};
+
+	struct TextureComponent {
+		Ref<Texture2D> Texture;
+
+		TextureComponent() = default;
+		TextureComponent(const TextureComponent&) = default;
+		TextureComponent(Ref<Texture2D> texture)
+			: Texture(texture) {}
 	};
 }

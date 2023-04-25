@@ -2,13 +2,14 @@
 #include <Wraith/Core/EntryPoint.h>
 
 #include "EditorLayer.h"
+#include "Game/GameLayer.h"
 
 namespace Wraith {
 	class WraithEditor : public Application {
 	public:
 		WraithEditor()
 			: Application("Wraith Editor") {
-			PushLayer(new EditorLayer());
+			PushLayer(new GameLayer());
 		}
 
 		~WraithEditor() {

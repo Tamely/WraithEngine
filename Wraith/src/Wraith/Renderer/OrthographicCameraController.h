@@ -27,6 +27,7 @@ namespace Wraith {
 		OrthographicCamera& GetCamera() { return m_Camera; }
 		const OrthographicCamera& GetCamera() const { return m_Camera; }
 
+		inline void LockZoomLevel() { m_ShouldZoom = false; };
 		float GetZoomLevel() const { return m_ZoomLevel; }
 		void SetZoomLevel(float level) { m_ZoomLevel = level; CalculateView(); }
 
@@ -42,6 +43,7 @@ namespace Wraith {
 		OrthographicCameraBounds m_Bounds;
 		OrthographicCamera m_Camera;
 
+		bool m_ShouldZoom = true;
 		bool m_Rotation;
 
 		glm::vec3 m_CameraPosition = { 0.0f, 0.0f, 0.0f };

@@ -26,11 +26,11 @@ namespace Wraith {
 	}
 
 	void Scene::OnUpdate(Timestep ts) {
-		auto group = m_Registry.group<TransformComponent>(entt::get<SpriteRendererComponent>);
-		for (auto entity : group) {
-			auto& [transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
+		auto textureGroup = m_Registry.group<TransformComponent>(entt::get<TextureComponent, SpriteRendererComponent>);
+		for (auto entity : textureGroup) {
+			auto& [transform, texture, sprite] = textureGroup.get<TransformComponent, TextureComponent, SpriteRendererComponent>(entity);
 
-			Renderer2D::DrawQuad(transform, sprite.Color);
+			Renderer2D::DrawQuad(transform, texture.Texture, 1.0f, sprite.Color);
 		}
 	}
 }

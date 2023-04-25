@@ -23,6 +23,7 @@ namespace Wraith {
 		m_ActiveScene = CreateRef<Scene>();
 		m_SquareEntity = m_ActiveScene->CreateEntity("Square");
 		m_SquareEntity.AddComponent<SpriteRendererComponent>(glm::vec4{ 0.0f, 1.0f, 0.0f, 1.0f });
+		m_SquareEntity.AddComponent<TextureComponent>(m_CheckerboardTexture);
 	}
 
 	void EditorLayer::OnDetach() {

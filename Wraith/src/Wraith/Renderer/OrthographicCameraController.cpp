@@ -71,6 +71,8 @@ namespace Wraith {
 	bool OrthographicCameraController::OnMouseScrolled(MouseScrolledEvent& e) {
 		W_PROFILE_FUNCTION();
 
+		if (!m_ShouldZoom) return false;
+
 		m_ZoomLevel -= e.GetYOffset() * 0.25f;
 		m_ZoomLevel = std::max(m_ZoomLevel, 0.25f);
 		CalculateView();
