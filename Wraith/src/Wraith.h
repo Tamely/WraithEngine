@@ -16,6 +16,7 @@
 #include "Wraith/ImGui/ImGuiLayer.h"
 
 #include "Wraith/Scene/Scene.h"
+#include "Wraith/Scene/Entity.h"
 #include "Wraith/Scene/Components.h"
 
 // --- Renderer -----
