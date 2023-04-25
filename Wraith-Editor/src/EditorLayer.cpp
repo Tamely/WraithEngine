@@ -19,6 +19,12 @@ namespace Wraith {
 		framebufferSpecification.Width = 1280;
 		framebufferSpecification.Height = 720;
 		m_Framebuffer = Framebuffer::Create(framebufferSpecification);
+
+		m_ActiveScene = CreateRef<Scene>();
+		m_SquareEntity = m_ActiveScene->CreateEntity();
+
+		m_ActiveScene->GetRegistry().emplace<TransformComponent>(m_SquareEntity);
+		m_ActiveScene->GetRegistry().emplace<SpriteRendererComponent>(m_SquareEntity, glm::vec4{ 0.0f, 1.0f, 0.0f, 1.0f });
 	}
 
 	void EditorLayer::OnDetach() {
@@ -39,7 +45,10 @@ namespace Wraith {
 		RenderCommand::Clear();
 
 		Renderer2D::BeginScene(m_CameraController.GetCamera());
-		Renderer2D::DrawQuad({ 0.5f, -0.5f }, { 0.5f, 0.75f }, m_SquareColor);
+		
+		// Update Scene
+		m_ActiveScene->OnUpdate(ts);
+
 		Renderer2D::EndScene();
 
 		m_Framebuffer->Unbind();
@@ -102,6 +111,9 @@ namespace Wraith {
 			ImGui::Text("Vertices: %d", stats.GetTotalVertexCount());
 			ImGui::Text("Indices: %d", stats.GetTotalIndexCount());
 
+			auto& squareColor = m_ActiveScene->GetRegistry().get<SpriteRendererComponent>(m_SquareEntity).Color;
+			ImGui::ColorEdit4("Square Color", glm::value_ptr(squareColor));
+
 			ImGui::End();
 		}
 
@@ -115,7 +127,7 @@ namespace Wraith {
 			Application::Get().GetImGuiLayer()->BlockEvents(!m_ViewportFocused || !m_ViewportHovered);
 
 			ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
-			if (m_ViewportSize != *((glm::vec2*)&viewportPanelSize)) {
+			if (m_ViewportSize != *((glm::vec2*)&viewportPanelSize) && viewportPanelSize.x > 0 && viewportPanelSize.y > 0) {
 				m_Framebuffer->Resize((uint32_t)viewportPanelSize.x, (uint32_t)viewportPanelSize.y);
 				m_ViewportSize = { viewportPanelSize.x, viewportPanelSize.y };
 

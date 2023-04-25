@@ -18,6 +18,7 @@ IncludeDir["Glad"] = "Wraith/vendor/Glad/include"
 IncludeDir["ImGui"] = "Wraith/vendor/imgui"
 IncludeDir["glm"] = "Wraith/vendor/glm"
 IncludeDir["stb_image"] = "Wraith/vendor/stb_image"
+IncludeDir["entt"] = "Wraith/vendor/entt/include"
 
 group "Dependencies"
 	include "Wraith/vendor/GLFW"
@@ -61,7 +62,8 @@ project "Wraith"
 		"%{IncludeDir.Glad}",
 		"%{IncludeDir.ImGui}",
 		"%{IncludeDir.glm}",
-		"%{IncludeDir.stb_image}"
+		"%{IncludeDir.stb_image}",
+		"%{IncludeDir.entt}"
 	}
 
 	links
@@ -119,7 +121,8 @@ project "Sandbox"
 		"Wraith/vendor/spdlog/include",
 		"Wraith/src",
 		"Wraith/vendor",
-		"%{IncludeDir.glm}"
+		"%{IncludeDir.glm}",
+		"%{IncludeDir.entt}"
 	}
 	
 	links
@@ -168,7 +171,8 @@ project "Wraith-Editor"
 		"Wraith/vendor/spdlog/include",
 		"Wraith/src",
 		"Wraith/vendor",
-		"%{IncludeDir.glm}"
+		"%{IncludeDir.glm}",
+		"%{IncludeDir.entt}"
 	}
 	
 	links

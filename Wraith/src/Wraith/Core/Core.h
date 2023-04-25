@@ -60,12 +60,22 @@
 #endif // End of DLL support
 
 #ifdef W_DEBUG
+	#if defined(W_PLATFORM_WINDOWS)
+		#define W_DEBUGBREAK() __debugbreak()
+	#elif defined(W_PLATFORM_LINUX)
+		#include <signal.h>
+		#define W_DEBUGBREAK() raise(SIGTRAP)
+	#else
+		#error "Platform doesn't support debugbreak yet!"
+	#endif
 	#define W_ENABLE_ASSERTS
+#else
+	#define W_DEBUGBREAK()
 #endif
 
 #ifdef W_ENABLE_ASSERTS
-	#define W_ASSERT(x, ...) {if (!(x)) { W_ERROR("Assertation Failed: {0}", __VA_ARGS__); __debugbreak(); } }
-	#define W_CORE_ASSERT(x, ...) { if (!(x)) { W_CORE_ERROR("Assertation Failed: {0}", __VA_ARGS__); __debugbreak(); } }
+	#define W_ASSERT(x, ...) {if (!(x)) { W_ERROR("Assertation Failed: {0}", __VA_ARGS__); W_DEBUGBREAK(); } }
+	#define W_CORE_ASSERT(x, ...) { if (!(x)) { W_CORE_ERROR("Assertation Failed: {0}", __VA_ARGS__); W_DEBUGBREAK(); } }
 #else
 	#define W_ASSERT(x, ...)
 	#define W_CORE_ASSERT(x, ...)
