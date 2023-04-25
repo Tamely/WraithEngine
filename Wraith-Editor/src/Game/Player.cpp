@@ -9,7 +9,7 @@ Player::Player() {
 }
 
 void Player::LoadAssets() {
-	m_ShipTexture = Texture2D::Create("assets/textures/Ship.png");
+	m_ShipTexture = Texture2D::Create("assets/textures/Bird.png");
 }
 
 void Player::OnUpdate(Timestep ts) {
