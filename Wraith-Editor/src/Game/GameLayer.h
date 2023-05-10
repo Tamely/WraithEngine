@@ -3,7 +3,7 @@
 #include <Wraith.h>
 
 #include "Level.h"
-#include <imgui/imgui.h>
+#include <imgui.h>
 
 enum class GameState {
 	GameOver,

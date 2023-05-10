@@ -1,6 +1,6 @@
 #include "Player.h"
 
-#include <imgui/imgui.h>
+#include <imgui.h>
 #include <glm/gtc/matrix_transform.hpp>
 
 using namespace Wraith;
@@ -9,7 +9,7 @@ Player::Player() {
 }
 
 void Player::LoadAssets() {
-	m_ShipTexture = Texture2D::Create("assets/textures/Bird.png");
+	m_ShipTexture = Texture2D::Create("assets/textures/Ship.png");
 }
 
 void Player::OnUpdate(Timestep ts) {
@@ -29,7 +29,7 @@ void Player::OnUpdate(Timestep ts) {
 }
 
 void Player::OnRender() {
-	Renderer2D::DrawRotatedQuad(glm::vec3{ m_Position.x, m_Position.y, 0.5f }, glm::vec2{ 1.2f, 0.9f }, glm::radians(GetRotation() + 90.0f), m_ShipTexture);
+	Renderer2D::DrawRotatedQuad(glm::vec3{ m_Position.x, m_Position.y, 0.5f }, glm::vec2{ 1.2f, 0.9f }, glm::radians(GetRotation()), m_ShipTexture);
 }
 
 void Player::OnImGuiRender() {

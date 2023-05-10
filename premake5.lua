@@ -13,17 +13,17 @@ outputdir = "%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}"
 
 -- Include directories relative to root folder (solution directory)
 IncludeDir = {}
-IncludeDir["GLFW"] = "Wraith/vendor/GLFW/include"
+IncludeDir["GLFW"] = "Wraith/vendor/GLFW-Premake/include"
 IncludeDir["Glad"] = "Wraith/vendor/Glad/include"
-IncludeDir["ImGui"] = "Wraith/vendor/imgui"
+IncludeDir["ImGui"] = "Wraith/vendor/ImGui-Premake"
 IncludeDir["glm"] = "Wraith/vendor/glm"
 IncludeDir["stb_image"] = "Wraith/vendor/stb_image"
 IncludeDir["entt"] = "Wraith/vendor/entt/include"
 
 group "Dependencies"
-	include "Wraith/vendor/GLFW"
+	include "Wraith/vendor/GLFW-Premake"
 	include "Wraith/vendor/Glad"
-	include "Wraith/vendor/ImGui"
+	include "Wraith/vendor/ImGui-Premake"
 group ""
 	
 project "Wraith"

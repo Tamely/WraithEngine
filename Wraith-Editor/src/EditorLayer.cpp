@@ -1,5 +1,5 @@
 #include "EditorLayer.h"
-#include "imgui/imgui.h"
+#include <imgui.h>
 
 #include "Platform/OpenGL/OpenGLShader.h"
 
