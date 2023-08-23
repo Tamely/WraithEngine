@@ -2,6 +2,7 @@
 
 #include <glm/glm.hpp>
 #include "Wraith/Renderer/Texture.h"
+#include "Wraith/Renderer/Camera.h"
 
 namespace Wraith {
 	struct TagComponent {
@@ -40,5 +41,16 @@ namespace Wraith {
 		TextureComponent(const TextureComponent&) = default;
 		TextureComponent(Ref<Texture2D> texture)
 			: Texture(texture) {}
+	};
+
+	struct CameraComponent {
+		Wraith::Camera Camera;
+		bool Primary = true; // TODO: Maybe move to Scene
+
+		CameraComponent() = default;
+		CameraComponent(const CameraComponent&) = default;
+		CameraComponent(const glm::mat4& projection)
+			: Camera(projection) {}
+
 	};
 }
