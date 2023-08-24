@@ -65,8 +65,8 @@ namespace Wraith {
 			}
 		};
 
-		m_CameraEntity.AddComponent<NativeScriptComponent>().Bind<CameraController>();
-		m_SecondCamera.AddComponent<NativeScriptComponent>().Bind<CameraController>();
+		m_CameraEntity.BindNativeScript<CameraController>();
+		m_SecondCamera.BindNativeScript<CameraController>();
 
 		m_SceneHierarchyPanel.SetContext(m_ActiveScene);
 	}

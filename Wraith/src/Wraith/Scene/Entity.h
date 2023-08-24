@@ -11,6 +11,11 @@ namespace Wraith {
 		Entity(entt::entity handle, Scene* scene);
 		Entity(const Entity& other) = default;
 
+		template <typename T, typename... Args>
+		void BindNativeScript(Args&&... args) {
+			AddComponent<NativeScriptComponent>(std::forward<Args>(args)...).Bind<T>();
+		}
+
 		template<typename T, typename... Args>
 		T& AddComponent(Args&&... args) {
 			W_CORE_ASSERT(!HasComponent<T>(), "Entity already has component!");
