@@ -29,13 +29,15 @@ namespace Wraith {
 		// Update scripts
 		{
 			m_Registry.view<NativeScriptComponent>().each([=](auto entity, auto& nsc) {
+				// TODO: Move to Scene::OnScenePlay (not made atm)
 				if (!nsc.Instance) {
-					nsc.InstantiateFunction();
+					nsc.Instance = nsc.InstantiateScript();
 					nsc.Instance->m_Entity = Entity{ entity, this };
-					nsc.OnCreateFunction(nsc.Instance);
+
+					nsc.Instance->OnCreate();
 				}
 
-				nsc.OnUpdateFunction(nsc.Instance, ts);
+				nsc.Instance->OnUpdate(ts);
 			});
 		}
 
@@ -47,7 +49,7 @@ namespace Wraith {
 			{
 				auto view = m_Registry.view<TransformComponent, CameraComponent>();
 				for (auto entity : view) {
-					auto& [transform, camera] = view.get<TransformComponent, CameraComponent>(entity);
+					auto [transform, camera] = view.get<TransformComponent, CameraComponent>(entity);
 
 					if (camera.Primary) {
 						mainCamera = &camera.Camera;
@@ -64,7 +66,7 @@ namespace Wraith {
 				{
 					auto group = m_Registry.group<TransformComponent>(entt::get<TextureComponent, SpriteRendererComponent>);
 					for (auto entity : group) {
-						auto& [transform, texture, sprite] = group.get<TransformComponent, TextureComponent, SpriteRendererComponent>(entity);
+						auto [transform, texture, sprite] = group.get<TransformComponent, TextureComponent, SpriteRendererComponent>(entity);
 
 						Renderer2D::DrawQuad(transform, texture.Texture, 1.0f, sprite.Color);
 					}
