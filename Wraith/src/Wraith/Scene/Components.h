@@ -1,8 +1,10 @@
 #pragma once
 
 #include <glm/glm.hpp>
+
+#include "SceneCamera.h"
+
 #include "Wraith/Renderer/Texture.h"
-#include "Wraith/Renderer/Camera.h"
 
 namespace Wraith {
 	struct TagComponent {
@@ -44,13 +46,12 @@ namespace Wraith {
 	};
 
 	struct CameraComponent {
-		Wraith::Camera Camera;
+		SceneCamera Camera;
 		bool Primary = true; // TODO: Maybe move to Scene
+		bool FixedAspectRatio = false;
 
 		CameraComponent() = default;
 		CameraComponent(const CameraComponent&) = default;
-		CameraComponent(const glm::mat4& projection)
-			: Camera(projection) {}
 
 	};
 }
