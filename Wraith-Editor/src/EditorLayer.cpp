@@ -25,6 +25,9 @@ namespace Wraith {
 		m_SquareEntity.AddComponent<SpriteRendererComponent>(glm::vec4{ 0.0f, 1.0f, 0.0f, 1.0f });
 		m_SquareEntity.AddComponent<TextureComponent>(m_CheckerboardTexture);
 
+		auto redSquare = m_ActiveScene->CreateEntity("Red Square");
+		redSquare.AddComponent<SpriteRendererComponent>(glm::vec4{ 1.0f, 0.0f, 0.0f, 1.0f });
+
 		m_CameraEntity = m_ActiveScene->CreateEntity("Camera Entity");
 		m_CameraEntity.AddComponent<CameraComponent>();
 
@@ -35,8 +38,6 @@ namespace Wraith {
 		class CameraController : public ScriptableEntity {
 		public:
 			void OnCreate() {
-				auto& transform = GetComponent<TransformComponent>().Transform;
-				transform[3][0] = rand() % 10 - 5.0f;
 			}
 
 			void OnDestroy() {
@@ -168,23 +169,6 @@ namespace Wraith {
 
 				auto& squareColor = m_SquareEntity.GetComponent<SpriteRendererComponent>().Color;
 				ImGui::ColorEdit4("Square Color", glm::value_ptr(squareColor));
-			}
-
-			if (m_CameraEntity) {
-				ImGui::DragFloat3("Camera A Transform", glm::value_ptr(m_CameraEntity.GetComponent<TransformComponent>().Transform[3]));
-
-				if (ImGui::Checkbox("Camera A", &m_PrimaryCamera)) {
-					m_CameraEntity.GetComponent<CameraComponent>().Primary = m_PrimaryCamera;
-					m_SecondCamera.GetComponent<CameraComponent>().Primary = !m_PrimaryCamera;
-				}
-
-				{
-					auto& camera = m_SecondCamera.GetComponent<CameraComponent>().Camera;
-					float orthoSize = camera.GetOrthographicSize();
-					if (ImGui::DragFloat("Camera B Ortho Size", &orthoSize)) {
-						camera.SetOrthographicSize(orthoSize);
-					}
-				}
 			}
 
 			ImGui::End();
