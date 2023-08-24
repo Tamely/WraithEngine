@@ -27,6 +27,10 @@ namespace Wraith {
 
 		m_CameraEntity = m_ActiveScene->CreateEntity("Camera Entity");
 		m_CameraEntity.AddComponent<CameraComponent>();
+
+		m_SecondCamera = m_ActiveScene->CreateEntity("Second Camera Entity");
+		auto& secondCameraComponent = m_SecondCamera.AddComponent<CameraComponent>();
+		secondCameraComponent.Primary = false;
 	}
 
 	void EditorLayer::OnDetach() {
@@ -42,7 +46,6 @@ namespace Wraith {
 			m_ViewportSize.x > 0.0f && m_ViewportSize.y > 0.0f && // zero sized framebuffer is invalid
 			(spec.Width != m_ViewportSize.x || spec.Height != m_ViewportSize.y))
 		{
-			W_INFO("Resize!");
 			m_Framebuffer->Resize((uint32_t)m_ViewportSize.x, (uint32_t)m_ViewportSize.y);
 			m_CameraController.OnResize(m_ViewportSize.x, m_ViewportSize.y);
 
@@ -127,6 +130,23 @@ namespace Wraith {
 
 				auto& squareColor = m_SquareEntity.GetComponent<SpriteRendererComponent>().Color;
 				ImGui::ColorEdit4("Square Color", glm::value_ptr(squareColor));
+			}
+
+			if (m_CameraEntity) {
+				ImGui::DragFloat3("Camera A Transform", glm::value_ptr(m_CameraEntity.GetComponent<TransformComponent>().Transform[3]));
+
+				if (ImGui::Checkbox("Camera A", &m_PrimaryCamera)) {
+					m_CameraEntity.GetComponent<CameraComponent>().Primary = m_PrimaryCamera;
+					m_SecondCamera.GetComponent<CameraComponent>().Primary = !m_PrimaryCamera;
+				}
+
+				{
+					auto& camera = m_SecondCamera.GetComponent<CameraComponent>().Camera;
+					float orthoSize = camera.GetOrthographicSize();
+					if (ImGui::DragFloat("Camera B Ortho Size", &orthoSize)) {
+						camera.SetOrthographicSize(orthoSize);
+					}
+				}
 			}
 
 			ImGui::End();
