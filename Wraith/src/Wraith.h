@@ -17,6 +17,7 @@
 
 #include "Wraith/Scene/Scene.h"
 #include "Wraith/Scene/Entity.h"
+#include "Wraith/Scene/ScriptableEntity.h"
 #include "Wraith/Scene/Components.h"
 
 // --- Renderer -----

@@ -29,7 +29,7 @@ namespace Wraith {
 		}
 
 		template<typename T>
-		void RemvoeComponent() {
+		void RemoveComponent() {
 			W_CORE_ASSERT(HasComponent<T>(), "Entity does not have component!");
 			m_Scene->m_Registry.remove<T>(m_EntityHandle);
 		}

@@ -26,38 +26,52 @@ namespace Wraith {
 	}
 
 	void Scene::OnUpdate(Timestep ts) {
-		// Render 2D
-
-		// Camera
-		Camera* mainCamera = nullptr;
-		glm::mat4* mainTransform = nullptr;
+		// Update scripts
 		{
-			auto view = m_Registry.view<TransformComponent, CameraComponent>();
-			for (auto entity : view) {
-				auto& [transform, camera] = view.get<TransformComponent, CameraComponent>(entity);
-
-				if (camera.Primary) {
-					mainCamera = &camera.Camera;
-					mainTransform = &transform.Transform;
-					break;
+			m_Registry.view<NativeScriptComponent>().each([=](auto entity, auto& nsc) {
+				if (!nsc.Instance) {
+					nsc.InstantiateFunction();
+					nsc.Instance->m_Entity = Entity{ entity, this };
+					nsc.OnCreateFunction(nsc.Instance);
 				}
-			}
+
+				nsc.OnUpdateFunction(nsc.Instance, ts);
+			});
 		}
 
-		if (mainCamera) {
-			Renderer2D::BeginScene(mainCamera->GetProjection(), *mainTransform);
-
-			// Textures
+		// Render 2D
+		// Camera
+		{
+			Camera* mainCamera = nullptr;
+			glm::mat4* mainTransform = nullptr;
 			{
-				auto group = m_Registry.group<TransformComponent>(entt::get<TextureComponent, SpriteRendererComponent>);
-				for (auto entity : group) {
-					auto& [transform, texture, sprite] = group.get<TransformComponent, TextureComponent, SpriteRendererComponent>(entity);
+				auto view = m_Registry.view<TransformComponent, CameraComponent>();
+				for (auto entity : view) {
+					auto& [transform, camera] = view.get<TransformComponent, CameraComponent>(entity);
 
-					Renderer2D::DrawQuad(transform, texture.Texture, 1.0f, sprite.Color);
+					if (camera.Primary) {
+						mainCamera = &camera.Camera;
+						mainTransform = &transform.Transform;
+						break;
+					}
 				}
 			}
 
-			Renderer2D::EndScene();
+			if (mainCamera) {
+				Renderer2D::BeginScene(mainCamera->GetProjection(), *mainTransform);
+
+				// Textures
+				{
+					auto group = m_Registry.group<TransformComponent>(entt::get<TextureComponent, SpriteRendererComponent>);
+					for (auto entity : group) {
+						auto& [transform, texture, sprite] = group.get<TransformComponent, TextureComponent, SpriteRendererComponent>(entity);
+
+						Renderer2D::DrawQuad(transform, texture.Texture, 1.0f, sprite.Color);
+					}
+				}
+
+				Renderer2D::EndScene();
+			}
 		}
 	}
 

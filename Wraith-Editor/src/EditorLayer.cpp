@@ -31,6 +31,36 @@ namespace Wraith {
 		m_SecondCamera = m_ActiveScene->CreateEntity("Second Camera Entity");
 		auto& secondCameraComponent = m_SecondCamera.AddComponent<CameraComponent>();
 		secondCameraComponent.Primary = false;
+
+		class CameraController : public ScriptableEntity {
+		public:
+			void OnCreate() {
+			}
+
+			void OnDestroy() {
+
+			}
+
+			void OnUpdate(Timestep ts) {
+				auto& transform = GetComponent<TransformComponent>().Transform;
+				float speed = 5.0f;
+
+				if (Input::IsKeyPressed(W_KEY_A)) {
+					transform[3][0] -= speed * ts;
+				}
+				if (Input::IsKeyPressed(W_KEY_D)) {
+					transform[3][0] += speed * ts;
+				}
+				if (Input::IsKeyPressed(W_KEY_W)) {
+					transform[3][1] += speed * ts;
+				}
+				if (Input::IsKeyPressed(W_KEY_S)) {
+					transform[3][1] -= speed * ts;
+				}
+			}
+		};
+
+		m_CameraEntity.AddComponent<NativeScriptComponent>().Bind<CameraController>();
 	}
 
 	void EditorLayer::OnDetach() {
