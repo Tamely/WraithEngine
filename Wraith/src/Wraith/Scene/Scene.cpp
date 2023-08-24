@@ -60,7 +60,7 @@ namespace Wraith {
 			}
 
 			if (mainCamera) {
-				Renderer2D::BeginScene(mainCamera->GetProjection(), *mainTransform);
+				Renderer2D::BeginScene(*mainCamera, *mainTransform);
 
 				// Textures
 				{

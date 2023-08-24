@@ -44,6 +44,8 @@ namespace Wraith {
 			}
 
 			void OnUpdate(Timestep ts) {
+				if (!GetComponent<CameraComponent>().Primary) return;
+
 				auto& transform = GetComponent<TransformComponent>().Transform;
 				float speed = 5.0f;
 
@@ -63,6 +65,9 @@ namespace Wraith {
 		};
 
 		m_CameraEntity.AddComponent<NativeScriptComponent>().Bind<CameraController>();
+		m_SecondCamera.AddComponent<NativeScriptComponent>().Bind<CameraController>();
+
+		m_SceneHierarchyPanel.SetContext(m_ActiveScene);
 	}
 
 	void EditorLayer::OnDetach() {
@@ -144,6 +149,7 @@ namespace Wraith {
 			ImGui::EndMenuBar();
 		}
 
+		m_SceneHierarchyPanel.OnImGuiRender();
 
 		// Settings
 		{
