@@ -54,6 +54,16 @@ namespace Wraith {
 		CameraComponent() = default;
 		CameraComponent(const CameraComponent&) = default;
 
+		bool operator==(CameraComponent other) {
+			return Camera.GetProjection() == other.Camera.GetProjection() 
+				&& Camera.GetProjectionType() == other.Camera.GetProjectionType() 
+				&& Primary == other.Primary 
+				&& FixedAspectRatio == other.FixedAspectRatio;
+		}
+
+		bool operator!=(CameraComponent other) {
+			return !(*this == other);
+		}
 	};
 
 	struct NativeScriptComponent {

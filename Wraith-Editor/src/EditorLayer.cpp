@@ -21,17 +21,17 @@ namespace Wraith {
 		m_Framebuffer = Framebuffer::Create(framebufferSpecification);
 
 		m_ActiveScene = CreateRef<Scene>();
-		m_SquareEntity = m_ActiveScene->CreateEntity("Square");
+		m_SquareEntity = m_ActiveScene->CreateEntity("Square A");
 		m_SquareEntity.AddComponent<SpriteRendererComponent>(glm::vec4{ 0.0f, 1.0f, 0.0f, 1.0f });
 		m_SquareEntity.AddComponent<TextureComponent>(m_CheckerboardTexture);
 
-		auto redSquare = m_ActiveScene->CreateEntity("Red Square");
+		auto redSquare = m_ActiveScene->CreateEntity("Square B");
 		redSquare.AddComponent<SpriteRendererComponent>(glm::vec4{ 1.0f, 0.0f, 0.0f, 1.0f });
 
-		m_CameraEntity = m_ActiveScene->CreateEntity("Camera Entity");
+		m_CameraEntity = m_ActiveScene->CreateEntity("Camera A");
 		m_CameraEntity.AddComponent<CameraComponent>();
 
-		m_SecondCamera = m_ActiveScene->CreateEntity("Second Camera Entity");
+		m_SecondCamera = m_ActiveScene->CreateEntity("Camera B");
 		auto& secondCameraComponent = m_SecondCamera.AddComponent<CameraComponent>();
 		secondCameraComponent.Primary = false;
 
@@ -152,9 +152,9 @@ namespace Wraith {
 
 		m_SceneHierarchyPanel.OnImGuiRender();
 
-		// Settings
+		// Render Stats
 		{
-			ImGui::Begin("Settings");
+			ImGui::Begin("Render Stats");
 
 			auto stats = Renderer2D::GetStats();
 			ImGui::Text("Renderer2D Stats:");
@@ -162,14 +162,6 @@ namespace Wraith {
 			ImGui::Text("Quad Count: %d", stats.QuadCount);
 			ImGui::Text("Vertices: %d", stats.GetTotalVertexCount());
 			ImGui::Text("Indices: %d", stats.GetTotalIndexCount());
-
-			if (m_SquareEntity) {
-				ImGui::Separator();
-				ImGui::Text("%s", m_SquareEntity.GetComponent<TagComponent>().Tag.c_str());
-
-				auto& squareColor = m_SquareEntity.GetComponent<SpriteRendererComponent>().Color;
-				ImGui::ColorEdit4("Square Color", glm::value_ptr(squareColor));
-			}
 
 			ImGui::End();
 		}
