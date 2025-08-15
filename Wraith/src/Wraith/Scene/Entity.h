@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Scene.h"
+#include "Wraith/Core/Log.h"
 
 #include "entt.hpp"
 
