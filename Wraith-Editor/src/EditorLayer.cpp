@@ -38,6 +38,10 @@ namespace Wraith {
 		class CameraController : public ScriptableEntity {
 		public:
 			void OnCreate() {
+				// This will just spawn the cameras at a random position so I can test "Make Primary" easier
+				auto& translation = GetComponent<TransformComponent>().Translation;
+				translation.x = rand() % 10 - 5.0f;
+				translation.y = rand() % 10 - 5.0f;
 			}
 
 			void OnDestroy() {
@@ -47,20 +51,20 @@ namespace Wraith {
 			void OnUpdate(Timestep ts) {
 				if (!GetComponent<CameraComponent>().Primary) return;
 
-				auto& transform = GetComponent<TransformComponent>().Transform;
+				auto& translation = GetComponent<TransformComponent>().Translation;
 				float speed = 5.0f;
 
 				if (Input::IsKeyPressed(W_KEY_A)) {
-					transform[3][0] -= speed * ts;
+					translation.x -= speed * ts;
 				}
 				if (Input::IsKeyPressed(W_KEY_D)) {
-					transform[3][0] += speed * ts;
+					translation.x += speed * ts;
 				}
 				if (Input::IsKeyPressed(W_KEY_W)) {
-					transform[3][1] += speed * ts;
+					translation.y += speed * ts;
 				}
 				if (Input::IsKeyPressed(W_KEY_S)) {
-					transform[3][1] -= speed * ts;
+					translation.y -= speed * ts;
 				}
 			}
 		};

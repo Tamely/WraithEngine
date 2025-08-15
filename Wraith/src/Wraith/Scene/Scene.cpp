@@ -45,7 +45,7 @@ namespace Wraith {
 		// Camera
 		{
 			Camera* mainCamera = nullptr;
-			glm::mat4* mainTransform = nullptr;
+			glm::mat4 cameraTransform;
 			{
 				auto view = m_Registry.view<TransformComponent, CameraComponent>();
 				for (auto entity : view) {
@@ -53,14 +53,14 @@ namespace Wraith {
 
 					if (camera.Primary) {
 						mainCamera = &camera.Camera;
-						mainTransform = &transform.Transform;
+						cameraTransform = transform.GetTransform();
 						break;
 					}
 				}
 			}
 
 			if (mainCamera) {
-				Renderer2D::BeginScene(*mainCamera, *mainTransform);
+				Renderer2D::BeginScene(*mainCamera, cameraTransform);
 
 				// Textured Quads
 				{
@@ -68,7 +68,7 @@ namespace Wraith {
 					for (auto entity : group) {
 						auto [transform, texture, sprite] = group.get<TransformComponent, TextureComponent, SpriteRendererComponent>(entity);
 
-						Renderer2D::DrawQuad(transform, texture.Texture, 1.0f, sprite.Color);
+						Renderer2D::DrawQuad(transform.GetTransform(), texture.Texture, 1.0f, sprite.Color);
 					}
 				}
 
@@ -78,7 +78,7 @@ namespace Wraith {
 					for (auto entity : group) {
 						auto [transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
 
-						Renderer2D::DrawQuad(transform, sprite.Color);
+						Renderer2D::DrawQuad(transform.GetTransform(), sprite.Color);
 					}
 				}
 

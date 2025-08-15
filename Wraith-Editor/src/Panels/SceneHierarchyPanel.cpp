@@ -64,8 +64,13 @@ namespace Wraith {
 
 		if (entity.HasComponent<TransformComponent>()) {
 			if (ImGui::TreeNodeEx((void*)typeid(TransformComponent).hash_code(), ImGuiTreeNodeFlags_DefaultOpen, "Transform")) {
-				auto& transform = entity.GetComponent<TransformComponent>().Transform;
-				ImGui::DragFloat3("Position", glm::value_ptr(transform[3]), 0.1f);
+				auto& translation = entity.GetComponent<TransformComponent>().Translation;
+				auto& rotation = entity.GetComponent<TransformComponent>().Rotation;
+				auto& scale = entity.GetComponent<TransformComponent>().Scale;
+
+				ImGui::DragFloat3("Position", glm::value_ptr(translation), 0.1f);
+				ImGui::DragFloat3("Rotation", glm::value_ptr(rotation), 0.1f, 0.0f, 2 * 3.141592653f);
+				ImGui::DragFloat3("Scale", glm::value_ptr(scale), 0.1f);
 
 				ImGui::TreePop();
 			}
@@ -140,9 +145,7 @@ namespace Wraith {
 		if (entity.HasComponent<SpriteRendererComponent>()) {
 			if (ImGui::TreeNodeEx((void*)typeid(SpriteRendererComponent).hash_code(), ImGuiTreeNodeFlags_DefaultOpen, "Sprite Renderer")) {
 				auto& spriteRenderer = entity.GetComponent<SpriteRendererComponent>();
-
 				ImGui::ColorEdit4("Sprite Color", glm::value_ptr(spriteRenderer.Color));
-
 				ImGui::TreePop();
 			}
 		}
