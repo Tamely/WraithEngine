@@ -28,6 +28,15 @@ namespace Wraith {
 			m_SelectionContext = {};
 		}
 
+		// Right-click on blank space (false) -> if we want to create child entities, copy this and make "false" set to "true"
+		if (ImGui::BeginPopupContextWindow(0, 1, false)) {
+			if (ImGui::MenuItem("Create Empty Entity")) {
+				m_Context->CreateEntity("Empty Entity");
+			}
+				
+			ImGui::EndPopup();
+		}
+
 		ImGui::End();
 
 		ImGui::Begin("Properties");
@@ -100,8 +109,29 @@ namespace Wraith {
 			m_SelectionContext = entity;
 		}
 
+		bool entityDeleted = false;
+		if (ImGui::BeginPopupContextItem()) {
+			if (ImGui::MenuItem("Delete Entity")) {
+				entityDeleted = true;
+			}
+
+			ImGui::EndPopup();
+		}
+
 		if (opened) {
+			ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow;
+			bool opened = ImGui::TreeNodeEx((void*)487321, flags, tag.c_str());
+			if (opened) {
+				ImGui::TreePop();
+			}
 			ImGui::TreePop();
+		}
+
+		if (entityDeleted) {
+			m_Context->DestroyEntity(entity);
+			if (m_SelectionContext == entity) {
+				m_SelectionContext = {}; // Clear the context so DrawComponents and co doesn't crash
+			}
 		}
 	}
 
