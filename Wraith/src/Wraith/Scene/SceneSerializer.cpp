@@ -119,9 +119,9 @@ namespace Wraith {
 
 	SceneSerializer::SceneSerializer(const Ref<Scene>& scene) : m_Scene(scene) {}
 
-	static void SerializeActor(YAML::Emitter& out, Entity entity) {
+	static void SerializeEntity(YAML::Emitter& out, Entity entity) {
 		out << YAML::BeginMap; // Entity
-		out << YAML::Key << "Actor" << YAML::Value << "854912389521"; // TODO: Entity ID goes here
+		out << YAML::Key << "Entity" << YAML::Value << "854912389521"; // TODO: Entity ID goes here
 
 		if (entity.HasComponent<TagComponent>()) {
 			out << YAML::Key << "TagComponent";
@@ -175,12 +175,12 @@ namespace Wraith {
 		YAML::Emitter out;
 		out << YAML::BeginMap; // Scene
 		out << YAML::Key << "Scene" << YAML::Value << "Untitled";
-		out << YAML::Key << "Actors" << YAML::Value << YAML::BeginSeq; // Actors
+		out << YAML::Key << "Entities" << YAML::Value << YAML::BeginSeq; // Entities
 		m_Scene->m_Registry.each([&](auto entityID) {
 			Entity entity = { entityID, m_Scene.get() };
 			if (!entity) return;
 
-			SerializeActor(out, entity);
+			SerializeEntity(out, entity);
 		});
 		out << YAML::EndSeq; // Entities
 		out << YAML::EndMap; // Scene
@@ -205,31 +205,31 @@ namespace Wraith {
 		std::string sceneName = data["Scene"].as<std::string>();
 		W_CORE_TRACE("Deserializing scene '{0}'", sceneName);
 
-		auto actors = data["Actors"];
-		if (actors) {
-			for (auto actor : actors) {
-				uint64_t uuid = actor["Actor"].as<uint64_t>();
+		auto entities = data["Entities"];
+		if (entities) {
+			for (auto entity : entities) {
+				uint64_t uuid = entity["Entity"].as<uint64_t>();
 
 				std::string name;
-				auto tagComponent = actor["TagComponent"];
+				auto tagComponent = entity["TagComponent"];
 				if (tagComponent) name = tagComponent["Tag"].as<std::string>();
 
-				W_CORE_TRACE("Deserialized actor with ID = {0}, name = {1}", uuid, name);
+				W_CORE_TRACE("Deserialized entity with ID = {0}, name = {1}", uuid, name);
 
-				Entity deserializedActor = m_Scene->CreateEntity(name);
+				Entity deserializedEntity = m_Scene->CreateEntity(name);
 
-				auto transformComponent = actor["TransformComponent"];
+				auto transformComponent = entity["TransformComponent"];
 				if (transformComponent) {
 					// Actors always have transforms
-					auto& tc = deserializedActor.GetComponent<TransformComponent>();
+					auto& tc = deserializedEntity.GetComponent<TransformComponent>();
 					tc.Translation = transformComponent["Translation"].as<glm::vec3>();
 					tc.Rotation = transformComponent["Rotation"].as<glm::vec3>();
 					tc.Scale = transformComponent["Scale"].as<glm::vec3>();
 				}
 
-				auto cameraComponent = actor["CameraComponent"];
+				auto cameraComponent = entity["CameraComponent"];
 				if (cameraComponent) {
-					auto& cc = deserializedActor.AddComponent<CameraComponent>();
+					auto& cc = deserializedEntity.AddComponent<CameraComponent>();
 					cc.Camera = cameraComponent["SceneCamera"].as<SceneCamera>();
 					cc.Primary = cameraComponent["Primary"].as<bool>();
 					cc.FixedAspectRatio = cameraComponent["FixedAspectRatio"].as<bool>();
@@ -237,9 +237,9 @@ namespace Wraith {
 					cc.Camera.SetViewportSize(m_Scene->m_ViewportWidth, m_Scene->m_ViewportHeight);
 				}
 
-				auto spriteRendererComponent = actor["SpriteRendererComponent"];
+				auto spriteRendererComponent = entity["SpriteRendererComponent"];
 				if (spriteRendererComponent) {
-					auto& src = deserializedActor.AddComponent<SpriteRendererComponent>();
+					auto& src = deserializedEntity.AddComponent<SpriteRendererComponent>();
 					src.Color = spriteRendererComponent["Color"].as<glm::vec4>();
 				}
 			}

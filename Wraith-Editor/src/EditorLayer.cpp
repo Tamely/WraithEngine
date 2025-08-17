@@ -154,6 +154,12 @@ namespace Wraith {
 
 			uint32_t textureID = m_Framebuffer->GetColorAttachmentRendererID();
 			ImGui::Image((void*)textureID, ImVec2{ m_ViewportSize.x, m_ViewportSize.y }, ImVec2{ 0, 1 }, ImVec2{ 1, 0 });
+			
+			// Gizmos
+			{
+				//Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
+			}
+
 			ImGui::End();
 			ImGui::PopStyleVar();
 		}
