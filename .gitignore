@@ -4,6 +4,9 @@ bin/
 bin-int/
 x64/
 
+scripts/__pycache__/
+vendor/premake/bin/
+
 # Files
 *.user
 *.sln
