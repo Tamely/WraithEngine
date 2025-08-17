@@ -1267,8 +1267,8 @@ namespace ImGuizmo
       // draw
       bool belowAxisLimit = false;
       bool belowPlaneLimit = false;
-      constexpr float arrowSize = 12.0f;
-      constexpr float lineThickness = 6.0f;
+      constexpr float arrowSize = 10.0f;
+      constexpr float lineThickness = 4.0f;
       for (unsigned int i = 0; i < 3; ++i)
       {
          vec_t dirPlaneX, dirPlaneY, dirAxis;
@@ -1296,19 +1296,6 @@ namespace ImGuizmo
 
             //if (gContext.mAxisFactor[i] < 0.f)
             //   DrawHatchedAxis(dirAxis);
-         }
-
-         // draw plane
-         if (belowPlaneLimit)
-         {
-            ImVec2 screenQuadPts[4];
-            for (int j = 0; j < 4; ++j)
-            {
-               vec_t cornerWorldPos = (dirPlaneX * quadUV[j * 2] + dirPlaneY * quadUV[j * 2 + 1]) * gContext.mScreenFactor;
-               screenQuadPts[j] = worldToPos(cornerWorldPos, gContext.mMVP);
-            }
-            drawList->AddPolyline(screenQuadPts, 4, directionColor[i], true, 1.0f);
-            drawList->AddConvexPolyFilled(screenQuadPts, 4, colors[i + 4]);
          }
       }
 

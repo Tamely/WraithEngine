@@ -3,11 +3,14 @@
 
 #include "Platform/OpenGL/OpenGLShader.h"
 
+#include "Wraith/Math/WraithMath.h"
 #include "Wraith/Scene/SceneSerializer.h"
 #include "Wraith/GenericPlatform/GenericPlatformFile.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+
+#include "ImGuizmo.h"
 
 namespace Wraith {
 	EditorLayer::EditorLayer()
@@ -15,8 +18,6 @@ namespace Wraith {
 
 	void EditorLayer::OnAttach() {
 		W_PROFILE_FUNCTION();
-
-		m_CheckerboardTexture = Texture2D::Create("assets/textures/Checkerboard.png");
 
 		FramebufferSpecification framebufferSpecification;
 		framebufferSpecification.Width = 1600;
@@ -147,7 +148,7 @@ namespace Wraith {
 			
 			m_ViewportFocused = ImGui::IsWindowFocused();
 			m_ViewportHovered = ImGui::IsWindowHovered();
-			Application::Get().GetImGuiLayer()->BlockEvents(!m_ViewportFocused || !m_ViewportHovered);
+			Application::Get().GetImGuiLayer()->BlockEvents(!m_ViewportFocused && !m_ViewportHovered);
 
 			ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
 			m_ViewportSize = { viewportPanelSize.x, viewportPanelSize.y };
@@ -157,7 +158,50 @@ namespace Wraith {
 			
 			// Gizmos
 			{
-				//Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
+				Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
+				if (selectedEntity && m_GizmoType != -1) {
+					// Camera
+					auto& cameraEntity = m_ActiveScene->GetPrimaryCameraEntity();
+					const auto& camera = cameraEntity.GetComponent<CameraComponent>().Camera;
+					const glm::mat4& cameraProjection = camera.GetProjection();
+					glm::mat4 cameraView = glm::inverse(cameraEntity.GetComponent<TransformComponent>().GetTransform());
+
+					// Check if the primary camera is orthographic because we want to make the Gizmos the same projection
+					ImGuizmo::SetOrthographic(
+						camera.GetProjectionType() == SceneCamera::ProjectionType::Orthographic
+					);
+					ImGuizmo::SetDrawlist();
+
+					float windowWidth = ImGui::GetWindowWidth();
+					float windowHeight= ImGui::GetWindowHeight();
+					ImGuizmo::SetRect(ImGui::GetWindowPos().x, ImGui::GetWindowPos().y, windowWidth, windowHeight);
+
+					// Entity transform
+					auto& transformComponent = selectedEntity.GetComponent<TransformComponent>();
+					glm::mat4 transform = transformComponent.GetTransform();
+
+					// Snapping
+					bool snap = Input::IsKeyPressed(W_KEY_LEFT_CONTROL);
+
+					float snapValue = 0.5f; // Snap to 0.5m for translation/scale
+					if (m_GizmoType == ImGuizmo::OPERATION::ROTATE) snapValue = 15.0f; // Snap to 15 deg for rotation
+
+					float snapValues[3] = { snapValue, snapValue, snapValue };
+
+					ImGuizmo::Manipulate(glm::value_ptr(cameraView), glm::value_ptr(cameraProjection), 
+						(ImGuizmo::OPERATION)m_GizmoType, ImGuizmo::LOCAL,
+						glm::value_ptr(transform), nullptr, snap ? snapValues : nullptr);
+
+					if (ImGuizmo::IsUsing()) {
+						glm::vec3 translation, rotation, scale;
+						Math::DecomposeTransform(transform, translation, rotation, scale);
+
+						glm::vec3 deltaRotation = rotation - transformComponent.Rotation;
+						transformComponent.Translation = translation;
+						transformComponent.Rotation += deltaRotation;
+						transformComponent.Scale = scale;
+					}
+				}
 			}
 
 			ImGui::End();
@@ -196,6 +240,24 @@ namespace Wraith {
 				if (controlPressed) {
 					OpenLevel();
 				}
+				break;
+			}
+
+			// Gizmos
+			case W_KEY_Q: {
+				m_GizmoType = -1;
+				break;
+			}
+			case W_KEY_W: {
+				m_GizmoType = ImGuizmo::OPERATION::TRANSLATE;
+				break;
+			}
+			case W_KEY_E: {
+				m_GizmoType = ImGuizmo::OPERATION::ROTATE;
+				break;
+			}
+			case W_KEY_R: {
+				m_GizmoType = ImGuizmo::OPERATION::SCALE;
 				break;
 			}
 		}

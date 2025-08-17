@@ -20,7 +20,8 @@ project "Wraith-Editor"
 		"%{wks.location}/Wraith/src",
 		"%{wks.location}/Wraith/vendor",
 		"%{IncludeDir.glm}",
-		"%{IncludeDir.entt}"
+		"%{IncludeDir.entt}",
+		"%{IncludeDir.ImGuizmo}"
 	}
 	
 	links
