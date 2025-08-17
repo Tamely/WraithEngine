@@ -90,12 +90,12 @@ namespace Wraith {
 				GLint maxLength = 0;
 				glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &maxLength);
 
-				std::vector<GLchar> infoLog(maxLength);
+				Array<GLchar> infoLog(maxLength);
 				glGetShaderInfoLog(shader, maxLength, &maxLength, &infoLog[0]);
 
 				glDeleteShader(shader);
 
-				W_CORE_ERROR("{0}", infoLog.data());
+				W_CORE_ERROR("{0}", infoLog.GetData());
 				W_CORE_ASSERT(false, "Shader compilation failure!");
 				break;
 			}
@@ -113,14 +113,14 @@ namespace Wraith {
 			GLint maxLength = 0;
 			glGetProgramiv(program, GL_INFO_LOG_LENGTH, &maxLength);
 
-			std::vector<GLchar> infoLog(maxLength);
+			Array<GLchar> infoLog(maxLength);
 			glGetProgramInfoLog(program, maxLength, &maxLength, &infoLog[0]);
 
 			glDeleteProgram(program);
 
 			for (auto id : glShaderIDs) glDeleteShader(id);
 
-			W_CORE_ERROR("{0}", infoLog.data());
+			W_CORE_ERROR("{0}", infoLog.GetData());
 			W_CORE_ASSERT(false, "Shader link failure!");
 			return;
 		}

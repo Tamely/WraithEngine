@@ -7,5 +7,7 @@ namespace Wraith {
 		static void* Memcpy(void* Dest, const void* Src, size_t Count);
 		static void* Memcmp(void* A, const void* B, size_t Count);
 		static void* Memmove(void* Dest, const void* Src, size_t Count);
+		static void* Malloc(size_t Size);
+		static void Free(void* Src);
 	};
 }

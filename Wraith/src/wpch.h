@@ -8,12 +8,11 @@
 
 #include <string>
 #include <sstream>
-#include <array>
-#include <vector>
 #include <unordered_map>
 #include <unordered_set>
 
 #include "Wraith/Core/Log.h"
+#include "Wraith/Containers/Array.h"
 
 #include "Wraith/Debug/Instrumentor.h"
 

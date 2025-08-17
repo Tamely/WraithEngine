@@ -51,7 +51,7 @@ namespace Wraith {
 	void OpenGLVertexArray::AddVertexBuffer(const Ref<VertexBuffer>& vertexBuffer) {
 		W_PROFILE_FUNCTION();
 
-		W_CORE_ASSERT(vertexBuffer->GetLayout().GetElements().size(), "Vertex buffer has no layout!");
+		W_CORE_ASSERT(vertexBuffer->GetLayout().GetElements().Size(), "Vertex buffer has no layout!");
 
 		glBindVertexArray(m_RendererID);
 		vertexBuffer->Bind();
@@ -69,7 +69,7 @@ namespace Wraith {
 			index++;
 		}
 
-		m_VertexBuffers.push_back(vertexBuffer);
+		m_VertexBuffers.Add(vertexBuffer);
 	}
 
 	void OpenGLVertexArray::SetIndexBuffer(const Ref<IndexBuffer>& indexBuffer) {

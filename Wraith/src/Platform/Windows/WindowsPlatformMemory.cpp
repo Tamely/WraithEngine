@@ -17,4 +17,12 @@ namespace Wraith {
 	void* Memory::Memmove(void* Dest, const void* Src, size_t Count) {
 		return Memmove(Dest, Src, Count);
 	}
+
+	void* Memory::Malloc(size_t Size) {
+		return malloc(Size);
+	}
+
+	void Memory::Free(void* Src) {
+		free(Src);
+	}
 }

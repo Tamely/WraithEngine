@@ -67,12 +67,12 @@ namespace Wraith {
 		}
 
 		inline uint32_t GetStride() const { return m_Stride; }
-		inline const std::vector<BufferElement>& GetElements() const { return m_Elements; }
+		inline const Array<BufferElement>& GetElements() const { return m_Elements; }
 
-		std::vector<BufferElement>::iterator begin() { return m_Elements.begin(); }
-		std::vector<BufferElement>::iterator end() { return m_Elements.end(); }
-		std::vector<BufferElement>::const_iterator begin() const { return m_Elements.begin(); }
-		std::vector<BufferElement>::const_iterator end() const { return m_Elements.end(); }
+		Array<BufferElement>::iterator begin() { return m_Elements.begin(); }
+		Array<BufferElement>::iterator end() { return m_Elements.end(); }
+		Array<BufferElement>::const_iterator begin() const { return m_Elements.begin(); }
+		Array<BufferElement>::const_iterator end() const { return m_Elements.end(); }
 	private:
 		void CalculateOffsetsAndStride() {
 			size_t offset = 0;
@@ -85,7 +85,7 @@ namespace Wraith {
 			}
 		}
 	private:
-		std::vector<BufferElement> m_Elements;
+		Array<BufferElement> m_Elements;
 		uint32_t m_Stride = 0;
 	};
 
