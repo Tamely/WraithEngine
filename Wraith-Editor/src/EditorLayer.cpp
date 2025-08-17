@@ -3,10 +3,11 @@
 
 #include "Platform/OpenGL/OpenGLShader.h"
 
+#include "Wraith/Scene/SceneSerializer.h"
+#include "Wraith/GenericPlatform/GenericPlatformFile.h"
+
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
-
-#include "Wraith/Scene/SceneSerializer.h"
 
 namespace Wraith {
 	EditorLayer::EditorLayer()
@@ -104,14 +105,16 @@ namespace Wraith {
 
 		if (ImGui::BeginMenuBar()) {
 			if (ImGui::BeginMenu("File")) {
-				if (ImGui::MenuItem("Serialize")) {
-					SceneSerializer serializer(m_ActiveScene);
-					serializer.Serialize("assets/scenes/Example.wraith");
+				if (ImGui::MenuItem("New Level", "CTRL+N")) {
+					NewLevel();
 				}
 
-				if (ImGui::MenuItem("Deserialize")) {
-					SceneSerializer serializer(m_ActiveScene);
-					serializer.Deserialize("assets/scenes/Example.wraith");
+				if (ImGui::MenuItem("Open...", "CTRL+O")) {
+					OpenLevel();
+				}
+
+				if (ImGui::MenuItem("Save As...", "CTRL+SHIFT+S")) {
+					SaveLevelAs();
 				}
 
 				if (ImGui::MenuItem("Exit")) Application::Get().Close();
@@ -160,5 +163,61 @@ namespace Wraith {
 
 	void EditorLayer::OnEvent(Event& e) {
 		m_CameraController.OnEvent(e);
+
+		EventDispatcher dispatcher(e);
+		dispatcher.Dispatch<KeyPressedEvent>(W_BIND_EVENT_FN(EditorLayer::OnKeyPressed));
+	}
+
+	bool EditorLayer::OnKeyPressed(KeyPressedEvent& e) {
+		if (e.GetRepeatCount() > 0) return false; // If you're holding a key, you're not doing the keyboard shortcuts
+
+		bool controlPressed = Input::IsKeyPressed(W_KEY_LEFT_CONTROL) || Input::IsKeyPressed(W_KEY_RIGHT_CONTROL);
+		bool shiftPressed = Input::IsKeyPressed(W_KEY_LEFT_SHIFT) || Input::IsKeyPressed(W_KEY_RIGHT_SHIFT);
+		switch (e.GetKeyCode()) {
+			case W_KEY_S: {
+				if (controlPressed && shiftPressed) {
+					SaveLevelAs();
+				}
+				break;
+			}
+			case W_KEY_N: {
+				if (controlPressed) {
+					NewLevel();
+				}
+				break;
+			}
+			case W_KEY_O: {
+				if (controlPressed) {
+					OpenLevel();
+				}
+				break;
+			}
+		}
+	}
+
+	void EditorLayer::NewLevel() {
+		m_ActiveScene = CreateRef<Scene>();
+		m_ActiveScene->OnViewportResize((uint32_t)m_ViewportSize.x, (uint32_t)m_ViewportSize.y);
+		m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+	}
+
+	void EditorLayer::OpenLevel() {
+		std::string filePath = FileDialogs::OpenFile("Wraith Level (*.wraith)\0*.wraith\0");
+		if (!filePath.empty()) {
+			m_ActiveScene = CreateRef<Scene>();
+			m_ActiveScene->OnViewportResize((uint32_t)m_ViewportSize.x, (uint32_t)m_ViewportSize.y);
+			m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+
+			SceneSerializer serializer(m_ActiveScene);
+			serializer.Deserialize(filePath);
+		}
+	}
+
+	void EditorLayer::SaveLevelAs() {
+		std::string filePath = FileDialogs::SaveFile("Wraith Level (*.wraith)\0*.wraith\0");
+		if (!filePath.empty()) {
+			SceneSerializer serializer(m_ActiveScene);
+			serializer.Serialize(filePath);
+		}
 	}
 }

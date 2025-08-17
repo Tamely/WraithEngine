@@ -16,6 +16,12 @@ namespace Wraith {
 		virtual void OnImGuiRender() override;
 		virtual void OnEvent(Event& e) override;
 	private:
+		bool OnKeyPressed(KeyPressedEvent& e);
+
+		void NewLevel();
+		void OpenLevel();
+		void SaveLevelAs();
+	private:
 		OrthographicCameraController m_CameraController;
 
 		Ref<VertexArray> m_SquareVA;
