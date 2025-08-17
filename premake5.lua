@@ -29,6 +29,7 @@ group "Dependencies"
 	include "Wraith/vendor/GLFW-Premake"
 	include "Wraith/vendor/Glad"
 	include "Wraith/vendor/ImGui-Premake"
+	include "Wraith/vendor/yaml-cpp"
 group ""
 
 group "Core"

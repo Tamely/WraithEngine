@@ -6,6 +6,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include "Wraith/Scene/SceneSerializer.h"
+
 namespace Wraith {
 	EditorLayer::EditorLayer()
 		: Layer("Wraith-Editor"), m_CameraController(16.0f / 9.0f) {}
@@ -21,57 +23,6 @@ namespace Wraith {
 		m_Framebuffer = Framebuffer::Create(framebufferSpecification);
 
 		m_ActiveScene = CreateRef<Scene>();
-		m_SquareEntity = m_ActiveScene->CreateEntity("Square A");
-		m_SquareEntity.AddComponent<SpriteRendererComponent>(glm::vec4{ 0.0f, 1.0f, 0.0f, 1.0f });
-		m_SquareEntity.AddComponent<TextureComponent>(m_CheckerboardTexture);
-
-		auto redSquare = m_ActiveScene->CreateEntity("Square B");
-		redSquare.AddComponent<SpriteRendererComponent>(glm::vec4{ 1.0f, 0.0f, 0.0f, 1.0f });
-
-		m_CameraEntity = m_ActiveScene->CreateEntity("Camera A");
-		m_CameraEntity.AddComponent<CameraComponent>();
-
-		m_SecondCamera = m_ActiveScene->CreateEntity("Camera B");
-		auto& secondCameraComponent = m_SecondCamera.AddComponent<CameraComponent>();
-		secondCameraComponent.Primary = false;
-
-		class CameraController : public ScriptableEntity {
-		public:
-			void OnCreate() {
-				// This will just spawn the cameras at a random position so I can test "Make Primary" easier
-				auto& translation = GetComponent<TransformComponent>().Translation;
-				translation.x = rand() % 10 - 5.0f;
-				translation.y = rand() % 10 - 5.0f;
-			}
-
-			void OnDestroy() {
-
-			}
-
-			void OnUpdate(Timestep ts) {
-				if (!GetComponent<CameraComponent>().Primary) return;
-
-				auto& translation = GetComponent<TransformComponent>().Translation;
-				float speed = 5.0f;
-
-				if (Input::IsKeyPressed(W_KEY_A)) {
-					translation.x -= speed * ts;
-				}
-				if (Input::IsKeyPressed(W_KEY_D)) {
-					translation.x += speed * ts;
-				}
-				if (Input::IsKeyPressed(W_KEY_W)) {
-					translation.y += speed * ts;
-				}
-				if (Input::IsKeyPressed(W_KEY_S)) {
-					translation.y -= speed * ts;
-				}
-			}
-		};
-
-		m_CameraEntity.BindNativeScript<CameraController>();
-		m_SecondCamera.BindNativeScript<CameraController>();
-
 		m_SceneHierarchyPanel.SetContext(m_ActiveScene);
 	}
 
@@ -153,6 +104,16 @@ namespace Wraith {
 
 		if (ImGui::BeginMenuBar()) {
 			if (ImGui::BeginMenu("File")) {
+				if (ImGui::MenuItem("Serialize")) {
+					SceneSerializer serializer(m_ActiveScene);
+					serializer.Serialize("assets/scenes/Example.wraith");
+				}
+
+				if (ImGui::MenuItem("Deserialize")) {
+					SceneSerializer serializer(m_ActiveScene);
+					serializer.Deserialize("assets/scenes/Example.wraith");
+				}
+
 				if (ImGui::MenuItem("Exit")) Application::Get().Close();
 				ImGui::EndMenu();
 			}

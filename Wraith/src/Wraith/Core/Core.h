@@ -76,9 +76,15 @@
 #ifdef W_ENABLE_ASSERTS
 	#define W_ASSERT(x, ...) {if (!(x)) { W_ERROR("Assertation Failed: {0}", __VA_ARGS__); W_DEBUGBREAK(); } }
 	#define W_CORE_ASSERT(x, ...) { if (!(x)) { W_CORE_ERROR("Assertation Failed: {0}", __VA_ARGS__); W_DEBUGBREAK(); } }
+
+	#define W_ASSERT(x) {if (!(x)) { W_ERROR("Assertation Failed"); W_DEBUGBREAK(); } }
+	#define W_CORE_ASSERT(x) { if (!(x)) { W_CORE_ERROR("Assertation Failed"); W_DEBUGBREAK(); } }
 #else
 	#define W_ASSERT(x, ...)
 	#define W_CORE_ASSERT(x, ...)
+
+	#define W_ASSERT(x)
+	#define W_CORE_ASSERT(x)
 #endif
 
 #define BIT(x) (1 << x)
