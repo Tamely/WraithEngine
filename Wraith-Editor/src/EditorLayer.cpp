@@ -14,7 +14,8 @@
 
 namespace Wraith {
 	EditorLayer::EditorLayer()
-		: Layer("Wraith-Editor"), m_CameraController(16.0f / 9.0f) {}
+		: Layer("Wraith-Editor"), m_CameraController(16.0f / 9.0f) {
+	}
 
 	void EditorLayer::OnAttach() {
 		W_PROFILE_FUNCTION();
@@ -33,25 +34,31 @@ namespace Wraith {
 
 	void EditorLayer::OnDetach() {
 		W_PROFILE_FUNCTION();
-
 	}
 
 	void EditorLayer::OnUpdate(Timestep ts) {
 		W_PROFILE_FUNCTION();
 
-		// Resize
+		// Reset hovered entity every frame
+		m_HoveredEntity = {};
+
+		if (!m_ViewportVisible) {
+			// Skip rendering & picking if viewport is hidden
+			return;
+		}
+
+		// Resize framebuffer when viewport size changes
 		if (FramebufferSpecification spec = m_Framebuffer->GetSpecification();
-			m_ViewportSize.x > 0.0f && m_ViewportSize.y > 0.0f && // zero sized framebuffer is invalid
+			m_ViewportSize.x > 0.0f && m_ViewportSize.y > 0.0f &&
 			(spec.Width != m_ViewportSize.x || spec.Height != m_ViewportSize.y))
 		{
 			m_Framebuffer->Resize((uint32_t)m_ViewportSize.x, (uint32_t)m_ViewportSize.y);
 			m_CameraController.OnResize(m_ViewportSize.x, m_ViewportSize.y);
 			m_EditorCamera.SetViewportSize(m_ViewportSize.x, m_ViewportSize.y);
-
 			m_ActiveScene->OnViewportResize((uint32_t)m_ViewportSize.x, (uint32_t)m_ViewportSize.y);
 		}
 
-		// Update
+		// Update cameras only when focused
 		if (m_ViewportFocused) {
 			m_CameraController.OnUpdate(ts);
 			m_EditorCamera.OnUpdate(ts);
@@ -63,24 +70,34 @@ namespace Wraith {
 		RenderCommand::SetClearColor({ 0.1f, 0.1f, 0.1f, 1 });
 		RenderCommand::Clear();
 
-		// Clear out entity ID attachment to INDEX_NONE
+		// Clear entity ID attachment to INDEX_NONE
 		m_Framebuffer->ClearColorAttachment(1, INDEX_NONE);
 
 		// Update Scene
 		m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);
 
-		auto [mx, my] = ImGui::GetMousePos();
-		mx -= m_ViewportBounds[0].x;
-		my -= m_ViewportBounds[0].y;
-		glm::vec2 viewportSize = m_ViewportBounds[1] - m_ViewportBounds[0];
-		my = viewportSize.y - my;
+		// Mouse picking (only when hovered and inside bounds)
+		auto spec = m_Framebuffer->GetSpecification();
+		int fbWidth = (int)spec.Width;
+		int fbHeight = (int)spec.Height;
 
-		int mouseX = (int)mx;
-		int mouseY = (int)my;
+		if (m_ViewportHovered && fbWidth > 0 && fbHeight > 0) {
+			auto [mx, my] = ImGui::GetMousePos();
+			mx -= m_ViewportBounds[0].x;
+			my -= m_ViewportBounds[0].y;
 
-		if (mouseX >= 0 && mouseY >= 0 && mouseX <= (int)viewportSize.x && mouseY <= (int)viewportSize.y) {
-			int pixelData = m_Framebuffer->ReadPixel(1, mouseX, mouseY);
-			W_CORE_INFO("Pixel Data {0}", pixelData);
+			glm::vec2 viewportSize = m_ViewportBounds[1] - m_ViewportBounds[0];
+			my = viewportSize.y - my; // flip Y
+
+			int mouseX = (int)mx;
+			int mouseY = (int)my;
+
+			if (mouseX >= 0 && mouseY >= 0 && mouseX < fbWidth && mouseY < fbHeight) {
+				int pixelData = m_Framebuffer->ReadPixel(1, mouseX, mouseY);
+				m_HoveredEntity = (pixelData == INDEX_NONE)
+					? Entity()
+					: Entity((entt::entity)pixelData, m_ActiveScene.get());
+			}
 		}
 
 		m_Framebuffer->Unbind();
@@ -125,35 +142,31 @@ namespace Wraith {
 			ImGuiID dockspace_id = ImGui::GetID("MyDockSpace");
 			ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
 		}
-
 		style.WindowMinSize.x = minWinSizeX;
 
 		if (ImGui::BeginMenuBar()) {
 			if (ImGui::BeginMenu("File")) {
-				if (ImGui::MenuItem("New Level", "CTRL+N")) {
-					NewLevel();
-				}
-
-				if (ImGui::MenuItem("Open...", "CTRL+O")) {
-					OpenLevel();
-				}
-
-				if (ImGui::MenuItem("Save As...", "CTRL+SHIFT+S")) {
-					SaveLevelAs();
-				}
-
+				if (ImGui::MenuItem("New Level", "CTRL+N")) NewScene();
+				if (ImGui::MenuItem("Open...", "CTRL+O")) OpenScene();
+				if (ImGui::MenuItem("Save As...", "CTRL+SHIFT+S")) SaveSceneAs();
 				if (ImGui::MenuItem("Exit")) Application::Get().Close();
 				ImGui::EndMenu();
 			}
-
 			ImGui::EndMenuBar();
 		}
 
 		m_SceneHierarchyPanel.OnImGuiRender();
 
-		// Render Stats
+		// Stats
 		{
-			ImGui::Begin("Render Stats");
+			ImGui::Begin("Stats");
+			{
+				std::string name = "None";
+				if (m_HoveredEntity)
+					name = m_HoveredEntity.GetComponent<TagComponent>().Tag;
+				ImGui::Text("Hovered Entity: %s", name.c_str());
+				ImGui::Separator();
+			}
 
 			auto stats = Renderer2D::GetStats();
 			ImGui::Text("Renderer2D Stats:");
@@ -161,90 +174,80 @@ namespace Wraith {
 			ImGui::Text("Quad Count: %d", stats.QuadCount);
 			ImGui::Text("Vertices: %d", stats.GetTotalVertexCount());
 			ImGui::Text("Indices: %d", stats.GetTotalIndexCount());
-
 			ImGui::End();
 		}
 
 		// Viewport
 		{
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-			ImGui::Begin("Viewport");
-			
-			m_ViewportFocused = ImGui::IsWindowFocused();
-			m_ViewportHovered = ImGui::IsWindowHovered();
-			Application::Get().GetImGuiLayer()->BlockEvents(!m_ViewportFocused && !m_ViewportHovered);
+			m_ViewportVisible = ImGui::Begin("Viewport"); // <- track visible state
 
-			ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
-			m_ViewportSize = { viewportPanelSize.x, viewportPanelSize.y };
+			if (m_ViewportVisible) {
+				m_ViewportFocused = ImGui::IsWindowFocused();
+				m_ViewportHovered = ImGui::IsWindowHovered();
+				Application::Get().GetImGuiLayer()->BlockEvents(!m_ViewportFocused && !m_ViewportHovered);
 
-			uint32_t textureID = m_Framebuffer->GetColorAttachmentRendererID();
-			ImGui::Image((void*)textureID, ImVec2{ m_ViewportSize.x, m_ViewportSize.y }, ImVec2{ 0, 1 }, ImVec2{ 1, 0 });
+				ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
+				m_ViewportSize = { viewportPanelSize.x, viewportPanelSize.y };
 
-			// Bounds calculation
-			{
-				ImVec2 viewportOffset = ImGui::GetCursorPos();
+				uint32_t textureID = m_Framebuffer->GetColorAttachmentRendererID();
+				ImGui::Image((void*)textureID,
+					ImVec2{ m_ViewportSize.x, m_ViewportSize.y },
+					ImVec2{ 0, 1 }, ImVec2{ 1, 0 });
 
-				ImVec2 windowPos = ImGui::GetWindowPos();
-				ImVec2 contentMin = ImGui::GetWindowContentRegionMin();
-				ImVec2 contentMax = ImGui::GetWindowContentRegionMax();
+				// Bounds calculation
+				{
+					ImVec2 windowPos = ImGui::GetWindowPos();
+					ImVec2 contentMin = ImGui::GetWindowContentRegionMin();
+					ImVec2 contentMax = ImGui::GetWindowContentRegionMax();
 
-				ImVec2 minBound = { windowPos.x + contentMin.x, windowPos.y + contentMin.y };
-				ImVec2 maxBound = { windowPos.x + contentMax.x, windowPos.y + contentMax.y };
+					ImVec2 minBound = { windowPos.x + contentMin.x, windowPos.y + contentMin.y };
+					ImVec2 maxBound = { windowPos.x + contentMax.x, windowPos.y + contentMax.y };
 
-				m_ViewportBounds[0] = { minBound.x, minBound.y };
-				m_ViewportBounds[1] = { maxBound.x, maxBound.y };
-			}
-			
-			// Gizmos
-			{
-				Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
-				if (selectedEntity && m_GizmoType != -1) {
-					// Camera
-					
-					// Runtime Camera from entity
-					/*
-					auto& cameraEntity = m_ActiveScene->GetPrimaryCameraEntity();
-					const auto& camera = cameraEntity.GetComponent<CameraComponent>().Camera;
-					const glm::mat4& cameraProjection = camera.GetProjection();
-					glm::mat4 cameraView = glm::inverse(cameraEntity.GetComponent<TransformComponent>().GetTransform());*/
+					m_ViewportBounds[0] = { minBound.x, minBound.y };
+					m_ViewportBounds[1] = { maxBound.x, maxBound.y };
+				}
 
-					// Editor Camera
-					const glm::mat4& cameraProjection = m_EditorCamera.GetProjection();
-					glm::mat4 cameraView = m_EditorCamera.GetViewMatrix();
+				// Gizmos
+				{
+					Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
+					if (selectedEntity && m_GizmoType != -1) {
+						const glm::mat4& cameraProjection = m_EditorCamera.GetProjection();
+						glm::mat4 cameraView = m_EditorCamera.GetViewMatrix();
 
-					ImGuizmo::SetOrthographic(false);
-					ImGuizmo::SetDrawlist();
+						ImGuizmo::SetOrthographic(false);
+						ImGuizmo::SetDrawlist();
 
-					float windowWidth = ImGui::GetWindowWidth();
-					float windowHeight= ImGui::GetWindowHeight();
-					ImGuizmo::SetRect(ImGui::GetWindowPos().x, ImGui::GetWindowPos().y, windowWidth, windowHeight);
+						ImGuizmo::SetRect(m_ViewportBounds[0].x, m_ViewportBounds[0].y,
+							m_ViewportBounds[1].x - m_ViewportBounds[0].x,
+							m_ViewportBounds[1].y - m_ViewportBounds[0].y);
 
-					// Entity transform
-					auto& transformComponent = selectedEntity.GetComponent<TransformComponent>();
-					glm::mat4 transform = transformComponent.GetTransform();
+						auto& transformComponent = selectedEntity.GetComponent<TransformComponent>();
+						glm::mat4 transform = transformComponent.GetTransform();
 
-					// Snapping
-					bool snap = Input::IsKeyPressed(W_KEY_LEFT_CONTROL);
+						bool snap = Input::IsKeyPressed(W_KEY_LEFT_CONTROL);
+						float snapValue = (m_GizmoType == ImGuizmo::OPERATION::ROTATE) ? 15.0f : 0.5f;
+						float snapValues[3] = { snapValue, snapValue, snapValue };
 
-					float snapValue = 0.5f; // Snap to 0.5m for translation/scale
-					if (m_GizmoType == ImGuizmo::OPERATION::ROTATE) snapValue = 15.0f; // Snap to 15 deg for rotation
+						ImGuizmo::Manipulate(glm::value_ptr(cameraView), glm::value_ptr(cameraProjection),
+							(ImGuizmo::OPERATION)m_GizmoType, ImGuizmo::LOCAL,
+							glm::value_ptr(transform), nullptr, snap ? snapValues : nullptr);
 
-					float snapValues[3] = { snapValue, snapValue, snapValue };
+						if (ImGuizmo::IsUsing()) {
+							glm::vec3 translation, rotation, scale;
+							Math::DecomposeTransform(transform, translation, rotation, scale);
 
-					ImGuizmo::Manipulate(glm::value_ptr(cameraView), glm::value_ptr(cameraProjection), 
-						(ImGuizmo::OPERATION)m_GizmoType, ImGuizmo::LOCAL,
-						glm::value_ptr(transform), nullptr, snap ? snapValues : nullptr);
-
-					if (ImGuizmo::IsUsing()) {
-						glm::vec3 translation, rotation, scale;
-						Math::DecomposeTransform(transform, translation, rotation, scale);
-
-						glm::vec3 deltaRotation = rotation - transformComponent.Rotation;
-						transformComponent.Translation = translation;
-						transformComponent.Rotation += deltaRotation;
-						transformComponent.Scale = scale;
+							glm::vec3 deltaRotation = rotation - transformComponent.Rotation;
+							transformComponent.Translation = translation;
+							transformComponent.Rotation += deltaRotation;
+							transformComponent.Scale = scale;
+						}
 					}
 				}
+			}
+			else {
+				m_ViewportFocused = false;
+				m_ViewportHovered = false;
 			}
 
 			ImGui::End();
@@ -260,60 +263,46 @@ namespace Wraith {
 
 		EventDispatcher dispatcher(e);
 		dispatcher.Dispatch<KeyPressedEvent>(W_BIND_EVENT_FN(EditorLayer::OnKeyPressed));
+		dispatcher.Dispatch<MouseButtonPressedEvent>(W_BIND_EVENT_FN(EditorLayer::OnMouseButtonPressed));
 	}
 
 	bool EditorLayer::OnKeyPressed(KeyPressedEvent& e) {
-		if (e.GetRepeatCount() > 0) return false; // If you're holding a key, you're not doing the keyboard shortcuts
+		if (e.GetRepeatCount() > 0) return false;
 
 		bool controlPressed = Input::IsKeyPressed(W_KEY_LEFT_CONTROL) || Input::IsKeyPressed(W_KEY_RIGHT_CONTROL);
 		bool shiftPressed = Input::IsKeyPressed(W_KEY_LEFT_SHIFT) || Input::IsKeyPressed(W_KEY_RIGHT_SHIFT);
+
 		switch (e.GetKeyCode()) {
-			case W_KEY_S: {
-				if (controlPressed && shiftPressed) {
-					SaveLevelAs();
-				}
-				break;
-			}
-			case W_KEY_N: {
-				if (controlPressed) {
-					NewLevel();
-				}
-				break;
-			}
-			case W_KEY_O: {
-				if (controlPressed) {
-					OpenLevel();
-				}
-				break;
-			}
+			case W_KEY_S: if (controlPressed && shiftPressed) SaveSceneAs(); break;
+			case W_KEY_N: if (controlPressed) NewScene(); break;
+			case W_KEY_O: if (controlPressed) OpenScene(); break;
 
 			// Gizmos
-			case W_KEY_Q: {
-				m_GizmoType = -1;
-				break;
-			}
-			case W_KEY_W: {
-				m_GizmoType = ImGuizmo::OPERATION::TRANSLATE;
-				break;
-			}
-			case W_KEY_E: {
-				m_GizmoType = ImGuizmo::OPERATION::ROTATE;
-				break;
-			}
-			case W_KEY_R: {
-				m_GizmoType = ImGuizmo::OPERATION::SCALE;
-				break;
-			}
+			case W_KEY_Q: m_GizmoType = -1; break;
+			case W_KEY_W: m_GizmoType = ImGuizmo::OPERATION::TRANSLATE; break;
+			case W_KEY_E: m_GizmoType = ImGuizmo::OPERATION::ROTATE; break;
+			case W_KEY_R: m_GizmoType = ImGuizmo::OPERATION::SCALE; break;
 		}
+		return false;
 	}
 
-	void EditorLayer::NewLevel() {
+	bool EditorLayer::OnMouseButtonPressed(MouseButtonPressedEvent& e) {
+		if (m_ViewportHovered && !ImGuizmo::IsOver() 
+			&& !Input::IsMouseButtonPressed(W_MOUSE_BUTTON_RIGHT)
+			&& e.GetMouseButton() == W_MOUSE_BUTTON_LEFT) {
+			m_SceneHierarchyPanel.SetSelectedEntity(m_HoveredEntity);
+		}
+
+		return false;
+	}
+
+	void EditorLayer::NewScene() {
 		m_ActiveScene = CreateRef<Scene>();
 		m_ActiveScene->OnViewportResize((uint32_t)m_ViewportSize.x, (uint32_t)m_ViewportSize.y);
 		m_SceneHierarchyPanel.SetContext(m_ActiveScene);
 	}
 
-	void EditorLayer::OpenLevel() {
+	void EditorLayer::OpenScene() {
 		std::string filePath = FileDialogs::OpenFile("Wraith Level (*.wraith)\0*.wraith\0");
 		if (!filePath.empty()) {
 			m_ActiveScene = CreateRef<Scene>();
@@ -325,7 +314,7 @@ namespace Wraith {
 		}
 	}
 
-	void EditorLayer::SaveLevelAs() {
+	void EditorLayer::SaveSceneAs() {
 		std::string filePath = FileDialogs::SaveFile("Wraith Level (*.wraith)\0*.wraith\0");
 		if (!filePath.empty()) {
 			SceneSerializer serializer(m_ActiveScene);

@@ -19,10 +19,11 @@ namespace Wraith {
 		virtual void OnEvent(Event& e) override;
 	private:
 		bool OnKeyPressed(KeyPressedEvent& e);
+		bool OnMouseButtonPressed(MouseButtonPressedEvent& e);
 
-		void NewLevel();
-		void OpenLevel();
-		void SaveLevelAs();
+		void NewScene();
+		void OpenScene();
+		void SaveSceneAs();
 	private:
 		OrthographicCameraController m_CameraController;
 
@@ -37,8 +38,10 @@ namespace Wraith {
 		int m_GizmoType = -1;
 
 		glm::vec2 m_ViewportSize = { 0.0f, 0.0f };
-		bool m_ViewportFocused = false, m_ViewportHovered = false;
+		bool m_ViewportFocused = false, m_ViewportHovered = false, m_ViewportVisible = false;
 		glm::vec2 m_ViewportBounds[2];
+
+		Entity m_HoveredEntity;
 
 		// Panels
 		SceneHierarchyPanel m_SceneHierarchyPanel;
