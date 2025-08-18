@@ -25,6 +25,8 @@ namespace Wraith {
 		m_Framebuffer = Framebuffer::Create(framebufferSpecification);
 
 		m_ActiveScene = CreateRef<Scene>();
+		m_EditorCamera = EditorCamera(30.0f, 1.778f, 0.1f, 1000.f);
+
 		m_SceneHierarchyPanel.SetContext(m_ActiveScene);
 	}
 
@@ -43,12 +45,16 @@ namespace Wraith {
 		{
 			m_Framebuffer->Resize((uint32_t)m_ViewportSize.x, (uint32_t)m_ViewportSize.y);
 			m_CameraController.OnResize(m_ViewportSize.x, m_ViewportSize.y);
+			m_EditorCamera.SetViewportSize(m_ViewportSize.x, m_ViewportSize.y);
 
 			m_ActiveScene->OnViewportResize((uint32_t)m_ViewportSize.x, (uint32_t)m_ViewportSize.y);
 		}
 
 		// Update
-		if (m_ViewportFocused) m_CameraController.OnUpdate(ts);
+		if (m_ViewportFocused) {
+			m_CameraController.OnUpdate(ts);
+			m_EditorCamera.OnUpdate(ts);
+		}
 
 		// Render
 		Renderer2D::ResetStats();
@@ -57,7 +63,7 @@ namespace Wraith {
 		RenderCommand::Clear();
 
 		// Update Scene
-		m_ActiveScene->OnUpdate(ts);
+		m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);
 
 		m_Framebuffer->Unbind();
 	}
@@ -161,15 +167,19 @@ namespace Wraith {
 				Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
 				if (selectedEntity && m_GizmoType != -1) {
 					// Camera
+					
+					// Runtime Camera from entity
+					/*
 					auto& cameraEntity = m_ActiveScene->GetPrimaryCameraEntity();
 					const auto& camera = cameraEntity.GetComponent<CameraComponent>().Camera;
 					const glm::mat4& cameraProjection = camera.GetProjection();
-					glm::mat4 cameraView = glm::inverse(cameraEntity.GetComponent<TransformComponent>().GetTransform());
+					glm::mat4 cameraView = glm::inverse(cameraEntity.GetComponent<TransformComponent>().GetTransform());*/
 
-					// Check if the primary camera is orthographic because we want to make the Gizmos the same projection
-					ImGuizmo::SetOrthographic(
-						camera.GetProjectionType() == SceneCamera::ProjectionType::Orthographic
-					);
+					// Editor Camera
+					const glm::mat4& cameraProjection = m_EditorCamera.GetProjection();
+					glm::mat4 cameraView = m_EditorCamera.GetViewMatrix();
+
+					ImGuizmo::SetOrthographic(false);
 					ImGuizmo::SetDrawlist();
 
 					float windowWidth = ImGui::GetWindowWidth();
@@ -213,6 +223,7 @@ namespace Wraith {
 
 	void EditorLayer::OnEvent(Event& e) {
 		m_CameraController.OnEvent(e);
+		m_EditorCamera.OnEvent(e);
 
 		EventDispatcher dispatcher(e);
 		dispatcher.Dispatch<KeyPressedEvent>(W_BIND_EVENT_FN(EditorLayer::OnKeyPressed));

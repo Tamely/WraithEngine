@@ -111,10 +111,18 @@ namespace Wraith {
 		s_Data.TextureShader->Bind();
 		s_Data.TextureShader->SetMat4("u_ViewProjection", viewProjection);
 
-		s_Data.QuadIndexCount = 0;
-		s_Data.QuadVertexBufferPtr = s_Data.QuadVertexBufferBase;
+		StartBatch();
+	}
 
-		s_Data.TextureSlotIndex = 1;
+	void Renderer2D::BeginScene(const EditorCamera& camera) {
+		W_PROFILE_FUNCTION();
+
+		glm::mat4 viewProjection = camera.GetViewProjection();
+
+		s_Data.TextureShader->Bind();
+		s_Data.TextureShader->SetMat4("u_ViewProjection", viewProjection);
+
+		StartBatch();
 	}
 
 	void Renderer2D::BeginScene(const OrthographicCamera& camera) {
@@ -123,10 +131,7 @@ namespace Wraith {
 		s_Data.TextureShader->Bind();
 		s_Data.TextureShader->SetMat4("u_ViewProjection", camera.GetViewProjectionMatrix());
 
-		s_Data.QuadIndexCount = 0;
-		s_Data.QuadVertexBufferPtr = s_Data.QuadVertexBufferBase;
-
-		s_Data.TextureSlotIndex = 1;
+		StartBatch();
 	}
 
 	void Renderer2D::EndScene() {
@@ -152,10 +157,7 @@ namespace Wraith {
 	void Renderer2D::FlushAndReset() {
 		EndScene();
 
-		s_Data.QuadIndexCount = 0;
-		s_Data.QuadVertexBufferPtr = s_Data.QuadVertexBufferBase;
-
-		s_Data.TextureSlotIndex = 1;
+		StartBatch();
 	}
 
 	void Renderer2D::DrawQuad(const glm::vec2& position, const glm::vec2& size, const glm::vec4& color) {
@@ -406,5 +408,17 @@ namespace Wraith {
 
 	Renderer2D::Statistics Renderer2D::GetStats() {
 		return s_Data.Stats;
+	}
+
+	void Renderer2D::StartBatch() {
+		s_Data.QuadIndexCount = 0;
+		s_Data.QuadVertexBufferPtr = s_Data.QuadVertexBufferBase;
+
+		s_Data.TextureSlotIndex = 1;
+	}
+
+	void Renderer2D::NextBatch() {
+		Flush();
+		StartBatch();
 	}
 }

@@ -3,6 +3,8 @@
 #include "Wraith.h"
 #include "Panels/SceneHierarchyPanel.h"
 
+#include "Wraith/Renderer/EditorCamera.h"
+
 namespace Wraith {
 	class EditorLayer : public Layer {
 	public:
@@ -29,6 +31,8 @@ namespace Wraith {
 		Ref<Framebuffer> m_Framebuffer;
 
 		Ref<Scene> m_ActiveScene;
+
+		EditorCamera m_EditorCamera;
 
 		int m_GizmoType = -1;
 
