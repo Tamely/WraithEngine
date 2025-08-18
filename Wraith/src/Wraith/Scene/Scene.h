@@ -3,6 +3,7 @@
 #include "entt.hpp"
 
 #include "Wraith/Core/Timestep.h"
+#include "Wraith/Renderer/EditorCamera.h"
 
 namespace Wraith {
 	class Entity;
@@ -15,7 +16,8 @@ namespace Wraith {
 		Entity CreateEntity(const std::string& name = std::string());
 		void DestroyEntity(Entity entity);
 
-		void OnUpdate(Timestep ts);
+		void OnUpdateEditor(Timestep ts, EditorCamera& camera);
+		void OnUpdateRuntime(Timestep ts);
 		void OnViewportResize(uint32_t width, uint32_t height);
 
 		Entity GetPrimaryCameraEntity();

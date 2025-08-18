@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Wraith/Renderer/Camera.h"
+#include "Wraith/Renderer/EditorCamera.h"
 #include "Wraith/Renderer/OrthographicCamera.h"
 
 #include "Wraith/Renderer/Texture.h"
@@ -13,6 +14,7 @@ namespace Wraith {
 		static void Shutdown();
 
 		static void BeginScene(const Camera& camera, const glm::mat4& transform);
+		static void BeginScene(const EditorCamera& camera);
 		static void BeginScene(const OrthographicCamera& camera); // TODO: Remove
 		static void EndScene();
 		static void Flush();
@@ -49,6 +51,9 @@ namespace Wraith {
 		static void ResetStats();
 		static Statistics GetStats();
 	private:
+		static void StartBatch();
+		static void NextBatch();
+
 		static void FlushAndReset();
 	};
 }
