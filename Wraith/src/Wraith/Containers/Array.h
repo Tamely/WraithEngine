@@ -90,7 +90,7 @@ public:
 		}
 		return *this;
 	}
-	Array& operator=(const Array&& Other) noexcept {
+	Array& operator=(Array&& Other) noexcept {
 		if (this != &Other) {
 			Empty();
 			if (Data) {

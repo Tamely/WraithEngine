@@ -20,6 +20,7 @@ namespace Wraith {
 		W_PROFILE_FUNCTION();
 
 		FramebufferSpecification framebufferSpecification;
+		framebufferSpecification.Attachments = { FramebufferTextureFormat::RGBA8, FramebufferTextureFormat::RGBA8, FramebufferTextureFormat::Depth };
 		framebufferSpecification.Width = 1600;
 		framebufferSpecification.Height = 900;
 		m_Framebuffer = Framebuffer::Create(framebufferSpecification);
