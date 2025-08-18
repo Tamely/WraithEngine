@@ -36,9 +36,9 @@ namespace Wraith {
 
 		int m_GizmoType = -1;
 
-		glm::vec2 m_ViewportSize;
-		bool m_ViewportFocused = false;
-		bool m_ViewportHovered = false;
+		glm::vec2 m_ViewportSize = { 0.0f, 0.0f };
+		bool m_ViewportFocused = false, m_ViewportHovered = false;
+		glm::vec2 m_ViewportBounds[2];
 
 		// Panels
 		SceneHierarchyPanel m_SceneHierarchyPanel;

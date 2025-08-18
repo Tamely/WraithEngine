@@ -7,6 +7,8 @@
 #include "Wraith/Renderer/Texture.h"
 #include "Wraith/Renderer/SubTexture2D.h"
 
+#include "Wraith/Scene/Components.h"
+
 namespace Wraith {
 	class Renderer2D {
 	public:
@@ -36,7 +38,6 @@ namespace Wraith {
 		static void DrawRotatedQuad(const glm::vec3& position, const glm::vec2& size, float rotation, const Ref<Texture2D>& texture, float tilingFactor = 1.0f, const glm::vec4& tintColor = glm::vec4(1.0f));
 		static void DrawRotatedQuad(const glm::vec2& position, const glm::vec2& size, float rotation, const Ref<SubTexture2D>& subTexture, float tilingFactor = 1.0f, const glm::vec4& tintColor = glm::vec4(1.0f));
 		static void DrawRotatedQuad(const glm::vec3& position, const glm::vec2& size, float rotation, const Ref<SubTexture2D>& subTexture, float tilingFactor = 1.0f, const glm::vec4& tintColor = glm::vec4(1.0f));
-
 
 		// Stats
 		struct Statistics {
