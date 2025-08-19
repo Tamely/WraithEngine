@@ -8,9 +8,11 @@ from SetupPython import PythonConfiguration as PythonRequirements
 PythonRequirements.Validate()
 
 from SetupPremake import PremakeConfiguration as PremakeRequirements
+from SetupVulkan import VulkanConfiguration as VulkanRequirements
 os.chdir('./../') # Change from devtools/scripts directory to root
 
 premakeInstalled = PremakeRequirements.Validate()
+VulkanRequirements.Validate()
 
 print("\nUpdating submodules...")
 subprocess.call(["git", "submodule", "update", "--init", "--recursive"])

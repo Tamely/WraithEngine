@@ -28,6 +28,11 @@ project "Wraith-Editor"
 	{
 		"Wraith"
 	}
+
+	postbuildcommands
+	{
+		"{COPY} %{LibraryDir.VulkanSDK_DLL} %{wks.location}/bin/" .. outputdir .. "/%{prj.name}"
+	}
 	
 	filter "system:windows"
 		systemversion "latest"

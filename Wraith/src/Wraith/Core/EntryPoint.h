@@ -1,14 +1,17 @@
 #pragma once
 
+#include "Wraith/Core/Core.h"
+#include "Wraith/Core/Application.h"
+
 #ifdef W_PLATFORM_WINDOWS
 
-extern Wraith::Application* Wraith::CreateApplication();
+extern Wraith::Application* Wraith::CreateApplication(ApplicationCommandLineArgs args);
 
 int main(int argc, char** argv) {
 	Wraith::Log::Init();
 
 	W_PROFILE_BEGIN_SESSION("Startup", "WraithProfile-Startup.json");
-	const auto app = Wraith::CreateApplication();
+	const auto app = Wraith::CreateApplication({ argc, argv });
 	W_PROFILE_END_SESSION();
 
 	W_PROFILE_BEGIN_SESSION("Startup", "WraithProfile-Runtime.json");

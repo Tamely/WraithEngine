@@ -4,6 +4,7 @@ bin/
 bin-int/
 x64/
 
+# Premake
 scripts/__pycache__/
 vendor/premake/bin/
 
@@ -21,3 +22,8 @@ Wraith-Editor/WraithProfile-Runtime.json
 Wraith-Editor/WraithProfile-Shutdown.json
 Wraith-Editor/WraithProfile-Startup.json
 *.log
+
+# Shader Files
+*.frag
+*.vert
+Wraith/vendor/VulkanSDK/
