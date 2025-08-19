@@ -124,7 +124,9 @@ namespace Wraith {
 
 	template<>
 	void Scene::OnComponentAdded<CameraComponent>(Entity entity, CameraComponent& component) {
-		component.Camera.SetViewportSize(m_ViewportWidth, m_ViewportHeight); // This is needed to recalculate the projection matrix
+		if (m_ViewportWidth > 0 && m_ViewportHeight > 0) {
+			component.Camera.SetViewportSize(m_ViewportWidth, m_ViewportHeight); // This is needed to recalculate the projection matrix
+		}
 	}
 
 	template<>

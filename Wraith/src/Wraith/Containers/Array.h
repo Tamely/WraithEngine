@@ -2,8 +2,10 @@
 
 #include "Wraith/GenericPlatform/GenericPlatformMemory.h"
 
+#include <vector>
 #include <algorithm>
 #include <initializer_list>
+#include <type_traits>
 
 enum { INDEX_NONE = -1 };
 
@@ -33,16 +35,23 @@ public:
 	// Constructors
 	Array() : Data(nullptr), ArrayNum(0), ArrayMax(0) {}
 
-	explicit Array(SizeType InitialSize) 
+	explicit Array(SizeType InitialSize)
 		: Data(nullptr), ArrayNum(0), ArrayMax(0) {
 		Reserve(InitialSize);
 		ArrayNum = InitialSize;
-		for (SizeType i = 0; i < ArrayNum; ++i) {
-			new(Data + i) T();
+		if constexpr (std::is_trivially_constructible_v<T>) {
+			// For trivial types like uint32_t, we can just leave them uninitialized
+			// or use memset if you want them zero-initialized
+			std::memset(Data, 0, ArrayNum * sizeof(T));
+		}
+		else {
+			for (SizeType i = 0; i < ArrayNum; ++i) {
+				new(Data + i) T();
+			}
 		}
 	}
 
-	Array(SizeType InitialSize, const T& DefaultValue) 
+	Array(SizeType InitialSize, const T& DefaultValue)
 		: Data(nullptr), ArrayNum(0), ArrayMax(0) {
 		Reserve(InitialSize);
 		ArrayNum = InitialSize;
@@ -51,7 +60,7 @@ public:
 		}
 	}
 
-	Array(std::initializer_list<T> InitList) 
+	Array(std::initializer_list<T> InitList)
 		: Data(nullptr), ArrayNum(0), ArrayMax(0) {
 		Reserve(InitList.size());
 		for (const auto& Item : InitList) {
@@ -59,17 +68,28 @@ public:
 		}
 	}
 
+	template<typename Iterator>
+	Array(Iterator first, Iterator last) : Data(nullptr), ArrayNum(0), ArrayMax(0) {
+		auto count = std::distance(first, last);
+		if (count > 0) {
+			Reserve(static_cast<SizeType>(count));
+			for (auto it = first; it != last; ++it) {
+				Add(*it);
+			}
+		}
+	}
+
 	Array(const Array& Other) // Copy constructor
 		: Data(nullptr), ArrayNum(0), ArrayMax(0) {
 		*this = Other;
-	} 
+	}
 
-	Array(const Array&& Other) noexcept // Move constructor
+	Array(Array&& Other) noexcept // Move constructor
 		: Data(Other.Data), ArrayNum(Other.ArrayNum), ArrayMax(Other.ArrayMax) {
 		Other.Data = nullptr;
 		Other.ArrayNum = 0;
 		Other.ArrayMax = 0;
-	} 
+	}
 
 	~Array() {
 		Empty();
@@ -78,14 +98,29 @@ public:
 		}
 	}
 
+	std::vector<T> ToVector() const {
+		std::vector<T> vec;
+		vec.reserve(ArrayNum);
+		for (SizeType i = 0; i < ArrayNum; ++i) {
+			vec.push_back(Data[i]);
+		}
+		return vec;
+	}
+
 	// Assignment operators
 	Array& operator=(const Array& Other) {
 		if (this != &Other) {
 			Empty();
 			Reserve(Other.ArrayNum);
 			ArrayNum = Other.ArrayNum;
-			for (SizeType i = 0; i < ArrayNum; ++i) {
-				new(Data + i) T(Other.Data[i]);
+			if constexpr (std::is_trivially_copyable_v<T>) {
+				// For trivial types, use memcpy for better performance
+				std::memcpy(Data, Other.Data, ArrayNum * sizeof(T));
+			}
+			else {
+				for (SizeType i = 0; i < ArrayNum; ++i) {
+					new(Data + i) T(Other.Data[i]);
+				}
 			}
 		}
 		return *this;
@@ -151,15 +186,21 @@ public:
 	void Reserve(SizeType NewCapacity) {
 		if (NewCapacity > ArrayMax) {
 			T* NewData = static_cast<T*>(Wraith::Memory::Malloc(NewCapacity * sizeof(T)));
-			W_CORE_ASSERT(NewData);
-
-			// Move existing elements
-			for (SizeType i = 0; i < ArrayNum; ++i) {
-				new(NewData + i) T(std::move(Data[i]));
-				Data[i].~T();
-			}
+			W_CORE_ASSERT(NewData, "Memory allocation failed");
 
 			if (Data) {
+				// Move existing elements
+				if constexpr (std::is_trivially_copyable_v<T>) {
+					// For trivial types, use memcpy
+					std::memcpy(NewData, Data, ArrayNum * sizeof(T));
+				}
+				else {
+					for (SizeType i = 0; i < ArrayNum; ++i) {
+						new(NewData + i) T(std::move(Data[i]));
+						Data[i].~T();
+					}
+				}
+
 				Wraith::Memory::Free(Data);
 			}
 
@@ -167,20 +208,11 @@ public:
 			ArrayMax = NewCapacity;
 		}
 	}
+
 	void Resize(SizeType NewSize) {
-		if (NewSize > ArrayNum) {
-			Reserve(NewSize);
-			for (SizeType i = ArrayNum; i < NewSize; ++i) {
-				new(Data + i) T();
-			}
-		}
-		else if (NewSize < ArrayNum) {
-			for (SizeType i = NewSize; i < ArrayNum; ++i) {
-				Data[i].~T();
-			}
-		}
-		ArrayNum = NewSize;
+		ResizeUninitialized(NewSize);
 	}
+
 	void Resize(SizeType NewSize, const T& DefaultValue) {
 		if (NewSize > ArrayNum) {
 			Reserve(NewSize);
@@ -189,8 +221,34 @@ public:
 			}
 		}
 		else if (NewSize < ArrayNum) {
-			for (SizeType i = NewSize; i < ArrayNum; ++i) {
-				Data[i].~T();
+			if constexpr (!std::is_trivially_destructible_v<T>) {
+				for (SizeType i = NewSize; i < ArrayNum; ++i) {
+					Data[i].~T();
+				}
+			}
+		}
+		ArrayNum = NewSize;
+	}
+
+	void ResizeUninitialized(SizeType NewSize) {
+		if (NewSize > ArrayNum) {
+			Reserve(NewSize);
+			if constexpr (std::is_trivially_constructible_v<T>) {
+				// For trivial types like uint32_t, don't initialize - just change the size
+				// This is perfect for reading binary data directly into the memory
+			}
+			else {
+				// For non-trivial types, we still need to construct them
+				for (SizeType i = ArrayNum; i < NewSize; ++i) {
+					new(Data + i) T();
+				}
+			}
+		}
+		else if (NewSize < ArrayNum) {
+			if constexpr (!std::is_trivially_destructible_v<T>) {
+				for (SizeType i = NewSize; i < ArrayNum; ++i) {
+					Data[i].~T();
+				}
 			}
 		}
 		ArrayNum = NewSize;
@@ -205,7 +263,7 @@ public:
 		new(Data + ArrayNum) T(Item);
 		return ArrayNum++;
 	}
-	SizeType Add(const T&& Item) {
+	SizeType Add(T&& Item) {  // Fixed: remove const from rvalue reference
 		if (ArrayNum >= ArrayMax) {
 			SizeType NewCapacity = ArrayMax == 0 ? DefaultCapacity : ArrayMax * 2;
 			Reserve(NewCapacity);
@@ -235,9 +293,14 @@ public:
 		}
 
 		// Move elements to make space
-		for (SizeType i = ArrayNum; i > Index; --i) {
-			new(Data + i) T(std::move(Data[i - 1]));
-			Data[i - 1].~T();
+		if constexpr (std::is_trivially_copyable_v<T>) {
+			std::memmove(Data + Index + 1, Data + Index, (ArrayNum - Index) * sizeof(T));
+		}
+		else {
+			for (SizeType i = ArrayNum; i > Index; --i) {
+				new(Data + i) T(std::move(Data[i - 1]));
+				Data[i - 1].~T();
+			}
 		}
 
 		new(Data + Index) T(Item);
@@ -247,24 +310,34 @@ public:
 	void Pop() {
 		if (ArrayNum > 0) {
 			ArrayNum--;
-			Data[ArrayNum].~T();
+			if constexpr (!std::is_trivially_destructible_v<T>) {
+				Data[ArrayNum].~T();
+			}
 		}
 	}
 
 	bool RemoveAt(SizeType Index) {
 		if (Index >= ArrayNum) return false;
 
-		Data[Index].~T();
+		if constexpr (!std::is_trivially_destructible_v<T>) {
+			Data[Index].~T();
+		}
 
 		// Shift elements down
-		for (SizeType i = Index; i < ArrayNum - 1; ++i) {
-			new(Data + i) T(std::move(Data[i + 1]));
-			Data[i + 1].~T();
+		if constexpr (std::is_trivially_copyable_v<T>) {
+			std::memmove(Data + Index, Data + Index + 1, (ArrayNum - Index - 1) * sizeof(T));
+		}
+		else {
+			for (SizeType i = Index; i < ArrayNum - 1; ++i) {
+				new(Data + i) T(std::move(Data[i + 1]));
+				Data[i + 1].~T();
+			}
 		}
 
 		ArrayNum--;
 		return true;
 	}
+
 	SizeType Remove(const T& Item) {
 		SizeType NumRemoved = 0;
 		for (SizeType i = 0; i < ArrayNum;) {
@@ -280,19 +353,23 @@ public:
 	}
 
 	void Empty() {
-		for (SizeType i = 0; i < ArrayNum; ++i) {
-			Data[i].~T();
+		if constexpr (!std::is_trivially_destructible_v<T>) {
+			for (SizeType i = 0; i < ArrayNum; ++i) {
+				Data[i].~T();
+			}
 		}
 		ArrayNum = 0;
 	}
+
 	void Reset() {
 		Empty();
 		ArrayMax = 0;
-		if (data) {
+		if (Data) {
 			Wraith::Memory::Free(Data);
 			Data = nullptr;
 		}
 	}
+
 	void Shrink() {
 		if (ArrayNum < ArrayMax) {
 			if (ArrayNum == 0) {
@@ -301,9 +378,14 @@ public:
 			else {
 				T* NewData = static_cast<T*>(Wraith::Memory::Malloc(ArrayNum * sizeof(T)));
 				if (NewData) {
-					for (SizeType i = 0; i < ArrayNum; ++i) {
-						new(NewData + i) T(std::move(Data[i]));
-						Data[i].~T();
+					if constexpr (std::is_trivially_copyable_v<T>) {
+						std::memcpy(NewData, Data, ArrayNum * sizeof(T));
+					}
+					else {
+						for (SizeType i = 0; i < ArrayNum; ++i) {
+							new(NewData + i) T(std::move(Data[i]));
+							Data[i].~T();
+						}
 					}
 
 					Wraith::Memory::Free(Data);

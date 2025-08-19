@@ -1,3 +1,5 @@
+// Flat Color Shader
+
 #type vertex
 #version 330 core
 

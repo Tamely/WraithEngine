@@ -6,8 +6,8 @@
 namespace Wraith {
 	class WraithEditor : public Application {
 	public:
-		WraithEditor()
-			: Application("Wraith Editor") {
+		WraithEditor(ApplicationCommandLineArgs args)
+			: Application("Wraith Editor", args) {
 			PushLayer(new EditorLayer());
 		}
 
@@ -16,7 +16,7 @@ namespace Wraith {
 		}
 	};
 
-	Application* CreateApplication() {
-		return new WraithEditor();
+	Application* CreateApplication(ApplicationCommandLineArgs args) {
+		return new WraithEditor(args);
 	}
 }

@@ -27,6 +27,14 @@ namespace Wraith {
 		m_Framebuffer = Framebuffer::Create(framebufferSpecification);
 
 		m_ActiveScene = CreateRef<Scene>();
+
+		auto commandLineArgs = Application::Get().GetCommandLineArgs();
+		if (commandLineArgs.Count > 1) {
+			auto sceneFilePath = commandLineArgs[1];
+			SceneSerializer serializer(m_ActiveScene);
+			serializer.Deserialize(sceneFilePath);
+		}
+
 		m_EditorCamera = EditorCamera(30.0f, 1.778f, 0.1f, 1000.f);
 
 		m_SceneHierarchyPanel.SetContext(m_ActiveScene);
@@ -267,7 +275,7 @@ namespace Wraith {
 	}
 
 	bool EditorLayer::OnKeyPressed(KeyPressedEvent& e) {
-		if (e.GetRepeatCount() > 0) return false;
+		if (e.GetRepeatCount() > 0 || Input::IsMouseButtonPressed(W_MOUSE_BUTTON_RIGHT)) return false;
 
 		bool controlPressed = Input::IsKeyPressed(W_KEY_LEFT_CONTROL) || Input::IsKeyPressed(W_KEY_RIGHT_CONTROL);
 		bool shiftPressed = Input::IsKeyPressed(W_KEY_LEFT_SHIFT) || Input::IsKeyPressed(W_KEY_RIGHT_SHIFT);
