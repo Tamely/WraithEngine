@@ -1,156 +1,124 @@
-# Wraith Engine ⚔️
+# Wraith Engine
 
 ![Wraith Engine Logo](Resources/Wraith-Logo.png)
 
-Wraith Engine is a C++ / OpenGL–based game engine inspired by **Unreal Engine**, **Hazel**, and concepts explored through various math and physics resources. The project is built with **C++**, leverages **OpenGL** for rendering (with plans for Vulkan support), and uses **Premake** for build automation.
+Wraith Engine is a C++ / OpenGL–based game engine inspired by **Unreal Engine**, **Hazel**, and concepts from mathematics and physics resources. The project is built with **C++**, uses **OpenGL** for rendering (with future plans for Vulkan), and leverages **Premake** for build automation.
 
 ---
 
-## ✨ Current Features
+## Current Features
 
-* 🎥 **Editor Camera Controls**
+### Editor & Camera
 
-  * Movement: `W`, `A`, `S`, `D`, `Space`, `Left Shift`
-  * Panning: Middle Mouse Button
-  * Rotation: Right Mouse Button
-  * Zoom: Scroll Wheel
+* Editor camera with movement (`W`, `A`, `S`, `D`, `Space`, `Left Shift`), panning (Middle Mouse), rotation (Right Mouse), and zoom (Scroll Wheel).
+* Mouse picking for selecting entities directly in the viewport.
 
-* 🖼️ **Rendering & Graphics**
+### Rendering & Graphics
 
-  * OpenGL rendering pipeline
-  * Real-time scene rendering
-  * 2D texture support
-  * Gizmos for transformations
-  * Dynamic lighting & basic shading
+* OpenGL rendering pipeline with multiple render targets.
+* Shaders updated to **SPIR-V**.
+* Real-time scene rendering with dynamic lighting and basic shading.
+* 2D texture support and gizmos for transformations.
 
-* 🛠️ **Scene & Entity Management**
+### Scene & Entity Management
 
-  * Scene customization and persistence
-  * Dynamic entity creation & deletion
-  * Component-based entity system (ECS)
-  * Serialization & deserialization of scenes
+* Component-based entity system (ECS).
+* Dynamic creation and deletion of entities.
+* Scene serialization and deserialization for persistence.
 
-* 🧩 **Engine Architecture**
+### Engine Architecture
 
-  * Modular core engine separated from editor
-  * Public **Wraith API** for game development
-  * Native scripting support
-  * Clean and organized folder structure
-  * Premake build automation
+* Modular engine core separated from the editor.
+* Public **Wraith API** for game development.
+* Native scripting support.
+* Organized folder structure with Premake build automation.
 
-* 🎨 **User Interface**
+### User Interface
 
-  * Integrated editor UI with **ImGui**
-  * Inspector for entity components
-  * Scene hierarchy panel
+* Integrated editor UI with **ImGui**.
+* Scene hierarchy and inspector panels.
+* New **Content Browser** for managing assets.
 
-* 📊 **Project Management**
+### Project Management
 
-  * Developed using **Kanban methodology** in JIRA
-  * Clear workflow for ongoing tasks and milestones
+* Development tracked with **Kanban methodology** in JIRA.
+* Clear workflow for ongoing tasks and milestones.
 
 ---
 
-## 🚀 Planned Features / Roadmap
+## Current State of the Engine
 
-Wraith Engine is under active development, with the following features planned for future releases:
-
-* 🔥 **Rendering Enhancements**
-
-  * Vulkan backend for next-gen rendering
-  * 3D mesh support (models, animations)
-  * Advanced lighting (PBR, HDR, shadows)
-  * Post-processing effects (bloom, SSAO, tone mapping)
-
-* 🎮 **Gameplay Systems**
-
-  * Event and messaging system for entities
-  * Prefab system for reusable entity setups
-
-* ⚡ **Physics & Simulation**
-
-  * Physics integration (rigidbodies, collisions, triggers)
-  * 2D & 3D physics simulation
-  * Particle system
-
-* 🌐 **Networking**
-
-  * Client/server architecture
-  * Multiplayer synchronization
-  * Basic networked entity replication
-
-* 🎵 **Audio**
-
-  * Sound engine integration
-  * Spatial audio support
-  * Music streaming and effects
-
-* 🌍 **Platform Support**
-
-  * Linux and macOS support
-  * Cross-platform builds with Premake
-  * Potential console support in the long term
-
-* 🛡️ **Developer Experience**
-
-  * Built-in asset importer (textures, models, audio)
-  * Hot-reloading for faster iteration
-  * In-editor debugging tools
+![Current Engine State](Resources/Git/CurrentEngineState.png)
 
 ---
 
-## 🏗️ Building Wraith Engine
+## Roadmap
 
-Follow the steps below to clone and build Wraith Engine on **Windows**.
+Wraith Engine is still in early development, but the focus is on building a solid foundation first before layering in advanced features. Here’s a breakdown of what’s coming next:
+
+### Short-Term Goals (Next 1–2 Months)
+
+* Vulkan backend implementation.
+* Basic 3D mesh support (models and simple animations).
+* Prefabs for reusable entity setups.
+* Asset importer for textures and models.
+
+### Mid-Term Goals (2–6 Months)
+
+* Advanced rendering features: PBR, HDR, shadows, and post-processing (bloom, SSAO, tone mapping).
+* Physics integration with rigidbodies, collisions, and triggers.
+* Particle system for effects.
+* Sound engine integration (with spatial audio).
+
+### Long-Term Goals (6+ Months)
+
+* Networking support: client/server model, multiplayer sync, and entity replication.
+* Cross-platform builds (Linux/macOS) with potential for console support.
+* In-editor debugging tools and hot-reloading.
+* Expanded gameplay systems and scripting.
+
+---
+
+## Building Wraith Engine
 
 ### Prerequisites
 
-* [GitHub Desktop](https://desktop.github.com/) or [Git](https://git-scm.com/)
-* [Visual Studio 2022](https://visualstudio.microsoft.com/) (Community Edition supported, v17.8+ recommended)
+* [Git](https://git-scm.com/) or [GitHub Desktop](https://desktop.github.com/)
+* [Visual Studio 2022](https://visualstudio.microsoft.com/) (v17.8+ recommended, Community Edition supported)
 
 ### Steps
 
-1. **Clone the Repository**
+1. Clone the repository:
 
-   * Using GitHub Desktop: Fork and clone this repository.
-   * Using Git CLI:
+   ```bash
+   git clone https://github.com/Tamely/WraithEngine.git
+   ```
 
-     ```bash
-     git clone https://github.com/YourUsername/WraithEngine.git
-     ```
-   * Alternatively, download the source as a `.zip` and extract it. (Be sure to **Unblock** the file in its **Properties** before extracting if downloaded on Windows.)
+   Or download as `.zip` and extract (be sure to **Unblock** on Windows before extracting).
 
-2. **Run Setup Script**
+2. Run the setup script:
 
-   * Navigate to the `scripts/` folder.
-   * Run `Setup.bat`.
-   * This will:
+   * Navigate to `Scripts/` and run `Setup.bat`.
+   * Installs dependencies and generates Visual Studio solution files.
 
-     * Download engine binaries
-     * Install required dependencies
-     * Generate Visual Studio solution files
+3. Open `WraithEngine.sln` in Visual Studio.
 
-3. **Open in Visual Studio**
+   * Set configuration to `Dist` and platform to `x64`.
 
-   * Open `WraithEngine.sln`.
-   * Set **Configuration** to `Dist` and **Platform** to `x64`.
-
-4. **Build the Editor**
+4. Build the editor:
 
    * Right-click **Wraith-Editor** → **Build**.
 
-5. **Run the Engine**
+5. Run the engine:
 
    * Set **Wraith-Editor** as the startup project.
-   * Press `F5` to launch the editor.
+   * Press `F5` to launch.
 
 ---
 
-## 📌 Project Management
+## Project Management
 
-This project is actively maintained using **Kanban methodology** in **JIRA**, ensuring a structured workflow and clear task tracking.
+Wraith Engine is actively maintained using **Kanban methodology** in **JIRA**, ensuring a structured workflow and clear task tracking.
 
 ![Kanban Board](Resources/Git/KanbanBoard.png)
 ![Kanban Summary](Resources/Git/KanbanSummary.png)
-
----
