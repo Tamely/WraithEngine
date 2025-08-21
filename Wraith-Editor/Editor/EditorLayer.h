@@ -35,7 +35,7 @@ namespace Wraith {
 
 		EditorCamera m_EditorCamera;
 
-		int m_GizmoType = -1;
+		int m_GizmoType = 0;
 
 		glm::vec2 m_ViewportSize = { 0.0f, 0.0f };
 		bool m_ViewportFocused = false, m_ViewportHovered = false, m_ViewportVisible = false;
