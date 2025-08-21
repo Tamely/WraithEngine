@@ -1,9 +1,10 @@
 #pragma once
 
-#include "Wraith.h"
-#include "Panels/SceneHierarchyPanel.h"
+#include <Wraith.h>
+#include <Editor/EditorCamera.h>
 
-#include "Editor/EditorCamera.h"
+#include "Panels/ContentBrowserPanel.h"
+#include "Panels/SceneHierarchyPanel.h"
 
 namespace Wraith {
 	class EditorLayer : public Layer {
@@ -45,5 +46,6 @@ namespace Wraith {
 
 		// Panels
 		SceneHierarchyPanel m_SceneHierarchyPanel;
+		ContentBrowserPanel m_ContentBrowserPanel;
 	};
 }
