@@ -3,6 +3,7 @@
 #include <OpenGL/OpenGLShader.h>
 
 #include <Math/WraithMath.h>
+#include <Editor/TextureLoader.h>
 #include <Scene/SceneSerializer.h>
 #include <GenericPlatform/GenericPlatformFile.h>
 
@@ -177,6 +178,13 @@ namespace Wraith {
 				ImGui::Separator();
 			}
 
+			// Memory related stats
+			{
+				ImGui::Text("Memory Stats");
+				ImGui::Text("Loaded Textures: %d", TextureLoader::Instance().GetLoadedTextureCount());
+				ImGui::Separator();
+			}
+
 			auto stats = Renderer2D::GetStats();
 			ImGui::Text("Renderer2D Stats:");
 			ImGui::Text("Draw Calls: %d", stats.DrawCalls);
@@ -312,7 +320,7 @@ namespace Wraith {
 	}
 
 	void EditorLayer::OpenScene() {
-		std::string filePath = FileDialogs::OpenFile("Wraith Level (*.wraith)\0*.wraith\0");
+		std::string filePath = FileDialogs::OpenFile("Wraith Scene (*.wscene)\0*.wscene\0");
 		if (!filePath.empty()) {
 			m_ActiveScene = CreateRef<Scene>();
 			m_ActiveScene->OnViewportResize((uint32_t)m_ViewportSize.x, (uint32_t)m_ViewportSize.y);
@@ -324,7 +332,7 @@ namespace Wraith {
 	}
 
 	void EditorLayer::SaveSceneAs() {
-		std::string filePath = FileDialogs::SaveFile("Wraith Level (*.wraith)\0*.wraith\0");
+		std::string filePath = FileDialogs::SaveFile("Wraith Scene (*.wscene)\0*.wscene\0");
 		if (!filePath.empty()) {
 			SceneSerializer serializer(m_ActiveScene);
 			serializer.Serialize(filePath);
