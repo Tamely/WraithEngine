@@ -1,16 +1,16 @@
 #include "EditorLayer.h"
-#include <imgui.h>
 
-#include "OpenGL/OpenGLShader.h"
+#include <OpenGL/OpenGLShader.h>
 
-#include "Math/WraithMath.h"
-#include "Scene/SceneSerializer.h"
-#include "GenericPlatform/GenericPlatformFile.h"
+#include <Math/WraithMath.h>
+#include <Scene/SceneSerializer.h>
+#include <GenericPlatform/GenericPlatformFile.h>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-#include "ImGuizmo.h"
+#include <ImGui-Premake/imgui.h>
+#include <ImGuizmo/ImGuizmo.h>
 
 namespace Wraith {
 	EditorLayer::EditorLayer()
@@ -164,6 +164,7 @@ namespace Wraith {
 		}
 
 		m_SceneHierarchyPanel.OnImGuiRender();
+		m_ContentBrowserPanel.OnImGuiRender();
 
 		// Stats
 		{
