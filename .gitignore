@@ -12,6 +12,7 @@ ThirdParty/premake/bin/
 *.user
 *.sln
 *.vcxproj
+*.DotSettings
 *.filters
 Sandbox/imgui.ini
 Wraith-Editor/imgui.ini
