@@ -44,6 +44,7 @@ project "Wraith"
 
 		"Tools",
 
+		"ThirdParty",
 		"ThirdParty/spdlog/include",
 		"%{IncludeDir.GLFW}",
 		"%{IncludeDir.Glad}",
