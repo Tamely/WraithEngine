@@ -6,7 +6,7 @@ x64/
 
 # Premake
 scripts/__pycache__/
-vendor/premake/bin/
+ThirdParty/premake/bin/
 
 # Files
 *.user
@@ -26,4 +26,4 @@ Wraith-Editor/WraithProfile-Startup.json
 # Shader Files
 *.frag
 *.vert
-Wraith/vendor/VulkanSDK/
+Wraith/ThirdParty/VulkanSDK/

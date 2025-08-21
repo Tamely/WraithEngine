@@ -8,19 +8,26 @@ project "Wraith"
 	objdir ("%{wks.location}/bin-int/" .. outputdir .. "/%{prj.name}")
 
 	pchheader "wpch.h"
-	pchsource "%{wks.location}/Wraith/src/wpch.cpp"
+	pchsource "%{wks.location}/Wraith/wpch.cpp"
 	
 	files
 	{
-		"src/**.h",
-		"src/**.cpp",
-		"vendor/stb_image/**.h",
-		"vendor/stb_image/**.cpp",
-		"vendor/glm/glm/**.hpp",
-		"vendor/glm/glm/**.inl",
+		"wpch.cpp",
+		"wpch.h",
+		"Wraith.h",
+		"imgui.h",
 
-		"vendor/ImGuizmo/ImGuizmo.h",
-		"vendor/ImGuizmo/ImGuizmo.cpp"
+		"Engine/**.h",
+		"Engine/**.cpp",
+		"Tools/**.h",
+		"Tools/**.cpp",
+		"ThirdParty/stb_image/**.h",
+		"ThirdParty/stb_image/**.cpp",
+		"ThirdParty/glm/glm/**.hpp",
+		"ThirdParty/glm/glm/**.inl",
+
+		"ThirdParty/ImGuizmo/ImGuizmo.h",
+		"ThirdParty/ImGuizmo/ImGuizmo.cpp"
 	}
 
 	defines
@@ -30,8 +37,14 @@ project "Wraith"
 	
 	includedirs
 	{
-		"src",
-		"vendor/spdlog/include",
+		"%{wks.location}/Wraith",
+		"Engine",
+		"Engine/Core",
+		"Engine/Platform",
+
+		"Tools",
+
+		"ThirdParty/spdlog/include",
 		"%{IncludeDir.GLFW}",
 		"%{IncludeDir.Glad}",
 		"%{IncludeDir.ImGui}",
@@ -52,7 +65,7 @@ project "Wraith"
 		"opengl32.lib"
 	}
 
-	filter "files:vendor/ImGuizmo/**.cpp"
+	filter "files:ThirdParty/ImGuizmo/**.cpp"
 	flags { "NOPCH" }
 	
 	filter "system:windows"
