@@ -16,9 +16,11 @@ project "Sandbox"
 	
 	includedirs
 	{
-		"%{wks.location}/Wraith/vendor/spdlog/include",
-		"%{wks.location}/Wraith/src",
-		"%{wks.location}/Wraith/vendor",
+		"%{wks.location}/Wraith",
+		"%{wks.location}/Wraith/Engine",
+		"%{wks.location}/Wraith/ThirdParty",
+		"%{wks.location}/Wraith/ThirdParty/spdlog/include",
+		
 		"%{IncludeDir.glm}",
 		"%{IncludeDir.entt}"
 	}

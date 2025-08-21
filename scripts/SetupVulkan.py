@@ -12,7 +12,7 @@ from urllib.request import urlopen
 class VulkanConfiguration:
     requiredVulkanVersion = "1.4."
     installVulkanVersion = "1.4.309.0"
-    vulkanDirectory = "./Wraith/vendor/VulkanSDK"
+    vulkanDirectory = "./Wraith/ThirdParty/VulkanSDK"
 
     @classmethod
     def Validate(cls):

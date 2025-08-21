@@ -120,10 +120,10 @@ ExampleLayer::ExampleLayer()
 
 	m_FlatColorShader = Wraith::Shader::Create("FlatColor", flatColorShaderVertexSrc, flatColorShaderFragmentSrc);
 
-	auto textureShader = m_ShaderLibrary.Load("assets/shaders/Texture.glsl");
+	auto textureShader = m_ShaderLibrary.Load("Content/Shaders/Texture.glsl");
 
-	m_Texture = Wraith::Texture2D::Create("assets/textures/Checkerboard.png");
-	m_CatTexture = Wraith::Texture2D::Create("assets/textures/Cat.png");
+	m_Texture = Wraith::Texture2D::Create("Content/Textures/Checkerboard.png");
+	m_CatTexture = Wraith::Texture2D::Create("Content/Textures/Cat.png");
 
 	textureShader->Bind();
 	textureShader->SetInt("u_Texture", 0);

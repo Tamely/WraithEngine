@@ -1,4 +1,4 @@
-include "./vendor/premake/premake_customization/solution_items.lua"
+include "./ThirdParty/premake/premake_customization/solution_items.lua"
 include "Dependencies.lua"
 
 workspace "Wraith"
@@ -25,11 +25,11 @@ workspace "Wraith"
 outputdir = "%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}"
 
 group "Dependencies"
-	include "vendor/premake"
-	include "Wraith/vendor/GLFW-Premake"
-	include "Wraith/vendor/Glad"
-	include "Wraith/vendor/ImGui-Premake"
-	include "Wraith/vendor/yaml-cpp"
+	include "ThirdParty/premake"
+	include "Wraith/ThirdParty/GLFW-Premake"
+	include "Wraith/ThirdParty/Glad"
+	include "Wraith/ThirdParty/ImGui-Premake"
+	include "Wraith/ThirdParty/yaml-cpp"
 group ""
 
 group "Core"

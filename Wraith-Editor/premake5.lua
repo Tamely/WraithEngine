@@ -9,16 +9,21 @@ project "Wraith-Editor"
 	
 	files
 	{
-		"src/**.h",
-		"src/**.cpp",
-		"src/**.hpp"
+		"Editor/**.h",
+		"Editor/**.cpp",
+		"Editor/**.hpp"
 	}
 	
 	includedirs
 	{
-		"%{wks.location}/Wraith/vendor/spdlog/include",
-		"%{wks.location}/Wraith/src",
-		"%{wks.location}/Wraith/vendor",
+		"%{wks.location}/Wraith",
+		"%{wks.location}/Wraith/Engine",
+		"%{wks.location}/Wraith/Engine/Core",
+		"%{wks.location}/Wraith/Engine/Platform",
+		"%{wks.location}/Wraith/ThirdParty",
+		"%{wks.location}/Wraith/ThirdParty/spdlog/include",
+		"%{wks.location}/Wraith/Tools",
+
 		"%{IncludeDir.glm}",
 		"%{IncludeDir.entt}",
 		"%{IncludeDir.ImGuizmo}"

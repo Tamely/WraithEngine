@@ -13,7 +13,7 @@ Sandbox2D::Sandbox2D()
 void Sandbox2D::OnAttach() {
 	W_PROFILE_FUNCTION();
 
-	m_CheckerboardTexture = Wraith::Texture2D::Create("assets/textures/Checkerboard.png");
+	m_CheckerboardTexture = Wraith::Texture2D::Create("Content/Textures/Checkerboard.png");
 }
 
 void Sandbox2D::OnDetach() {
