@@ -5,6 +5,9 @@
 
 #include <ImGui-Premake/imgui.h>
 
+#define IMGUI_PAYLOAD_TYPE_SCENE	"WRAITH_CONTENT_SCENE"
+#define IMGUI_PAYLOAD_TYPE_UNKNOWN	"UNKNOWN"
+
 namespace Wraith {
 	enum FileType {
 		TEXTURE = 0,
@@ -34,6 +37,7 @@ namespace Wraith {
 		FileType GetFileType(const std::filesystem::path& path);
 		ImU32 GetFileTypeColor(FileType type);
 		const char* GetFileTypeText(FileType type);
+		const char* GetImGuiTypeText(FileType type);
 
 		void OnFileSelected(const std::filesystem::path& path);
 	private:

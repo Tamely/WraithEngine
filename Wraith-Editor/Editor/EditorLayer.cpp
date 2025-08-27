@@ -14,6 +14,8 @@
 #include <ImGuizmo/ImGuizmo.h>
 
 namespace Wraith {
+	extern const std::filesystem::path g_ContentDirectory;
+
 	EditorLayer::EditorLayer()
 		: Layer("Wraith-Editor"), m_CameraController(16.0f / 9.0f) {
 	}
@@ -261,6 +263,15 @@ namespace Wraith {
 						}
 					}
 				}
+
+				if (ImGui::BeginDragDropTarget()) {
+					if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(IMGUI_PAYLOAD_TYPE_SCENE)) {
+						const wchar_t* path = (const wchar_t*)payload->Data;
+						OpenScene(g_ContentDirectory / path);
+					}
+
+					ImGui::EndDragDropTarget();
+				}
 			}
 			else {
 				m_ViewportFocused = false;
@@ -322,13 +333,17 @@ namespace Wraith {
 	void EditorLayer::OpenScene() {
 		std::string filePath = FileDialogs::OpenFile("Wraith Scene (*.wscene)\0*.wscene\0");
 		if (!filePath.empty()) {
-			m_ActiveScene = CreateRef<Scene>();
-			m_ActiveScene->OnViewportResize((uint32_t)m_ViewportSize.x, (uint32_t)m_ViewportSize.y);
-			m_SceneHierarchyPanel.SetContext(m_ActiveScene);
-
-			SceneSerializer serializer(m_ActiveScene);
-			serializer.Deserialize(filePath);
+			OpenScene(filePath);
 		}
+	}
+
+	void EditorLayer::OpenScene(const std::filesystem::path& filePath) {
+		m_ActiveScene = CreateRef<Scene>();
+		m_ActiveScene->OnViewportResize((uint32_t)m_ViewportSize.x, (uint32_t)m_ViewportSize.y);
+		m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+
+		SceneSerializer serializer(m_ActiveScene);
+		serializer.Deserialize(filePath.string());
 	}
 
 	void EditorLayer::SaveSceneAs() {

@@ -5,7 +5,7 @@
 
 namespace Wraith {
 	// Once we have projects, change this
-	static std::filesystem::path s_ContentDirectory = "Content";
+	extern const std::filesystem::path g_ContentDirectory = "Content";
 
 	// Texture handles for UI elements
 	static ImTextureID s_FolderIcon = nullptr;
@@ -13,7 +13,7 @@ namespace Wraith {
 	static ImTextureID s_FileIcons[FileType::COUNT] = { nullptr };
 
 	ContentBrowserPanel::ContentBrowserPanel()
-		: m_CurrentDirectory(s_ContentDirectory),
+		: m_CurrentDirectory(g_ContentDirectory),
 		  m_ThumbnailSize(64.0f),
 		  m_Padding(16.0f) {
 
@@ -61,17 +61,17 @@ namespace Wraith {
 
 	void ContentBrowserPanel::RenderBreadcrumbs() {
 		// Display current path as clickable breadcrumbs
-		std::filesystem::path relativePath = std::filesystem::relative(m_CurrentDirectory, s_ContentDirectory);
+		std::filesystem::path relativePath = std::filesystem::relative(m_CurrentDirectory, g_ContentDirectory);
 
 		// Root "Content" button
 		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{ 0.3f, 0.5f, 0.8f, 1.0f });
 		if (ImGui::Button("Content")) {
-			m_CurrentDirectory = s_ContentDirectory;
+			m_CurrentDirectory = g_ContentDirectory;
 		}
 		ImGui::PopStyleColor();
 
 		// Path segments
-		std::filesystem::path currentPath = s_ContentDirectory;
+		std::filesystem::path currentPath = g_ContentDirectory;
 		for (const auto& segment : relativePath) {
 			if (segment == ".") continue;
 
@@ -122,9 +122,10 @@ namespace Wraith {
 		// Render directories first
 		for (auto& directoryEntry : directories) {
 			auto& path = directoryEntry.path();
-			auto relativePath = std::filesystem::relative(path, s_ContentDirectory);
+			auto relativePath = std::filesystem::relative(path, g_ContentDirectory);
 			std::string fileName = relativePath.filename().string();
 
+			ImGui::PushID(fileName.c_str());
 			ImGui::BeginGroup();
 			// Item background for selection highlighting
 			ImVec2 cursorPos = ImGui::GetCursorPos();
@@ -146,7 +147,7 @@ namespace Wraith {
 			ImGui::EndGroup();
 
 			// Handle clicking
-			if (ImGui::IsItemClicked()) {
+			if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
 				m_CurrentDirectory /= directoryEntry.path().filename();
 			}
 
@@ -158,14 +159,16 @@ namespace Wraith {
 			else {
 				currentColumn = 0;
 			}
+			ImGui::PopID();
 		}
 
 		// Then render files
 		for (auto& directoryEntry : files) {
 			auto& path = directoryEntry.path();
-			auto relativePath = std::filesystem::relative(path, s_ContentDirectory);
+			auto relativePath = std::filesystem::relative(path, g_ContentDirectory);
 			std::string fileName = relativePath.filename().string();
 
+			ImGui::PushID(fileName.c_str());
 			ImGui::BeginGroup();
 			// Item background for selection highlighting
 			ImVec2 cursorPos = ImGui::GetCursorPos();
@@ -187,8 +190,16 @@ namespace Wraith {
 			ImGui::EndGroup();
 
 			// Handle clicking
-			if (ImGui::IsItemClicked()) {
+			if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
 				OnFileSelected(path);
+			}
+
+			// Handle drag and dropping
+			if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+				const wchar_t* itemPath = relativePath.c_str();
+				FileType fileType = GetFileType(relativePath);
+				ImGui::SetDragDropPayload(GetImGuiTypeText(fileType), itemPath, (wcslen(itemPath) + 1) * sizeof(wchar_t), ImGuiCond_Once);
+				ImGui::EndDragDropSource();
 			}
 
 			// Arrange in grid
@@ -199,6 +210,7 @@ namespace Wraith {
 			else {
 				currentColumn = 0;
 			}
+			ImGui::PopID();
 		}
 	}
 
@@ -288,7 +300,7 @@ namespace Wraith {
 		ImGui::SameLine();
 
 		// Show current directory info
-		std::string currentPath = std::filesystem::relative(m_CurrentDirectory, s_ContentDirectory).string();
+		std::string currentPath = std::filesystem::relative(m_CurrentDirectory, g_ContentDirectory).string();
 		if (currentPath.empty() || currentPath == ".") {
 			currentPath = "Content";
 		}
@@ -355,6 +367,13 @@ namespace Wraith {
 			case FileType::SCRIPT:   return "SCR";
 			case FileType::SCENE:    return "SCN";
 			default:                 return "???";
+		}
+	}
+
+	const char* ContentBrowserPanel::GetImGuiTypeText(FileType type) {
+		switch (type) {
+		case FileType::SCENE:    return IMGUI_PAYLOAD_TYPE_SCENE;
+		default:                 return IMGUI_PAYLOAD_TYPE_UNKNOWN;
 		}
 	}
 
