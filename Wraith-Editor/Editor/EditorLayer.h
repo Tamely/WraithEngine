@@ -24,6 +24,7 @@ namespace Wraith {
 
 		void NewScene();
 		void OpenScene();
+		void OpenScene(const std::filesystem::path& filePath);
 		void SaveSceneAs();
 	private:
 		OrthographicCameraController m_CameraController;
