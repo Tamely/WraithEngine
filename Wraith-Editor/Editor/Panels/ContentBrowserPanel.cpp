@@ -94,48 +94,100 @@ namespace Wraith {
 		float cellSize = m_ThumbnailSize + m_Padding;
 		int columnCount = (int)(panelWidth / cellSize);
 		if (columnCount < 1) columnCount = 1;
-
 		int currentColumn = 0;
 
+		// Collect and sort directory entries
+		std::vector<std::filesystem::directory_entry> directories;
+		std::vector<std::filesystem::directory_entry> files;
+
 		for (auto& directoryEntry : std::filesystem::directory_iterator(m_CurrentDirectory)) {
+			if (directoryEntry.is_directory()) {
+				directories.push_back(directoryEntry);
+			}
+			else {
+				files.push_back(directoryEntry);
+			}
+		}
+
+		// Sort directories and files alphabetically (optional)
+		std::sort(directories.begin(), directories.end(),
+			[](const auto& a, const auto& b) {
+				return a.path().filename().string() < b.path().filename().string();
+			});
+		std::sort(files.begin(), files.end(),
+			[](const auto& a, const auto& b) {
+				return a.path().filename().string() < b.path().filename().string();
+			});
+
+		// Render directories first
+		for (auto& directoryEntry : directories) {
 			auto& path = directoryEntry.path();
 			auto relativePath = std::filesystem::relative(path, s_ContentDirectory);
 			std::string fileName = relativePath.filename().string();
 
 			ImGui::BeginGroup();
-
 			// Item background for selection highlighting
 			ImVec2 cursorPos = ImGui::GetCursorPos();
 			ImDrawList* drawList = ImGui::GetWindowDrawList();
 			ImVec2 itemMin = ImGui::GetCursorScreenPos();
 			ImVec2 itemMax = ImVec2(itemMin.x + m_ThumbnailSize, itemMin.y + m_ThumbnailSize + 40);
-
 			bool isHovered = ImGui::IsMouseHoveringRect(itemMin, itemMax);
 			if (isHovered) {
 				drawList->AddRectFilled(itemMin, itemMax,
 					IM_COL32(50, 50, 50, 100), 4.0f);
 			}
 
-			if (directoryEntry.is_directory()) {
-				RenderDirectoryItem(fileName);
-			}
-			else {
-				RenderFileItem(fileName, path);
-			}
+			RenderDirectoryItem(fileName);
 
 			// File name with text wrapping
 			ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + m_ThumbnailSize);
 			ImGui::TextWrapped("%s", fileName.c_str());
 			ImGui::PopTextWrapPos();
-
 			ImGui::EndGroup();
 
 			// Handle clicking
-			if (ImGui::IsItemClicked() && directoryEntry.is_directory()) {
+			if (ImGui::IsItemClicked()) {
 				m_CurrentDirectory /= directoryEntry.path().filename();
 			}
-			else if (ImGui::IsItemClicked() && !directoryEntry.is_directory()) {
-				// Handle file selection/opening
+
+			// Arrange in grid
+			currentColumn++;
+			if (currentColumn < columnCount) {
+				ImGui::SameLine();
+			}
+			else {
+				currentColumn = 0;
+			}
+		}
+
+		// Then render files
+		for (auto& directoryEntry : files) {
+			auto& path = directoryEntry.path();
+			auto relativePath = std::filesystem::relative(path, s_ContentDirectory);
+			std::string fileName = relativePath.filename().string();
+
+			ImGui::BeginGroup();
+			// Item background for selection highlighting
+			ImVec2 cursorPos = ImGui::GetCursorPos();
+			ImDrawList* drawList = ImGui::GetWindowDrawList();
+			ImVec2 itemMin = ImGui::GetCursorScreenPos();
+			ImVec2 itemMax = ImVec2(itemMin.x + m_ThumbnailSize, itemMin.y + m_ThumbnailSize + 40);
+			bool isHovered = ImGui::IsMouseHoveringRect(itemMin, itemMax);
+			if (isHovered) {
+				drawList->AddRectFilled(itemMin, itemMax,
+					IM_COL32(50, 50, 50, 100), 4.0f);
+			}
+
+			RenderFileItem(fileName, path);
+
+			// File name with text wrapping
+			ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + m_ThumbnailSize);
+			ImGui::TextWrapped("%s", fileName.c_str());
+			ImGui::PopTextWrapPos();
+			ImGui::EndGroup();
+
+			// Handle clicking
+			if (ImGui::IsItemClicked()) {
 				OnFileSelected(path);
 			}
 
