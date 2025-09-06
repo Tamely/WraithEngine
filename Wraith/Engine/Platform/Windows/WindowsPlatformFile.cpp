@@ -1,4 +1,5 @@
 #include "wpch.h"
+#ifdef W_PLATFORM_WINDOWS
 #include "GenericPlatform/GenericPlatformFile.h"
 #include "GenericPlatform/GenericPlatformMemory.h"
 
@@ -50,3 +51,4 @@ namespace Wraith {
 		return std::string();
 	}
 }
+#endif

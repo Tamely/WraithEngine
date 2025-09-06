@@ -5,9 +5,9 @@
 
 #include <glm/gtc/type_ptr.hpp>
 
-#include "CoreObject/ComponentMacros.h"
-#include "CoreObject/Components/TagComponent.h"
-#include "PayloadDefinitions.h"
+#include <CoreObject/ComponentMacros.h>
+#include <CoreObject/Components/TagComponent.h>
+#include <PayloadDefinitions.h>
 
 #include <filesystem>
 
@@ -38,7 +38,7 @@ namespace Wraith {
 		// Right-click on blank space
 		if (ImGui::BeginPopupContextWindow(0, 1, false)) {
 			if (ImGui::MenuItem("Create Empty Entity")) {
-				m_Context->CreateEntity("Empty Entity");
+				m_Context->CreateEntity(Guid::NewGuid(), "Empty Entity");
 			}
 
 			ImGui::EndPopup();

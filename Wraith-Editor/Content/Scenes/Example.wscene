@@ -1,6 +1,6 @@
 Scene: Untitled
 Entities:
-  - Entity: 854912389521
+  - Entity: [2332879739, 1101617774, 1080464049, 2124208019]
     TagComponent:
       Tag: Green Square
     TransformComponent:
@@ -9,7 +9,7 @@ Entities:
       Scale: [1, 1, 1]
     SpriteRendererComponent:
       Color: [0, 1, 0, 1]
-  - Entity: 854912389521
+  - Entity: [3015553507, 1308896056, 1564120729, 3362654438]
     TagComponent:
       Tag: Red Square
     TransformComponent:
@@ -18,7 +18,7 @@ Entities:
       Scale: [1, 1, 1]
     SpriteRendererComponent:
       Color: [1, 0, 0, 1]
-  - Entity: 854912389521
+  - Entity: [2492284899, 1262638531, 397924498, 2334046940]
     TagComponent:
       Tag: Perspective Camera
     TransformComponent:
@@ -36,7 +36,7 @@ Entities:
         OrthographicFar: 1
       Primary: true
       FixedAspectRatio: false
-  - Entity: 854912389521
+  - Entity: [4265374698, 3936087985, 55068725, 3965505011]
     TagComponent:
       Tag: Orthographic Camera
     TransformComponent:

@@ -17,6 +17,11 @@ namespace YAML {
 		return out;
 	}
 
+	Emitter& operator<<(Emitter& out, const Wraith::Guid& v) {
+		out << Flow << BeginSeq << v.A << v.B << v.C << v.D << EndSeq;
+		return out;
+	}
+
 	Emitter& operator<<(Emitter& out, const Wraith::SceneCamera& camera) {
 		out << BeginMap;
 		out << Key << "ProjectionType" << Value << (int)camera.GetProjectionType();

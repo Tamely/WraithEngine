@@ -4,6 +4,7 @@
 
 #include "CoreObject/Entity.h"
 #include "CoreObject/ComponentMacros.h"
+#include "Components/IDComponent.h"
 #include "Components/TagComponent.h"
 #include "Components/TransformComponent.h"
 #include "Components/SpriteRendererComponent.h"
@@ -23,12 +24,22 @@ namespace Wraith {
 		// PhysicsWorld2D will be automatically destroyed via unique_ptr
 	}
 
-	Entity Scene::CreateEntity(const std::string& name) {
+	Entity Scene::CreateEntity(Guid& guid, const std::string& name) {
 		Entity entity = { m_Registry.create(), this };
 
 		// Add essential components using the registry system
+		auto* idInfo = ComponentRegistry::GetComponentInfo("IDComponent");
 		auto* transformInfo = ComponentRegistry::GetComponentInfo("TransformComponent");
 		auto* tagInfo = ComponentRegistry::GetComponentInfo("TagComponent");
+
+		if (idInfo) {
+			idInfo->addComponent(entity);
+
+			if (entity.HasComponent<IDComponent>()) {
+				auto& id = entity.GetComponent<IDComponent>();
+				id.ID = guid.IsValid() ? guid : Guid::NewGuid();
+			}
+		}
 
 		if (transformInfo) {
 			transformInfo->addComponent(entity);

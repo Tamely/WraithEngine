@@ -2,7 +2,6 @@
 #include "ComponentMacros.h"
 #include "CoreObject/ScriptableEntity.h"
 
-
 namespace Wraith {
 	struct NativeScriptComponent {
 		GENERATED_COMPONENT_BODY(NativeScriptComponent);

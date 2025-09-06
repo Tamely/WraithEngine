@@ -3,7 +3,9 @@
 #include "Scene/SceneSerializer.h"
 #include "CoreObject/Entity.h"
 #include "ComponentMacros.h"
+#include "Components/IDComponent.h"
 #include "Components/TransformComponent.h"
+#include "YAMLOperators.h"
 
 #include <fstream>
 #include <yaml-cpp/yaml.h>
@@ -13,10 +15,14 @@ namespace Wraith {
 	SceneSerializer::SceneSerializer(const Ref<Scene>& scene) : m_Scene(scene) {}
 
 	static void SerializeEntity(YAML::Emitter& out, Entity entity) {
+		W_CORE_ASSERT(entity.HasComponent<IDComponent>());
+
 		out << YAML::BeginMap; // Entity
-		out << YAML::Key << "Entity" << YAML::Value << "854912389521"; // TODO: Entity ID goes here
+		entity.GetComponent<IDComponent>().Serialize(out);
 
 		for (const auto& [name, info] : ComponentRegistry::GetComponents()) {
+			if (name == "IDComponent") continue; // We serialize this as Entity, not a component
+
 			info.serialize(entity, out);
 		}
 
@@ -34,7 +40,7 @@ namespace Wraith {
 			if (!entity) return;
 
 			SerializeEntity(out, entity);
-			});
+		});
 
 		out << YAML::EndSeq; // Entities
 		out << YAML::EndMap; // Scene
@@ -62,15 +68,15 @@ namespace Wraith {
 		auto entities = data["Entities"];
 		if (entities) {
 			for (auto entity : entities) {
-				uint64_t uuid = entity["Entity"].as<uint64_t>();
+				Guid guid = entity["Entity"].as<Guid>();
 
 				std::string name;
 				auto tagComponent = entity["TagComponent"];
 				if (tagComponent) name = tagComponent["Tag"].as<std::string>();
 
-				W_CORE_TRACE("Deserialized entity with ID = {0}, name = {1}", uuid, name);
+				W_CORE_TRACE("Deserialized entity with ID = {0}, name = {1}", guid.ToString(), name);
 
-				Entity deserializedEntity = m_Scene->CreateEntity(name);
+				Entity deserializedEntity = m_Scene->CreateEntity(guid, name);
 
 				auto transformComponent = entity["TransformComponent"];
 				if (transformComponent) {

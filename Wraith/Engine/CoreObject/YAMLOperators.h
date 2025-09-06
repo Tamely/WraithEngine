@@ -1,6 +1,8 @@
 #pragma once
 #include <yaml-cpp/yaml.h>
 #include <glm/glm.hpp>
+
+#include "Misc/Guid.h"
 #include "Scene/SceneCamera.h"
 
 // YAML conversion templates for GLM types - these need to be in YAML namespace
@@ -63,6 +65,27 @@ namespace YAML {
 	};
 
 	template<>
+	struct convert<Wraith::Guid> {
+		static Node encode(const Wraith::Guid& rhs) {
+			Node node;
+			node.push_back(rhs.A);
+			node.push_back(rhs.B);
+			node.push_back(rhs.C);
+			node.push_back(rhs.D);
+			return node;
+		}
+
+		static bool decode(const Node& node, Wraith::Guid& rhs) {
+			if (!node.IsSequence() || node.size() != 4) return false;
+			rhs.A = node[0].as<uint32_t>();
+			rhs.B = node[1].as<uint32_t>();
+			rhs.C = node[2].as<uint32_t>();
+			rhs.D = node[3].as<uint32_t>();
+			return true;
+		}
+	};
+
+	template<>
 	struct convert<Wraith::SceneCamera> {
 		static Node encode(const Wraith::SceneCamera& rhs) {
 			Node node;
@@ -92,5 +115,6 @@ namespace YAML {
 	Emitter& operator<<(Emitter& out, const glm::vec2& v);
 	Emitter& operator<<(Emitter& out, const glm::vec3& v);
 	Emitter& operator<<(Emitter& out, const glm::vec4& v);
+	Emitter& operator<<(Emitter& out, const Wraith::Guid& guid);
 	Emitter& operator<<(Emitter& out, const Wraith::SceneCamera& camera);
 }
