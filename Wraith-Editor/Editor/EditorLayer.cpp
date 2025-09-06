@@ -13,6 +13,8 @@
 #include <ImGui-Premake/imgui.h>
 #include <ImGuizmo/ImGuizmo.h>
 
+#include "Panels/PayloadDefinitions.h"
+
 namespace Wraith {
 	extern const std::filesystem::path g_ContentDirectory;
 

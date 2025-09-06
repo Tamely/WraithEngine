@@ -40,20 +40,13 @@ namespace Wraith {
 
 	struct SpriteRendererComponent {
 		glm::vec4 Color{ 1.0f, 1.0f, 1.0f, 1.0f };
+		Ref<Texture2D> Texture;
+		float TilingFactor = 1.0f;
 
 		SpriteRendererComponent() = default;
 		SpriteRendererComponent(const SpriteRendererComponent&) = default;
 		SpriteRendererComponent(const glm::vec4& Color)
 			: Color(Color) {}
-	};
-
-	struct TextureComponent {
-		Ref<Texture2D> Texture;
-
-		TextureComponent() = default;
-		TextureComponent(const TextureComponent&) = default;
-		TextureComponent(Ref<Texture2D> texture)
-			: Texture(texture) {}
 	};
 
 	struct CameraComponent {

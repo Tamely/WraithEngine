@@ -6,8 +6,13 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "CoreObject/Components.h"
+#include "PayloadDefinitions.h"
+
+#include <filesystem>
 
 namespace Wraith {
+	extern const std::filesystem::path g_ContentDirectory;
+
 	SceneHierarchyPanel::SceneHierarchyPanel(const Ref<Scene>& context) {
 		SetContext(context);
 	}
@@ -280,6 +285,20 @@ namespace Wraith {
 
 		DrawComponent<SpriteRendererComponent>("Sprite Renderer", entity, [](auto& component) {
 			ImGui::ColorEdit4("Sprite Color", glm::value_ptr(component.Color));
+
+			ImGui::Button("Texture", ImVec2(100.0f, 0.0f));
+			if (ImGui::BeginDragDropTarget()) {
+				if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(IMGUI_PAYLOAD_TYPE_TEXTURE)) {
+					const wchar_t* path = (const wchar_t*)payload->Data;
+					std::filesystem::path texturePath = g_ContentDirectory / path;
+					component.Texture = Texture2D::Create(texturePath.string(), true);
+				}
+
+				ImGui::EndDragDropTarget();
+			}
+
+			// Texture
+			ImGui::DragFloat("Tiling Factor", &component.TilingFactor, 0.1f, 0.0f, 100.0f);
 		});
 	}
 }
