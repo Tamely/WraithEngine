@@ -5,9 +5,6 @@
 
 #include <ImGui-Premake/imgui.h>
 
-#define IMGUI_PAYLOAD_TYPE_SCENE	"WRAITH_CONTENT_SCENE"
-#define IMGUI_PAYLOAD_TYPE_UNKNOWN	"UNKNOWN"
-
 namespace Wraith {
 	enum FileType {
 		TEXTURE = 0,

@@ -3,6 +3,8 @@
 
 #include "Editor/TextureLoader.h"
 
+#include "PayloadDefinitions.h"
+
 namespace Wraith {
 	// Once we have projects, change this
 	extern const std::filesystem::path g_ContentDirectory = "Content";
@@ -372,8 +374,9 @@ namespace Wraith {
 
 	const char* ContentBrowserPanel::GetImGuiTypeText(FileType type) {
 		switch (type) {
-		case FileType::SCENE:    return IMGUI_PAYLOAD_TYPE_SCENE;
-		default:                 return IMGUI_PAYLOAD_TYPE_UNKNOWN;
+		case FileType::SCENE:		return IMGUI_PAYLOAD_TYPE_SCENE;
+		case FileType::TEXTURE:		return IMGUI_PAYLOAD_TYPE_TEXTURE;
+		default:					return IMGUI_PAYLOAD_TYPE_UNKNOWN;
 		}
 	}
 

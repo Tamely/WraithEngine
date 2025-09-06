@@ -136,8 +136,5 @@ namespace Wraith {
 	void Scene::OnComponentAdded<TagComponent>(Entity entity, TagComponent& component) {}
 
 	template<>
-	void Scene::OnComponentAdded<TextureComponent>(Entity entity, TextureComponent& component) {}
-
-	template<>
 	void Scene::OnComponentAdded<NativeScriptComponent>(Entity entity, NativeScriptComponent& component) {}
 }
