@@ -286,6 +286,7 @@ namespace Wraith {
 		DrawComponent<SpriteRendererComponent>("Sprite Renderer", entity, [](auto& component) {
 			ImGui::ColorEdit4("Sprite Color", glm::value_ptr(component.Color));
 
+			// This is skunky, but it lets you drag and drop a texture in
 			ImGui::Button("Texture", ImVec2(100.0f, 0.0f));
 			if (ImGui::BeginDragDropTarget()) {
 				if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(IMGUI_PAYLOAD_TYPE_TEXTURE)) {
@@ -297,7 +298,6 @@ namespace Wraith {
 				ImGui::EndDragDropTarget();
 			}
 
-			// Texture
 			ImGui::DragFloat("Tiling Factor", &component.TilingFactor, 0.1f, 0.0f, 100.0f);
 		});
 	}

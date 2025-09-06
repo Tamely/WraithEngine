@@ -26,6 +26,12 @@ namespace Wraith {
 		void OpenScene();
 		void OpenScene(const std::filesystem::path& filePath);
 		void SaveSceneAs();
+
+		void OnScenePlay();
+		void OnSceneStop();
+
+		// UI panels
+		void UI_Toolbar();
 	private:
 		OrthographicCameraController m_CameraController;
 
@@ -48,5 +54,14 @@ namespace Wraith {
 		// Panels
 		SceneHierarchyPanel m_SceneHierarchyPanel;
 		ContentBrowserPanel m_ContentBrowserPanel;
+
+		enum SceneState_ {
+			SceneState_Edit = 0,
+			SceneState_Play,
+			SceneState_Count
+		};
+
+		static ImTextureID s_StateIcons[];
+		SceneState_ m_SceneState = SceneState_Edit;
 	};
 }

@@ -17,6 +17,7 @@
 
 namespace Wraith {
 	extern const std::filesystem::path g_ContentDirectory;
+	ImTextureID EditorLayer::s_StateIcons[SceneState_Count] = { nullptr };
 
 	EditorLayer::EditorLayer()
 		: Layer("Wraith-Editor"), m_CameraController(16.0f / 9.0f) {
@@ -24,6 +25,9 @@ namespace Wraith {
 
 	void EditorLayer::OnAttach() {
 		W_PROFILE_FUNCTION();
+
+		s_StateIcons[SceneState_Edit] = TextureLoader::Instance().LoadTexture("Content/Textures/Icons/PlayButton.png");
+		s_StateIcons[SceneState_Play] = TextureLoader::Instance().LoadTexture("Content/Textures/Icons/StopButton.png");
 
 		FramebufferSpecification framebufferSpecification;
 		framebufferSpecification.Attachments = { FramebufferTextureFormat::RGBA8, FramebufferTextureFormat::RED_INTEGER, FramebufferTextureFormat::Depth };
@@ -71,12 +75,6 @@ namespace Wraith {
 			m_ActiveScene->OnViewportResize((uint32_t)m_ViewportSize.x, (uint32_t)m_ViewportSize.y);
 		}
 
-		// Update cameras only when focused
-		if (m_ViewportFocused) {
-			m_CameraController.OnUpdate(ts);
-			m_EditorCamera.OnUpdate(ts);
-		}
-
 		// Render
 		Renderer2D::ResetStats();
 		m_Framebuffer->Bind();
@@ -86,8 +84,23 @@ namespace Wraith {
 		// Clear entity ID attachment to INDEX_NONE
 		m_Framebuffer->ClearColorAttachment(1, INDEX_NONE);
 
-		// Update Scene
-		m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);
+		// TODO: Make an actual scene renderer instead of this jank switch statement
+		switch (m_SceneState) {
+			case SceneState_Edit: {
+				// Update cameras only when focused
+				if (m_ViewportFocused) {
+					m_CameraController.OnUpdate(ts);
+					m_EditorCamera.OnUpdate(ts);
+				}
+
+				m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);
+				break;
+			}
+			case SceneState_Play: {
+				m_ActiveScene->OnUpdateRuntime(ts);
+				break;
+			}
+		}
 
 		// Mouse picking (only when hovered and inside bounds)
 		auto spec = m_Framebuffer->GetSpecification();
@@ -284,6 +297,11 @@ namespace Wraith {
 			ImGui::PopStyleVar();
 		}
 
+		// Toolbar
+		{
+			UI_Toolbar();
+		}
+
 		ImGui::End();
 	}
 
@@ -354,5 +372,44 @@ namespace Wraith {
 			SceneSerializer serializer(m_ActiveScene);
 			serializer.Serialize(filePath);
 		}
+	}
+
+	void EditorLayer::OnScenePlay() {
+		m_SceneState = SceneState_Play;
+	}
+
+	void EditorLayer::OnSceneStop() {
+		m_SceneState = SceneState_Edit;
+	}
+
+	void EditorLayer::UI_Toolbar() {
+		auto& colors = ImGui::GetStyle().Colors;
+		const auto& buttonHovered = colors[ImGuiCol_ButtonHovered];
+		const auto& buttonActive = colors[ImGuiCol_ButtonActive];
+
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 2));
+		ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing, ImVec2(0, 0));
+
+		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(buttonHovered.x, buttonHovered.y, buttonHovered.z, 0.5f));
+		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(buttonActive.x, buttonActive.y, buttonActive.z, 0.5f));
+
+		ImGui::Begin("##toolbar", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+
+		float size = ImGui::GetWindowHeight() - 6;
+		ImGui::SetCursorPosX((ImGui::GetWindowContentRegionMax().x * 0.5f) - (size * 0.5f));
+		if (ImGui::ImageButton(s_StateIcons[m_SceneState], ImVec2(size, size), ImVec2(0,0), ImVec2(1,1), 0)) {
+			if (m_SceneState == SceneState_Edit) {
+				OnScenePlay();
+			}
+			else if (m_SceneState == SceneState_Play) {
+				OnSceneStop();
+			}
+		}
+
+		ImGui::PopStyleVar(2);
+		ImGui::PopStyleColor(3);
+
+		ImGui::End();
 	}
 }
