@@ -87,6 +87,27 @@
 	#define W_CORE_ASSERT(x)
 #endif
 
+#define W_VERIFY(x, ...) \
+	do { \
+		if (!(x)) { \
+			W_ERROR("Verification failed: {0}", __VA_ARGS__); \
+			W_DEBUGBREAK(); \
+			throw std::runtime_error("Verification failed"); \
+		} \
+	} while(0)
+
+#define W_CORE_VERIFY(x, ...) \
+	do { \
+		if (!(x)) { \
+			W_CORE_ERROR("Core verification failed: {0}", __VA_ARGS__); \
+			W_DEBUGBREAK(); \
+			throw std::runtime_error("Core verification failed"); \
+		} \
+	} while(0)
+
+#define W_VERIFY_SIMPLE(x) W_VERIFY(x, "No message provided")
+#define W_CORE_VERIFY_SIMPLE(x) W_CORE_VERIFY(x, "No message provided")
+
 #define BIT(x) (1 << x)
 
 #define W_BIND_EVENT_FN(fn) [this](auto&&... args) -> decltype(auto) { return this->fn(std::forward<decltype(args)>(args)...); }

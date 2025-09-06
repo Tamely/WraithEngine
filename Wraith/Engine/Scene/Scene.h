@@ -1,4 +1,5 @@
 #pragma once
+#include "Misc/Guid.h"
 #include "Core/Timestep.h"
 #include "Editor/EditorCamera.h"
 
@@ -13,7 +14,7 @@ namespace Wraith {
 		Scene();
 		~Scene();
 
-		Entity CreateEntity(const std::string& name = std::string());
+		Entity CreateEntity(Guid& guid = Guid(), const std::string& name = std::string());
 		void DestroyEntity(Entity entity);
 
 		void OnRuntimeStart();
