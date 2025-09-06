@@ -13,7 +13,7 @@
 #include <ImGui-Premake/imgui.h>
 #include <ImGuizmo/ImGuizmo.h>
 
-#include "Panels/PayloadDefinitions.h"
+#include <PayloadDefinitions.h>
 
 namespace Wraith {
 	extern const std::filesystem::path g_ContentDirectory;
@@ -375,10 +375,12 @@ namespace Wraith {
 	}
 
 	void EditorLayer::OnScenePlay() {
+		m_ActiveScene->OnRuntimeStart();
 		m_SceneState = SceneState_Play;
 	}
 
 	void EditorLayer::OnSceneStop() {
+		m_ActiveScene->OnRuntimeStop();
 		m_SceneState = SceneState_Edit;
 	}
 

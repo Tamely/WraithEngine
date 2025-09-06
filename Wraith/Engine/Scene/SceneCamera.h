@@ -14,6 +14,7 @@ namespace Wraith {
 		void SetPerspective(float fov, float nearClip, float farClip);
 
 		void SetViewportSize(uint32_t width, uint32_t height);
+		glm::vec2 GetViewportSize() { return m_ViewportSize; }
 
 		float GetPerspectiveVerticalFOV() const { return m_PerspectiveFOV; }
 		void SetPerspectiveVerticalFOV(float fov) { m_PerspectiveFOV = fov; RecalculateProjection(); }
@@ -43,5 +44,7 @@ namespace Wraith {
 		float m_OrthographicNear = -1.0f, m_OrthographicFar = 1.0f;
 
 		float m_AspectRatio = 0.0f;
+
+		glm::vec2 m_ViewportSize = { 0.0f, 0.0f };
 	};
 }

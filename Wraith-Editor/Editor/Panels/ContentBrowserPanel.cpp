@@ -3,7 +3,7 @@
 
 #include "Editor/TextureLoader.h"
 
-#include "PayloadDefinitions.h"
+#include <PayloadDefinitions.h>
 
 namespace Wraith {
 	// Once we have projects, change this
@@ -381,6 +381,10 @@ namespace Wraith {
 	}
 
 	void ContentBrowserPanel::OnFileSelected(const std::filesystem::path& path) {
-		// TODO - handle file selection
+		switch (GetFileType(path)) {
+			case FileType::SCENE:
+			default:
+				break;
+		}
 	}
 }

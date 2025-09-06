@@ -9,6 +9,7 @@ IncludeDir["stb_image"] = "%{wks.location}/Wraith/ThirdParty/stb_image"
 IncludeDir["entt"] = "%{wks.location}/Wraith/ThirdParty/entt/include"
 IncludeDir["yaml"] = "%{wks.location}/Wraith/ThirdParty/yaml-cpp/include"
 IncludeDir["ImGuizmo"] = "%{wks.location}/Wraith/ThirdParty/ImGuizmo"
+IncludeDir["Box2D"] = "%{wks.location}/Wraith/ThirdParty/Box2D/include"
 IncludeDir["VulkanSDK"] = "%{VULKAN_SDK}/Include"
 
 LibraryDir = {}

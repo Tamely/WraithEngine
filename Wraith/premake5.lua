@@ -40,12 +40,14 @@ project "Wraith"
 		"%{wks.location}/Wraith",
 		"Engine",
 		"Engine/Core",
+		"Engine/CoreObject",
 		"Engine/Platform",
 
 		"Tools",
 
 		"ThirdParty",
 		"ThirdParty/spdlog/include",
+		"%{IncludeDir.Box2D}",
 		"%{IncludeDir.GLFW}",
 		"%{IncludeDir.Glad}",
 		"%{IncludeDir.ImGui}",
@@ -59,6 +61,7 @@ project "Wraith"
 
 	links
 	{
+		"Box2D",
 		"GLFW",
 		"Glad",
 		"ImGui",

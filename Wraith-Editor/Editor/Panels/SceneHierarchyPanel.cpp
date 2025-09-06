@@ -5,7 +5,8 @@
 
 #include <glm/gtc/type_ptr.hpp>
 
-#include "CoreObject/Components.h"
+#include "CoreObject/ComponentMacros.h"
+#include "CoreObject/Components/TagComponent.h"
 #include "PayloadDefinitions.h"
 
 #include <filesystem>
@@ -26,20 +27,20 @@ namespace Wraith {
 		ImGui::Begin("Scene Hierarchy");
 
 		m_Context->m_Registry.each([&](auto entityID) {
-			Entity entity { entityID, m_Context.get() };
+			Entity entity{ entityID, m_Context.get() };
 			DrawEntityNode(entity);
-		});
+			});
 
 		if (ImGui::IsMouseDown(0) && ImGui::IsWindowHovered()) {
 			m_SelectionContext = {};
 		}
 
-		// Right-click on blank space (false) -> if we want to create child entities, copy this and make "false" set to "true"
+		// Right-click on blank space
 		if (ImGui::BeginPopupContextWindow(0, 1, false)) {
 			if (ImGui::MenuItem("Create Empty Entity")) {
 				m_Context->CreateEntity("Empty Entity");
 			}
-				
+
 			ImGui::EndPopup();
 		}
 
@@ -51,92 +52,29 @@ namespace Wraith {
 
 			if (ImGui::BeginPopupContextWindow(0, 1, false)) {
 				if (ImGui::BeginMenu("Add Component")) {
-					// TODO: Switch this to either a vector of components or upgrade to C++26 and do a reflection based solution
-					if (ImGui::MenuItem("Camera")) {
-						m_SelectionContext.AddComponent<CameraComponent>();
-						ImGui::CloseCurrentPopup();
-					}
+					// Use component registry for automatic component menu generation
+					for (const auto& [name, info] : ComponentRegistry::GetComponents()) {
+						// Skip components that are always present or shouldn't be manually added
+						if (name == "TagComponent" || name == "TransformComponent") {
+							continue;
+						}
 
-					if (ImGui::MenuItem("Sprite Renderer")) {
-						m_SelectionContext.AddComponent<SpriteRendererComponent>();
-						ImGui::CloseCurrentPopup();
+						if (!info.hasComponent(m_SelectionContext) && ImGui::MenuItem(info.displayName.c_str())) {
+							info.addComponent(m_SelectionContext);
+							ImGui::CloseCurrentPopup();
+						}
 					}
-
 					ImGui::EndMenu();
 				}
-
 				ImGui::EndPopup();
 			}
 		}
 		ImGui::End();
 	}
 
-	static void DrawVec3Control(const std::string& label, glm::vec3& values, float resetValue = 0.0f, float columnWidth = 100.0f) {
-		ImGuiIO& io = ImGui::GetIO();
-		ImFont* boldFont = io.Fonts->Fonts[0];
-
-		ImGui::PushID(label.c_str());
-
-		ImGui::Columns(2);
-
-		ImGui::SetColumnWidth(0, columnWidth);
-		ImGui::Text(label.c_str());
-		ImGui::NextColumn();
-
-		ImGui::PushMultiItemsWidths(3, ImGui::CalcItemWidth());
-		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2{ 0, 0 });
-
-		float lineHeight = GImGui->Font->FontSize + GImGui->Style.FramePadding.y * 2.0f;
-		ImVec2 buttonSize = { lineHeight + 3.0f, lineHeight };
-
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{ 0.8f, 0.1f, 0.15f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{ 0.9f, 0.2f, 0.2f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{ 0.8f, 0.1f, 0.15f, 1.0f });
-		ImGui::PushFont(boldFont);
-		if (ImGui::Button("X", buttonSize)) values.x = resetValue;
-		ImGui::PopFont();
-		ImGui::PopStyleColor(3);
-
-		ImGui::SameLine();
-		ImGui::DragFloat("##X", &values.x, 0.1f, 0.0f, 0.0f, "%.2f");
-		ImGui::PopItemWidth();
-		ImGui::SameLine();
-
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{ 0.2f, 0.7f, 0.2f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{ 0.3f, 0.8f, 0.3f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{ 0.2f, 0.7f, 0.2f, 1.0f });
-		ImGui::PushFont(boldFont);
-		if (ImGui::Button("Y", buttonSize)) values.y = resetValue;
-		ImGui::PopFont();
-		ImGui::PopStyleColor(3);
-
-		ImGui::SameLine();
-		ImGui::DragFloat("##Y", &values.y, 0.1f, 0.0f, 0.0f, "%.2f");
-		ImGui::PopItemWidth();
-		ImGui::SameLine();
-
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{ 0.1f, 0.25f, 0.8f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{ 0.2f, 0.35f, 0.9f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{ 0.1f, 0.25f, 0.8f, 1.0f });
-		ImGui::PushFont(boldFont);
-		if (ImGui::Button("Z", buttonSize)) values.z = resetValue;
-		ImGui::PopFont();
-		ImGui::PopStyleColor(3);
-
-		ImGui::SameLine();
-		ImGui::DragFloat("##Z", &values.z, 0.1f, 0.0f, 0.0f, "%.2f");
-		ImGui::PopItemWidth();
-
-		ImGui::PopStyleVar();
-
-		ImGui::Columns(1);
-
-		ImGui::PopID();
-	}
-
 	void SceneHierarchyPanel::DrawEntityNode(Entity entity) {
 		auto& tag = entity.GetComponent<TagComponent>().Tag;
-		
+
 		ImGuiTreeNodeFlags flags = ((m_SelectionContext == entity) ? ImGuiTreeNodeFlags_Selected : 0) | ImGuiTreeNodeFlags_OpenOnArrow;
 		flags |= ImGuiTreeNodeFlags_SpanAvailWidth;
 
@@ -161,49 +99,18 @@ namespace Wraith {
 		if (entityDeleted) {
 			m_Context->DestroyEntity(entity);
 			if (m_SelectionContext == entity) {
-				m_SelectionContext = {}; // Clear the context so DrawComponents and co doesn't crash
-			}
-		}
-	}
-
-	template<typename T, typename UIFunction>
-	static void DrawComponent(const std::string& label, Entity entity, UIFunction function) {
-		if (entity.HasComponent<T>()) {
-			auto& component = entity.GetComponent<T>();
-
-			ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2{ 4, 4 });
-			bool open = ImGui::TreeNodeEx((void*)typeid(T).hash_code(), 
-				ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowItemOverlap | ImGuiTreeNodeFlags_FramePadding,
-				label.c_str());
-
-			bool removeComponent = false;
-			if (ImGui::BeginPopupContextItem()) {
-				if (ImGui::MenuItem("Remove Component")) {
-					removeComponent = true;
-				}
-
-				ImGui::EndPopup();
-			}
-
-			ImGui::PopStyleVar();
-
-			if (open) {
-				function(component);
-				ImGui::TreePop();
-			}
-
-			if (removeComponent) {
-				entity.RemoveComponent<T>();
+				m_SelectionContext = {};
 			}
 		}
 	}
 
 	void SceneHierarchyPanel::DrawComponents(Entity entity) {
+		// Special handling for TagComponent (always show at top, no collapsing header)
 		if (entity.HasComponent<TagComponent>()) {
 			auto& tag = entity.GetComponent<TagComponent>().Tag;
 
 			char buffer[256];
-			memset(buffer, 0, sizeof(buffer)); // Null terminate the "string"
+			memset(buffer, 0, sizeof(buffer));
 			strcpy_s(buffer, sizeof(buffer), tag.c_str());
 
 			ImGui::SetNextItemWidth(-1.0f);
@@ -212,93 +119,41 @@ namespace Wraith {
 			}
 		}
 
-		DrawComponent<TransformComponent>("Transform", entity, [](auto& component) {
-			DrawVec3Control("Translation", component.Translation);
+		// Draw all other components using the registry
+		for (const auto& [name, info] : ComponentRegistry::GetComponents()) {
+			if (name == "TagComponent") continue;
 
-			auto& rotation = glm::degrees(component.Rotation);
-			DrawVec3Control("Rotation", rotation);
-			component.Rotation = glm::radians(rotation);
+			if (info.hasComponent(entity)) {
+				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2{ 4, 4 });
+				float lineHeight = GImGui->Font->FontSize + GImGui->Style.FramePadding.y * 2.0f;
+				ImGui::Separator();
 
-			DrawVec3Control("Scale", component.Scale, 1.0f);
-		});
+				bool open = ImGui::TreeNodeEx((void*)std::hash<std::string>{}(name),
+					ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_Framed |
+					ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowItemOverlap |
+					ImGuiTreeNodeFlags_FramePadding, info.displayName.c_str());
 
-		DrawComponent<CameraComponent>("Camera", entity, [](auto& component) {
-			auto& camera = component.Camera;
+				ImGui::PopStyleVar();
 
-			ImGui::Checkbox("Primary", &component.Primary);
-
-			const char* projectionTypeStrings[] = { "Perspective", "Orthographic" };
-			const char* currentProjectionTypeString = projectionTypeStrings[(int)camera.GetProjectionType()];
-
-			if (ImGui::BeginCombo("Projection", currentProjectionTypeString)) {
-				for (int i = 0; i < 2; i++) {
-					bool isSelected = currentProjectionTypeString == projectionTypeStrings[i];
-					if (ImGui::Selectable(projectionTypeStrings[i], isSelected)) {
-						currentProjectionTypeString = projectionTypeStrings[i];
-						camera.SetProjectionType((SceneCamera::ProjectionType)i);
+				bool removeComponent = false;
+				if (ImGui::BeginPopupContextItem()) {
+					if (name != "TagComponent" && name != "TransformComponent") {
+						if (ImGui::MenuItem("Remove Component"))
+							removeComponent = true;
 					}
 
-					if (isSelected) {
-						ImGui::SetItemDefaultFocus();
-					}
+					ImGui::EndPopup();
 				}
 
-				ImGui::EndCombo();
-			}
-
-			if (camera.GetProjectionType() == SceneCamera::ProjectionType::Perspective) {
-				float perspectiveFOV = glm::degrees(camera.GetPerspectiveVerticalFOV());
-				if (ImGui::DragFloat("FOV", &perspectiveFOV)) {
-					camera.SetPerspectiveVerticalFOV(glm::radians(perspectiveFOV));
+				if (open) {
+					info.drawImGui(entity);
+					ImGui::TreePop();
 				}
 
-				float perspectiveNearClip = camera.GetPerspectiveNearClip();
-				if (ImGui::DragFloat("Near Clip", &perspectiveNearClip)) {
-					camera.SetPerspectiveNearClip(perspectiveNearClip);
-				}
-
-				float perspectiveFarClip = camera.GetPerspectiveFarClip();
-				if (ImGui::DragFloat("Far Clip", &perspectiveFarClip)) {
-					camera.SetPerspectiveFarClip(perspectiveFarClip);
+				if (removeComponent) {
+					info.removeComponent(entity);
 				}
 			}
-
-			if (camera.GetProjectionType() == SceneCamera::ProjectionType::Orthographic) {
-				float orthoSize = camera.GetOrthographicSize();
-				if (ImGui::DragFloat("Size", &orthoSize)) {
-					camera.SetOrthographicSize(orthoSize);
-				}
-
-				float orthoNearClip = camera.GetOrthographicNearClip();
-				if (ImGui::DragFloat("Near Clip", &orthoNearClip)) {
-					camera.SetOrthographicNearClip(orthoNearClip);
-				}
-
-				float orthoFarClip = camera.GetOrthographicFarClip();
-				if (ImGui::DragFloat("Far Clip", &orthoFarClip)) {
-					camera.SetOrthographicFarClip(orthoFarClip);
-				}
-
-				ImGui::Checkbox("Fixed Aspect Ratio", &component.FixedAspectRatio);
-			}
-		});
-
-		DrawComponent<SpriteRendererComponent>("Sprite Renderer", entity, [](auto& component) {
-			ImGui::ColorEdit4("Sprite Color", glm::value_ptr(component.Color));
-
-			// This is skunky, but it lets you drag and drop a texture in
-			ImGui::Button("Texture", ImVec2(100.0f, 0.0f));
-			if (ImGui::BeginDragDropTarget()) {
-				if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(IMGUI_PAYLOAD_TYPE_TEXTURE)) {
-					const wchar_t* path = (const wchar_t*)payload->Data;
-					std::filesystem::path texturePath = g_ContentDirectory / path;
-					component.Texture = Texture2D::Create(texturePath.string(), true);
-				}
-
-				ImGui::EndDragDropTarget();
-			}
-
-			ImGui::DragFloat("Tiling Factor", &component.TilingFactor, 0.1f, 0.0f, 100.0f);
-		});
+		}
 	}
 }

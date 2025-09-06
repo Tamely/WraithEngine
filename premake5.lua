@@ -26,6 +26,7 @@ outputdir = "%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}"
 
 group "Dependencies"
 	include "ThirdParty/premake"
+	include "Wraith/ThirdParty/Box2D"
 	include "Wraith/ThirdParty/GLFW-Premake"
 	include "Wraith/ThirdParty/Glad"
 	include "Wraith/ThirdParty/ImGui-Premake"

@@ -26,6 +26,7 @@ namespace Wraith {
 
 	void SceneCamera::SetViewportSize(uint32_t width, uint32_t height) {
 		W_CORE_ASSERT(width > 0 && height > 0);
+		m_ViewportSize = glm::vec2{ width, height };
 		m_AspectRatio = (float)width / (float)height;
 		RecalculateProjection();
 	}
