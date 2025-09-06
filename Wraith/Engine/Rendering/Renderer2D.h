@@ -6,7 +6,7 @@
 #include "Rendering/Texture.h"
 #include "Rendering/SubTexture2D.h"
 
-#include "CoreObject/Components.h"
+#include "Components/SpriteRendererComponent.h"
 
 #include "Editor/EditorCamera.h"
 

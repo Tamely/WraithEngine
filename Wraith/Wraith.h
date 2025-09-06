@@ -18,7 +18,14 @@
 #include "Scene/Scene.h"
 #include "CoreObject/Entity.h"
 #include "CoreObject/ScriptableEntity.h"
-#include "CoreObject/Components.h"
+#include "CoreObject/ComponentMacros.h"
+#include "CoreObject/Components/BoxCollider2DComponent.h"
+#include "CoreObject/Components/CameraComponent.h"
+#include "CoreObject/Components/NativeScriptComponent.h"
+#include "CoreObject/Components/RigidBody2DComponent.h"
+#include "CoreObject/Components/SpriteRendererComponent.h"
+#include "CoreObject/Components/TagComponent.h"
+#include "CoreObject/Components/TransformComponent.h"
 
 // --- Renderer -----
 #include "Rendering/Renderer.h"

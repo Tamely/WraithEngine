@@ -19,6 +19,7 @@ project "Wraith-Editor"
 		"%{wks.location}/Wraith",
 		"%{wks.location}/Wraith/Engine",
 		"%{wks.location}/Wraith/Engine/Core",
+		"%{wks.location}/Wraith/Engine/CoreObject",
 		"%{wks.location}/Wraith/Engine/Platform",
 		"%{wks.location}/Wraith/ThirdParty",
 		"%{wks.location}/Wraith/ThirdParty/spdlog/include",
@@ -26,6 +27,7 @@ project "Wraith-Editor"
 
 		"%{IncludeDir.glm}",
 		"%{IncludeDir.entt}",
+		"%{IncludeDir.yaml}",
 		"%{IncludeDir.ImGuizmo}"
 	}
 	
