@@ -7,7 +7,7 @@
 #include "Components/IDComponent.h"
 #include "Components/TagComponent.h"
 #include "Components/TransformComponent.h"
-#include "Components/SpriteRendererComponent.h"
+#include "Components/Shape2DComponent.h"
 #include "Components/CameraComponent.h"
 #include "Components/NativeScriptComponent.h"
 #include "Components/RigidBody2DComponent.h"
@@ -114,10 +114,10 @@ namespace Wraith {
 	void Scene::OnUpdateEditor(Timestep ts, EditorCamera& camera) {
 		Renderer2D::BeginScene(camera);
 
-		auto group = m_Registry.group<TransformComponent>(entt::get<SpriteRendererComponent>);
+		auto group = m_Registry.group<TransformComponent>(entt::get<Shape2DComponent>);
 		for (auto entity : group) {
-			auto [transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
-			Renderer2D::DrawSprite(transform.GetTransform(), sprite, (int)entity);
+			auto [transform, sprite] = group.get<TransformComponent, Shape2DComponent>(entity);
+			Renderer2D::DrawShape(transform.GetTransform(), sprite, (int)entity);
 		}
 
 		Renderer2D::EndScene();
@@ -223,10 +223,10 @@ namespace Wraith {
 	void Scene::RenderSceneWithCamera(Camera& camera, const glm::mat4& transform) {
 		Renderer2D::BeginScene(camera, transform);
 
-		auto group = m_Registry.group<TransformComponent>(entt::get<SpriteRendererComponent>);
+		auto group = m_Registry.group<TransformComponent>(entt::get<Shape2DComponent>);
 		for (auto entity : group) {
-			auto [transformComp, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
-			Renderer2D::DrawSprite(transformComp.GetTransform(), sprite, (int)entity);
+			auto [transformComp, sprite] = group.get<TransformComponent, Shape2DComponent>(entity);
+			Renderer2D::DrawShape(transformComp.GetTransform(), sprite, (int)entity);
 		}
 
 		Renderer2D::EndScene();

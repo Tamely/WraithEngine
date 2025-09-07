@@ -7,7 +7,8 @@ Entities:
       Translation: [0, 0, 0]
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
-    SpriteRendererComponent:
+    Shape2DComponent:
+      Type: Quad
       Color: [0, 1, 0, 1]
   - Entity: [3015553507, 1308896056, 1564120729, 3362654438]
     TagComponent:
@@ -16,7 +17,8 @@ Entities:
       Translation: [1.79999995, 0, 0]
       Rotation: [2.24274802, 0.664970398, 0.715584993]
       Scale: [1, 1, 1]
-    SpriteRendererComponent:
+    Shape2DComponent:
+      Type: Quad
       Color: [1, 0, 0, 1]
   - Entity: [2492284899, 1262638531, 397924498, 2334046940]
     TagComponent:

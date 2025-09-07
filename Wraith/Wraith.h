@@ -23,9 +23,10 @@
 #include "CoreObject/Components/CameraComponent.h"
 #include "CoreObject/Components/NativeScriptComponent.h"
 #include "CoreObject/Components/RigidBody2DComponent.h"
-#include "CoreObject/Components/SpriteRendererComponent.h"
+#include "CoreObject/Components/Shape2DComponent.h"
 #include "CoreObject/Components/TagComponent.h"
 #include "CoreObject/Components/TransformComponent.h"
+#include "CoreObject/Components/IDComponent.h"
 
 // --- Renderer -----
 #include "Rendering/Renderer.h"

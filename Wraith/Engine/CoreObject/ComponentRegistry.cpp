@@ -8,7 +8,7 @@
 #include "Components/NativeScriptComponent.h"
 #include "Components/TransformComponent.h"
 #include "Components/CameraComponent.h"
-#include "Components/SpriteRendererComponent.h"
+#include "Components/Shape2DComponent.h"
 #include "Components/RigidBody2DComponent.h"
 #include "Components/BoxCollider2DComponent.h"
 
