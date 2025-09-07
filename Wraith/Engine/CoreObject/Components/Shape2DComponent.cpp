@@ -3,7 +3,8 @@
 #include "CoreObject/YAMLOperators.h"
 #include "PayloadDefinitions.h"
 
-#include <imgui.h>
+#include "UI/UIRenderCommand.h"
+#include "UI/UIDragDropPayload.h"
 
 #include <filesystem>
 
@@ -54,40 +55,39 @@ namespace Wraith {
 		const char* shapeTypeStrings[] = { "Quad", "Circle" };
 		const char* currentShapeTypeString = shapeTypeStrings[(int)Type];
 
-		if (ImGui::BeginCombo("Shape Type", currentShapeTypeString)) {
+		if (UIRenderCommand::BeginCombo("Shape Type", currentShapeTypeString)) {
 			for (int i = 0; i < 2; i++) {
 				bool isSelected = currentShapeTypeString == shapeTypeStrings[i];
-				if (ImGui::Selectable(shapeTypeStrings[i], isSelected)) {
+				if (UIRenderCommand::Selectable(shapeTypeStrings[i], isSelected)) {
 					currentShapeTypeString = shapeTypeStrings[i];
 					Type = (ShapeType)i;
 				}
 
-				if (isSelected)
-					ImGui::SetItemDefaultFocus();
+				if (isSelected) UIRenderCommand::SetItemDefaultFocus();
 			}
-			ImGui::EndCombo();
+			UIRenderCommand::EndCombo();
 		}
 
 		switch (Type) {
 			case ShapeType::Quad: {
-				ImGui::ColorEdit4("Color", &RectDetails.Color.x);
-				ImGui::DragFloat("Tiling Factor", &RectDetails.TilingFactor, 0.1f, 0.0f, 0.0f, "%.1f");
+				UIRenderCommand::ColorEdit4("Color", &RectDetails.Color.x);
+				UIRenderCommand::DragFloat("Tiling Factor", &RectDetails.TilingFactor, 0.1f, 0.0f, 0.0f, "%.1f");
 
-				ImGui::Button("Texture", ImVec2(100.0f, 0.0f));
-				if (ImGui::BeginDragDropTarget()) {
-					if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(IMGUI_PAYLOAD_TYPE_TEXTURE)) {
+				UIRenderCommand::Button("Texture", glm::vec2{ 100.0f, 0.0f });
+				if (UIRenderCommand::BeginDragDropTarget()) {
+					if (const UIDragDropPayload* payload = UIRenderCommand::AcceptDragDropPayload(IMGUI_PAYLOAD_TYPE_TEXTURE)) {
 						const wchar_t* path = (const wchar_t*)payload->Data;
 						std::filesystem::path texturePath = g_ContentDirectory / path;
 						RectDetails.Texture = Texture2D::Create(texturePath.string(), true);
 					}
-					ImGui::EndDragDropTarget();
+					UIRenderCommand::EndDragDropTarget();
 				}
 				break;
 			}
 			case ShapeType::Circle: {
-				ImGui::ColorEdit4("Color", &CircleDetails.Color.x);
-				ImGui::DragFloat("Thickness", &CircleDetails.Thickness, 0.01f, 0.0f, 1.0f, "%.2f");
-				ImGui::DragFloat("Fade", &CircleDetails.Fade, 0.01f, 0.0f, 10.0f, "%.2f");
+				UIRenderCommand::ColorEdit4("Color", &CircleDetails.Color.x);
+				UIRenderCommand::DragFloat("Thickness", &CircleDetails.Thickness, 0.01f, 0.0f, 1.0f, "%.2f");
+				UIRenderCommand::DragFloat("Fade", &CircleDetails.Fade, 0.01f, 0.0f, 10.0f, "%.2f");
 				break;
 			}
 		}
