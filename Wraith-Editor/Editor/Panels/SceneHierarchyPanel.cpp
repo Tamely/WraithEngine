@@ -55,9 +55,7 @@ namespace Wraith {
 					// Use component registry for automatic component menu generation
 					for (const auto& [name, info] : ComponentRegistry::GetComponents()) {
 						// Skip components that are always present or shouldn't be manually added
-						if (name == "TagComponent" || name == "TransformComponent") {
-							continue;
-						}
+						if (name == "TagComponent" || name == "TransformComponent") continue;
 
 						if (!info.hasComponent(m_SelectionContext) && ImGui::MenuItem(info.displayName.c_str())) {
 							info.addComponent(m_SelectionContext);

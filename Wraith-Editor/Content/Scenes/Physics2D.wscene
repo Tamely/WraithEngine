@@ -1,5 +1,43 @@
 Scene: Untitled
 Entities:
+  - Entity: [2492284899, 1262638531, 397924498, 2334046940]
+    CameraComponent:
+      SceneCamera:
+        ProjectionType: 0
+        PerspectiveFOV: 0.785398185
+        PerspectiveNear: 0.00999999978
+        PerspectiveFar: 1000
+        OrthographicSize: 10
+        OrthographicNear: -1
+        OrthographicFar: 1
+      Primary: true
+      FixedAspectRatio: false
+    TransformComponent:
+      Translation: [0, 0, 9.97000027]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    TagComponent:
+      Tag: Camera
+  - Entity: [3015553507, 1308896056, 1564120729, 3362654438]
+    BoxCollider2DComponent:
+      Offset: [0, 0]
+      Size: [0.5, 0.5]
+      Density: 1
+      Friction: 0
+      Restitution: 1
+      RestitutionThreshold: 0.5
+    RigidBody2DComponent:
+      Type: Dynamic
+      FixedRotation: false
+    TransformComponent:
+      Translation: [-0.00176218152, 1.84646881, 0]
+      Rotation: [0, 0, 3.92327934e-07]
+      Scale: [1, 1, 1]
+    TagComponent:
+      Tag: Square
+    SpriteRendererComponent:
+      Color: [1, 1, 1, 1]
+      TilingFactor: 1
   - Entity: [2332879739, 1101617774, 1080464049, 2124208019]
     BoxCollider2DComponent:
       Offset: [0, 0]
@@ -20,41 +58,3 @@ Entities:
     SpriteRendererComponent:
       Color: [1, 1, 1, 1]
       TilingFactor: 1
-  - Entity: [3015553507, 1308896056, 1564120729, 3362654438]
-    BoxCollider2DComponent:
-      Offset: [0, 0]
-      Size: [0.5, 0.5]
-      Density: 1
-      Friction: 0
-      Restitution: 0
-      RestitutionThreshold: 0.5
-    RigidBody2DComponent:
-      Type: Dynamic
-      FixedRotation: false
-    TransformComponent:
-      Translation: [-0.00176212518, 1.84646881, 0]
-      Rotation: [0, 0, 3.92327934e-07]
-      Scale: [1, 1, 1]
-    TagComponent:
-      Tag: Square
-    SpriteRendererComponent:
-      Color: [1, 1, 1, 1]
-      TilingFactor: 1
-  - Entity: [2492284899, 1262638531, 397924498, 2334046940]
-    CameraComponent:
-      SceneCamera:
-        ProjectionType: 0
-        PerspectiveFOV: 0.785398185
-        PerspectiveNear: 0.00999999978
-        PerspectiveFar: 1000
-        OrthographicSize: 10
-        OrthographicNear: -1
-        OrthographicFar: 1
-      Primary: true
-      FixedAspectRatio: false
-    TransformComponent:
-      Translation: [0, 0, 9.97000027]
-      Rotation: [0, 0, 0]
-      Scale: [1, 1, 1]
-    TagComponent:
-      Tag: Camera

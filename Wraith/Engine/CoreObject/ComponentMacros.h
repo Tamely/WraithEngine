@@ -21,6 +21,8 @@ namespace Wraith {
 			std::function<void(Entity&, const YAML::Node&)> deserialize;
 			std::function<void(Entity&)> drawImGui;
 			std::function<void(Entity&)> removeComponent;
+			std::function<void(entt::registry&, entt::registry&, const std::unordered_map<entt::entity, entt::entity>&)> copyComponent;
+			std::function<void(Entity dst, Entity src)> copyComponentIfExists;
 		};
 
 		// RegisterComponent is a template (defined inline) so it can be called
@@ -59,6 +61,24 @@ namespace Wraith {
 			info.removeComponent = [](Entity& entity) {
 				if (entity.HasComponent<T>()) {
 					entity.RemoveComponent<T>();
+				}
+			};
+
+			info.copyComponent = [](entt::registry& dst, entt::registry& src, const std::unordered_map<entt::entity, entt::entity>& entityMap) {
+				auto view = src.view<T>();
+				for (auto srcEntity : view) {
+					auto it = entityMap.find(srcEntity);
+					if (it != entityMap.end()) {
+						entt::entity dstEntity = it->second;
+						auto& component = src.get<T>(srcEntity);
+						dst.emplace_or_replace<T>(dstEntity, component);
+					}
+				}
+			};
+
+			info.copyComponentIfExists = [](Entity dst, Entity src) {
+				if (src.HasComponent<T>()) {
+					dst.AddOrReplaceComponent<T>(src.GetComponent<T>());
 				}
 			};
 
