@@ -173,6 +173,7 @@ namespace Wraith {
 		if (ImGui::BeginMenuBar()) {
 			if (ImGui::BeginMenu("File")) {
 				if (ImGui::MenuItem("New Level", "CTRL+N")) NewScene();
+				if (ImGui::MenuItem("Save", "CTRL+S")) SaveScene();
 				if (ImGui::MenuItem("Open...", "CTRL+O")) OpenScene();
 				if (ImGui::MenuItem("Save As...", "CTRL+SHIFT+S")) SaveSceneAs();
 				if (ImGui::MenuItem("Exit")) Application::Get().Close();
@@ -321,7 +322,15 @@ namespace Wraith {
 		bool shiftPressed = Input::IsKeyPressed(W_KEY_LEFT_SHIFT) || Input::IsKeyPressed(W_KEY_RIGHT_SHIFT);
 
 		switch (e.GetKeyCode()) {
-			case W_KEY_S: if (controlPressed && shiftPressed) SaveSceneAs(); break;
+			case W_KEY_S: {
+				if (controlPressed && shiftPressed) {
+					SaveSceneAs();
+				}
+				else if (controlPressed) {
+					SaveScene();
+				}
+				break;
+			}
 			case W_KEY_N: if (controlPressed) NewScene(); break;
 			case W_KEY_O: if (controlPressed) OpenScene(); break;
 			case W_KEY_D: if (controlPressed) OnDuplicateEntity(); break;
@@ -349,6 +358,7 @@ namespace Wraith {
 		m_ActiveScene = CreateRef<Scene>();
 		m_ActiveScene->OnViewportResize((uint32_t)m_ViewportSize.x, (uint32_t)m_ViewportSize.y);
 		m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+		m_ActiveScenePath = std::filesystem::path();
 	}
 
 	void EditorLayer::OpenScene() {
@@ -368,6 +378,8 @@ namespace Wraith {
 			return;
 		}
 
+		m_ActiveScenePath = filePath;
+
 		Ref<Scene> newScene = CreateRef<Scene>();
 		SceneSerializer serializer(newScene);
 		if (serializer.Deserialize(filePath.string())) {
@@ -379,12 +391,22 @@ namespace Wraith {
 		}
 	}
 
+	void EditorLayer::SaveScene() {
+		if (!m_ActiveScenePath.empty()) SerializeScene(m_EditorScene, m_ActiveScenePath);
+		else SaveSceneAs();
+	}
+
 	void EditorLayer::SaveSceneAs() {
 		std::string filePath = FileDialogs::SaveFile("Wraith Scene (*.wscene)\0*.wscene\0");
 		if (!filePath.empty()) {
-			SceneSerializer serializer(m_EditorScene);
-			serializer.Serialize(filePath);
+			SerializeScene(m_EditorScene, filePath);
+			m_ActiveScenePath = filePath;
 		}
+	}
+
+	void EditorLayer::SerializeScene(Ref<Scene> scene, const std::filesystem::path& filePath) {
+		SceneSerializer serializer(scene);
+		serializer.Serialize(filePath.string());
 	}
 
 	void EditorLayer::OnScenePlay() {

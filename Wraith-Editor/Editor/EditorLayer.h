@@ -25,7 +25,10 @@ namespace Wraith {
 		void NewScene();
 		void OpenScene();
 		void OpenScene(const std::filesystem::path& filePath);
+		void SaveScene();
 		void SaveSceneAs();
+
+		void SerializeScene(Ref<Scene> scene, const std::filesystem::path& filePath);
 
 		void OnScenePlay();
 		void OnSceneStop();
@@ -43,6 +46,7 @@ namespace Wraith {
 
 		Ref<Scene> m_ActiveScene;
 		Ref<Scene> m_EditorScene;
+		std::filesystem::path m_ActiveScenePath;
 
 		EditorCamera m_EditorCamera;
 
