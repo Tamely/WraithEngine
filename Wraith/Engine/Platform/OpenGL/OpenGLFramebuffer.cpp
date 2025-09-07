@@ -89,14 +89,18 @@ namespace Wraith {
 	OpenGLFramebuffer::~OpenGLFramebuffer() {
 		glDeleteFramebuffers(1, &m_RendererID);
 		glDeleteTextures(m_ColorAttachments.Size(), m_ColorAttachments.GetData());
-		glDeleteBuffers(1, &m_DepthAttachment);
+		if (m_DepthAttachment) {
+			glDeleteTextures(1, &m_DepthAttachment);
+		}
 	}
 
 	void OpenGLFramebuffer::Invalidate() {
 		if (m_RendererID) {
 			glDeleteFramebuffers(1, &m_RendererID);
 			glDeleteTextures(m_ColorAttachments.Size(), m_ColorAttachments.GetData());
-			glDeleteBuffers(1, &m_DepthAttachment);
+			if (m_DepthAttachment) {
+				glDeleteTextures(1, &m_DepthAttachment);
+			}
 
 			m_ColorAttachments.Empty();
 			m_DepthAttachment = 0;
@@ -121,7 +125,7 @@ namespace Wraith {
 					case FramebufferTextureFormat::RED_INTEGER:
 						Utils::AttachColorTexture(m_ColorAttachments[i], m_Specification.Samples, GL_R32I, GL_RED_INTEGER, m_Specification.Width, m_Specification.Height, i);
 						break;
-					}
+				}
 			}
 		}
 
@@ -130,8 +134,8 @@ namespace Wraith {
 			Utils::BindTexture(multisample, m_DepthAttachment);
 
 			switch (m_DepthAttachmentSpec.TextureFormat) {
-			case FramebufferTextureFormat::DEPTH24STENCIL8:
-				Utils::AttachDepthTexture(m_DepthAttachment, m_Specification.Samples, GL_DEPTH24_STENCIL8, GL_DEPTH_STENCIL_ATTACHMENT, m_Specification.Width, m_Specification.Height);
+				case FramebufferTextureFormat::DEPTH24STENCIL8:
+					Utils::AttachDepthTexture(m_DepthAttachment, m_Specification.Samples, GL_DEPTH24_STENCIL8, GL_DEPTH_STENCIL_ATTACHMENT, m_Specification.Width, m_Specification.Height);
 			}
 		}
 
@@ -149,7 +153,7 @@ namespace Wraith {
 
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	}
-	
+
 	void OpenGLFramebuffer::Bind() {
 		glBindFramebuffer(GL_FRAMEBUFFER, m_RendererID);
 		glViewport(0, 0, m_Specification.Width, m_Specification.Height);
@@ -185,7 +189,7 @@ namespace Wraith {
 		W_CORE_ASSERT(attachmentIndex < m_ColorAttachments.Size());
 
 		auto& spec = m_ColorAttachmentSpecs[attachmentIndex];
-		glClearTexImage(m_ColorAttachments[attachmentIndex], 0, 
+		glClearTexImage(m_ColorAttachments[attachmentIndex], 0,
 			Utils::WraithFramebufferTextureFormatToGL(spec.TextureFormat), GL_INT, &value);
 	}
 }

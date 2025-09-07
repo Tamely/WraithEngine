@@ -1,6 +1,7 @@
 #include "wpch.h"
 #include "Rendering/Renderer.h"
 #include "Rendering/Renderer2D.h"
+#include "UI/UIRenderCommand.h"
 
 #include "OpenGL/OpenGLShader.h"
 
@@ -12,6 +13,7 @@ namespace Wraith {
 
 		RenderCommand::Init();
 		Renderer2D::Init();
+		UIRenderCommand::Init();
 	}
 
 	void Renderer::OnWindowResize(uint32_t width, uint32_t height) {

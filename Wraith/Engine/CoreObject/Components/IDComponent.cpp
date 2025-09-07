@@ -2,7 +2,7 @@
 #include "IDComponent.h"
 #include "YAMLOperators.h"
 
-#include <imgui.h>
+#include "UI/UIRenderCommand.h"
 
 namespace Wraith {
 	void IDComponent::Serialize(YAML::Emitter& out) const {
@@ -16,6 +16,6 @@ namespace Wraith {
 	void IDComponent::DrawImGuiProperties() {
 		char buffer[256];
 		strcpy_s(buffer, sizeof(buffer), ID.ToString().c_str());
-		ImGui::Text(buffer);
+		UIRenderCommand::Text(buffer);
 	}
 }

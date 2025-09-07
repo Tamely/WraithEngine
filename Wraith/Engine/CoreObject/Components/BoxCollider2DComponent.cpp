@@ -1,7 +1,8 @@
 #include "wpch.h"
 #include "BoxCollider2DComponent.h"
 #include "YAMLOperators.h"
-#include <imgui.h>
+
+#include "UI/UIRenderCommand.h"
 
 namespace Wraith {
 	void BoxCollider2DComponent::Serialize(YAML::Emitter& out) const {
@@ -23,15 +24,15 @@ namespace Wraith {
 	}
 
 	void BoxCollider2DComponent::DrawImGuiProperties() {
-		ImGui::DragFloat2("Offset", &Offset.x, 0.01f);
-		ImGui::DragFloat2("Size", &Size.x, 0.01f, 0.0f, 0.0f, "%.2f");
+		UIRenderCommand::Vec2Control("Offset", Offset);
+		UIRenderCommand::Vec2Control("Size", Size);
 
-		ImGui::Separator();
-		ImGui::Text("Physics Material");
+		UIRenderCommand::Separator();
+		UIRenderCommand::Text("Physics Material");
 
-		ImGui::DragFloat("Density", &Density, 0.01f, 0.0f, 0.0f, "%.2f");
-		ImGui::DragFloat("Friction", &Friction, 0.01f, 0.0f, 1.0f, "%.2f");
-		ImGui::DragFloat("Restitution", &Restitution, 0.01f, 0.0f, 1.0f, "%.2f");
-		ImGui::DragFloat("Restitution Threshold", &RestitutionThreshold, 0.01f, 0.0f, 0.0f, "%.2f");
+		UIRenderCommand::DragFloat("Density", &Density, 0.01f, 0.0f, 0.0f, "%.2f");
+		UIRenderCommand::DragFloat("Friction", &Friction, 0.01f, 0.0f, 1.0f, "%.2f");
+		UIRenderCommand::DragFloat("Bounciness", &Restitution, 0.01f, 0.0f, 1.0f, "%.2f");
+		UIRenderCommand::DragFloat("Bounciness Threshold", &RestitutionThreshold, 0.01f, 0.0f, 0.0f, "%.2f");
 	}
 }

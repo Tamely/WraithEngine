@@ -1,6 +1,7 @@
 #include "wpch.h"
 #include "RigidBody2DComponent.h"
-#include <imgui.h>
+
+#include "UI/UIRenderCommand.h"
 
 namespace Wraith {
 	void RigidBody2DComponent::Serialize(YAML::Emitter& out) const {
@@ -18,20 +19,19 @@ namespace Wraith {
 		const char* bodyTypeStrings[] = { "Static", "Dynamic", "Kinematic" };
 		const char* currentBodyTypeString = bodyTypeStrings[(int)Type];
 
-		if (ImGui::BeginCombo("Body Type", currentBodyTypeString)) {
+		if (UIRenderCommand::BeginCombo("Body Type", currentBodyTypeString)) {
 			for (int i = 0; i < 3; i++) {
 				bool isSelected = currentBodyTypeString == bodyTypeStrings[i];
-				if (ImGui::Selectable(bodyTypeStrings[i], isSelected)) {
+				if (UIRenderCommand::Selectable(bodyTypeStrings[i], isSelected)) {
 					currentBodyTypeString = bodyTypeStrings[i];
 					Type = (BodyType)i;
 				}
 
-				if (isSelected)
-					ImGui::SetItemDefaultFocus();
+				if (isSelected) UIRenderCommand::SetItemDefaultFocus();
 			}
-			ImGui::EndCombo();
+			UIRenderCommand::EndCombo();
 		}
 
-		ImGui::Checkbox("Fixed Rotation", &FixedRotation);
+		UIRenderCommand::Checkbox("Fixed Rotation", &FixedRotation);
 	}
 }

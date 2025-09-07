@@ -42,7 +42,7 @@ namespace Wraith {
 			style.Colors[ImGuiCol_WindowBg].w = 1.0f;
 		}
 
-		SetDarkThemeColors();
+		SetDarkTheme();
 
 		Application& app = Application::Get();
 		GLFWwindow* window = static_cast<GLFWwindow*>(app.GetWindow().GetNativeWindow());
@@ -87,8 +87,41 @@ namespace Wraith {
 		}
 	}
 
-	void ImGuiLayer::SetDarkThemeColors() {
-		auto& colors = ImGui::GetStyle().Colors;
+	void ImGuiLayer::SetDarkTheme() {
+		ImGuiStyle& style = ImGui::GetStyle();
+
+		style.Alpha = 1.0f;
+		style.DisabledAlpha = 1.0f;
+		style.WindowPadding = ImVec2(12.0f, 12.0f);
+		style.WindowRounding = 11.5f;
+		style.WindowBorderSize = 0.0f;
+		style.WindowMinSize = ImVec2(20.0f, 20.0f);
+		style.WindowTitleAlign = ImVec2(0.5f, 0.5f);
+		style.WindowMenuButtonPosition = ImGuiDir_Right;
+		style.ChildRounding = 0.0f;
+		style.ChildBorderSize = 1.0f;
+		style.PopupRounding = 0.0f;
+		style.PopupBorderSize = 1.0f;
+		style.FramePadding = ImVec2(20.0f, 3.400000095367432f);
+		style.FrameRounding = 11.89999961853027f;
+		style.FrameBorderSize = 0.0f;
+		style.ItemSpacing = ImVec2(4.300000190734863f, 5.5f);
+		style.ItemInnerSpacing = ImVec2(7.099999904632568f, 1.799999952316284f);
+		style.CellPadding = ImVec2(12.10000038146973f, 9.199999809265137f);
+		style.IndentSpacing = 0.0f;
+		style.ColumnsMinSpacing = 4.900000095367432f;
+		style.ScrollbarSize = 11.60000038146973f;
+		style.ScrollbarRounding = 15.89999961853027f;
+		style.GrabMinSize = 3.700000047683716f;
+		style.GrabRounding = 20.0f;
+		style.TabRounding = 0.0f;
+		style.TabBorderSize = 0.0f;
+		style.TabMinWidthForCloseButton = 0.0f;
+		style.ColorButtonPosition = ImGuiDir_Right;
+		style.ButtonTextAlign = ImVec2(0.5f, 0.5f);
+		style.SelectableTextAlign = ImVec2(0.0f, 0.0f);
+
+		auto& colors = style.Colors;
 
 		// Main background
 		colors[ImGuiCol_WindowBg] = ImVec4{ 0.06f, 0.06f, 0.06f, 1.0f };

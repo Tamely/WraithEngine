@@ -1,5 +1,6 @@
 #include "wpch.h"
 #include "TagComponent.h"
+#include "UI/UIRenderCommand.h"
 #include <imgui.h>
 
 namespace Wraith {
@@ -14,7 +15,7 @@ namespace Wraith {
 	void TagComponent::DrawImGuiProperties() {
 		char buffer[256];
 		strcpy_s(buffer, sizeof(buffer), Tag.c_str());
-		if (ImGui::InputText("##Tag", buffer, sizeof(buffer))) {
+		if (UIRenderCommand::InputText("##Tag", buffer, sizeof(buffer))) {
 			Tag = std::string(buffer);
 		}
 	}
