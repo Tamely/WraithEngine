@@ -173,8 +173,8 @@ namespace Wraith {
 		if (ImGui::BeginMenuBar()) {
 			if (ImGui::BeginMenu("File")) {
 				if (ImGui::MenuItem("New Level", "CTRL+N")) NewScene();
-				if (ImGui::MenuItem("Save", "CTRL+S")) SaveScene();
 				if (ImGui::MenuItem("Open...", "CTRL+O")) OpenScene();
+				if (ImGui::MenuItem("Save", "CTRL+S")) SaveScene();
 				if (ImGui::MenuItem("Save As...", "CTRL+SHIFT+S")) SaveSceneAs();
 				if (ImGui::MenuItem("Exit")) Application::Get().Close();
 				ImGui::EndMenu();

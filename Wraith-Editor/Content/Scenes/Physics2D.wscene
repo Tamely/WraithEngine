@@ -17,7 +17,8 @@ Entities:
       Scale: [16.6000004, 1, 1]
     TagComponent:
       Tag: Floor
-    SpriteRendererComponent:
+    Shape2DComponent:
+      Type: Quad
       Color: [1, 1, 0, 1]
       TilingFactor: 1
   - Entity: [3015553507, 1308896056, 1564120729, 3362654438]
@@ -37,7 +38,8 @@ Entities:
       Scale: [1, 1, 1]
     TagComponent:
       Tag: Square
-    SpriteRendererComponent:
+    Shape2DComponent:
+      Type: Quad
       Color: [1, 1, 1, 1]
       TilingFactor: 1
   - Entity: [2492284899, 1262638531, 397924498, 2334046940]

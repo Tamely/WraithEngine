@@ -374,9 +374,9 @@ namespace Wraith {
 
 	const char* ContentBrowserPanel::GetImGuiTypeText(FileType type) {
 		switch (type) {
-		case FileType::SCENE:		return IMGUI_PAYLOAD_TYPE_SCENE;
-		case FileType::TEXTURE:		return IMGUI_PAYLOAD_TYPE_TEXTURE;
-		default:					return IMGUI_PAYLOAD_TYPE_UNKNOWN;
+			case FileType::SCENE:		return IMGUI_PAYLOAD_TYPE_SCENE;
+			case FileType::TEXTURE:		return IMGUI_PAYLOAD_TYPE_TEXTURE;
+			default:					return IMGUI_PAYLOAD_TYPE_UNKNOWN;
 		}
 	}
 
