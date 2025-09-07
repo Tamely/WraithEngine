@@ -5,9 +5,12 @@
 #include <ImGui-Premake/imgui.h>
 #include <ImGui-Premake/imgui_internal.h>
 
+#include "Core/CoreBasic.h"
+
 namespace Wraith {
 	void ImGuiRenderer::Init() {
 		// TODO: Move ImGui initialization here
+		W_CORE_INFO("Initialized ImGui UI Renderer");
 	}
 
 	bool ImGuiRenderer::Begin(const char* name, bool* open, int flags) {
