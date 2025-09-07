@@ -14,6 +14,8 @@ namespace Wraith {
 		Scene();
 		~Scene();
 
+		static Ref<Scene> Copy(Ref<Scene> other);
+
 		Entity CreateEntity(Guid& guid = Guid(), const std::string& name = std::string());
 		void DestroyEntity(Entity entity);
 
@@ -24,6 +26,8 @@ namespace Wraith {
 		void OnUpdateRuntime(Timestep ts);
 
 		void OnViewportResize(uint32_t width, uint32_t height);
+
+		void DuplicateEntity(Entity entity);
 
 		Entity GetPrimaryCameraEntity();
 
@@ -46,7 +50,7 @@ namespace Wraith {
 		uint32_t m_ViewportWidth = 0, m_ViewportHeight = 0;
 
 		// Physics abstraction - will be expanded for 3D later
-		std::unique_ptr<PhysicsWorld2D> m_PhysicsWorld2D;
+		Scope<PhysicsWorld2D> m_PhysicsWorld2D;
 
 		friend class Entity;
 		friend class SceneSerializer;

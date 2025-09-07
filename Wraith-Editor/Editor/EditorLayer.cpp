@@ -324,6 +324,7 @@ namespace Wraith {
 			case W_KEY_S: if (controlPressed && shiftPressed) SaveSceneAs(); break;
 			case W_KEY_N: if (controlPressed) NewScene(); break;
 			case W_KEY_O: if (controlPressed) OpenScene(); break;
+			case W_KEY_D: if (controlPressed) OnDuplicateEntity(); break;
 
 			// Gizmos
 			case W_KEY_Q: m_GizmoType = -1; break;
@@ -358,30 +359,57 @@ namespace Wraith {
 	}
 
 	void EditorLayer::OpenScene(const std::filesystem::path& filePath) {
-		m_ActiveScene = CreateRef<Scene>();
-		m_ActiveScene->OnViewportResize((uint32_t)m_ViewportSize.x, (uint32_t)m_ViewportSize.y);
-		m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+		if (m_SceneState != SceneState_Edit) {
+			OnSceneStop();
+		}
 
-		SceneSerializer serializer(m_ActiveScene);
-		serializer.Deserialize(filePath.string());
+		if (filePath.extension().string() != ".wscene") {
+			W_WARN("Could not load {0} - not a scene file", filePath.filename().string());
+			return;
+		}
+
+		Ref<Scene> newScene = CreateRef<Scene>();
+		SceneSerializer serializer(newScene);
+		if (serializer.Deserialize(filePath.string())) {
+			m_EditorScene = newScene;
+			m_EditorScene->OnViewportResize((uint32_t)m_ViewportSize.x, (uint32_t)m_ViewportSize.y);
+			m_SceneHierarchyPanel.SetContext(m_EditorScene);
+
+			m_ActiveScene = m_EditorScene;
+		}
 	}
 
 	void EditorLayer::SaveSceneAs() {
 		std::string filePath = FileDialogs::SaveFile("Wraith Scene (*.wscene)\0*.wscene\0");
 		if (!filePath.empty()) {
-			SceneSerializer serializer(m_ActiveScene);
+			SceneSerializer serializer(m_EditorScene);
 			serializer.Serialize(filePath);
 		}
 	}
 
 	void EditorLayer::OnScenePlay() {
-		m_ActiveScene->OnRuntimeStart();
 		m_SceneState = SceneState_Play;
+		m_GizmoTypeBackup = m_GizmoType;
+		m_GizmoType = -1;
+
+		m_ActiveScene = Scene::Copy(m_EditorScene);
+		m_ActiveScene->OnRuntimeStart();
 	}
 
 	void EditorLayer::OnSceneStop() {
-		m_ActiveScene->OnRuntimeStop();
 		m_SceneState = SceneState_Edit;
+		m_GizmoType = m_GizmoTypeBackup;
+
+		m_ActiveScene->OnRuntimeStop();
+		m_ActiveScene = m_EditorScene;
+	}
+
+	void EditorLayer::OnDuplicateEntity() {
+		if (m_SceneState != SceneState_Edit) return;
+
+		if (Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity()) {
+			m_EditorScene->DuplicateEntity(selectedEntity);
+		}
 	}
 
 	void EditorLayer::UI_Toolbar() {

@@ -1,4 +1,5 @@
 #include "wpch.h"
+#ifdef W_PLATFORM_WINDOWS
 #include "GenericPlatform/GenericPlatformMemory.h"
 
 namespace Wraith {
@@ -26,3 +27,4 @@ namespace Wraith {
 		free(Src);
 	}
 }
+#endif

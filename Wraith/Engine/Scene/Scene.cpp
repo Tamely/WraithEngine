@@ -17,11 +17,35 @@
 
 namespace Wraith {
 	Scene::Scene() {
-		m_PhysicsWorld2D = std::make_unique<PhysicsWorld2D>();
+		m_PhysicsWorld2D = CreateScope<PhysicsWorld2D>();
 	}
 
 	Scene::~Scene() {
-		// PhysicsWorld2D will be automatically destroyed via unique_ptr
+		// PhysicsWorld2D will be automatically destroyed via unique_ptr (Scope)
+	}
+
+	Ref<Scene> Scene::Copy(Ref<Scene> other) {
+		Ref<Scene> newScene = CreateRef<Scene>();
+		newScene->m_ViewportWidth = other->m_ViewportWidth;
+		newScene->m_ViewportHeight = other->m_ViewportHeight;
+
+		std::unordered_map<entt::entity, entt::entity> entityMap;
+		auto& srcSceneRegistry = other->m_Registry;
+		auto& dstSceneRegistry = newScene->m_Registry;
+
+		auto idView = srcSceneRegistry.view<IDComponent>();
+		for (auto srcEntity : idView) {
+			Guid guid = srcSceneRegistry.get<IDComponent>(srcEntity).ID;
+			const auto& name = srcSceneRegistry.get<TagComponent>(srcEntity).Tag;
+			Entity newEntity = newScene->CreateEntity(guid, name);
+			entityMap[srcEntity] = newEntity;
+		}
+
+		for (const auto& [name, info] : ComponentRegistry::GetComponents()) {
+			info.copyComponent(dstSceneRegistry, srcSceneRegistry, entityMap);
+		}
+
+		return newScene;
 	}
 
 	Entity Scene::CreateEntity(Guid& guid, const std::string& name) {
@@ -117,6 +141,17 @@ namespace Wraith {
 				cameraComponent.Camera.SetViewportSize(width, height);
 			}
 		}
+	}
+
+	void Scene::DuplicateEntity(Entity entity) {
+		Entity newEntity = CreateEntity(Guid::NewGuid(), entity.GetComponent<TagComponent>().Tag);
+		Guid newID = newEntity.GetComponent<IDComponent>().ID; // We need to save this then re-set it at the end because it'll be overwritten
+
+		for (const auto& [name, info] : ComponentRegistry::GetComponents()) {
+			info.copyComponentIfExists(newEntity, entity);
+		}
+
+		newEntity.GetComponent<IDComponent>().ID = newID;
 	}
 
 	Entity Scene::GetPrimaryCameraEntity() {

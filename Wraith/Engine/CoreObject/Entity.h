@@ -26,6 +26,16 @@ namespace Wraith {
 			return component;
 		}
 
+		template<typename T, typename... Args>
+		T& AddOrReplaceComponent(Args&&... args) {
+			T& component = m_Scene->m_Registry.emplace_or_replace<T>(m_EntityHandle, std::forward<Args>(args)...);
+
+			// Delegate any component-specific initialization to Scene
+			m_Scene->HandleComponentInitialization(*this, component);
+
+			return component;
+		}
+
 		template<typename T>
 		T& GetComponent() {
 			W_CORE_ASSERT(HasComponent<T>(), "Entity does not have component!");

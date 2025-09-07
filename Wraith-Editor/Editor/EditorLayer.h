@@ -30,6 +30,8 @@ namespace Wraith {
 		void OnScenePlay();
 		void OnSceneStop();
 
+		void OnDuplicateEntity();
+
 		// UI panels
 		void UI_Toolbar();
 	private:
@@ -40,10 +42,12 @@ namespace Wraith {
 		Ref<Framebuffer> m_Framebuffer;
 
 		Ref<Scene> m_ActiveScene;
+		Ref<Scene> m_EditorScene;
 
 		EditorCamera m_EditorCamera;
 
 		int m_GizmoType = 0;
+		int m_GizmoTypeBackup = -1; // This is only set when the runtime is starting and serves as a way to keep context
 
 		glm::vec2 m_ViewportSize = { 0.0f, 0.0f };
 		bool m_ViewportFocused = false, m_ViewportHovered = false, m_ViewportVisible = false;
