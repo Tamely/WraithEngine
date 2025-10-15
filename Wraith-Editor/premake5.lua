@@ -25,6 +25,8 @@ project "Wraith-Editor"
 		"%{wks.location}/Wraith/ThirdParty/spdlog/include",
 		"%{wks.location}/Wraith/Tools",
 
+		"Editor/Weave",
+
 		"%{IncludeDir.glm}",
 		"%{IncludeDir.entt}",
 		"%{IncludeDir.yaml}",
