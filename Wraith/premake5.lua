@@ -57,7 +57,9 @@ project "Wraith"
 		"%{IncludeDir.entt}",
 		"%{IncludeDir.yaml}",
 		"%{IncludeDir.ImGuizmo}",
-		"%{IncludeDir.VulkanSDK}"
+		"%{IncludeDir.VulkanSDK}",
+		"%{IncludeDir.DirectXSDK}",
+		"%{IncludeDir.ScopeGuard}"
 	}
 
 	links
@@ -66,6 +68,7 @@ project "Wraith"
 		"GLFW",
 		"Glad",
 		"ImGui",
+		"ImGuiNodeEditor",
 		"yaml-cpp",
 		"opengl32.lib"
 	}
@@ -91,7 +94,8 @@ project "Wraith"
 		{
 			"%{Library.ShaderC_Debug}",
 			"%{Library.SPIRV_Cross_Debug}",
-			"%{Library.SPIRV_Cross_GLSL_Debug}"
+			"%{Library.SPIRV_Cross_GLSL_Debug}",
+			"%{Library.DirectX_X64_Debug}"
 		}
 		
 	filter "configurations:Release"
@@ -103,7 +107,8 @@ project "Wraith"
 		{
 			"%{Library.ShaderC_Release}",
 			"%{Library.SPIRV_Cross_Release}",
-			"%{Library.SPIRV_Cross_GLSL_Release}"
+			"%{Library.SPIRV_Cross_GLSL_Release}",
+			"%{Library.DirectX_X64_Release}"
 		}
 		
 	filter "configurations:Dist"
@@ -116,5 +121,6 @@ project "Wraith"
 		{
 			"%{Library.ShaderC_Release}",
 			"%{Library.SPIRV_Cross_Release}",
-			"%{Library.SPIRV_Cross_GLSL_Release}"
+			"%{Library.SPIRV_Cross_GLSL_Release}",
+			"%{Library.DirectX_X64_Release}"
 		}

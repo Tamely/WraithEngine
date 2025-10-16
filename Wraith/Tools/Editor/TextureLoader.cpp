@@ -30,6 +30,7 @@ namespace Wraith {
 
 			if (texture) {
 				m_LoadedTextures[textureKey] = texture;
+				m_LoadedTexturesByID[reinterpret_cast<ImTextureID>(texture->GetRendererID())] = texture;
 				W_CORE_INFO("Loaded texture: {0} ({1}x{2}) {3}", filePath,
 					texture->GetWidth(), texture->GetHeight(),
 					flipVertically ? "[Flipped]" : "[Normal]");
@@ -64,6 +65,8 @@ namespace Wraith {
 		if (it != m_LoadedTextures.end()) {
 			W_CORE_INFO("Unloading texture: {0} {1}", filePath,
 				flipVertically ? "[Flipped]" : "[Normal]");
+
+			m_LoadedTexturesByID.erase(reinterpret_cast<ImTextureID*>(it->second->GetRendererID()));
 			m_LoadedTextures.erase(it);
 		}
 	}
@@ -71,6 +74,7 @@ namespace Wraith {
 	void TextureLoader::UnloadAllTextures() {
 		W_CORE_INFO("Unloading all textures ({0} total)", m_LoadedTextures.size());
 		m_LoadedTextures.clear();
+		m_LoadedTexturesByID.clear();
 		m_WhiteTexture = nullptr;
 	}
 
@@ -87,6 +91,22 @@ namespace Wraith {
 			return { it->second->GetWidth(), it->second->GetHeight() };
 		}
 		return { 0, 0 };
+	}
+
+	uint32_t TextureLoader::GetTextureWidth(ImTextureID loadedID) const {
+		auto it = m_LoadedTexturesByID.find(loadedID);
+		if (it != m_LoadedTexturesByID.end()) {
+			return it->second->GetWidth();
+		}
+		return 0;
+	}
+
+	uint32_t TextureLoader::GetTextureHeight(ImTextureID loadedID) const {
+		auto it = m_LoadedTexturesByID.find(loadedID);
+		if (it != m_LoadedTexturesByID.end()) {
+			return it->second->GetHeight();
+		}
+		return 0;
 	}
 
 	ImTextureID TextureLoader::GetWhiteTexture() {
