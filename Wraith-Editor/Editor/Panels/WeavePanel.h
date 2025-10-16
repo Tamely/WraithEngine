@@ -1,0 +1,71 @@
+#pragma once
+
+#include <Weave/Node.h>
+#include <Weave/Pin.h>
+#include <Weave/Link.h>
+#include <Weave/NodeOperators.h>
+
+#include <ImGui-NodeEditor/imgui_node_editor.h>
+
+#include <map>
+#include <vector>
+
+using ImTextureID = void*;
+
+namespace Wraith {
+	class WeavePanel {
+	public:
+		WeavePanel();
+		~WeavePanel();
+
+		void OnImGuiRender();
+		void OnUpdate(float deltaTime);
+
+	private:
+		void BuildNode(Node* node);
+		Node* FindNode(ax::NodeEditor::NodeId id);
+		void TouchNode(ax::NodeEditor::NodeId id);
+
+		bool CanCreateLink(Pin* a, Pin* b);
+		Link* FindLink(ax::NodeEditor::LinkId id);
+
+		Pin* FindPin(ax::NodeEditor::PinId id);
+		bool IsPinLinked(ax::NodeEditor::PinId id);
+
+		ImColor GetIconColor(PinType type);
+		void DrawPinIcon(const Pin& pin, bool connected, int alpha);
+
+		float GetTouchProgress(ax::NodeEditor::NodeId id);
+		void UpdateTouch();
+
+		Node* SpawnInputActionNode();
+		Node* SpawnBranchNode();
+		Node* SpawnDoNNode();
+		Node* SpawnOutputActionNode();
+		Node* SpawnPrintStringNode();
+		Node* SpawnMessageNode();
+		Node* SpawnSetTimerNode();
+		Node* SpawnLessNode();
+		Node* SpawnWeirdNode();
+		Node* SpawnTraceByChannelNode();
+		Node* SpawnTreeSequenceNode();
+		Node* SpawnTreeTaskNode();
+		Node* SpawnTreeTask2Node();
+		Node* SpawnComment();
+		Node* SpawnHoudiniTransformNode();
+		Node* SpawnHoudiniGroupNode();
+
+		int GetNextId();
+		ax::NodeEditor::LinkId GetNextLinkId();
+
+	private:
+		ax::NodeEditor::EditorContext* m_EditorContext = nullptr;
+		int m_NextId = 1;
+		std::vector<Node> m_Nodes;
+		std::vector<Link> m_Links;
+		ImTextureID m_HeaderBackground = nullptr;
+		const int m_PinIconSize = 24;
+		const float m_TouchTime = 1.0f;
+		std::map<ax::NodeEditor::NodeId, float, NodeIdLess> m_NodeTouchTime;
+	};
+}

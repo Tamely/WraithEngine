@@ -30,6 +30,7 @@ group "Dependencies"
 	include "Wraith/ThirdParty/GLFW-Premake"
 	include "Wraith/ThirdParty/Glad"
 	include "Wraith/ThirdParty/ImGui-Premake"
+	include "Wraith/ThirdParty/ImGui-NodeEditor"
 	include "Wraith/ThirdParty/yaml-cpp"
 group ""
 

@@ -2,7 +2,6 @@
 #include <Core/EntryPoint.h>
 
 #include "EditorLayer.h"
-#include "WeaveLayer.h"
 
 namespace Wraith {
 	class WraithEditor : public Application {
@@ -10,7 +9,6 @@ namespace Wraith {
 		WraithEditor(ApplicationCommandLineArgs args)
 			: Application("Wraith Editor", args) {
 			PushLayer(new EditorLayer());
-			PushLayer(new WeaveLayer());
 		}
 
 		~WraithEditor() {

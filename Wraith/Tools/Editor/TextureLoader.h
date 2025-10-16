@@ -15,41 +15,30 @@ namespace Wraith {
 			return instance;
 		}
 
-		// Load a texture and return ImGui texture ID
 		ImTextureID LoadTexture(const std::string& filePath, bool flipVertically = false);
-
-		// Get the Texture2D object for a loaded texture
-		Ref<Texture2D> GetTexture(const std::string& filePath, bool flipVertically = false);
-
-		// Check if texture is loaded
+		void UnloadTexture(const std::string& filePath, bool flipVertically = false);
+		void UnloadAllTextures();
+		bool ReloadTexture(const std::string& filePath, bool flipVertically = false);
 		bool IsTextureLoaded(const std::string& filePath, bool flipVertically = false) const;
 
-		// Unload a specific texture
-		void UnloadTexture(const std::string& filePath, bool flipVertically = false);
+		Ref<Texture2D> GetTexture(const std::string& filePath, bool flipVertically = false);
 
-		// Unload all textures
-		void UnloadAllTextures();
-
-		// Reload a texture (useful for hot-reloading during development)
-		bool ReloadTexture(const std::string& filePath, bool flipVertically = false);
-
-		// Get texture dimensions
 		std::pair<uint32_t, uint32_t> GetTextureDimensions(const std::string& filePath, bool flipVertically = false) const;
 
-		// Create a white texture for missing files
-		ImTextureID GetWhiteTexture();
+		uint32_t GetTextureWidth(ImTextureID loadedID) const;
+		uint32_t GetTextureHeight(ImTextureID loadedID) const;
 
-		// Get statistics
+		ImTextureID GetWhiteTexture();
 		size_t GetLoadedTextureCount() const { return m_LoadedTextures.size(); }
 
 	private:
 		TextureLoader() = default;
 		~TextureLoader() = default;
 
-		// Generate unique key for texture with flip state
 		std::string GetTextureKey(const std::string& filePath, bool flipVertically) const;
 
 		std::unordered_map<std::string, Ref<Texture2D>> m_LoadedTextures;
+		std::unordered_map<ImTextureID, Ref<Texture2D>> m_LoadedTexturesByID;
 		Ref<Texture2D> m_WhiteTexture = nullptr;
 	};
 
