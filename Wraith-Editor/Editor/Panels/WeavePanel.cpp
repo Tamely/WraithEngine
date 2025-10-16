@@ -20,6 +20,7 @@
 #include "Nodes/MultiplyMat4Vec4Node.h"
 #include "Nodes/SequenceNode.h"
 #include "Nodes/Vec3Node.h"
+#include "Nodes/Vec3ConstructorNode.h"
 #include "Nodes/Vec4ConstructorNode.h"
 #include "Nodes/Vec4Node.h"
 #include "Nodes/VertexOutputNode.h"

@@ -6,6 +6,7 @@
 #include "Weave/NodeType.h"
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -22,10 +23,10 @@ namespace Wraith {
 			std::string category = definition->GetCategory();
 
 			m_NodeDefinitions[name] = definition;
-			m_Categories[category].push_back(name);
+			m_Categories[category].insert(name);
 		}
 
-		const std::map<std::string, std::vector<std::string>>& GetCategories() const {
+		const std::map<std::string, std::set<std::string>>& GetCategories() const {
 			return m_Categories;
 		}
 
@@ -63,7 +64,7 @@ namespace Wraith {
 		NodeRegistry& operator=(const NodeRegistry&) = delete;
 
 		std::map<std::string, INodeDefinition*> m_NodeDefinitions; // Using a map over unordered_map, so we have consistent alphabetical sorting
-		std::map<std::string, std::vector<std::string>> m_Categories;
+		std::map<std::string, std::set<std::string>> m_Categories;
 	};
 
 	template<typename T>
