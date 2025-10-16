@@ -43,6 +43,7 @@ project "Wraith"
 		"Engine/CoreObject",
 		"Engine/Platform",
 		"Engine/Rendering",
+		"Engine/Weave",
 
 		"Tools",
 

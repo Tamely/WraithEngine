@@ -22,6 +22,9 @@ namespace Wraith {
 		void OnUpdate(float deltaTime);
 
 	private:
+		Node* SpawnNodeFromRegistry(const std::string& definitionName);
+		void RenderContextMenu(ImVec2 openPopupPosition, Pin* newNodeLinkPin, bool& createNewNode);
+
 		void BuildNode(Node* node);
 		Node* FindNode(ax::NodeEditor::NodeId id);
 		void TouchNode(ax::NodeEditor::NodeId id);
