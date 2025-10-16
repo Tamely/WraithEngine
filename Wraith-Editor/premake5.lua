@@ -21,6 +21,7 @@ project "Wraith-Editor"
 		"%{wks.location}/Wraith/Engine/Core",
 		"%{wks.location}/Wraith/Engine/CoreObject",
 		"%{wks.location}/Wraith/Engine/Platform",
+		"%{wks.location}/Wraith/Engine/Weave",
 		"%{wks.location}/Wraith/ThirdParty",
 		"%{wks.location}/Wraith/ThirdParty/spdlog/include",
 		"%{wks.location}/Wraith/Tools",

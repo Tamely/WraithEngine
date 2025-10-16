@@ -3,11 +3,14 @@
 
 #include <Weave/WeaveWidgets.h>
 #include <Weave/WeaveNodeBuilder.h>
+#include <Weave/Registry/NodeRegistry.h>
 
 #include <Editor/TextureLoader.h>
 
 #include <imgui.h>
 #include <imgui_internal.h>
+
+#include "Nodes/AddNode.h"
 
 namespace Wraith {
 	WeavePanel::WeavePanel() {
@@ -39,9 +42,10 @@ namespace Wraith {
 
 		ax::NodeEditor::SetCurrentEditor(m_EditorContext);
 		Node* node;
-		node = SpawnInputActionNode();      ax::NodeEditor::SetNodePosition(node->ID, ImVec2(-252, 220));
-		node = SpawnBranchNode();           ax::NodeEditor::SetNodePosition(node->ID, ImVec2(-300, 351));
-		node = SpawnPrintStringNode();      ax::NodeEditor::SetNodePosition(node->ID, ImVec2(-69, 652));
+		
+		node = SpawnNodeFromRegistry("Add");
+		if (node) ax::NodeEditor::SetNodePosition(node->ID, ImVec2(-252, 220));
+
 		ax::NodeEditor::NavigateToContent();
 		ax::NodeEditor::SetCurrentEditor(nullptr);
 	}
@@ -59,6 +63,71 @@ namespace Wraith {
 				entry.second -= deltaTime;
 			}
 		}
+	}
+
+	Node* WeavePanel::SpawnNodeFromRegistry(const std::string& definitionName) {
+		auto& registry = NodeRegistry::Instance();
+
+		Node node = registry.CreateNode(definitionName, m_NextId);
+
+		if (node.Name == "Unknown") {
+			return nullptr;
+		}
+
+		m_Nodes.push_back(node);
+
+		BuildNode(&m_Nodes.back());
+		return &m_Nodes.back();
+	}
+
+	void WeavePanel::RenderContextMenu(ImVec2 openPopupPosition, Pin* newNodeLinkPin, bool& createNewNode) {
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 8));
+		if (ImGui::BeginPopup("Create New Node")) {
+			auto& registry = NodeRegistry::Instance();
+			const auto& categories = registry.GetCategories();
+
+			Node* spawnedNode = nullptr;
+			std::string nodeToSpawn;
+
+			for (const auto& [category, nodeNames] : categories) {
+				if (ImGui::BeginMenu(category.c_str())) {
+					for (const auto& nodeName : nodeNames) {
+						if (ImGui::MenuItem(nodeName.c_str())) {
+							nodeToSpawn = nodeName;
+						}
+					}
+					ImGui::EndMenu();
+				}
+			}
+
+			if (!nodeToSpawn.empty()) {
+				spawnedNode = SpawnNodeFromRegistry(nodeToSpawn);
+
+				if (spawnedNode) {
+					createNewNode = false;
+					ax::NodeEditor::SetNodePosition(spawnedNode->ID, openPopupPosition);
+
+					if (auto startPin = newNodeLinkPin) {
+						auto& pins = startPin->Kind == PinKind::Input ? spawnedNode->Outputs : spawnedNode->Inputs;
+						for (auto& pin : pins) {
+							if (CanCreateLink(startPin, &pin)) {
+								auto endPin = &pin;
+								if (startPin->Kind == PinKind::Input)
+									std::swap(startPin, endPin);
+								m_Links.emplace_back(Link(GetNextId(), startPin->ID, endPin->ID));
+								m_Links.back().Color = GetIconColor(startPin->Type);
+								break;
+							}
+						}
+					}
+				}
+			}
+			ImGui::EndPopup();
+		}
+		else {
+			createNewNode = false;
+		}
+		ImGui::PopStyleVar();
 	}
 
 	void WeavePanel::OnImGuiRender() {
@@ -215,45 +284,7 @@ namespace Wraith {
 			ax::NodeEditor::Resume();
 
 			ax::NodeEditor::Suspend();
-			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 8));
-			if (ImGui::BeginPopup("Create New Node")) {
-				auto newNodePostion = openPopupPosition;
-				Node* node = nullptr;
-
-				if (ImGui::MenuItem("Input Action")) node = SpawnInputActionNode();
-				if (ImGui::MenuItem("Output Action")) node = SpawnOutputActionNode();
-				if (ImGui::MenuItem("Branch")) node = SpawnBranchNode();
-				if (ImGui::MenuItem("Do N")) node = SpawnDoNNode();
-				if (ImGui::MenuItem("Set Timer")) node = SpawnSetTimerNode();
-				if (ImGui::MenuItem("Less")) node = SpawnLessNode();
-				if (ImGui::MenuItem("Print String")) node = SpawnPrintStringNode();
-				ImGui::Separator();
-				if (ImGui::MenuItem("Message")) node = SpawnMessageNode();
-
-				if (node) {
-					createNewNode = false;
-					ax::NodeEditor::SetNodePosition(node->ID, newNodePostion);
-
-					if (auto startPin = newNodeLinkPin) {
-						auto& pins = startPin->Kind == PinKind::Input ? node->Outputs : node->Inputs;
-						for (auto& pin : pins) {
-							if (CanCreateLink(startPin, &pin)) {
-								auto endPin = &pin;
-								if (startPin->Kind == PinKind::Input)
-									std::swap(startPin, endPin);
-								m_Links.emplace_back(Link(GetNextId(), startPin->ID, endPin->ID));
-								m_Links.back().Color = GetIconColor(startPin->Type);
-								break;
-							}
-						}
-					}
-				}
-				ImGui::EndPopup();
-			}
-			else {
-				createNewNode = false;
-			}
-			ImGui::PopStyleVar();
+			RenderContextMenu(openPopupPosition, newNodeLinkPin, createNewNode);
 			ax::NodeEditor::Resume();
 		}
 		ax::NodeEditor::End();
@@ -375,10 +406,8 @@ namespace Wraith {
 
 	// Node spawning implementations
 	Node* WeavePanel::SpawnInputActionNode() {
-		m_Nodes.emplace_back(GetNextId(), "InputAction Fire", ImColor(255, 128, 128));
-		m_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Delegate);
-		m_Nodes.back().Outputs.emplace_back(GetNextId(), "Pressed", PinType::Flow);
-		m_Nodes.back().Outputs.emplace_back(GetNextId(), "Released", PinType::Flow);
+		m_Nodes.emplace_back(GetNextId(), "OnBegin", ImColor(255, 128, 128));
+		m_Nodes.back().Outputs.emplace_back(GetNextId(), "Start", PinType::Flow);
 		BuildNode(&m_Nodes.back());
 		return &m_Nodes.back();
 	}
