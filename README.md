@@ -6,6 +6,13 @@ Wraith Engine is a C++ / OpenGL–based game engine inspired by **Unreal Engine*
 
 ---
 
+## Current State of the Engine
+
+![Current Engine State](Resources/Git/CurrentEngineState.gif)
+Currently Working On: A node-based material system to increase accessibility for non-programmers.
+
+---
+
 ## Current Features
 
 ### Editor & Camera
@@ -43,12 +50,6 @@ Wraith Engine is a C++ / OpenGL–based game engine inspired by **Unreal Engine*
 
 * Development tracked with **Kanban methodology** in JIRA.
 * Clear workflow for ongoing tasks and milestones.
-
----
-
-## Current State of the Engine
-
-![Current Engine State](Resources/Git/CurrentEngineState.png)
 
 ---
 
