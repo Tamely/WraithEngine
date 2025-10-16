@@ -11,6 +11,18 @@
 #include <imgui_internal.h>
 
 #include "Nodes/AddNode.h"
+#include "Nodes/BeginNode.h"
+#include "Nodes/BranchNode.h"
+#include "Nodes/CommentNode.h"
+#include "Nodes/FloatNode.h"
+#include "Nodes/FragmentOutputNode.h"
+#include "Nodes/Mat4Node.h"
+#include "Nodes/MultiplyMat4Vec4Node.h"
+#include "Nodes/SequenceNode.h"
+#include "Nodes/Vec3Node.h"
+#include "Nodes/Vec4ConstructorNode.h"
+#include "Nodes/Vec4Node.h"
+#include "Nodes/VertexOutputNode.h"
 
 namespace Wraith {
 	WeavePanel::WeavePanel() {
@@ -149,9 +161,6 @@ namespace Wraith {
 
 			// Node rendering
 			for (auto& node : m_Nodes) {
-				if (node.Type != NodeType::Blueprint && node.Type != NodeType::Simple)
-					continue;
-
 				const auto isSimple = node.Type == NodeType::Simple;
 
 				builder.Begin(node.ID);
@@ -353,6 +362,9 @@ namespace Wraith {
 			case PinType::Bool:     return ImColor(220, 48, 48);
 			case PinType::Int:      return ImColor(68, 201, 156);
 			case PinType::Float:    return ImColor(147, 226, 74);
+			case PinType::Vec3:    return ImColor(147, 226, 74);
+			case PinType::Vec4:    return ImColor(147, 226, 74);
+			case PinType::Mat4:		return ImColor(200, 200, 200);
 			case PinType::String:   return ImColor(124, 21, 153);
 			case PinType::Object:   return ImColor(51, 150, 215);
 			case PinType::Function: return ImColor(218, 0, 183);
@@ -370,6 +382,9 @@ namespace Wraith {
 			case PinType::Bool:     iconType = Drawing::IconType::Circle; break;
 			case PinType::Int:      iconType = Drawing::IconType::Circle; break;
 			case PinType::Float:    iconType = Drawing::IconType::Circle; break;
+			case PinType::Vec3:		iconType = Drawing::IconType::Circle; break;
+			case PinType::Vec4:		iconType = Drawing::IconType::Circle; break;
+			case PinType::Mat4:		iconType = Drawing::IconType::Circle; break;
 			case PinType::String:   iconType = Drawing::IconType::Circle; break;
 			case PinType::Object:   iconType = Drawing::IconType::Circle; break;
 			case PinType::Function: iconType = Drawing::IconType::Circle; break;
@@ -402,160 +417,5 @@ namespace Wraith {
 			if (entry.second > 0.0f)
 				entry.second -= deltaTime;
 		}
-	}
-
-	// Node spawning implementations
-	Node* WeavePanel::SpawnInputActionNode() {
-		m_Nodes.emplace_back(GetNextId(), "OnBegin", ImColor(255, 128, 128));
-		m_Nodes.back().Outputs.emplace_back(GetNextId(), "Start", PinType::Flow);
-		BuildNode(&m_Nodes.back());
-		return &m_Nodes.back();
-	}
-
-	Node* WeavePanel::SpawnBranchNode() {
-		m_Nodes.emplace_back(GetNextId(), "Branch");
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "Condition", PinType::Bool);
-		m_Nodes.back().Outputs.emplace_back(GetNextId(), "True", PinType::Flow);
-		m_Nodes.back().Outputs.emplace_back(GetNextId(), "False", PinType::Flow);
-		BuildNode(&m_Nodes.back());
-		return &m_Nodes.back();
-	}
-
-	Node* WeavePanel::SpawnDoNNode() {
-		m_Nodes.emplace_back(GetNextId(), "Do N");
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "Enter", PinType::Flow);
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "N", PinType::Int);
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "Reset", PinType::Flow);
-		m_Nodes.back().Outputs.emplace_back(GetNextId(), "Exit", PinType::Flow);
-		m_Nodes.back().Outputs.emplace_back(GetNextId(), "Counter", PinType::Int);
-		BuildNode(&m_Nodes.back());
-		return &m_Nodes.back();
-	}
-
-	Node* WeavePanel::SpawnOutputActionNode() {
-		m_Nodes.emplace_back(GetNextId(), "OutputAction");
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "Sample", PinType::Float);
-		m_Nodes.back().Outputs.emplace_back(GetNextId(), "Condition", PinType::Bool);
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "Event", PinType::Delegate);
-		BuildNode(&m_Nodes.back());
-		return &m_Nodes.back();
-	}
-
-	Node* WeavePanel::SpawnPrintStringNode() {
-		m_Nodes.emplace_back(GetNextId(), "Print String");
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "In String", PinType::String);
-		m_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Flow);
-		BuildNode(&m_Nodes.back());
-		return &m_Nodes.back();
-	}
-
-	Node* WeavePanel::SpawnMessageNode() {
-		m_Nodes.emplace_back(GetNextId(), "", ImColor(128, 195, 248));
-		m_Nodes.back().Type = NodeType::Simple;
-		m_Nodes.back().Outputs.emplace_back(GetNextId(), "Message", PinType::String);
-		BuildNode(&m_Nodes.back());
-		return &m_Nodes.back();
-	}
-
-	Node* WeavePanel::SpawnSetTimerNode() {
-		m_Nodes.emplace_back(GetNextId(), "Set Timer", ImColor(128, 195, 248));
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "Object", PinType::Object);
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "Function Name", PinType::Function);
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "Time", PinType::Float);
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "Looping", PinType::Bool);
-		m_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Flow);
-		BuildNode(&m_Nodes.back());
-		return &m_Nodes.back();
-	}
-
-	Node* WeavePanel::SpawnLessNode() {
-		m_Nodes.emplace_back(GetNextId(), "<", ImColor(128, 195, 248));
-		m_Nodes.back().Type = NodeType::Simple;
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Float);
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Float);
-		m_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Float);
-		BuildNode(&m_Nodes.back());
-		return &m_Nodes.back();
-	}
-
-	Node* WeavePanel::SpawnWeirdNode() {
-		m_Nodes.emplace_back(GetNextId(), "o.O", ImColor(128, 195, 248));
-		m_Nodes.back().Type = NodeType::Simple;
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Float);
-		m_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Float);
-		m_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Float);
-		BuildNode(&m_Nodes.back());
-		return &m_Nodes.back();
-	}
-
-	Node* WeavePanel::SpawnTraceByChannelNode() {
-		m_Nodes.emplace_back(GetNextId(), "Single Line Trace by Channel", ImColor(255, 128, 64));
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "Start", PinType::Flow);
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "End", PinType::Int);
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "Trace Channel", PinType::Float);
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "Trace Complex", PinType::Bool);
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "Actors to Ignore", PinType::Int);
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "Draw Debug Type", PinType::Bool);
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "Ignore Self", PinType::Bool);
-		m_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Flow);
-		m_Nodes.back().Outputs.emplace_back(GetNextId(), "Out Hit", PinType::Float);
-		m_Nodes.back().Outputs.emplace_back(GetNextId(), "Return Value", PinType::Bool);
-		BuildNode(&m_Nodes.back());
-		return &m_Nodes.back();
-	}
-
-	Node* WeavePanel::SpawnTreeSequenceNode() {
-		m_Nodes.emplace_back(GetNextId(), "Sequence");
-		m_Nodes.back().Type = NodeType::Tree;
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
-		m_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Flow);
-		BuildNode(&m_Nodes.back());
-		return &m_Nodes.back();
-	}
-
-	Node* WeavePanel::SpawnTreeTaskNode() {
-		m_Nodes.emplace_back(GetNextId(), "Move To");
-		m_Nodes.back().Type = NodeType::Tree;
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
-		BuildNode(&m_Nodes.back());
-		return &m_Nodes.back();
-	}
-
-	Node* WeavePanel::SpawnTreeTask2Node() {
-		m_Nodes.emplace_back(GetNextId(), "Random Wait");
-		m_Nodes.back().Type = NodeType::Tree;
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
-		BuildNode(&m_Nodes.back());
-		return &m_Nodes.back();
-	}
-
-	Node* WeavePanel::SpawnComment() {
-		m_Nodes.emplace_back(GetNextId(), "Test Comment");
-		m_Nodes.back().Type = NodeType::Comment;
-		m_Nodes.back().Size = ImVec2(300, 200);
-		return &m_Nodes.back();
-	}
-
-	Node* WeavePanel::SpawnHoudiniTransformNode() {
-		m_Nodes.emplace_back(GetNextId(), "Transform");
-		m_Nodes.back().Type = NodeType::Houdini;
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
-		m_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Flow);
-		BuildNode(&m_Nodes.back());
-		return &m_Nodes.back();
-	}
-
-	Node* WeavePanel::SpawnHoudiniGroupNode() {
-		m_Nodes.emplace_back(GetNextId(), "Group");
-		m_Nodes.back().Type = NodeType::Houdini;
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
-		m_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
-		m_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Flow);
-		BuildNode(&m_Nodes.back());
-		return &m_Nodes.back();
 	}
 }

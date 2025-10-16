@@ -41,23 +41,6 @@ namespace Wraith {
 		float GetTouchProgress(ax::NodeEditor::NodeId id);
 		void UpdateTouch();
 
-		Node* SpawnInputActionNode();
-		Node* SpawnBranchNode();
-		Node* SpawnDoNNode();
-		Node* SpawnOutputActionNode();
-		Node* SpawnPrintStringNode();
-		Node* SpawnMessageNode();
-		Node* SpawnSetTimerNode();
-		Node* SpawnLessNode();
-		Node* SpawnWeirdNode();
-		Node* SpawnTraceByChannelNode();
-		Node* SpawnTreeSequenceNode();
-		Node* SpawnTreeTaskNode();
-		Node* SpawnTreeTask2Node();
-		Node* SpawnComment();
-		Node* SpawnHoudiniTransformNode();
-		Node* SpawnHoudiniGroupNode();
-
 		int GetNextId();
 		ax::NodeEditor::LinkId GetNextLinkId();
 

@@ -7,7 +7,7 @@ namespace Wraith {
 	}
 
 	NodeType AddNode::GetNodeType() const {
-		return NodeType::Simple;
+		return NodeType::Blueprint;
 	}
 
 	std::vector<std::pair<std::string, PinType>> AddNode::GetInputs() const {
