@@ -7,14 +7,16 @@
 #include <Renderer/Camera.h>
 #include <Renderer/RenderCommand.h>
 #include <Renderer/Renderer.h>
+#include <Session/EditorSession.h>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
-#include <glm/ext/matrix_transform.hpp>
 #include <glm/geometric.hpp>
+#include <glm/vec2.hpp>
 
 #include <filesystem>
+#include <utility>
 
 #ifndef AXIOM_CONTENT_DIR
 #define AXIOM_CONTENT_DIR "Content"
@@ -22,19 +24,19 @@
 
 class StartupSceneLayer final : public Axiom::Layer {
 public:
-  StartupSceneLayer() : Axiom::Layer("StartupSceneLayer") {}
+  StartupSceneLayer()
+      : Axiom::Layer("StartupSceneLayer"), m_Session(m_SessionId) {}
 
   void OnAttach() override {
-    m_Camera.LookAt(glm::vec3(0.0f, 0.8f, 3.5f), glm::vec3(0.0f, 0.3f, 0.0f));
-    m_Camera.SetPerspective(55.0f, 1600.0f / 900.0f, 0.1f, 100.0f);
+    m_Session.EnsureViewportState(m_LocalUserId);
     const auto MeshPath =
         std::filesystem::path(AXIOM_CONTENT_DIR) / "basicmesh.glb";
-    m_Submissions =
-        Axiom::Renderer::Get().LoadMeshSceneFromFile(MeshPath);
-    if (m_Submissions.empty()) {
+    auto Submissions = Axiom::Renderer::Get().LoadMeshSceneFromFile(MeshPath);
+    if (Submissions.empty()) {
       A_CORE_ERROR("Failed to create startup mesh scene from {0}",
                    MeshPath.string());
     }
+    m_Session.SetSceneSubmissions(std::move(Submissions));
   }
 
   void OnDetach() override {
@@ -43,46 +45,55 @@ public:
   }
 
   void OnUpdate() override {
-    UpdateCameraControls();
-    Axiom::RenderCommand::SetCamera(m_Camera);
-    for (const auto &Submission : m_Submissions) {
+    CollectInputCommands();
+    m_Session.Tick();
+    SyncWindowCursorMode();
+  }
+
+  void OnRender() override {
+    const Axiom::EditorViewportState *Viewport =
+        m_Session.FindViewport(m_LocalUserId);
+    if (Viewport == nullptr) {
+      return;
+    }
+
+    Axiom::RenderCommand::SetCamera(
+        Viewport->Camera);
+    for (const auto &Submission : m_Session.GetState().SceneSubmissions) {
       Axiom::RenderCommand::Submit(Submission);
     }
   }
 
 private:
-  void UpdateCameraControls() {
+  void CollectInputCommands() {
     auto &App = Axiom::Application::Get();
     auto &Window = App.GetWindow();
     const float DeltaTime = App.GetDeltaTime();
 
     const bool IsRightMouseHeld =
         Window.IsMouseButtonPressed(GLFW_MOUSE_BUTTON_RIGHT);
+    double CursorX = 0.0;
+    double CursorY = 0.0;
+    Window.GetCursorPosition(CursorX, CursorY);
+    const glm::dvec2 CursorPosition(CursorX, CursorY);
 
-    if (IsRightMouseHeld && !m_IsLooking) {
-      Window.SetCursorMode(Axiom::CursorMode::Disabled);
-      Window.GetCursorPosition(m_LastCursorX, m_LastCursorY);
-      m_IsLooking = true;
-    } else if (!IsRightMouseHeld && m_IsLooking) {
-      Window.SetCursorMode(Axiom::CursorMode::Normal);
-      m_IsLooking = false;
+    if (IsRightMouseHeld != m_LastLookInputState) {
+      m_Session.Submit(
+          MakeContext(DeltaTime),
+          {.Payload = Axiom::SetLookActiveCommand{
+               .IsLooking = IsRightMouseHeld,
+               .CursorPosition = CursorPosition,
+           }});
+      m_LastLookInputState = IsRightMouseHeld;
     }
 
-    if (m_IsLooking) {
-      double CursorX = 0.0;
-      double CursorY = 0.0;
-      Window.GetCursorPosition(CursorX, CursorY);
-
-      const float DeltaX = static_cast<float>(CursorX - m_LastCursorX);
-      const float DeltaY = static_cast<float>(CursorY - m_LastCursorY);
-      m_LastCursorX = CursorX;
-      m_LastCursorY = CursorY;
-
-      m_Camera.SetRotation(m_Camera.GetYawDegrees() + DeltaX * m_MouseSensitivity,
-                           m_Camera.GetPitchDegrees() - DeltaY * m_MouseSensitivity);
+    const Axiom::EditorViewportState *Viewport =
+        m_Session.FindViewport(m_LocalUserId);
+    if (Viewport == nullptr) {
+      return;
     }
 
-    glm::vec3 HorizontalForward = m_Camera.GetForward();
+    glm::vec3 HorizontalForward = Viewport->Camera.GetForward();
     HorizontalForward.y = 0.0f;
     if (glm::dot(HorizontalForward, HorizontalForward) > 0.0f) {
       HorizontalForward = glm::normalize(HorizontalForward);
@@ -115,17 +126,43 @@ private:
 
     if (glm::dot(Movement, Movement) > 0.0f) {
       Movement = glm::normalize(Movement);
-      m_Camera.MoveWorld(Movement * (m_MoveSpeed * DeltaTime));
+    }
+
+    m_Session.Submit(
+        MakeContext(DeltaTime),
+        {.Payload = Axiom::UpdateViewportCameraCommand{
+             .WorldMovement = Movement * (m_MoveSpeed * DeltaTime),
+             .CursorPosition = CursorPosition,
+         }});
+  }
+
+  Axiom::CommandContext MakeContext(float DeltaTime) const {
+    return {
+        .Session = m_SessionId,
+        .User = m_LocalUserId,
+        .FrameIndex = Axiom::Application::Get().GetFrameIndex(),
+        .DeltaTimeSeconds = DeltaTime,
+    };
+  }
+
+  void SyncWindowCursorMode() const {
+    auto &Window = Axiom::Application::Get().GetWindow();
+    const Axiom::EditorViewportState *Viewport =
+        m_Session.FindViewport(m_LocalUserId);
+    const Axiom::CursorMode DesiredMode =
+        Viewport != nullptr && Viewport->IsLooking
+            ? Axiom::CursorMode::Disabled
+            : Axiom::CursorMode::Normal;
+    if (Window.GetCursorMode() != DesiredMode) {
+      Window.SetCursorMode(DesiredMode);
     }
   }
 
-  Axiom::Camera m_Camera;
-  std::vector<Axiom::RenderMeshSubmission> m_Submissions;
-  bool m_IsLooking{false};
-  double m_LastCursorX{0.0};
-  double m_LastCursorY{0.0};
+  Axiom::SessionId m_SessionId{1};
+  Axiom::SessionUserId m_LocalUserId{1};
+  Axiom::EditorSession m_Session;
+  bool m_LastLookInputState{false};
   float m_MoveSpeed{3.5f};
-  float m_MouseSensitivity{0.12f};
 };
 
 class EditorApplication : public Axiom::Application {

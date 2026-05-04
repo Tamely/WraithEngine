@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <string>
 
 #include "Core/LayerStack.h"
@@ -24,6 +25,7 @@ public:
   void PushLayer(Layer *Layer);
   [[nodiscard]] Window &GetWindow() const { return *m_Window; }
   [[nodiscard]] float GetDeltaTime() const { return m_DeltaTime; }
+  [[nodiscard]] uint64_t GetFrameIndex() const { return m_FrameIndex; }
 
 private:
   static Application *s_Instance;
@@ -34,6 +36,7 @@ private:
   LayerStack m_LayerStack;
   std::chrono::steady_clock::time_point m_LastFrameTime;
   float m_DeltaTime{0.0f};
+  uint64_t m_FrameIndex{0};
 };
 
 Application *Create(const ApplicationArgs &Args);

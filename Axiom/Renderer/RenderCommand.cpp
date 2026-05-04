@@ -8,7 +8,7 @@ void RenderCommand::BeginScene(RenderScene &Scene) {
   s_ActiveScene = &Scene;
 }
 
-void RenderCommand::SetCamera(Camera &Camera) {
+void RenderCommand::SetCamera(const Camera &Camera) {
   if (s_ActiveScene) {
     s_ActiveScene->ActiveCamera = &Camera;
   }

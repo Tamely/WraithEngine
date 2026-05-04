@@ -31,9 +31,56 @@ if (FASTGLTF_DOWNLOAD_SIMDJSON)
     set(SIMDJSON_HEADER_FILE "${SIMDJSON_DL_DIR}/simdjson.h")
     set(SIMDJSON_SOURCE_FILE "${SIMDJSON_DL_DIR}/simdjson.cpp")
 
+    function(patch_simdjson_header HEADER_FILE)
+        if (NOT EXISTS "${HEADER_FILE}")
+            return()
+        endif()
+
+        file(READ "${HEADER_FILE}" SIMDJSON_HEADER_CONTENTS)
+
+        set(SIMDJSON_MINGW_OLD_CALLS [=[
+  simdjson_inline void call_print_newline() {
+      this->print_newline();
+  }
+
+  simdjson_inline void call_print_indents(size_t depth) {
+      this->print_indents(depth);
+  }
+
+  simdjson_inline void call_print_space() {
+      this->print_space();
+  }
+]=])
+        set(SIMDJSON_MINGW_NEW_CALLS [=[
+  simdjson_inline void call_print_newline() {
+      reinterpret_cast<formatter*>(this)->print_newline();
+  }
+
+  simdjson_inline void call_print_indents(size_t depth) {
+      reinterpret_cast<formatter*>(this)->print_indents(depth);
+  }
+
+  simdjson_inline void call_print_space() {
+      reinterpret_cast<formatter*>(this)->print_space();
+  }
+]=])
+
+        string(FIND "${SIMDJSON_HEADER_CONTENTS}" "${SIMDJSON_MINGW_OLD_CALLS}"
+               SIMDJSON_NEEDS_PATCH)
+        if (SIMDJSON_NEEDS_PATCH EQUAL -1)
+            return()
+        endif()
+
+        string(REPLACE "${SIMDJSON_MINGW_OLD_CALLS}" "${SIMDJSON_MINGW_NEW_CALLS}"
+               SIMDJSON_HEADER_CONTENTS "${SIMDJSON_HEADER_CONTENTS}")
+        file(WRITE "${HEADER_FILE}" "${SIMDJSON_HEADER_CONTENTS}")
+        message(STATUS "fastgltf: patched simdjson single-header formatter calls for MinGW compatibility")
+    endfunction()
+
     macro(download_simdjson)
         file(DOWNLOAD "https://raw.githubusercontent.com/simdjson/simdjson/v${SIMDJSON_TARGET_VERSION}/singleheader/simdjson.h" ${SIMDJSON_HEADER_FILE})
         file(DOWNLOAD "https://raw.githubusercontent.com/simdjson/simdjson/v${SIMDJSON_TARGET_VERSION}/singleheader/simdjson.cpp" ${SIMDJSON_SOURCE_FILE})
+        patch_simdjson_header("${SIMDJSON_HEADER_FILE}")
     endmacro()
 
     if (EXISTS ${SIMDJSON_HEADER_FILE})
@@ -44,6 +91,8 @@ if (FASTGLTF_DOWNLOAD_SIMDJSON)
         if (SIMDJSON_HEADER_VERSION VERSION_LESS SIMDJSON_TARGET_VERSION)
             message(STATUS "fastgltf: simdjson outdated, downloading...")
             download_simdjson()
+        else()
+            patch_simdjson_header("${SIMDJSON_HEADER_FILE}")
         endif()
     else()
         message(STATUS "fastgltf: Did not find simdjson, downloading...")
