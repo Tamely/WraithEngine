@@ -63,11 +63,11 @@ private:
   static constexpr uint32_t MaxMeshSubmissionsPerFrame = 64;
   static constexpr uint32_t TimestampQueryCount = 4;
 
-  struct MeshFrameResources {
-    AllocatedBuffer CameraBuffer;
-    VkDescriptorSet FrameDescriptorSet{VK_NULL_HANDLE};
-    VkQueryPool TimestampQueryPool{VK_NULL_HANDLE};
-    bool HasValidTimestamps{false};
+struct MeshFrameResources {
+  AllocatedBuffer CameraBuffer;
+  VkDescriptorSet FrameDescriptorSet{VK_NULL_HANDLE};
+  VkQueryPool TimestampQueryPool{VK_NULL_HANDLE};
+  bool HasValidTimestamps{false};
   };
 
   void InitSwapchain();
@@ -131,6 +131,7 @@ private:
   RenderScene *m_ActiveScene{nullptr};
   RendererFrameStats m_FrameStats{};
   float m_TimestampPeriod{0.0f};
+  float m_RenderScale{0.5f};
   bool m_HasWarnedMeshSubmissionOverflow{false};
 };
 } // namespace Axiom

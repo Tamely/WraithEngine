@@ -515,6 +515,7 @@ void VulkanRendererBackend::DrawStatsPanel() {
   ImGui::Text("CPU render: %.2f ms", m_FrameStats.CpuRenderMs);
   ImGui::Text("GPU background: %.2f ms", m_FrameStats.GpuBackgroundMs);
   ImGui::Text("GPU meshes: %.2f ms", m_FrameStats.GpuMeshMs);
+  ImGui::SliderFloat("Render scale", &m_RenderScale, 0.2f, 1.0f, "%.2f");
   ImGui::Separator();
   ImGui::Text("Mesh submissions: %u", m_FrameStats.MeshSubmissionCount);
   ImGui::Text("Triangles: %u", m_FrameStats.TriangleCount);
@@ -880,8 +881,12 @@ void VulkanRendererBackend::Draw() {
       VkInit::CommandBufferBeginInfo(
           VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
-  m_DrawExtent.width = m_DrawImage.ImageExtent.width;
-  m_DrawExtent.height = m_DrawImage.ImageExtent.height;
+  const uint32_t FullWidth = m_DrawImage.ImageExtent.width;
+  const uint32_t FullHeight = m_DrawImage.ImageExtent.height;
+  m_DrawExtent.width =
+      std::max(1u, static_cast<uint32_t>(std::floor(FullWidth * m_RenderScale)));
+  m_DrawExtent.height =
+      std::max(1u, static_cast<uint32_t>(std::floor(FullHeight * m_RenderScale)));
   m_FrameStats.DrawExtent = {m_DrawExtent.width, m_DrawExtent.height};
   m_FrameStats.MeshSubmissionCount = 0;
   m_FrameStats.TriangleCount = 0;

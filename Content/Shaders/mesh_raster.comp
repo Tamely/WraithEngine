@@ -10,6 +10,13 @@ struct ProjectedVertex {
 
 layout(rgba16f, set = 0, binding = 0) uniform image2D colorImage;
 layout(r32ui, set = 0, binding = 1) uniform uimage2D depthImage;
+layout(std140, set = 0, binding = 2) uniform CameraFrame {
+    mat4 view;
+    mat4 projection;
+    mat4 viewProjection;
+    vec4 cameraPosition;
+    vec4 viewportSize;
+} cameraFrame;
 layout(std430, set = 1, binding = 1) readonly buffer IndexBuffer {
     uint indices[];
 };
@@ -59,7 +66,7 @@ void main() {
         return;
     }
 
-    vec2 viewport = vec2(imageSize(colorImage));
+    vec2 viewport = cameraFrame.viewportSize.xy;
     vec2 p0 = v0.pixelAndDepth.xy;
     vec2 p1 = v1.pixelAndDepth.xy;
     vec2 p2 = v2.pixelAndDepth.xy;
