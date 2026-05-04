@@ -1,11 +1,15 @@
 set(ENGINE_SOURCES
   Assets/MeshAsset.cpp
   Core/Application.cpp
+  Core/GlfwEditorInputSource.cpp
   Core/Layer.cpp
   Core/LayerStack.cpp
   Core/Window.cpp
+  Core/WindowInputPlatform.cpp
   Core/Log.cpp
   Core/VulkanLoader.cpp
+  Remote/AxiomSessionEndpoint.cpp
+  Session/BufferedEditorInputSource.cpp
   Session/EditorMessageBus.cpp
   Session/EditorSession.cpp
   Renderer/Camera.cpp

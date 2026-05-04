@@ -26,7 +26,6 @@
 #include <utility>
 
 #include "Core/Log.h"
-#include "Core/Window.h"
 
 Axiom::VulkanRendererBackend *g_LoadedEngine = nullptr;
 
@@ -73,14 +72,15 @@ VulkanRendererBackend &VulkanRendererBackend::Get() { return *g_LoadedEngine; }
 VulkanRendererBackend *VulkanRendererBackend::TryGet() { return g_LoadedEngine; }
 
 void VulkanRendererBackend::Init(const RendererCreateInfo &CreateInfo) {
-  assert(CreateInfo.TargetWindow != nullptr);
+  assert(CreateInfo.TargetSurface != nullptr);
   assert(g_LoadedEngine == nullptr);
   g_LoadedEngine = this;
 
-  m_Window = CreateInfo.TargetWindow->GetNativeHandle();
+  m_Surface = CreateInfo.TargetSurface;
+  m_FrameOutput = CreateInfo.FrameOutput;
   m_WindowExtent = {CreateInfo.Width, CreateInfo.Height};
 
-  m_Context.Init(m_Window);
+  m_Context.Init(m_Surface->GetGlfwWindow());
   m_Device.Init(m_Context);
 
   VkPhysicalDeviceProperties DeviceProperties{};
@@ -101,28 +101,36 @@ void VulkanRendererBackend::Init(const RendererCreateInfo &CreateInfo) {
 
   InitSwapchain();
   InitHzbResources();
+  InitViewportReadbackBuffers();
   InitDescriptors();
   InitTextureResources();
   InitPipelines();
   InitMeshFrameResources();
-  m_ImGuiRenderer.Init({.Window = m_Window,
-                        .Instance = m_Context.Instance,
-                        .PhysicalDevice = m_Device.PhysicalDevice,
-                        .Device = m_Device.Device,
-                        .Queue = m_Device.GraphicsQueue,
-                        .QueueFamily = m_Device.GraphicsQueueFamily,
-                        .SwapchainImageFormat = m_Swapchain.ImageFormat,
-                        .DeletionQueue = &m_MainDeletionQueue});
+  if (m_Surface->GetKind() == RenderSurfaceKind::Window) {
+    m_ImGuiRenderer.Init({.Window = m_Surface->GetGlfwWindow(),
+                          .Instance = m_Context.Instance,
+                          .PhysicalDevice = m_Device.PhysicalDevice,
+                          .Device = m_Device.Device,
+                          .Queue = m_Device.GraphicsQueue,
+                          .QueueFamily = m_Device.GraphicsQueueFamily,
+                          .SwapchainImageFormat = m_Swapchain.ImageFormat,
+                          .DeletionQueue = &m_MainDeletionQueue});
+  }
 
-  m_IsInitialized = m_Window != nullptr;
+  m_IsInitialized = m_Surface != nullptr;
 
   A_CORE_INFO("Vulkan Engine set up was successful: {0}",
               m_IsInitialized ? "True" : "False");
 }
 
 void VulkanRendererBackend::InitSwapchain() {
-  m_Swapchain.Init(m_Context, m_Device, m_WindowExtent.width,
-                   m_WindowExtent.height);
+  if (m_Surface->GetKind() == RenderSurfaceKind::Window) {
+    m_Swapchain.Init(m_Context, m_Device, m_WindowExtent.width,
+                     m_WindowExtent.height);
+  } else {
+    m_Swapchain.Extent = m_WindowExtent;
+    m_Swapchain.ImageFormat = VK_FORMAT_B8G8R8A8_UNORM;
+  }
 
   VkExtent3D DrawImageExtent = {m_WindowExtent.width, m_WindowExtent.height, 1};
 
@@ -201,6 +209,29 @@ void VulkanRendererBackend::InitSwapchain() {
     vkDestroyImageView(m_Device.Device, m_DrawImage.ImageView, VK_NULL_HANDLE);
     vmaDestroyImage(m_Device.Allocator, m_DrawImage.Image,
                     m_DrawImage.Allocation);
+  });
+}
+
+void VulkanRendererBackend::InitViewportReadbackBuffers() {
+  if (m_Surface->GetKind() != RenderSurfaceKind::Offscreen ||
+      m_FrameOutput == nullptr) {
+    return;
+  }
+
+  m_ViewportReadbackBufferSize =
+      static_cast<VkDeviceSize>(m_WindowExtent.width) * m_WindowExtent.height * 8u;
+  for (AllocatedBuffer &Buffer : m_ViewportReadbackBuffers) {
+    Buffer = VkBufferUtil::CreateBuffer(
+        m_Device.Allocator, static_cast<size_t>(m_ViewportReadbackBufferSize),
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_CPU_ONLY,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
+            VMA_ALLOCATION_CREATE_MAPPED_BIT);
+  }
+
+  m_MainDeletionQueue.PushFunction([this]() {
+    for (AllocatedBuffer &Buffer : m_ViewportReadbackBuffers) {
+      VkBufferUtil::DestroyBuffer(m_Device.Allocator, Buffer);
+    }
   });
 }
 
@@ -1102,8 +1133,12 @@ void VulkanRendererBackend::Draw() {
 
   CollectFrameStats(MeshFrame);
 
-  const uint32_t SwapchainImageIndex =
-      m_Swapchain.AcquireNextImage(m_Device.Device, CurrentFrame.SwapchainSemaphore);
+  const bool PresentsToWindow = m_Surface->GetKind() == RenderSurfaceKind::Window;
+  uint32_t SwapchainImageIndex = 0;
+  if (PresentsToWindow) {
+    SwapchainImageIndex = m_Swapchain.AcquireNextImage(
+        m_Device.Device, CurrentFrame.SwapchainSemaphore);
+  }
 
   VkCommandBuffer CommandBuffer = CurrentFrame.MainCommandBuffer;
   VK_CHECK(vkResetCommandBuffer(CommandBuffer, 0));
@@ -1155,47 +1190,54 @@ void VulkanRendererBackend::Draw() {
   VkUtil::TransitionImage(CommandBuffer, m_DrawImage.Image,
                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-  VkUtil::TransitionImage(CommandBuffer, m_Swapchain.Images[SwapchainImageIndex],
-                          VK_IMAGE_LAYOUT_UNDEFINED,
-                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+  if (PresentsToWindow) {
+    VkUtil::TransitionImage(CommandBuffer, m_Swapchain.Images[SwapchainImageIndex],
+                            VK_IMAGE_LAYOUT_UNDEFINED,
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-  VkUtil::CopyImageToImage(CommandBuffer, m_DrawImage.Image,
-                           m_Swapchain.Images[SwapchainImageIndex], m_DrawExtent,
-                           m_Swapchain.Extent);
+    VkUtil::CopyImageToImage(CommandBuffer, m_DrawImage.Image,
+                             m_Swapchain.Images[SwapchainImageIndex], m_DrawExtent,
+                             m_Swapchain.Extent);
 
-  VkUtil::TransitionImage(CommandBuffer, m_Swapchain.Images[SwapchainImageIndex],
-                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    VkUtil::TransitionImage(CommandBuffer, m_Swapchain.Images[SwapchainImageIndex],
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-  m_ImGuiRenderer.RecordDrawData(CommandBuffer, m_Swapchain.Extent,
-                                 m_Swapchain.ImageViews[SwapchainImageIndex]);
+    m_ImGuiRenderer.RecordDrawData(CommandBuffer, m_Swapchain.Extent,
+                                   m_Swapchain.ImageViews[SwapchainImageIndex]);
 
-  VkUtil::TransitionImage(CommandBuffer, m_Swapchain.Images[SwapchainImageIndex],
-                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                          VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    VkUtil::TransitionImage(CommandBuffer, m_Swapchain.Images[SwapchainImageIndex],
+                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+  } else {
+    CaptureOffscreenFrame(CommandBuffer, CurrentFrame);
+  }
 
   VK_CHECK(vkEndCommandBuffer(CommandBuffer));
 
   VkCommandBufferSubmitInfo CommandBufferSubmitInfo =
       VkInit::CommandBufferSubmitInfo(CommandBuffer);
+  VkSemaphoreSubmitInfo RenderSemaphoreSubmitInfo = VkInit::SemaphoreSubmitInfo(
+      VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, CurrentFrame.RenderSemaphore);
+  VkSemaphoreSubmitInfo SwapchainSemaphoreSubmitInfo = VkInit::SemaphoreSubmitInfo(
+      VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR,
+      CurrentFrame.SwapchainSemaphore);
 
-  VkSemaphoreSubmitInfo SwapchainSemaphoreSubmitInfo =
-      VkInit::SemaphoreSubmitInfo(
-          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR,
-          CurrentFrame.SwapchainSemaphore);
-  VkSemaphoreSubmitInfo RenderSemaphoreSubmitInfo =
-      VkInit::SemaphoreSubmitInfo(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                                  CurrentFrame.RenderSemaphore);
-
-  VkSubmitInfo2 Submit =
-      VkInit::SubmitInfo(&CommandBufferSubmitInfo, &RenderSemaphoreSubmitInfo,
-                         &SwapchainSemaphoreSubmitInfo);
+  VkSubmitInfo2 Submit = VkInit::SubmitInfo(
+      &CommandBufferSubmitInfo, &RenderSemaphoreSubmitInfo,
+      PresentsToWindow ? &SwapchainSemaphoreSubmitInfo : nullptr);
 
   VK_CHECK(vkQueueSubmit2(m_Device.GraphicsQueue, 1, &Submit,
                           CurrentFrame.RenderFence));
 
-  m_Swapchain.Present(m_Device.GraphicsQueue, SwapchainImageIndex,
-                      CurrentFrame.RenderSemaphore);
+  if (PresentsToWindow) {
+    m_Swapchain.Present(m_Device.GraphicsQueue, SwapchainImageIndex,
+                        CurrentFrame.RenderSemaphore);
+  } else {
+    VK_CHECK(vkWaitForFences(m_Device.Device, 1, &CurrentFrame.RenderFence, VK_TRUE,
+                             1000000000));
+    PublishOffscreenFrame(CurrentFrame);
+  }
 
   m_FrameNumber++;
 }
@@ -1212,7 +1254,7 @@ void VulkanRendererBackend::EnqueueDeferredDestroy(
 }
 
 void VulkanRendererBackend::BeginFrame() {
-  m_StopRendering = glfwGetWindowAttrib(m_Window, GLFW_ICONIFIED);
+  m_StopRendering = m_Surface->IsMinimized();
   m_RenderFallbackBackground = false;
   m_ActiveScene = nullptr;
   if (m_StopRendering) {
@@ -1254,5 +1296,69 @@ void VulkanRendererBackend::EndFrame() {
   }
 
   Draw();
+}
+
+void VulkanRendererBackend::CaptureOffscreenFrame(VkCommandBuffer CommandBuffer,
+                                                  FrameData &Frame) {
+  if (m_FrameOutput == nullptr || m_ViewportReadbackBufferSize == 0) {
+    return;
+  }
+
+  AllocatedBuffer &ReadbackBuffer =
+      m_ViewportReadbackBuffers[m_FrameNumber % FRAME_OVERLAP];
+  VkBufferImageCopy CopyRegion{
+      .bufferOffset = 0,
+      .bufferRowLength = 0,
+      .bufferImageHeight = 0,
+      .imageSubresource =
+          {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+           .mipLevel = 0,
+           .baseArrayLayer = 0,
+           .layerCount = 1},
+      .imageOffset = {0, 0, 0},
+      .imageExtent = m_DrawImage.ImageExtent};
+  vkCmdCopyImageToBuffer(CommandBuffer, m_DrawImage.Image,
+                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                         ReadbackBuffer.Buffer, 1, &CopyRegion);
+
+  VkBufferMemoryBarrier2 ReadbackBarrier{
+      .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+      .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+      .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+      .dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
+      .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT,
+      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .buffer = ReadbackBuffer.Buffer,
+      .offset = 0,
+      .size = ReadbackBuffer.Size};
+  VkDependencyInfo ReadbackDependencyInfo{
+      .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+      .bufferMemoryBarrierCount = 1,
+      .pBufferMemoryBarriers = &ReadbackBarrier};
+  vkCmdPipelineBarrier2(CommandBuffer, &ReadbackDependencyInfo);
+  (void)Frame;
+}
+
+void VulkanRendererBackend::PublishOffscreenFrame(FrameData &Frame) {
+  (void)Frame;
+  if (m_FrameOutput == nullptr || m_ViewportReadbackBufferSize == 0) {
+    return;
+  }
+
+  const AllocatedBuffer &ReadbackBuffer =
+      m_ViewportReadbackBuffers[m_FrameNumber % FRAME_OVERLAP];
+  const auto *Bytes = static_cast<const std::byte *>(ReadbackBuffer.Info.pMappedData);
+  if (Bytes == nullptr) {
+    return;
+  }
+
+  m_FrameOutput->OnViewportFrame({
+      .FrameIndex = m_FrameNumber,
+      .Width = m_DrawExtent.width,
+      .Height = m_DrawExtent.height,
+      .Format = ViewportFrameFormat::R16G16B16A16Float,
+      .Pixels = std::span(Bytes, static_cast<size_t>(ReadbackBuffer.Size)),
+  });
 }
 } // namespace Axiom

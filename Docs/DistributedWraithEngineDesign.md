@@ -1,4 +1,4 @@
-# Distributed WraithEngine Design
+# Distributed Wraith Engine Design
 
 ## Document Status
 - Status: Draft
@@ -67,7 +67,7 @@ This implies the engine is not just a renderer or editor. It becomes a platform 
 ## 4. Current State of the Repository
 At the time of writing, the repository contains:
 
-- `Axiom`: the main engine library
+- `Axiom`: the current runtime library name and the future remote/distributed subsystem brand
 - `Editor`: a native editor executable
 - `Tests`: basic test scaffolding
 - a Vulkan renderer backend
@@ -866,6 +866,12 @@ Progress update:
 - support camera control and basic input
 
 This is now the next major step. The local authoritative camera/input seam exists, so the next work should make that same session drive a headless/offscreen runtime and expose it through transport rather than only a local GLFW adapter.
+
+The first implementation step inside that phase is the `GLFW split`:
+
+- `Wraith Engine` remains the engine and runtime product name
+- `Axiom` names the remote/distributed subsystem and session endpoint path
+- GLFW should become a local adapter for input and presentation rather than the authority boundary for editor behavior
 
 ### Phase 2: Browser Editor Shell
 - build browser editor layout

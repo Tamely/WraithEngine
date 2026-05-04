@@ -25,14 +25,14 @@ void VulkanDevice::Init(VulkanContext &Context) {
   Features12.descriptorIndexing = true;
 
   vkb::PhysicalDeviceSelector Selector{Context.BootstrapInstance};
-  vkb::PhysicalDevice SelectedPhysicalDevice =
-      Selector.set_minimum_version(1, 3)
-          .set_required_features(RequiredFeatures)
-          .set_required_features_13(Features13)
-          .set_required_features_12(Features12)
-          .set_surface(Context.Surface)
-          .select()
-          .value();
+  Selector.set_minimum_version(1, 3)
+      .set_required_features(RequiredFeatures)
+      .set_required_features_13(Features13)
+      .set_required_features_12(Features12);
+  if (Context.Surface != VK_NULL_HANDLE) {
+    Selector.set_surface(Context.Surface);
+  }
+  vkb::PhysicalDevice SelectedPhysicalDevice = Selector.select().value();
 
   vkb::DeviceBuilder DeviceBuilder{SelectedPhysicalDevice};
   vkb::Device VkbDevice = DeviceBuilder.build().value();

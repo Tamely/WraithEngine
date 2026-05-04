@@ -9,6 +9,8 @@
 #include <cstdlib>
 
 namespace Axiom {
+RenderSurfaceKind Window::GetKind() const { return RenderSurfaceKind::Window; }
+
 Window::Window(const std::string &Title, uint32_t Width, uint32_t Height)
     : m_Title(Title), m_Width(Width), m_Height(Height) {
   glfwSetErrorCallback([](int Error, const char *Description) {
@@ -76,5 +78,9 @@ CursorMode Window::GetCursorMode() const {
 
 [[nodiscard]] bool Window::ShouldClose() const {
   return glfwWindowShouldClose(m_NativeHandle);
+}
+
+bool Window::IsMinimized() const {
+  return glfwGetWindowAttrib(m_NativeHandle, GLFW_ICONIFIED) == GLFW_TRUE;
 }
 } // namespace Axiom
