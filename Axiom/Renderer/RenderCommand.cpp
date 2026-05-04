@@ -8,7 +8,13 @@ void RenderCommand::BeginScene(RenderScene &Scene) {
   s_ActiveScene = &Scene;
 }
 
-void RenderCommand::Submit(const RenderSubmission &Submission) {
+void RenderCommand::SetCamera(Camera &Camera) {
+  if (s_ActiveScene) {
+    s_ActiveScene->ActiveCamera = &Camera;
+  }
+}
+
+void RenderCommand::Submit(const RenderMeshSubmission &Submission) {
   if (s_ActiveScene) {
     s_ActiveScene->Submissions.push_back(Submission);
   }

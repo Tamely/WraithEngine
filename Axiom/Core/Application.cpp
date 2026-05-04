@@ -17,6 +17,7 @@ Application::Application(const std::string &Title, const ApplicationArgs &Args)
 }
 
 Application::~Application() {
+  m_LayerStack.Clear();
   delete m_Renderer;
   delete m_Window;
 }
@@ -27,11 +28,12 @@ void Application::Run() {
   while (!m_Window->ShouldClose()) {
     m_Window->PollEvents();
 
+    m_Renderer->BeginFrame();
+
     for (Layer *Layer : m_LayerStack) {
       Layer->OnUpdate();
     }
 
-    m_Renderer->BeginFrame();
     m_Renderer->Render();
 
     for (Layer *Layer : m_LayerStack) {
@@ -42,4 +44,3 @@ void Application::Run() {
   }
 }
 } // namespace Axiom
-

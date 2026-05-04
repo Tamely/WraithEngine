@@ -4,6 +4,7 @@
 #include "Renderer/RenderScene.h"
 #include "Renderer/RenderTechnique.h"
 
+#include <filesystem>
 #include <memory>
 
 namespace Axiom {
@@ -11,6 +12,8 @@ class Renderer {
 public:
   Renderer() = default;
   ~Renderer();
+
+  static Renderer &Get();
 
   Renderer(const Renderer &) = delete;
   Renderer &operator=(const Renderer &) = delete;
@@ -20,12 +23,14 @@ public:
   void BeginFrame();
   void Render();
   void EndFrame();
+  MeshRef LoadMeshFromFile(const std::filesystem::path &Path);
 
 private:
+  static Renderer *s_Instance;
+
   std::unique_ptr<RendererBackend> m_Backend;
   std::unique_ptr<RenderTechnique> m_Technique;
   RenderScene m_Scene;
   bool m_IsInitialized{false};
 };
 } // namespace Axiom
-
