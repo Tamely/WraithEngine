@@ -11,7 +11,9 @@
 - Added engine-owned `EditorSession`, `EditorCommand`, `EditorEvent`, `SessionId`, and `SessionUserId` foundations in `Axiom`
 - The native editor now translates GLFW input into commands and renders from session-owned camera/scene state instead of mutating camera state directly in the layer
 - Added deterministic in-process command draining, authoritative event publication, and focused tests for camera/look state transitions and command rejection
-- This work establishes the command/event seam locally, but does not yet add headless rendering, frame capture, transport, browser integration, or collaborative scene editing
+- Restored the `GLFW split` and application/runtime seams after the `headless` merge so local windowed input remains an adapter rather than the editor authority boundary
+- `AxiomHeadless` now boots successfully in headless Vulkan mode, renders offscreen, and publishes viewport frames back through `AxiomSessionEndpoint`
+- This subphase establishes the runtime-mode, surface, and frame-output seams needed for remote viewport work, but does not yet add a browser client, WebRTC transport, or a full remote editor UI
 
 ## 1. Executive Summary
 WraithEngine will evolve from a single-process native editor into a distributed platform with one shared C++ engine runtime that supports two execution styles:
@@ -853,10 +855,12 @@ The design should define behavior for:
 
 Progress update:
 
-- partially completed via the `event-system` branch for editor authority foundations
+- completed for the current seam-restoration subphase
 - core session identity types and a local command/event seam now exist
 - native editor path still works as the first local adapter
-- rendering surface, capture, and transport interfaces are still pending
+- runtime modes, render surfaces, and endpoint-oriented frame output are now wired back together
+- `AxiomHeadless` is working as a command-driven headless runtime prototype
+- browser transport, encode/streaming, and a true remote editor client are still pending
 
 ### Phase 1: Remote Viewport Foundation
 - support headless or offscreen rendering
@@ -866,6 +870,14 @@ Progress update:
 - support camera control and basic input
 
 This is now the next major step. The local authoritative camera/input seam exists, so the next work should make that same session drive a headless/offscreen runtime and expose it through transport rather than only a local GLFW adapter.
+
+Subphase status update:
+
+- the seam-restoration slice is complete
+- headless startup now works again without requiring a presentation surface
+- the local editor still uses `WindowInputPlatform + GlfwEditorInputSource`
+- offscreen frame publication is routed through `AxiomSessionEndpoint` rather than being hard-wired only to renderer-local capture polling
+- the next slice should build a real client on top of that runtime instead of extending the raw NDJSON prototype indefinitely
 
 The first implementation step inside that phase is the `GLFW split`:
 
