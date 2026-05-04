@@ -2,10 +2,12 @@
 
 layout(location = 0) in vec4 inPosition;
 layout(location = 1) in vec4 inNormal;
+layout(location = 2) in vec2 inTexCoord;
 
 layout(location = 0) out vec3 outNormal;
+layout(location = 1) out vec2 outTexCoord;
 
-layout(std140, set = 0, binding = 2) uniform CameraFrame {
+layout(std140, set = 0, binding = 0) uniform CameraFrame {
     mat4 view;
     mat4 projection;
     mat4 viewProjection;
@@ -23,4 +25,5 @@ void main() {
     clipPosition.z = (clipPosition.z + clipPosition.w) * 0.5;
     gl_Position = clipPosition;
     outNormal = normalize(mat3(pushConstants.model) * inNormal.xyz);
+    outTexCoord = inTexCoord;
 }

@@ -103,6 +103,7 @@ Renderer::LoadMeshSceneFromFile(const std::filesystem::path &Path,
             : Options.DefaultRenderPath;
     Result.push_back(
         {.Mesh = Mesh,
+         .Material = Instance.Material,
          .Name = Instance.Name,
          .RenderPath = RenderPath,
          .Transform = Instance.Transform});
