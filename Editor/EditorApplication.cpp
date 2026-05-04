@@ -78,7 +78,7 @@ private:
       m_LastCursorY = CursorY;
 
       m_Camera.SetRotation(m_Camera.GetYawDegrees() + DeltaX * m_MouseSensitivity,
-                           m_Camera.GetPitchDegrees() - DeltaY * m_MouseSensitivity);
+                           m_Camera.GetPitchDegrees() + DeltaY * m_MouseSensitivity);
     }
 
     glm::vec3 HorizontalForward = m_Camera.GetForward();
@@ -100,10 +100,16 @@ private:
       Movement -= HorizontalForward;
     }
     if (Window.IsKeyPressed(GLFW_KEY_D)) {
-      Movement += HorizontalRight;
+      Movement -= HorizontalRight;
     }
     if (Window.IsKeyPressed(GLFW_KEY_A)) {
-      Movement -= HorizontalRight;
+      Movement += HorizontalRight;
+    }
+    if (Window.IsKeyPressed(GLFW_KEY_SPACE)) {
+      Movement -= glm::vec3(0.0f, 1.0f, 0.0f);
+    }
+    if (Window.IsKeyPressed(GLFW_KEY_LEFT_SHIFT)) {
+      Movement += glm::vec3(0.0f, 1.0f, 0.0f);
     }
 
     if (glm::dot(Movement, Movement) > 0.0f) {
