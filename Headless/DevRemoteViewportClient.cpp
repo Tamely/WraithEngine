@@ -14,10 +14,19 @@
 #include "HeadlessSessionHost.h"
 
 namespace {
-class HeadlessEndpointSubscriber final
+class DevRemoteViewportSubscriber final
     : public Axiom::ISessionTransportSubscriber {
 public:
-  explicit HeadlessEndpointSubscriber(std::ostream &Output) : m_Output(Output) {}
+  explicit DevRemoteViewportSubscriber(std::ostream &Output)
+      : m_Output(Output) {}
+
+  void OnSessionTransportConnected() override {
+    m_Output << "{\"type\":\"connected\"}" << std::endl;
+  }
+
+  void OnSessionTransportDisconnected() override {
+    m_Output << "{\"type\":\"disconnected\"}" << std::endl;
+  }
 
   void OnSessionTransportEditorEvent(
       const Axiom::PublishedEditorEvent &Event) override {
@@ -90,13 +99,14 @@ int main(int argc, char **argv) {
   }
   std::filesystem::create_directories(Options->OutputDirectory, FileSystemError);
   if (FileSystemError) {
-    std::cerr << Axiom::SerializeError("Failed to create output directory.") << std::endl;
+    std::cerr << Axiom::SerializeError("Failed to create output directory.")
+              << std::endl;
     return 1;
   }
 
-  Axiom::HeadlessSessionHost App({argv, argc}, Options->Width, Options->Height);
-  HeadlessEndpointSubscriber Subscriber(std::cout);
-  App.GetTransport().Connect(&Subscriber);
+  Axiom::HeadlessSessionHost Host({argv, argc}, Options->Width, Options->Height);
+  DevRemoteViewportSubscriber Subscriber(std::cout);
+  Host.GetTransport().Connect(&Subscriber);
 
   std::cout << Axiom::SerializeReady(Options->Width, Options->Height)
             << std::endl;
@@ -123,7 +133,7 @@ int main(int argc, char **argv) {
                   << std::endl;
         break;
       }
-      if (!App.LoadStartupSceneIntoSession()) {
+      if (!Host.LoadStartupSceneIntoSession()) {
         std::cout << Axiom::SerializeError(
                          "Failed to load the startup scene.")
                   << std::endl;
@@ -132,12 +142,12 @@ int main(int argc, char **argv) {
       SceneLoaded = true;
       break;
     case Axiom::HeadlessCommandType::SetViewMode:
-      App.SetRemoteViewMode(Command->ViewMode);
+      Host.SetRemoteViewMode(Command->ViewMode);
       break;
     case Axiom::HeadlessCommandType::SetLookActive:
     case Axiom::HeadlessCommandType::UpdateViewportCamera:
-      App.SubmitRemoteCommand(Command->EditorPayload);
-      App.Step();
+      Host.SubmitRemoteCommand(Command->EditorPayload);
+      Host.Step();
       Subscriber.DiscardLatestFrame();
       break;
     case Axiom::HeadlessCommandType::RenderFrame: {
@@ -147,10 +157,11 @@ int main(int argc, char **argv) {
                   << std::endl;
         break;
       }
-      App.Step();
+      Host.Step();
       const auto Frame = Subscriber.TakeLatestFrame();
       if (!Frame.has_value()) {
-        std::cout << Axiom::SerializeError("Renderer did not produce a frame.")
+        std::cout << Axiom::SerializeError(
+                         "Transport client did not receive a frame.")
                   << std::endl;
         break;
       }
@@ -167,13 +178,14 @@ int main(int argc, char **argv) {
       break;
     }
     case Axiom::HeadlessCommandType::Quit:
-      App.RequestClose();
+      Host.RequestClose();
+      Host.GetTransport().Disconnect(&Subscriber);
       std::cout << Axiom::SerializeShutdown() << std::endl;
       return 0;
     }
   }
 
-  App.GetTransport().Disconnect(&Subscriber);
+  Host.GetTransport().Disconnect(&Subscriber);
   std::cout << Axiom::SerializeShutdown() << std::endl;
   return 0;
 }

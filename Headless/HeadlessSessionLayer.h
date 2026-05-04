@@ -2,6 +2,7 @@
 
 #include <Core/Layer.h>
 
+#include <Remote/SessionTransport.h>
 #include <Session/EditorSession.h>
 
 namespace Axiom {
@@ -15,6 +16,8 @@ public:
 
   bool LoadStartupSceneIntoSession();
   void Submit(const EditorCommand &Command);
+  void SubmitToTransport(ISessionTransport &Transport,
+                         const EditorCommand &Command);
   EditorSession &GetSession() { return m_Session; }
 
 private:
