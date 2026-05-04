@@ -31,9 +31,17 @@ struct CameraFrameUniform {
   glm::vec4 ViewportSize{0.0f};
 };
 
-struct MeshPushConstants {
+struct MeshProjectPushConstants {
   glm::mat4 Model{1.0f};
-  glm::vec4 TriangleCount{0.0f};
+  glm::uvec4 Counts{0u};
+};
+
+struct MeshRasterPushConstants {
+  glm::uvec4 Counts{0u};
+};
+
+struct MeshGraphicsPushConstants {
+  glm::mat4 Model{1.0f};
 };
 
 class VulkanMesh;
@@ -48,6 +56,8 @@ public:
   std::shared_ptr<Mesh> CreateMesh(const MeshData &Mesh) override;
   void RenderSceneMeshes(RenderScene &Scene) override;
   void RenderFallbackBackground(RenderScene &Scene) override;
+  RendererFrameStats &AccessFrameStats() override;
+  const RendererFrameStats &GetFrameStats() const override;
   void RenderImGui() override;
   void EndFrame() override;
 
@@ -55,10 +65,13 @@ public:
 
 private:
   static constexpr uint32_t MaxMeshSubmissionsPerFrame = 64;
+  static constexpr uint32_t TimestampQueryCount = 4;
 
-  struct MeshFrameResources {
-    AllocatedBuffer CameraBuffer;
-    std::array<VkDescriptorSet, MaxMeshSubmissionsPerFrame> DescriptorSets{};
+struct MeshFrameResources {
+  AllocatedBuffer CameraBuffer;
+  VkDescriptorSet FrameDescriptorSet{VK_NULL_HANDLE};
+  VkQueryPool TimestampQueryPool{VK_NULL_HANDLE};
+  bool HasValidTimestamps{false};
   };
 
   void InitSwapchain();
@@ -69,6 +82,8 @@ private:
   void InitMeshFrameResources();
   void InitImGui();
 
+  void CollectFrameStats(MeshFrameResources &Frame);
+  void DrawStatsPanel();
   void DrawBackground(VkCommandBuffer CommandBuffer);
   void DrawMeshes(VkCommandBuffer CommandBuffer, RenderScene &Scene);
   void DrawImGui(VkCommandBuffer Command, VkImageView TargetImageView);
@@ -98,22 +113,35 @@ private:
   VulkanCommandContext m_CommandContext;
 
   DescriptorAllocator m_GlobalDescriptorAllocator;
-  VkDescriptorSet m_DrawImageDescriptors{VK_NULL_HANDLE};
+  VkDescriptorSet m_DrawImageDescriptorSet{VK_NULL_HANDLE};
   VkDescriptorSetLayout m_DrawImageDescriptorLayout{VK_NULL_HANDLE};
+  VkDescriptorSetLayout m_MeshFrameDescriptorLayout{VK_NULL_HANDLE};
   VkDescriptorSetLayout m_MeshDescriptorLayout{VK_NULL_HANDLE};
+  VkSampler m_LinearDepthSampler{VK_NULL_HANDLE};
 
   VkPipeline m_GradientPipeline{VK_NULL_HANDLE};
   VkPipelineLayout m_GradientPipelineLayout{VK_NULL_HANDLE};
+  VkPipeline m_MeshProjectPipeline{VK_NULL_HANDLE};
+  VkPipelineLayout m_MeshProjectPipelineLayout{VK_NULL_HANDLE};
   VkPipeline m_MeshPipeline{VK_NULL_HANDLE};
   VkPipelineLayout m_MeshPipelineLayout{VK_NULL_HANDLE};
+  VkPipeline m_MeshGraphicsPipeline{VK_NULL_HANDLE};
+  VkPipelineLayout m_MeshGraphicsPipelineLayout{VK_NULL_HANDLE};
+  VkPipeline m_MeshDepthPipeline{VK_NULL_HANDLE};
+  VkPipelineLayout m_MeshDepthPipelineLayout{VK_NULL_HANDLE};
 
   DeletionQueue m_MainDeletionQueue;
 
   AllocatedImage m_DrawImage;
   AllocatedImage m_DepthImage;
+  AllocatedImage m_RasterDepthImage;
   VkExtent2D m_DrawExtent{};
 
   std::array<MeshFrameResources, FRAME_OVERLAP> m_MeshFrames{};
   RenderScene *m_ActiveScene{nullptr};
+  RendererFrameStats m_FrameStats{};
+  float m_TimestampPeriod{0.0f};
+  float m_RenderScale{0.5f};
+  bool m_HasWarnedMeshSubmissionOverflow{false};
 };
 } // namespace Axiom

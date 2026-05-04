@@ -6,9 +6,16 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace Axiom {
+enum class MeshRenderPath {
+  Graphics,
+  Compute,
+};
+
 struct MeshVertex {
   glm::vec4 Position{0.0f, 0.0f, 0.0f, 1.0f};
   glm::vec4 Normal{0.0f, 0.0f, 1.0f, 0.0f};
@@ -23,11 +30,17 @@ struct MeshData {
 
 struct MeshSceneData {
   struct MeshInstanceData {
+    std::string Name;
     MeshData Mesh;
     glm::mat4 Transform{1.0f};
   };
 
   std::vector<MeshInstanceData> Instances;
+};
+
+struct MeshSceneLoadOptions {
+  MeshRenderPath DefaultRenderPath{MeshRenderPath::Graphics};
+  std::unordered_set<std::string> ComputeMeshNames;
 };
 
 class Mesh {
@@ -39,6 +52,8 @@ using MeshRef = std::shared_ptr<Mesh>;
 
 struct RenderMeshSubmission {
   MeshRef Mesh;
+  std::string Name;
+  MeshRenderPath RenderPath{MeshRenderPath::Graphics};
   glm::mat4 Transform{1.0f};
 };
 } // namespace Axiom

@@ -7,6 +7,8 @@
 
 #include "Core/Log.h"
 
+#include <chrono>
+
 namespace Axiom {
 Renderer *Renderer::s_Instance = nullptr;
 
@@ -52,7 +54,13 @@ void Renderer::BeginFrame() {
   RenderCommand::BeginScene(m_Scene);
 }
 
-void Renderer::Render() { m_Technique->Render(m_Scene); }
+void Renderer::Render() {
+  const auto StartTime = std::chrono::steady_clock::now();
+  m_Technique->Render(m_Scene);
+  const auto EndTime = std::chrono::steady_clock::now();
+  UpdateCpuRenderTime(
+      std::chrono::duration<float, std::milli>(EndTime - StartTime).count());
+}
 
 void Renderer::EndFrame() {
   RenderCommand::EndScene();
@@ -60,8 +68,21 @@ void Renderer::EndFrame() {
   m_Backend->EndFrame();
 }
 
+void Renderer::SetCpuFrameTime(float CpuFrameMs) {
+  m_Backend->AccessFrameStats().CpuFrameMs = CpuFrameMs;
+}
+
+const RendererFrameStats &Renderer::GetFrameStats() const {
+  return m_Backend->GetFrameStats();
+}
+
+void Renderer::UpdateCpuRenderTime(float CpuRenderMs) {
+  m_Backend->AccessFrameStats().CpuRenderMs = CpuRenderMs;
+}
+
 std::vector<RenderMeshSubmission>
-Renderer::LoadMeshSceneFromFile(const std::filesystem::path &Path) {
+Renderer::LoadMeshSceneFromFile(const std::filesystem::path &Path,
+                                const MeshSceneLoadOptions &Options) {
   auto SceneData = Assets::LoadBasicMeshAsset(Path);
   if (!SceneData.has_value()) {
     A_CORE_ERROR("Failed to load mesh asset scene: {0}", Path.string());
@@ -76,7 +97,15 @@ Renderer::LoadMeshSceneFromFile(const std::filesystem::path &Path) {
       continue;
     }
 
-    Result.push_back({Mesh, Instance.Transform});
+    const MeshRenderPath RenderPath =
+        Options.ComputeMeshNames.contains(Instance.Name)
+            ? MeshRenderPath::Compute
+            : Options.DefaultRenderPath;
+    Result.push_back(
+        {.Mesh = Mesh,
+         .Name = Instance.Name,
+         .RenderPath = RenderPath,
+         .Transform = Instance.Transform});
   }
 
   return Result;

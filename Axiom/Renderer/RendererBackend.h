@@ -2,8 +2,11 @@
 
 #include "Renderer/Mesh.h"
 
+#include <glm/vec2.hpp>
+
 #include <cstdint>
 #include <memory>
+#include <string>
 
 namespace Axiom {
 class Window;
@@ -23,6 +26,16 @@ struct RenderFrameInfo {
   uint64_t FrameIndex{0};
 };
 
+struct RendererFrameStats {
+  float CpuFrameMs{0.0f};
+  float CpuRenderMs{0.0f};
+  float GpuBackgroundMs{0.0f};
+  float GpuMeshMs{0.0f};
+  uint32_t MeshSubmissionCount{0};
+  uint32_t TriangleCount{0};
+  glm::uvec2 DrawExtent{0u, 0u};
+};
+
 class RendererBackend {
 public:
   virtual ~RendererBackend() = default;
@@ -33,6 +46,8 @@ public:
   virtual std::shared_ptr<Mesh> CreateMesh(const MeshData &Mesh) = 0;
   virtual void RenderSceneMeshes(RenderScene &Scene) = 0;
   virtual void RenderFallbackBackground(RenderScene &Scene) = 0;
+  virtual RendererFrameStats &AccessFrameStats() = 0;
+  virtual const RendererFrameStats &GetFrameStats() const = 0;
   virtual void RenderImGui() = 0;
   virtual void EndFrame() = 0;
 };

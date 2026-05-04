@@ -13,6 +13,23 @@
 
 namespace Axiom::Assets {
 namespace {
+std::string ResolveNodeMeshName(const fastgltf::Node &Node,
+                                const fastgltf::Mesh &Mesh, size_t PrimitiveIndex) {
+  if (!Node.name.empty()) {
+    return std::string(Node.name);
+  }
+
+  if (!Mesh.name.empty()) {
+    if (Mesh.primitives.size() == 1) {
+      return std::string(Mesh.name);
+    }
+
+    return std::string(Mesh.name) + "_primitive_" + std::to_string(PrimitiveIndex);
+  }
+
+  return "mesh_" + std::to_string(PrimitiveIndex);
+}
+
 glm::mat4 TransformFromNode(const fastgltf::Node &Node) {
   if (const auto *Transform = std::get_if<fastgltf::Node::TransformMatrix>(&Node.transform)) {
     glm::mat4 Matrix{1.0f};
@@ -148,7 +165,9 @@ std::optional<MeshSceneData> LoadBasicMeshAsset(const std::filesystem::path &Pat
     }
 
     const auto &Mesh = Asset->meshes[*Node.meshIndex];
-    for (const auto &Primitive : Mesh.primitives) {
+    for (size_t PrimitiveIndex = 0; PrimitiveIndex < Mesh.primitives.size();
+         ++PrimitiveIndex) {
+      const auto &Primitive = Mesh.primitives[PrimitiveIndex];
       if (Primitive.type != fastgltf::PrimitiveType::Triangles) {
         A_CORE_WARN("Skipping non-triangle primitive in {0}", Path.string());
         continue;
@@ -162,7 +181,9 @@ std::optional<MeshSceneData> LoadBasicMeshAsset(const std::filesystem::path &Pat
       }
 
       SceneData.Instances.push_back(
-          {.Mesh = std::move(*MeshData), .Transform = TransformFromNode(Node)});
+          {.Name = ResolveNodeMeshName(Node, Mesh, PrimitiveIndex),
+           .Mesh = std::move(*MeshData),
+           .Transform = TransformFromNode(Node)});
     }
   }
 
