@@ -67,7 +67,7 @@ public:
 };
 
 class RecordingEndpointSubscriber final
-    : public Axiom::IAxiomSessionEndpointSubscriber {
+    : public Axiom::ISessionTransportSubscriber {
 public:
   struct FrameRecord {
     uint64_t FrameIndex{0};
@@ -77,11 +77,17 @@ public:
         Axiom::ViewportFrameFormat::R16G16B16A16Float};
   };
 
-  void OnAxiomEditorEvent(const Axiom::PublishedEditorEvent &Event) override {
+  void OnSessionTransportConnected() override { ++ConnectedCount; }
+
+  void OnSessionTransportDisconnected() override { ++DisconnectedCount; }
+
+  void OnSessionTransportEditorEvent(
+      const Axiom::PublishedEditorEvent &Event) override {
     Events.push_back(Event);
   }
 
-  void OnAxiomViewportFrame(const Axiom::ViewportFrame &Frame) override {
+  void OnSessionTransportViewportFrame(
+      const Axiom::ViewportFrame &Frame) override {
     Frames.push_back({.FrameIndex = Frame.FrameIndex,
                       .Width = Frame.Width,
                       .Height = Frame.Height,
@@ -89,6 +95,8 @@ public:
     LastFrameBytes.assign(Frame.Pixels.begin(), Frame.Pixels.end());
   }
 
+  size_t ConnectedCount{0};
+  size_t DisconnectedCount{0};
   std::vector<Axiom::PublishedEditorEvent> Events;
   std::vector<FrameRecord> Frames;
   std::vector<std::byte> LastFrameBytes;
@@ -368,7 +376,9 @@ TEST(RemoteViewportTests, AxiomEndpointForwardsEventsAndFrames) {
   Axiom::EditorSession Session(Axiom::SessionId{1});
   Axiom::AxiomSessionEndpoint Endpoint(Session);
   RecordingEndpointSubscriber Subscriber;
-  Endpoint.Subscribe(&Subscriber);
+  Endpoint.Connect(&Subscriber);
+
+  EXPECT_EQ(Subscriber.ConnectedCount, 1u);
 
   Endpoint.Submit(MakeContext(),
                   {.Payload = Axiom::SetLookActiveCommand{
@@ -395,5 +405,8 @@ TEST(RemoteViewportTests, AxiomEndpointForwardsEventsAndFrames) {
   EXPECT_EQ(Subscriber.Frames.front().FrameIndex, 99u);
   EXPECT_EQ(Subscriber.LastFrameBytes.size(), Bytes.size());
   EXPECT_EQ(Subscriber.LastFrameBytes[0], Bytes[0]);
+
+  Endpoint.Disconnect(&Subscriber);
+  EXPECT_EQ(Subscriber.DisconnectedCount, 1u);
 }
 

@@ -19,15 +19,17 @@
 
 namespace {
 class HeadlessEndpointSubscriber final
-    : public Axiom::IAxiomSessionEndpointSubscriber {
+    : public Axiom::ISessionTransportSubscriber {
 public:
   explicit HeadlessEndpointSubscriber(std::ostream &Output) : m_Output(Output) {}
 
-  void OnAxiomEditorEvent(const Axiom::PublishedEditorEvent &Event) override {
+  void OnSessionTransportEditorEvent(
+      const Axiom::PublishedEditorEvent &Event) override {
     m_Output << Axiom::SerializeEvent(Event) << std::endl;
   }
 
-  void OnAxiomViewportFrame(const Axiom::ViewportFrame &Frame) override {
+  void OnSessionTransportViewportFrame(
+      const Axiom::ViewportFrame &Frame) override {
     m_LastFrame = ConvertFrame(Frame);
   }
 
@@ -123,7 +125,7 @@ int main(int argc, char **argv) {
   HeadlessApplication App({argv, argc}, Options->Width, Options->Height);
   auto &Layer = App.GetHeadlessLayer();
   HeadlessEndpointSubscriber Subscriber(std::cout);
-  App.GetEndpoint().Subscribe(&Subscriber);
+  App.GetEndpoint().Connect(&Subscriber);
 
   std::cout << Axiom::SerializeReady(Options->Width, Options->Height)
             << std::endl;
@@ -197,6 +199,7 @@ int main(int argc, char **argv) {
     }
   }
 
+  App.GetEndpoint().Disconnect(&Subscriber);
   std::cout << Axiom::SerializeShutdown() << std::endl;
   return 0;
 }

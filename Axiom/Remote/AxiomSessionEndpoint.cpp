@@ -17,20 +17,7 @@ void AxiomSessionEndpoint::Submit(const CommandContext &Context,
   m_Session.Submit(Context, Command);
 }
 
-void AxiomSessionEndpoint::OnEditorEvent(const PublishedEditorEvent &Event) {
-  for (IAxiomSessionEndpointSubscriber *Subscriber : m_Subscribers) {
-    Subscriber->OnAxiomEditorEvent(Event);
-  }
-}
-
-void AxiomSessionEndpoint::OnViewportFrame(const ViewportFrame &Frame) {
-  for (IAxiomSessionEndpointSubscriber *Subscriber : m_Subscribers) {
-    Subscriber->OnAxiomViewportFrame(Frame);
-  }
-}
-
-void AxiomSessionEndpoint::Subscribe(
-    IAxiomSessionEndpointSubscriber *Subscriber) {
+void AxiomSessionEndpoint::Connect(ISessionTransportSubscriber *Subscriber) {
   if (Subscriber == nullptr) {
     return;
   }
@@ -38,13 +25,34 @@ void AxiomSessionEndpoint::Subscribe(
   if (std::find(m_Subscribers.begin(), m_Subscribers.end(), Subscriber) ==
       m_Subscribers.end()) {
     m_Subscribers.push_back(Subscriber);
+    Subscriber->OnSessionTransportConnected();
   }
 }
 
-void AxiomSessionEndpoint::Unsubscribe(
-    IAxiomSessionEndpointSubscriber *Subscriber) {
-  const auto It =
-      std::remove(m_Subscribers.begin(), m_Subscribers.end(), Subscriber);
-  m_Subscribers.erase(It, m_Subscribers.end());
+void AxiomSessionEndpoint::Disconnect(ISessionTransportSubscriber *Subscriber) {
+  if (Subscriber == nullptr) {
+    return;
+  }
+
+  const auto Existing =
+      std::find(m_Subscribers.begin(), m_Subscribers.end(), Subscriber);
+  if (Existing == m_Subscribers.end()) {
+    return;
+  }
+
+  Subscriber->OnSessionTransportDisconnected();
+  m_Subscribers.erase(Existing);
+}
+
+void AxiomSessionEndpoint::OnEditorEvent(const PublishedEditorEvent &Event) {
+  for (ISessionTransportSubscriber *Subscriber : m_Subscribers) {
+    Subscriber->OnSessionTransportEditorEvent(Event);
+  }
+}
+
+void AxiomSessionEndpoint::OnViewportFrame(const ViewportFrame &Frame) {
+  for (ISessionTransportSubscriber *Subscriber : m_Subscribers) {
+    Subscriber->OnSessionTransportViewportFrame(Frame);
+  }
 }
 } // namespace Axiom
