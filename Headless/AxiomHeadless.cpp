@@ -2,10 +2,9 @@
 #include <Renderer/Renderer.h>
 
 #include <filesystem>
-#include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <optional>
+#include <sstream>
 #include <string>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -70,6 +69,13 @@ int main(int argc, char **argv) {
   }
 
   std::error_code FileSystemError;
+  if (std::filesystem::exists(Options->OutputDirectory, FileSystemError) &&
+      !std::filesystem::is_directory(Options->OutputDirectory, FileSystemError)) {
+    std::cerr << Axiom::SerializeError(
+                     "The output path exists but is not a directory.")
+              << std::endl;
+    return 1;
+  }
   std::filesystem::create_directories(Options->OutputDirectory, FileSystemError);
   if (FileSystemError) {
     std::cerr << Axiom::SerializeError("Failed to create output directory.") << std::endl;
@@ -85,6 +91,7 @@ int main(int argc, char **argv) {
             << std::endl;
 
   bool SceneLoaded = false;
+  uint64_t EmittedFrameCount = 0;
   for (std::string Line; std::getline(std::cin, Line);) {
     if (Line.empty()) {
       continue;
@@ -134,7 +141,9 @@ int main(int argc, char **argv) {
         break;
       }
 
-      const auto FramePath = NextFramePath(Options->OutputDirectory, Frame->FrameIndex);
+      ++EmittedFrameCount;
+      const auto FramePath =
+          NextFramePath(Options->OutputDirectory, EmittedFrameCount);
       if (!WritePng(FramePath, *Frame)) {
         std::cout << Axiom::SerializeError("Failed to write frame PNG.")
                   << std::endl;
