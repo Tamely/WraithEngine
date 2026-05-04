@@ -59,6 +59,30 @@ Window::~Window() {
 
 void Window::PollEvents() { glfwPollEvents(); }
 
+bool Window::IsKeyPressed(int Key) const {
+  return glfwGetKey(m_NativeHandle, Key) == GLFW_PRESS;
+}
+
+bool Window::IsMouseButtonPressed(int Button) const {
+  return glfwGetMouseButton(m_NativeHandle, Button) == GLFW_PRESS;
+}
+
+void Window::GetCursorPosition(double &X, double &Y) const {
+  glfwGetCursorPos(m_NativeHandle, &X, &Y);
+}
+
+void Window::SetCursorMode(CursorMode Mode) {
+  const int GlfwMode =
+      Mode == CursorMode::Disabled ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL;
+  glfwSetInputMode(m_NativeHandle, GLFW_CURSOR, GlfwMode);
+}
+
+CursorMode Window::GetCursorMode() const {
+  return glfwGetInputMode(m_NativeHandle, GLFW_CURSOR) == GLFW_CURSOR_DISABLED
+             ? CursorMode::Disabled
+             : CursorMode::Normal;
+}
+
 [[nodiscard]] bool Window::ShouldClose() const {
   return glfwWindowShouldClose(m_NativeHandle);
 }

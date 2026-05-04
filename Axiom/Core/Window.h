@@ -6,6 +6,8 @@
 struct GLFWwindow;
 
 namespace Axiom {
+enum class CursorMode { Normal, Disabled };
+
 class Window {
 public:
   Window(const std::string &Title, uint32_t Width, uint32_t Height);
@@ -16,6 +18,11 @@ public:
 
 public:
   void PollEvents();
+  bool IsKeyPressed(int Key) const;
+  bool IsMouseButtonPressed(int Button) const;
+  void GetCursorPosition(double &X, double &Y) const;
+  void SetCursorMode(CursorMode Mode);
+  [[nodiscard]] CursorMode GetCursorMode() const;
 
   [[nodiscard]] bool ShouldClose() const;
   [[nodiscard]] GLFWwindow *GetNativeHandle() const { return m_NativeHandle; }
@@ -30,4 +37,3 @@ private:
   GLFWwindow *m_NativeHandle;
 };
 } // namespace Axiom
-
