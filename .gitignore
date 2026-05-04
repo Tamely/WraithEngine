@@ -13,6 +13,8 @@ CMakeUserPresets.json
 Build/
 .cache/
 .vs/
+.idea/
+build-tests/
 
 # CLion
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
@@ -21,3 +23,5 @@ Build/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #cmake-build-*
 .DS_Store
+imgui.ini
+*.log

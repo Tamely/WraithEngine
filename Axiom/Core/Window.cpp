@@ -1,13 +1,44 @@
 #include "Window.h"
 #include <iostream>
 
+#define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#include <volk.h>
 
+#include "Core/Log.h"
+
+#include <dlfcn.h>
 #include <string>
+
+namespace {
+PFN_vkGetInstanceProcAddr LoadVulkanLoaderProcAddr() {
+#ifdef AXIOM_VULKAN_LOADER_LIBRARY
+  void *Loader = dlopen(AXIOM_VULKAN_LOADER_LIBRARY, RTLD_NOW | RTLD_LOCAL);
+  if (!Loader) {
+    A_CORE_ERROR("Failed to load Vulkan loader '{0}': {1}",
+                 AXIOM_VULKAN_LOADER_LIBRARY, dlerror());
+    return nullptr;
+  }
+
+  return reinterpret_cast<PFN_vkGetInstanceProcAddr>(
+      dlsym(Loader, "vkGetInstanceProcAddr"));
+#else
+  return nullptr;
+#endif
+}
+} // namespace
 
 namespace Axiom {
 Window::Window(const std::string &Title, uint32_t Width, uint32_t Height)
     : m_Title(Title), m_Width(Width), m_Height(Height) {
+  glfwSetErrorCallback([](int Error, const char *Description) {
+    A_CORE_ERROR("GLFW error {0}: {1}", Error, Description);
+  });
+
+  if (PFN_vkGetInstanceProcAddr LoaderProcAddr = LoadVulkanLoaderProcAddr()) {
+    glfwInitVulkanLoader(LoaderProcAddr);
+  }
+
   glfwInit();
 
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -32,4 +63,3 @@ void Window::PollEvents() { glfwPollEvents(); }
   return glfwWindowShouldClose(m_NativeHandle);
 }
 } // namespace Axiom
-

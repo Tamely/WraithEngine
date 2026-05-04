@@ -8,11 +8,13 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
-#include <vma/vk_mem_alloc.h>
+#include <vk_mem_alloc.h>
 
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <string>
 #include <thread>
 #include <utility>
 
@@ -27,6 +29,10 @@
 #include "imgui_impl_vulkan.h"
 
 Axiom::VulkanRendererBackend *g_LoadedEngine = nullptr;
+
+#ifndef AXIOM_CONTENT_DIR
+#define AXIOM_CONTENT_DIR "Content"
+#endif
 
 Axiom::VulkanRendererBackend &Axiom::VulkanRendererBackend::Get() { return *g_LoadedEngine; }
 
@@ -177,9 +183,13 @@ void Axiom::VulkanRendererBackend::InitBackgroundPipelines() {
                                   &m_GradientPipelineLayout));
 
   VkShaderModule ComputeDrawShader;
-  if (!VkUtil::LoadShaderModule("../../Content/Shaders/gradient_color.comp.spv",
-                                m_Device.Device, &ComputeDrawShader)) {
-    A_ERROR("Error when building the compute shader");
+  const std::string ShaderPath =
+      std::string(AXIOM_CONTENT_DIR) + "/Shaders/gradient_color.comp.spv";
+  if (!VkUtil::LoadShaderModule(ShaderPath.c_str(), m_Device.Device,
+                                &ComputeDrawShader)) {
+    A_ERROR("Error when loading the compute shader: {0}", ShaderPath);
+    Axiom::Log::Flush();
+    abort();
   }
 
   VkPipelineShaderStageCreateInfo StageInfo = {
@@ -477,6 +487,3 @@ void Axiom::VulkanRendererBackend::EndFrame() {
 
   Draw();
 }
-
-
-

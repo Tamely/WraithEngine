@@ -5,12 +5,31 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include <VkBootstrap.h>
-#include <vulkan/vk_enum_string_helper.h>
+
+#include <cstdlib>
+#include <dlfcn.h>
 
 #include "Core/Log.h"
+#include "Renderer/Vulkan/VulkanStringUtils.h"
 
 namespace {
 constexpr bool bUseValidationLayers = true;
+
+PFN_vkGetInstanceProcAddr LoadVulkanLoaderProcAddr() {
+#ifdef AXIOM_VULKAN_LOADER_LIBRARY
+  void *Loader = dlopen(AXIOM_VULKAN_LOADER_LIBRARY, RTLD_NOW | RTLD_LOCAL);
+  if (!Loader) {
+    A_CORE_CRITICAL("Failed to load Vulkan loader '{0}': {1}",
+                    AXIOM_VULKAN_LOADER_LIBRARY, dlerror());
+    return nullptr;
+  }
+
+  return reinterpret_cast<PFN_vkGetInstanceProcAddr>(
+      dlsym(Loader, "vkGetInstanceProcAddr"));
+#else
+  return nullptr;
+#endif
+}
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL
 VulkanDebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT MessageSeverity,
@@ -22,31 +41,34 @@ VulkanDebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT MessageSeverity,
 
   A_CORE_CRITICAL(
       "Vulkan Validation: [Severity: {0}]: {1}",
-      string_VkDebugUtilsMessageSeverityFlagBitsEXT(MessageSeverity),
-      pCallbackData->pMessage);
+      VkDebugSeverityToString(MessageSeverity), pCallbackData->pMessage);
   return VK_FALSE;
 }
 } // namespace
 
 namespace Axiom {
 void VulkanContext::Init(GLFWwindow *Window) {
-  if (!glfwVulkanSupported()) {
-    A_CORE_CRITICAL("GLFW reports Vulkan is not supported on this machine!");
-    return;
+  PFN_vkGetInstanceProcAddr LoaderProcAddr = LoadVulkanLoaderProcAddr();
+  if (LoaderProcAddr == nullptr) {
+    A_CORE_CRITICAL("Failed to load vkGetInstanceProcAddr from Vulkan loader");
+    Axiom::Log::Flush();
+    abort();
   }
 
-  VkResult VolkResult = volkInitialize();
-  if (VolkResult != VK_SUCCESS) {
-    A_CORE_CRITICAL("Failed to initializes Volk: {0}",
-                    static_cast<int>(VolkResult));
-    return;
-  }
+  volkInitializeCustom(LoaderProcAddr);
   A_CORE_INFO("Volk successfully initialized!");
 
-  vkb::InstanceBuilder Builder;
+  glfwInitVulkanLoader(LoaderProcAddr);
+  if (!glfwVulkanSupported()) {
+    A_CORE_CRITICAL("GLFW reports Vulkan is not supported on this machine!");
+    Axiom::Log::Flush();
+    abort();
+  }
+
+  vkb::InstanceBuilder Builder{LoaderProcAddr};
 
   vkb::Result<vkb::SystemInfo> SystemInfoReturn =
-      vkb::SystemInfo::get_system_info();
+      vkb::SystemInfo::get_system_info(LoaderProcAddr);
   if (!SystemInfoReturn) {
     A_CORE_CRITICAL(
         "Failed to get device system info! This is a critical crash as we are "
@@ -104,4 +126,3 @@ void VulkanContext::Shutdown() {
   }
 }
 } // namespace Axiom
-

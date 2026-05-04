@@ -65,6 +65,8 @@ target_link_libraries(AxiomCore PUBLIC
 
 target_compile_definitions(AxiomCore PUBLIC
   VK_NO_PROTOTYPES
+  AXIOM_CONTENT_DIR="${CMAKE_SOURCE_DIR}/Content"
+  AXIOM_VULKAN_LOADER_LIBRARY="${Vulkan_LIBRARIES}"
 )
 
 target_compile_options(AxiomCore PRIVATE -O3 -march=native)

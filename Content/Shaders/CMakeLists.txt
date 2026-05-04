@@ -1,4 +1,18 @@
-find_program(GLSL_VALIDATOR glslangValidator HINTS /usr/bin /usr/local/bin $ENV{VULKAN_SDK}/Bin/ $ENV{VULKAN_SDK}/Bin32/)
+find_program(
+  GLSL_VALIDATOR
+  glslangValidator
+  HINTS
+    /usr/bin
+    /usr/local/bin
+    /opt/homebrew/bin
+    $ENV{VULKAN_SDK}/bin
+    $ENV{VULKAN_SDK}/Bin
+    $ENV{VULKAN_SDK}/Bin32
+)
+
+if(NOT GLSL_VALIDATOR)
+  message(FATAL_ERROR "glslangValidator was not found. Install it with `brew install glslang` or set VULKAN_SDK to a Vulkan SDK install.")
+endif()
 
 ## Find all the shader files under the shaders folder
 file(GLOB_RECURSE GLSL_SOURCE_FILES

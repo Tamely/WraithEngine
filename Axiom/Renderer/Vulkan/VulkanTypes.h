@@ -11,18 +11,18 @@
 
 #include <vk_mem_alloc.h>
 #include <volk.h>
-#include <vulkan/vk_enum_string_helper.h>
 
 #include <glm/mat4x4.hpp>
 #include <glm/vec4.hpp>
 
 #include "Core/Log.h"
+#include "Renderer/Vulkan/VulkanStringUtils.h"
 
 #define VK_CHECK(x)                                                            \
   do {                                                                         \
     VkResult err = x;                                                          \
     if (err) {                                                                 \
-      A_CORE_ERROR("Detected Vulkan error: {0}", string_VkResult(err));        \
+      A_CORE_ERROR("Detected Vulkan error: {0}", VkResultToString(err));       \
       Axiom::Log::Flush();                                                     \
       abort();                                                                 \
     }                                                                          \
@@ -35,4 +35,3 @@ struct AllocatedImage {
   VkExtent3D ImageExtent;
   VkFormat ImageFormat;
 };
-
