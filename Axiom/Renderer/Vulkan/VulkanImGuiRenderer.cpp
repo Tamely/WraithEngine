@@ -26,6 +26,11 @@ const char *RendererViewModeLabel(RendererViewMode Mode) {
 } // namespace
 
 void VulkanImGuiRenderer::Init(const InitInfo &InitInfo) {
+  if (InitInfo.Window == nullptr) {
+    m_IsEnabled = false;
+    return;
+  }
+
   VkDescriptorPoolSize PoolSizes[] = {
       {VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
       {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
@@ -84,6 +89,7 @@ void VulkanImGuiRenderer::Init(const InitInfo &InitInfo) {
   ImGuiInitInfo.QueueFamily = InitInfo.QueueFamily;
   ImGuiInitInfo.PipelineInfoMain = PipelineInfo;
   ImGui_ImplVulkan_Init(&ImGuiInitInfo);
+  m_IsEnabled = true;
 
   InitInfo.DeletionQueue->PushFunction([Device = InitInfo.Device, ImGuiPool]() {
     ImGui_ImplVulkan_Shutdown();
@@ -92,6 +98,10 @@ void VulkanImGuiRenderer::Init(const InitInfo &InitInfo) {
 }
 
 void VulkanImGuiRenderer::BeginFrame() const {
+  if (!m_IsEnabled) {
+    return;
+  }
+
   ImGui_ImplVulkan_NewFrame();
   ImGui_ImplGlfw_NewFrame();
   ImGui::NewFrame();
@@ -99,6 +109,10 @@ void VulkanImGuiRenderer::BeginFrame() const {
 
 void VulkanImGuiRenderer::BuildStatsUiAndRender(RendererFrameStats &FrameStats,
                                                 RendererViewMode &ViewMode) const {
+  if (!m_IsEnabled) {
+    return;
+  }
+
   if (ImGui::Begin("Renderer Stats")) {
     ImGui::Text("CPU frame: %.2f ms", FrameStats.CpuFrameMs);
     ImGui::Text("CPU render: %.2f ms", FrameStats.CpuRenderMs);
@@ -127,6 +141,10 @@ void VulkanImGuiRenderer::BuildStatsUiAndRender(RendererFrameStats &FrameStats,
 void VulkanImGuiRenderer::RecordDrawData(VkCommandBuffer CommandBuffer,
                                          VkExtent2D Extent,
                                          VkImageView TargetImageView) const {
+  if (!m_IsEnabled) {
+    return;
+  }
+
   VkRenderingAttachmentInfo ColorAttachment =
       VkInit::AttachmentInfo(TargetImageView, VK_NULL_HANDLE,
                              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);

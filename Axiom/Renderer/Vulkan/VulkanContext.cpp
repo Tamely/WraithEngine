@@ -45,12 +45,6 @@ void VulkanContext::Init(GLFWwindow *Window) {
   A_CORE_INFO("Volk successfully initialized using {0}",
               LoaderInfo.UsesCustomLoader ? "custom loader" : "default loader");
 
-  if (!glfwVulkanSupported()) {
-    A_CORE_CRITICAL("GLFW reports Vulkan is not supported on this machine!");
-    Axiom::Log::Flush();
-    std::abort();
-  }
-
   vkb::InstanceBuilder Builder = [&LoaderInfo]() {
     if (LoaderInfo.UsesCustomLoader) {
       return vkb::InstanceBuilder{LoaderInfo.ProcAddr};
@@ -77,7 +71,7 @@ void VulkanContext::Init(GLFWwindow *Window) {
     A_CORE_WARN("Debug utils extension is not available!");
   }
 
-  auto InstanceReturn = Builder.set_app_name("Axiom Engine")
+  auto InstanceReturn = Builder.set_app_name("Wraith Engine")
                             .request_validation_layers(bUseValidationLayers)
                             .set_debug_callback(VulkanDebugCallback)
                             .require_api_version(1, 3, 0)
@@ -103,13 +97,21 @@ void VulkanContext::Init(GLFWwindow *Window) {
 
   volkLoadInstance(Instance);
 
-  const VkResult SurfaceResult =
-      glfwCreateWindowSurface(Instance, Window, nullptr, &Surface);
-  if (SurfaceResult != VK_SUCCESS) {
-    A_CORE_CRITICAL("Failed to create Vulkan window surface: {0}",
-                    VkResultToString(SurfaceResult));
-    Axiom::Log::Flush();
-    std::abort();
+  if (Window != nullptr) {
+    if (!glfwVulkanSupported()) {
+      A_CORE_CRITICAL("GLFW reports Vulkan is not supported on this machine!");
+      Axiom::Log::Flush();
+      std::abort();
+    }
+
+    const VkResult SurfaceResult =
+        glfwCreateWindowSurface(Instance, Window, nullptr, &Surface);
+    if (SurfaceResult != VK_SUCCESS) {
+      A_CORE_CRITICAL("Failed to create Vulkan window surface: {0}",
+                      VkResultToString(SurfaceResult));
+      Axiom::Log::Flush();
+      std::abort();
+    }
   }
 }
 

@@ -13,11 +13,10 @@
 #include "Renderer/Vulkan/VulkanSceneRenderer.h"
 #include "Renderer/Vulkan/VulkanSwapchain.h"
 
+#include <array>
 #include <functional>
 #include <memory>
 #include <vector>
-
-struct GLFWwindow;
 
 namespace Axiom {
 class VulkanRendererBackend final : public RendererBackend {
@@ -55,6 +54,9 @@ private:
   void DrawMeshes(VkCommandBuffer CommandBuffer, RenderScene &Scene);
   void BuildHzb(VkCommandBuffer CommandBuffer, MeshFrameResources &Frame);
   void ClearDepthImage(VkCommandBuffer CommandBuffer);
+  void InitViewportReadbackBuffers();
+  void CaptureOffscreenFrame(VkCommandBuffer CommandBuffer, FrameData &Frame);
+  void PublishOffscreenFrame(FrameData &Frame);
   void Draw();
 
   FrameData &GetCurrentFrame() {
@@ -71,8 +73,10 @@ private:
   bool m_StopRendering{false};
   bool m_RenderFallbackBackground{false};
   VkExtent2D m_WindowExtent{1700, 900};
-
-  GLFWwindow *m_Window{nullptr};
+  IRenderSurface *m_Surface{nullptr};
+  IViewportFrameOutput *m_FrameOutput{nullptr};
+  VkDeviceSize m_ViewportReadbackBufferSize{0};
+  std::array<AllocatedBuffer, FRAME_OVERLAP> m_ViewportReadbackBuffers{};
 
   VulkanContext m_Context;
   VulkanDevice m_Device;

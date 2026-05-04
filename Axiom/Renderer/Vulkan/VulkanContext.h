@@ -10,7 +10,7 @@ struct GLFWwindow;
 namespace Axiom {
 class VulkanContext {
 public:
-  void Init(GLFWwindow *Window);
+  void Init(GLFWwindow *Window = nullptr);
   void Shutdown();
 
   VkInstance Instance{VK_NULL_HANDLE};

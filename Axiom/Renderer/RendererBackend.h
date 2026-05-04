@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Renderer/Mesh.h"
+#include "Renderer/RenderSurface.h"
+#include "Renderer/ViewportFrameOutput.h"
 
 #include <glm/vec2.hpp>
 
@@ -9,7 +11,6 @@
 #include <string>
 
 namespace Axiom {
-class Window;
 class RenderScene;
 struct MeshData;
 
@@ -21,7 +22,8 @@ enum class RendererViewMode : uint32_t {
 };
 
 struct RendererCreateInfo {
-  Window *TargetWindow{nullptr};
+  IRenderSurface *TargetSurface{nullptr};
+  IViewportFrameOutput *FrameOutput{nullptr};
   uint32_t Width{0};
   uint32_t Height{0};
   RendererBackendType BackendType{RendererBackendType::Vulkan};
