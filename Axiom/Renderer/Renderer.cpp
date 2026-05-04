@@ -39,6 +39,7 @@ void Renderer::Shutdown() {
     return;
   }
 
+  m_Scene.Reset();
   m_Technique->Shutdown();
   m_Technique.reset();
   m_Backend->Shutdown();

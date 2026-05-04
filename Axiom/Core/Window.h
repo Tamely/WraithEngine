@@ -34,6 +34,6 @@ private:
   uint32_t m_Width;
   uint32_t m_Height;
 
-  GLFWwindow *m_NativeHandle;
+  GLFWwindow *m_NativeHandle{nullptr};
 };
 } // namespace Axiom
