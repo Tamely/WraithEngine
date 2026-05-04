@@ -13,6 +13,7 @@
 namespace Axiom {
 enum class HeadlessCommandType {
   LoadStartupScene,
+  SetViewMode,
   SetLookActive,
   UpdateViewportCamera,
   RenderFrame,
@@ -22,6 +23,7 @@ enum class HeadlessCommandType {
 struct HeadlessCommand {
   HeadlessCommandType Type;
   EditorCommand EditorPayload;
+  RendererViewMode ViewMode{RendererViewMode::Lit};
 };
 
 struct HeadlessAppOptions {

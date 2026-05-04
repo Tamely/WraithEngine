@@ -38,6 +38,7 @@ public:
   const RendererFrameStats &GetFrameStats() const override;
   void RenderImGui() override;
   void EndFrame() override;
+  void SetViewMode(RendererViewMode ViewMode) override;
   void SetViewportFrameOutput(IViewportFrameOutput *FrameOutput) override;
   std::optional<CapturedFrame> ConsumeCapturedFrame() override;
 

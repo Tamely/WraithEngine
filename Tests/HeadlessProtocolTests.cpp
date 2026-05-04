@@ -39,6 +39,16 @@ TEST(HeadlessProtocolTests, RejectsRenderWithoutType) {
   EXPECT_NE(Error.find("type"), std::string::npos);
 }
 
+TEST(HeadlessProtocolTests, ParsesWireframeViewModeCommand) {
+  std::string Error;
+  const auto Command = Axiom::ParseHeadlessCommand(
+      R"json({"type":"set_view_mode","viewMode":"wireframe"})json", Error);
+
+  ASSERT_TRUE(Command.has_value()) << Error;
+  EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::SetViewMode);
+  EXPECT_EQ(Command->ViewMode, Axiom::RendererViewMode::Wireframe);
+}
+
 TEST(HeadlessProtocolTests, SerializesCommandRejectedEvent) {
   const Axiom::PublishedEditorEvent Event{
       .Id = Axiom::EventId{4},

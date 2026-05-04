@@ -1416,6 +1416,10 @@ void VulkanRendererBackend::EndFrame() {
   Draw();
 }
 
+void VulkanRendererBackend::SetViewMode(RendererViewMode ViewMode) {
+  m_ViewMode = ViewMode;
+}
+
 void VulkanRendererBackend::SetViewportFrameOutput(
     IViewportFrameOutput *FrameOutput) {
   m_FrameOutput = FrameOutput;

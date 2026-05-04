@@ -116,6 +116,7 @@ std::optional<HeadlessAppOptions> ParseHeadlessOptions(int argc, char **argv,
 std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
                                                     std::string &Error) {
   static const std::regex TypePattern(R"json("type"\s*:\s*"([^"]+)")json");
+  static const std::regex ViewModePattern(R"json("viewMode"\s*:\s*"([^"]+)")json");
   static const std::regex BoolPattern(
       R"json("isLooking"\s*:\s*(true|false))json");
   static const std::regex CursorPattern(
@@ -138,6 +139,29 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
   if (*Type == "render_frame") {
     return HeadlessCommand{.Type = HeadlessCommandType::RenderFrame,
                            .EditorPayload = {}};
+  }
+  if (*Type == "set_view_mode") {
+    const auto ViewMode = MatchString(JsonLine, ViewModePattern);
+    if (!ViewMode.has_value()) {
+      Error = "`set_view_mode` requires `viewMode`.";
+      return std::nullopt;
+    }
+
+    RendererViewMode ParsedMode{};
+    if (*ViewMode == "lit") {
+      ParsedMode = RendererViewMode::Lit;
+    } else if (*ViewMode == "unlit") {
+      ParsedMode = RendererViewMode::Unlit;
+    } else if (*ViewMode == "wireframe") {
+      ParsedMode = RendererViewMode::Wireframe;
+    } else {
+      Error = "Unsupported view mode: " + *ViewMode;
+      return std::nullopt;
+    }
+
+    return HeadlessCommand{.Type = HeadlessCommandType::SetViewMode,
+                           .EditorPayload = {},
+                           .ViewMode = ParsedMode};
   }
   if (*Type == "quit") {
     return HeadlessCommand{.Type = HeadlessCommandType::Quit, .EditorPayload = {}};

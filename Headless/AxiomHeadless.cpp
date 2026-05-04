@@ -160,6 +160,9 @@ int main(int argc, char **argv) {
       }
       SceneLoaded = true;
       break;
+    case Axiom::HeadlessCommandType::SetViewMode:
+      App.SetRendererViewMode(Command->ViewMode);
+      break;
     case Axiom::HeadlessCommandType::SetLookActive:
     case Axiom::HeadlessCommandType::UpdateViewportCamera:
       Layer.Submit(Command->EditorPayload);
