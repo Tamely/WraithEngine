@@ -52,7 +52,7 @@ void main() {
         vec3 ndc = clipPosition.xyz / clipPosition.w;
         result.pixelAndDepth.xy = vec2(
             (ndc.x * 0.5 + 0.5) * (cameraFrame.viewportSize.x - 1.0),
-            (1.0 - (ndc.y * 0.5 + 0.5)) * (cameraFrame.viewportSize.y - 1.0)
+            (ndc.y * 0.5 + 0.5) * (cameraFrame.viewportSize.y - 1.0)
         );
         result.pixelAndDepth.z = ndc.z * 0.5 + 0.5;
         result.pixelAndDepth.w = 0.0;

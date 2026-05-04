@@ -117,6 +117,7 @@ private:
   VkDescriptorSetLayout m_DrawImageDescriptorLayout{VK_NULL_HANDLE};
   VkDescriptorSetLayout m_MeshFrameDescriptorLayout{VK_NULL_HANDLE};
   VkDescriptorSetLayout m_MeshDescriptorLayout{VK_NULL_HANDLE};
+  VkSampler m_LinearDepthSampler{VK_NULL_HANDLE};
 
   VkPipeline m_GradientPipeline{VK_NULL_HANDLE};
   VkPipelineLayout m_GradientPipelineLayout{VK_NULL_HANDLE};
@@ -126,6 +127,8 @@ private:
   VkPipelineLayout m_MeshPipelineLayout{VK_NULL_HANDLE};
   VkPipeline m_MeshGraphicsPipeline{VK_NULL_HANDLE};
   VkPipelineLayout m_MeshGraphicsPipelineLayout{VK_NULL_HANDLE};
+  VkPipeline m_MeshDepthPipeline{VK_NULL_HANDLE};
+  VkPipelineLayout m_MeshDepthPipelineLayout{VK_NULL_HANDLE};
 
   DeletionQueue m_MainDeletionQueue;
 

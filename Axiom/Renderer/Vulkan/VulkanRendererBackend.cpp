@@ -90,6 +90,7 @@ bool IsBoundsVisible(const glm::mat4 &ViewProjection, const glm::mat4 &Model,
 
   return true;
 }
+
 } // namespace
 
 class VulkanMesh final : public Mesh {
@@ -202,6 +203,7 @@ void VulkanRendererBackend::InitSwapchain() {
 
   VkImageUsageFlags RasterDepthUsages{};
   RasterDepthUsages |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+  RasterDepthUsages |= VK_IMAGE_USAGE_SAMPLED_BIT;
 
   VkImageCreateInfo RasterDepthInfo = VkInit::ImageCreateInfo(
       m_RasterDepthImage.ImageFormat, RasterDepthUsages,
@@ -253,9 +255,11 @@ void VulkanRendererBackend::Shutdown() {
 }
 
 void VulkanRendererBackend::InitDescriptors() {
-  const uint32_t MaxSets = 1 + FRAME_OVERLAP;
+  const uint32_t MaxSets = 1 + FRAME_OVERLAP + MaxMeshSubmissionsPerFrame;
   std::vector<DescriptorAllocator::PoolSizeRatio> Sizes = {
-      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1.0f},
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2.0f},
+      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2.0f},
+      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4.0f},
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2.0f}};
 
   m_GlobalDescriptorAllocator.InitPool(m_Device.Device, MaxSets, Sizes);
@@ -269,9 +273,21 @@ void VulkanRendererBackend::InitDescriptors() {
 
   {
     DescriptorLayoutBuilder Builder;
-    Builder.AddBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    Builder.AddBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+    Builder.AddBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    Builder.AddBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
     m_MeshFrameDescriptorLayout =
-        Builder.Build(m_Device.Device, VK_SHADER_STAGE_VERTEX_BIT);
+        Builder.Build(m_Device.Device,
+                      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT);
+  }
+
+  {
+    DescriptorLayoutBuilder Builder;
+    Builder.AddBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    Builder.AddBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    Builder.AddBinding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    m_MeshDescriptorLayout =
+        Builder.Build(m_Device.Device, VK_SHADER_STAGE_COMPUTE_BIT);
   }
 
   m_DrawImageDescriptorSet = m_GlobalDescriptorAllocator.Allocate(
@@ -287,8 +303,30 @@ void VulkanRendererBackend::InitDescriptors() {
   vkUpdateDescriptorSets(m_Device.Device, 1, &DrawImageWrite, 0,
                          VK_NULL_HANDLE);
 
+  VkSamplerCreateInfo SamplerInfo{
+      .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+      .pNext = VK_NULL_HANDLE,
+      .magFilter = VK_FILTER_NEAREST,
+      .minFilter = VK_FILTER_NEAREST,
+      .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+      .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+      .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+      .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+      .mipLodBias = 0.0f,
+      .anisotropyEnable = VK_FALSE,
+      .compareEnable = VK_FALSE,
+      .minLod = 0.0f,
+      .maxLod = 0.0f,
+      .borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE,
+      .unnormalizedCoordinates = VK_FALSE};
+  VK_CHECK(vkCreateSampler(m_Device.Device, &SamplerInfo, VK_NULL_HANDLE,
+                           &m_LinearDepthSampler));
+
   m_MainDeletionQueue.PushFunction([this]() {
+    vkDestroySampler(m_Device.Device, m_LinearDepthSampler, VK_NULL_HANDLE);
     m_GlobalDescriptorAllocator.DestroyPool(m_Device.Device);
+    vkDestroyDescriptorSetLayout(m_Device.Device, m_MeshDescriptorLayout,
+                                 VK_NULL_HANDLE);
     vkDestroyDescriptorSetLayout(m_Device.Device, m_MeshFrameDescriptorLayout,
                                  VK_NULL_HANDLE);
     vkDestroyDescriptorSetLayout(m_Device.Device, m_DrawImageDescriptorLayout,
@@ -352,6 +390,46 @@ void VulkanRendererBackend::InitBackgroundPipelines() {
 }
 
 void VulkanRendererBackend::InitMeshPipelines() {
+  std::array<VkDescriptorSetLayout, 2> ComputeLayouts = {
+      m_MeshFrameDescriptorLayout, m_MeshDescriptorLayout};
+
+  {
+    VkPipelineLayoutCreateInfo ComputeLayout =
+        VkInit::PipelineLayoutCreateInfo();
+    ComputeLayout.pSetLayouts = ComputeLayouts.data();
+    ComputeLayout.setLayoutCount =
+        static_cast<uint32_t>(ComputeLayouts.size());
+
+    VkPushConstantRange PushConstant{};
+    PushConstant.offset = 0;
+    PushConstant.size = sizeof(MeshProjectPushConstants);
+    PushConstant.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    ComputeLayout.pPushConstantRanges = &PushConstant;
+    ComputeLayout.pushConstantRangeCount = 1;
+
+    VK_CHECK(vkCreatePipelineLayout(m_Device.Device, &ComputeLayout,
+                                    VK_NULL_HANDLE,
+                                    &m_MeshProjectPipelineLayout));
+  }
+
+  {
+    VkPipelineLayoutCreateInfo ComputeLayout =
+        VkInit::PipelineLayoutCreateInfo();
+    ComputeLayout.pSetLayouts = ComputeLayouts.data();
+    ComputeLayout.setLayoutCount =
+        static_cast<uint32_t>(ComputeLayouts.size());
+
+    VkPushConstantRange PushConstant{};
+    PushConstant.offset = 0;
+    PushConstant.size = sizeof(MeshRasterPushConstants);
+    PushConstant.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    ComputeLayout.pPushConstantRanges = &PushConstant;
+    ComputeLayout.pushConstantRangeCount = 1;
+
+    VK_CHECK(vkCreatePipelineLayout(m_Device.Device, &ComputeLayout,
+                                    VK_NULL_HANDLE, &m_MeshPipelineLayout));
+  }
+
   VkPipelineLayoutCreateInfo GraphicsLayout = VkInit::PipelineLayoutCreateInfo();
   GraphicsLayout.pSetLayouts = &m_MeshFrameDescriptorLayout;
   GraphicsLayout.setLayoutCount = 1;
@@ -366,6 +444,59 @@ void VulkanRendererBackend::InitMeshPipelines() {
   VK_CHECK(vkCreatePipelineLayout(m_Device.Device, &GraphicsLayout,
                                   VK_NULL_HANDLE,
                                   &m_MeshGraphicsPipelineLayout));
+  VK_CHECK(vkCreatePipelineLayout(m_Device.Device, &GraphicsLayout,
+                                  VK_NULL_HANDLE, &m_MeshDepthPipelineLayout));
+
+  VkShaderModule MeshProjectShader;
+  const std::string MeshProjectShaderPath =
+      std::string(AXIOM_CONTENT_DIR) + "/Shaders/mesh_project.comp.spv";
+  if (!VkUtil::LoadShaderModule(MeshProjectShaderPath.c_str(), m_Device.Device,
+                                &MeshProjectShader)) {
+    A_ERROR("Error when loading the mesh projection shader: {0}",
+            MeshProjectShaderPath);
+    Axiom::Log::Flush();
+    abort();
+  }
+
+  VkPipelineShaderStageCreateInfo MeshProjectStageInfo =
+      VkInit::PipelineShaderStageCreateInfo(VK_SHADER_STAGE_COMPUTE_BIT,
+                                            MeshProjectShader);
+
+  VkComputePipelineCreateInfo MeshProjectPipelineCreateInfo = {
+      .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+      .pNext = VK_NULL_HANDLE,
+      .stage = MeshProjectStageInfo,
+      .layout = m_MeshProjectPipelineLayout};
+
+  VK_CHECK(vkCreateComputePipelines(m_Device.Device, VK_NULL_HANDLE, 1,
+                                    &MeshProjectPipelineCreateInfo,
+                                    VK_NULL_HANDLE, &m_MeshProjectPipeline));
+  vkDestroyShaderModule(m_Device.Device, MeshProjectShader, VK_NULL_HANDLE);
+
+  VkShaderModule MeshShader;
+  const std::string MeshShaderPath =
+      std::string(AXIOM_CONTENT_DIR) + "/Shaders/mesh_raster.comp.spv";
+  if (!VkUtil::LoadShaderModule(MeshShaderPath.c_str(), m_Device.Device,
+                                &MeshShader)) {
+    A_ERROR("Error when loading the mesh compute shader: {0}", MeshShaderPath);
+    Axiom::Log::Flush();
+    abort();
+  }
+
+  VkPipelineShaderStageCreateInfo MeshStageInfo =
+      VkInit::PipelineShaderStageCreateInfo(VK_SHADER_STAGE_COMPUTE_BIT,
+                                            MeshShader);
+
+  VkComputePipelineCreateInfo MeshPipelineCreateInfo = {
+      .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+      .pNext = VK_NULL_HANDLE,
+      .stage = MeshStageInfo,
+      .layout = m_MeshPipelineLayout};
+
+  VK_CHECK(vkCreateComputePipelines(m_Device.Device, VK_NULL_HANDLE, 1,
+                                    &MeshPipelineCreateInfo, VK_NULL_HANDLE,
+                                    &m_MeshPipeline));
+  vkDestroyShaderModule(m_Device.Device, MeshShader, VK_NULL_HANDLE);
 
   VkShaderModule VertexShader;
   const std::string VertexShaderPath =
@@ -501,10 +632,39 @@ void VulkanRendererBackend::InitMeshPipelines() {
                                      &PipelineInfo, VK_NULL_HANDLE,
                                      &m_MeshGraphicsPipeline));
 
+  VkPipelineColorBlendAttachmentState DepthOnlyColorAttachment{};
+  DepthOnlyColorAttachment.colorWriteMask = 0;
+  VkPipelineColorBlendStateCreateInfo DepthOnlyBlending = ColorBlending;
+  DepthOnlyBlending.pAttachments = &DepthOnlyColorAttachment;
+
+  VkPipelineRenderingCreateInfo DepthRenderingInfo{
+      .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+      .pNext = VK_NULL_HANDLE,
+      .colorAttachmentCount = 0,
+      .pColorAttachmentFormats = VK_NULL_HANDLE,
+      .depthAttachmentFormat = m_RasterDepthImage.ImageFormat,
+      .stencilAttachmentFormat = VK_FORMAT_UNDEFINED};
+  VkGraphicsPipelineCreateInfo DepthPipelineInfo = PipelineInfo;
+  DepthPipelineInfo.pNext = &DepthRenderingInfo;
+  DepthPipelineInfo.pColorBlendState = &DepthOnlyBlending;
+  DepthPipelineInfo.layout = m_MeshDepthPipelineLayout;
+  VK_CHECK(vkCreateGraphicsPipelines(m_Device.Device, VK_NULL_HANDLE, 1,
+                                     &DepthPipelineInfo, VK_NULL_HANDLE,
+                                     &m_MeshDepthPipeline));
+
   vkDestroyShaderModule(m_Device.Device, VertexShader, VK_NULL_HANDLE);
   vkDestroyShaderModule(m_Device.Device, FragmentShader, VK_NULL_HANDLE);
 
   m_MainDeletionQueue.PushFunction([this]() {
+    vkDestroyPipelineLayout(m_Device.Device, m_MeshProjectPipelineLayout,
+                            VK_NULL_HANDLE);
+    vkDestroyPipeline(m_Device.Device, m_MeshProjectPipeline, VK_NULL_HANDLE);
+    vkDestroyPipelineLayout(m_Device.Device, m_MeshPipelineLayout,
+                            VK_NULL_HANDLE);
+    vkDestroyPipeline(m_Device.Device, m_MeshPipeline, VK_NULL_HANDLE);
+    vkDestroyPipelineLayout(m_Device.Device, m_MeshDepthPipelineLayout,
+                            VK_NULL_HANDLE);
+    vkDestroyPipeline(m_Device.Device, m_MeshDepthPipeline, VK_NULL_HANDLE);
     vkDestroyPipelineLayout(m_Device.Device, m_MeshGraphicsPipelineLayout,
                             VK_NULL_HANDLE);
     vkDestroyPipeline(m_Device.Device, m_MeshGraphicsPipeline, VK_NULL_HANDLE);
@@ -650,6 +810,31 @@ VulkanRendererBackend::CreateMesh(const MeshData &MeshSource) {
       GetCurrentFrame().CommandPool, MeshSource.Indices.data(),
       MeshSource.Indices.size() * sizeof(uint32_t),
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+  MeshRef->ProjectedVertexBuffer = VkBufferUtil::CreateBuffer(
+      m_Device.Allocator,
+      std::max<size_t>(1, MeshSource.Vertices.size()) *
+          sizeof(ProjectedMeshVertexGpu),
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+  MeshRef->DescriptorSet = m_GlobalDescriptorAllocator.Allocate(
+      m_Device.Device, m_MeshDescriptorLayout);
+
+  VkDescriptorBufferInfo VertexBufferInfo =
+      VkInit::BufferInfo(MeshRef->VertexBuffer.Buffer, 0,
+                         MeshRef->VertexBuffer.Size);
+  VkDescriptorBufferInfo IndexBufferInfo =
+      VkInit::BufferInfo(MeshRef->IndexBuffer.Buffer, 0, MeshRef->IndexBuffer.Size);
+  VkDescriptorBufferInfo ProjectedBufferInfo = VkInit::BufferInfo(
+      MeshRef->ProjectedVertexBuffer.Buffer, 0, MeshRef->ProjectedVertexBuffer.Size);
+  std::array<VkWriteDescriptorSet, 3> Writes = {
+      VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                    MeshRef->DescriptorSet, &VertexBufferInfo, 0),
+      VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                    MeshRef->DescriptorSet, &IndexBufferInfo, 1),
+      VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                    MeshRef->DescriptorSet, &ProjectedBufferInfo,
+                                    2)};
+  vkUpdateDescriptorSets(m_Device.Device, static_cast<uint32_t>(Writes.size()),
+                         Writes.data(), 0, VK_NULL_HANDLE);
 
   return MeshRef;
 }
@@ -670,11 +855,24 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
   std::memcpy(Frame.CameraBuffer.Info.pMappedData, &CameraData,
               sizeof(CameraFrameUniform));
 
+  VkDescriptorImageInfo ColorImageInfo{};
+  ColorImageInfo.sampler = VK_NULL_HANDLE;
+  ColorImageInfo.imageView = m_DrawImage.ImageView;
+  ColorImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+  VkDescriptorImageInfo DepthImageInfo{};
+  DepthImageInfo.sampler = m_LinearDepthSampler;
+  DepthImageInfo.imageView = m_RasterDepthImage.ImageView;
+  DepthImageInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
   VkDescriptorBufferInfo CameraBufferInfo =
       VkInit::BufferInfo(Frame.CameraBuffer.Buffer, 0, Frame.CameraBuffer.Size);
-  std::array<VkWriteDescriptorSet, 1> FrameWrites = {
+  std::array<VkWriteDescriptorSet, 3> FrameWrites = {
+      VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                 Frame.FrameDescriptorSet, &ColorImageInfo, 0),
+      VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                 Frame.FrameDescriptorSet, &DepthImageInfo, 1),
       VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                                    Frame.FrameDescriptorSet, &CameraBufferInfo, 0)};
+                                    Frame.FrameDescriptorSet, &CameraBufferInfo,
+                                    2)};
   vkUpdateDescriptorSets(m_Device.Device,
                          static_cast<uint32_t>(FrameWrites.size()),
                          FrameWrites.data(), 0, VK_NULL_HANDLE);
@@ -685,20 +883,15 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
   VkRenderingAttachmentInfo ColorAttachment =
       VkInit::AttachmentInfo(m_DrawImage.ImageView, VK_NULL_HANDLE,
                              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-  VkRenderingAttachmentInfo DepthAttachment =
-      VkInit::DepthAttachmentInfo(m_RasterDepthImage.ImageView,
-                                  VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+  VkRenderingAttachmentInfo DepthAttachment{
+      .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+      .pNext = VK_NULL_HANDLE,
+      .imageView = m_RasterDepthImage.ImageView,
+      .imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+      .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+      .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
   VkRenderingInfo RenderingInfo =
       VkInit::RenderingInfo(m_DrawExtent, &ColorAttachment, &DepthAttachment);
-
-  vkCmdBeginRendering(CommandBuffer, &RenderingInfo);
-  vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    m_MeshGraphicsPipeline);
-  vkCmdSetViewport(CommandBuffer, 0, 1, &Viewport);
-  vkCmdSetScissor(CommandBuffer, 0, 1, &Scissor);
-  vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                          m_MeshGraphicsPipelineLayout, 0, 1,
-                          &Frame.FrameDescriptorSet, 0, VK_NULL_HANDLE);
 
   const size_t SubmissionCount =
       std::min(Scene.Submissions.size(),
@@ -714,6 +907,15 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
   m_FrameStats.MeshSubmissionCount = 0;
   m_FrameStats.TriangleCount = 0;
 
+  struct VisibleMeshSubmission {
+    const RenderMeshSubmission *Submission{nullptr};
+    std::shared_ptr<VulkanMesh> Mesh;
+  };
+  std::vector<VisibleMeshSubmission> GraphicsSubmissions;
+  std::vector<VisibleMeshSubmission> ComputeSubmissions;
+  GraphicsSubmissions.reserve(SubmissionCount);
+  ComputeSubmissions.reserve(SubmissionCount);
+
   for (size_t Index = 0; Index < SubmissionCount; ++Index) {
     const auto &Submission = Scene.Submissions[Index];
     auto VulkanMeshRef = std::dynamic_pointer_cast<VulkanMesh>(Submission.Mesh);
@@ -726,24 +928,213 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
       continue;
     }
 
-    MeshGraphicsPushConstants PushConstants{};
-    PushConstants.Model = Submission.Transform;
-    vkCmdPushConstants(CommandBuffer, m_MeshGraphicsPipelineLayout,
-                       VK_SHADER_STAGE_VERTEX_BIT, 0,
-                       sizeof(MeshGraphicsPushConstants), &PushConstants);
-
-    VkDeviceSize VertexOffset = 0;
-    vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &VulkanMeshRef->VertexBuffer.Buffer,
-                           &VertexOffset);
-    vkCmdBindIndexBuffer(CommandBuffer, VulkanMeshRef->IndexBuffer.Buffer, 0,
-                         VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(CommandBuffer, VulkanMeshRef->IndexCount, 1, 0, 0, 0);
+    VisibleMeshSubmission VisibleSubmission{&Submission, VulkanMeshRef};
+    if (Submission.RenderPath == MeshRenderPath::Compute) {
+      ComputeSubmissions.push_back(VisibleSubmission);
+    } else {
+      GraphicsSubmissions.push_back(VisibleSubmission);
+    }
 
     ++m_FrameStats.MeshSubmissionCount;
     m_FrameStats.TriangleCount += VulkanMeshRef->TriangleCount;
   }
 
-  vkCmdEndRendering(CommandBuffer);
+  auto BindMeshBuffers = [&](const std::shared_ptr<VulkanMesh> &MeshRef) {
+    VkDeviceSize VertexOffset = 0;
+    vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &MeshRef->VertexBuffer.Buffer,
+                           &VertexOffset);
+    vkCmdBindIndexBuffer(CommandBuffer, MeshRef->IndexBuffer.Buffer, 0,
+                         VK_INDEX_TYPE_UINT32);
+  };
+
+  VkRenderingAttachmentInfo DepthOnlyAttachment =
+      VkInit::DepthAttachmentInfo(m_RasterDepthImage.ImageView,
+                                  VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+  VkRenderingInfo DepthOnlyRenderingInfo{
+      .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+      .pNext = VK_NULL_HANDLE,
+      .renderArea = VkRect2D{VkOffset2D{0, 0}, m_DrawExtent},
+      .layerCount = 1,
+      .colorAttachmentCount = 0,
+      .pColorAttachments = VK_NULL_HANDLE,
+      .pDepthAttachment = &DepthOnlyAttachment,
+      .pStencilAttachment = VK_NULL_HANDLE};
+
+  if (!GraphicsSubmissions.empty() || !ComputeSubmissions.empty()) {
+    vkCmdBeginRendering(CommandBuffer, &DepthOnlyRenderingInfo);
+    vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      m_MeshDepthPipeline);
+    vkCmdSetViewport(CommandBuffer, 0, 1, &Viewport);
+    vkCmdSetScissor(CommandBuffer, 0, 1, &Scissor);
+    vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            m_MeshDepthPipelineLayout, 0, 1,
+                            &Frame.FrameDescriptorSet, 0, VK_NULL_HANDLE);
+    for (const auto &VisibleSubmission : GraphicsSubmissions) {
+      MeshGraphicsPushConstants PushConstants{};
+      PushConstants.Model = VisibleSubmission.Submission->Transform;
+      vkCmdPushConstants(CommandBuffer, m_MeshDepthPipelineLayout,
+                         VK_SHADER_STAGE_VERTEX_BIT, 0,
+                         sizeof(MeshGraphicsPushConstants), &PushConstants);
+      BindMeshBuffers(VisibleSubmission.Mesh);
+      vkCmdDrawIndexed(CommandBuffer, VisibleSubmission.Mesh->IndexCount, 1, 0,
+                       0, 0);
+    }
+    for (const auto &VisibleSubmission : ComputeSubmissions) {
+      MeshGraphicsPushConstants PushConstants{};
+      PushConstants.Model = VisibleSubmission.Submission->Transform;
+      vkCmdPushConstants(CommandBuffer, m_MeshDepthPipelineLayout,
+                         VK_SHADER_STAGE_VERTEX_BIT, 0,
+                         sizeof(MeshGraphicsPushConstants), &PushConstants);
+      BindMeshBuffers(VisibleSubmission.Mesh);
+      vkCmdDrawIndexed(CommandBuffer, VisibleSubmission.Mesh->IndexCount, 1, 0,
+                       0, 0);
+    }
+    vkCmdEndRendering(CommandBuffer);
+  }
+
+  if (ComputeSubmissions.empty()) {
+    if (!GraphicsSubmissions.empty()) {
+      vkCmdBeginRendering(CommandBuffer, &RenderingInfo);
+      vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        m_MeshGraphicsPipeline);
+      vkCmdSetViewport(CommandBuffer, 0, 1, &Viewport);
+      vkCmdSetScissor(CommandBuffer, 0, 1, &Scissor);
+      vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              m_MeshGraphicsPipelineLayout, 0, 1,
+                              &Frame.FrameDescriptorSet, 0, VK_NULL_HANDLE);
+      for (const auto &VisibleSubmission : GraphicsSubmissions) {
+        MeshGraphicsPushConstants PushConstants{};
+        PushConstants.Model = VisibleSubmission.Submission->Transform;
+        vkCmdPushConstants(CommandBuffer, m_MeshGraphicsPipelineLayout,
+                           VK_SHADER_STAGE_VERTEX_BIT, 0,
+                           sizeof(MeshGraphicsPushConstants), &PushConstants);
+        BindMeshBuffers(VisibleSubmission.Mesh);
+        vkCmdDrawIndexed(CommandBuffer, VisibleSubmission.Mesh->IndexCount, 1, 0,
+                         0, 0);
+      }
+      vkCmdEndRendering(CommandBuffer);
+    }
+    return;
+  }
+
+  VkUtil::TransitionImage(CommandBuffer, m_RasterDepthImage.Image,
+                          VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                          VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+  VkUtil::TransitionImage(CommandBuffer, m_DrawImage.Image,
+                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                          VK_IMAGE_LAYOUT_GENERAL);
+
+  for (const auto &VisibleSubmission : ComputeSubmissions) {
+    std::array<VkDescriptorSet, 2> DescriptorSets = {
+        Frame.FrameDescriptorSet, VisibleSubmission.Mesh->DescriptorSet};
+
+    vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      m_MeshProjectPipeline);
+    vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            m_MeshProjectPipelineLayout, 0,
+                            static_cast<uint32_t>(DescriptorSets.size()),
+                            DescriptorSets.data(), 0, VK_NULL_HANDLE);
+
+    MeshProjectPushConstants ProjectPushConstants{};
+    ProjectPushConstants.Model = VisibleSubmission.Submission->Transform;
+    ProjectPushConstants.Counts.x = VisibleSubmission.Mesh->VertexCount;
+    vkCmdPushConstants(CommandBuffer, m_MeshProjectPipelineLayout,
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                       sizeof(MeshProjectPushConstants),
+                       &ProjectPushConstants);
+
+    const uint32_t VertexGroupCount =
+        std::max(1u, (VisibleSubmission.Mesh->VertexCount + 63u) / 64u);
+    vkCmdDispatch(CommandBuffer, VertexGroupCount, 1, 1);
+
+    VkBufferMemoryBarrier2 ProjectedVertexBarrier{
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+        .pNext = VK_NULL_HANDLE,
+        .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = VisibleSubmission.Mesh->ProjectedVertexBuffer.Buffer,
+        .offset = 0,
+        .size = VisibleSubmission.Mesh->ProjectedVertexBuffer.Size};
+    VkDependencyInfo ProjectDependencyInfo{
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .pNext = VK_NULL_HANDLE,
+        .bufferMemoryBarrierCount = 1,
+        .pBufferMemoryBarriers = &ProjectedVertexBarrier};
+    vkCmdPipelineBarrier2(CommandBuffer, &ProjectDependencyInfo);
+
+    vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      m_MeshPipeline);
+    vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            m_MeshPipelineLayout, 0,
+                            static_cast<uint32_t>(DescriptorSets.size()),
+                            DescriptorSets.data(), 0, VK_NULL_HANDLE);
+
+    MeshRasterPushConstants RasterPushConstants{};
+    RasterPushConstants.Counts.x = VisibleSubmission.Mesh->TriangleCount;
+    vkCmdPushConstants(CommandBuffer, m_MeshPipelineLayout,
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                       sizeof(MeshRasterPushConstants),
+                       &RasterPushConstants);
+
+    const uint32_t GroupCount =
+        std::max(1u, (VisibleSubmission.Mesh->TriangleCount + 63u) / 64u);
+    vkCmdDispatch(CommandBuffer, GroupCount, 1, 1);
+
+    VkImageMemoryBarrier2 DrawImageBarrier{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .pNext = VK_NULL_HANDLE,
+        .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT |
+                         VK_ACCESS_2_SHADER_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = m_DrawImage.Image,
+        .subresourceRange =
+            VkInit::ImageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT)};
+    VkDependencyInfo ComputeDependencyInfo{
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .pNext = VK_NULL_HANDLE,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &DrawImageBarrier};
+    vkCmdPipelineBarrier2(CommandBuffer, &ComputeDependencyInfo);
+  }
+
+  VkUtil::TransitionImage(CommandBuffer, m_DrawImage.Image,
+                          VK_IMAGE_LAYOUT_GENERAL,
+                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+  VkUtil::TransitionImage(CommandBuffer, m_RasterDepthImage.Image,
+                          VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                          VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+
+  if (!GraphicsSubmissions.empty()) {
+    vkCmdBeginRendering(CommandBuffer, &RenderingInfo);
+    vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      m_MeshGraphicsPipeline);
+    vkCmdSetViewport(CommandBuffer, 0, 1, &Viewport);
+    vkCmdSetScissor(CommandBuffer, 0, 1, &Scissor);
+    vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            m_MeshGraphicsPipelineLayout, 0, 1,
+                            &Frame.FrameDescriptorSet, 0, VK_NULL_HANDLE);
+    for (const auto &VisibleSubmission : GraphicsSubmissions) {
+      MeshGraphicsPushConstants PushConstants{};
+      PushConstants.Model = VisibleSubmission.Submission->Transform;
+      vkCmdPushConstants(CommandBuffer, m_MeshGraphicsPipelineLayout,
+                         VK_SHADER_STAGE_VERTEX_BIT, 0,
+                         sizeof(MeshGraphicsPushConstants), &PushConstants);
+      BindMeshBuffers(VisibleSubmission.Mesh);
+      vkCmdDrawIndexed(CommandBuffer, VisibleSubmission.Mesh->IndexCount, 1, 0,
+                       0, 0);
+    }
+    vkCmdEndRendering(CommandBuffer);
+  }
 }
 
 void VulkanRendererBackend::InitImGui() {

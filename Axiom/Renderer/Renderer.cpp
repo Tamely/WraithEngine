@@ -81,7 +81,8 @@ void Renderer::UpdateCpuRenderTime(float CpuRenderMs) {
 }
 
 std::vector<RenderMeshSubmission>
-Renderer::LoadMeshSceneFromFile(const std::filesystem::path &Path) {
+Renderer::LoadMeshSceneFromFile(const std::filesystem::path &Path,
+                                const MeshSceneLoadOptions &Options) {
   auto SceneData = Assets::LoadBasicMeshAsset(Path);
   if (!SceneData.has_value()) {
     A_CORE_ERROR("Failed to load mesh asset scene: {0}", Path.string());
@@ -96,7 +97,15 @@ Renderer::LoadMeshSceneFromFile(const std::filesystem::path &Path) {
       continue;
     }
 
-    Result.push_back({Mesh, Instance.Transform});
+    const MeshRenderPath RenderPath =
+        Options.ComputeMeshNames.contains(Instance.Name)
+            ? MeshRenderPath::Compute
+            : Options.DefaultRenderPath;
+    Result.push_back(
+        {.Mesh = Mesh,
+         .Name = Instance.Name,
+         .RenderPath = RenderPath,
+         .Transform = Instance.Transform});
   }
 
   return Result;

@@ -9,7 +9,7 @@ struct ProjectedVertex {
 };
 
 layout(rgba16f, set = 0, binding = 0) uniform image2D colorImage;
-layout(r32ui, set = 0, binding = 1) uniform uimage2D depthImage;
+layout(set = 0, binding = 1) uniform sampler2D depthTexture;
 layout(std140, set = 0, binding = 2) uniform CameraFrame {
     mat4 view;
     mat4 projection;
@@ -72,7 +72,11 @@ void main() {
     vec2 p2 = v2.pixelAndDepth.xy;
 
     float area = edgeFunction(p0, p1, p2);
-    if (abs(area) < 0.00001 || area >= 0.0) {
+    if (abs(area) < 0.00001) {
+        return;
+    }
+    bool frontFacing = area > 0.0;
+    if (!frontFacing) {
         return;
     }
 
@@ -94,7 +98,7 @@ void main() {
             float w0 = edgeFunction(p1, p2, samplePoint);
             float w1 = edgeFunction(p2, p0, samplePoint);
             float w2 = edgeFunction(p0, p1, samplePoint);
-            if (w0 > 0.0 || w1 > 0.0 || w2 > 0.0) {
+            if (w0 < 0.0 || w1 < 0.0 || w2 < 0.0) {
                 continue;
             }
 
@@ -103,12 +107,13 @@ void main() {
             w2 /= area;
 
             float depth = w0 * v0.pixelAndDepth.z + w1 * v1.pixelAndDepth.z + w2 * v2.pixelAndDepth.z;
-            uint depthBits = floatBitsToUint(clamp(depth, 0.0, 1.0));
 
-            uint previousDepth = imageAtomicMin(depthImage, ivec2(x, y), depthBits);
-            if (depthBits <= previousDepth) {
-                imageStore(colorImage, ivec2(x, y), shadedColor);
+            float sceneDepth = texelFetch(depthTexture, ivec2(x, y), 0).r;
+            if (depth > sceneDepth + 0.0005) {
+                continue;
             }
+
+            imageStore(colorImage, ivec2(x, y), shadedColor);
         }
     }
 }

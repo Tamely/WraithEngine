@@ -26,7 +26,9 @@ public:
   void SetCpuFrameTime(float CpuFrameMs);
   const RendererFrameStats &GetFrameStats() const;
   std::vector<RenderMeshSubmission>
-  LoadMeshSceneFromFile(const std::filesystem::path &Path);
+  LoadMeshSceneFromFile(
+      const std::filesystem::path &Path,
+      const MeshSceneLoadOptions &Options = {});
 
 private:
   void UpdateCpuRenderTime(float CpuRenderMs);

@@ -5,7 +5,7 @@ layout(location = 1) in vec4 inNormal;
 
 layout(location = 0) out vec3 outNormal;
 
-layout(std140, set = 0, binding = 0) uniform CameraFrame {
+layout(std140, set = 0, binding = 2) uniform CameraFrame {
     mat4 view;
     mat4 projection;
     mat4 viewProjection;
