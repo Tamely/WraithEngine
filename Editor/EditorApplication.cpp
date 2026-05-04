@@ -29,11 +29,8 @@ public:
     m_Camera.SetPerspective(55.0f, 1600.0f / 900.0f, 0.1f, 100.0f);
     const auto MeshPath =
         std::filesystem::path(AXIOM_CONTENT_DIR) / "basicmesh.glb";
-    Axiom::MeshSceneLoadOptions LoadOptions{};
-    LoadOptions.ComputeMeshNames.insert("Cube");
-    LoadOptions.ComputeMeshNames.insert("cube");
     m_Submissions =
-        Axiom::Renderer::Get().LoadMeshSceneFromFile(MeshPath, LoadOptions);
+        Axiom::Renderer::Get().LoadMeshSceneFromFile(MeshPath);
     if (m_Submissions.empty()) {
       A_CORE_ERROR("Failed to create startup mesh scene from {0}",
                    MeshPath.string());
