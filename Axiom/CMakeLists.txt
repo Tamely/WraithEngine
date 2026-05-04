@@ -71,4 +71,10 @@ target_compile_definitions(AxiomCore PUBLIC
   AXIOM_VULKAN_LOADER_LIBRARY="${Vulkan_LIBRARIES}"
 )
 
-target_compile_options(AxiomCore PRIVATE -O3 -march=native)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+  target_compile_options(AxiomCore PRIVATE
+    $<$<CONFIG:Release>:-O3 -march=native>
+    $<$<CONFIG:RelWithDebInfo>:-O2 -g -march=native>
+    $<$<CONFIG:MinSizeRel>:-Os>
+  )
+endif()
