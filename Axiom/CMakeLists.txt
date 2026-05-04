@@ -18,8 +18,12 @@ set(ENGINE_SOURCES
   Renderer/Vulkan/VulkanDevice.cpp
   Renderer/Vulkan/VulkanImage.cpp
   Renderer/Vulkan/VulkanInitializers.cpp
+  Renderer/Vulkan/VulkanMaterialResources.cpp
+  Renderer/Vulkan/VulkanMesh.cpp
+  Renderer/Vulkan/VulkanOcclusionCulling.cpp
   Renderer/Vulkan/VulkanPipeline.cpp
   Renderer/Vulkan/VulkanRendererBackend.cpp
+  Renderer/Vulkan/VulkanSceneRenderer.cpp
   Renderer/Vulkan/VulkanSwapchain.cpp
 )
 

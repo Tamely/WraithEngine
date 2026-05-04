@@ -6,60 +6,23 @@
 #include "Renderer/Vulkan/VulkanDeletionQueue.h"
 #include "Renderer/Vulkan/VulkanDescriptors.h"
 #include "Renderer/Vulkan/VulkanDevice.h"
+#include "Renderer/Vulkan/VulkanMaterialResources.h"
+#include "Renderer/Vulkan/VulkanOcclusionCulling.h"
+#include "Renderer/Vulkan/VulkanRendererTypes.h"
+#include "Renderer/Vulkan/VulkanSceneRenderer.h"
 #include "Renderer/Vulkan/VulkanSwapchain.h"
-#include "Renderer/Vulkan/VulkanTypes.h"
 
-#include <array>
 #include <functional>
 #include <memory>
-#include <unordered_map>
 #include <vector>
-
-#include <glm/mat4x4.hpp>
-#include <glm/vec2.hpp>
-#include <glm/ext/vector_uint4.hpp>
 
 struct GLFWwindow;
 
 namespace Axiom {
-struct ComputePushConstants {
-  glm::vec4 data1;
-  glm::vec4 data2;
-  glm::vec4 data3;
-  glm::vec4 data4;
-};
-
-struct CameraFrameUniform {
-  glm::mat4 View{1.0f};
-  glm::mat4 Projection{1.0f};
-  glm::mat4 ViewProjection{1.0f};
-  glm::vec4 CameraPosition{0.0f};
-  glm::vec4 ViewportSize{0.0f};
-  glm::uvec4 RenderOptions{0u};
-};
-
-struct MeshProjectPushConstants {
-  glm::mat4 Model{1.0f};
-  glm::uvec4 Counts{0u};
-};
-
-struct MeshRasterPushConstants {
-  glm::uvec4 Counts{0u};
-};
-
-struct MeshGraphicsPushConstants {
-  glm::mat4 Model{1.0f};
-};
-
-struct HzbReducePushConstants {
-  glm::uvec4 Dimensions{0u};
-};
-
-class VulkanMesh;
-
 class VulkanRendererBackend final : public RendererBackend {
 public:
   static VulkanRendererBackend &Get();
+  static VulkanRendererBackend *TryGet();
 
   void Init(const RendererCreateInfo &CreateInfo) override;
   void Shutdown() override;
@@ -73,25 +36,10 @@ public:
   void EndFrame() override;
 
   void ImmediateSubmit(std::function<void(VkCommandBuffer cmd)> &&Function);
+  void EnqueueDeferredDestroy(std::function<void()> &&Function);
+  bool IsInitialized() const { return m_IsInitialized; }
 
 private:
-  static constexpr uint32_t MaxMeshSubmissionsPerFrame = 64;
-  static constexpr uint32_t TimestampQueryCount = 4;
-
-  struct MeshFrameResources {
-    AllocatedBuffer CameraBuffer;
-    AllocatedBuffer HzbReadbackBuffer;
-    VkDescriptorSet DepthFrameDescriptorSet{VK_NULL_HANDLE};
-    std::array<VkDescriptorSet, MaxMeshSubmissionsPerFrame>
-        GraphicsFrameDescriptorSets{};
-    VkDescriptorSet ComputeFrameDescriptorSet{VK_NULL_HANDLE};
-    VkQueryPool TimestampQueryPool{VK_NULL_HANDLE};
-    glm::mat4 HzbViewProjection{1.0f};
-    glm::vec2 HzbViewportSize{0.0f};
-    bool HasValidTimestamps{false};
-    bool HasValidOcclusionData{false};
-  };
-
   void InitSwapchain();
   void InitDescriptors();
   void InitTextureResources();
@@ -110,15 +58,6 @@ private:
   void BuildHzb(VkCommandBuffer CommandBuffer, MeshFrameResources &Frame);
   void ClearDepthImage(VkCommandBuffer CommandBuffer);
   void Draw();
-  AllocatedImage CreateTextureImage(const TextureSourceData &TextureData);
-  VkImageView ResolveMaterialTextureView(const MaterialInstanceRef &Material);
-  const MeshFrameResources *GetPreviousOcclusionFrame();
-  bool ShouldUsePreviousOcclusionData(const MeshFrameResources &PreviousFrame,
-                                      const CameraFrameUniform &CameraData) const;
-  bool IsOccludedByPreviousFrame(const MeshFrameResources &PreviousFrame,
-                                 const glm::mat4 &Model,
-                                 const glm::vec3 &BoundsMin,
-                                 const glm::vec3 &BoundsMax) const;
 
   FrameData &GetCurrentFrame() {
     return m_CommandContext.GetFrame(m_FrameNumber);
@@ -151,8 +90,6 @@ private:
   VkDescriptorSetLayout m_MeshDescriptorLayout{VK_NULL_HANDLE};
   VkSampler m_LinearDepthSampler{VK_NULL_HANDLE};
   VkSampler m_TextureSampler{VK_NULL_HANDLE};
-  AllocatedImage m_FallbackTextureImage;
-  std::unordered_map<const MaterialInstance *, VkImageView> m_MaterialImageViews;
 
   VkPipeline m_GradientPipeline{VK_NULL_HANDLE};
   VkPipelineLayout m_GradientPipelineLayout{VK_NULL_HANDLE};
@@ -183,6 +120,9 @@ private:
   VkImageLayout m_HzbImageLayout{VK_IMAGE_LAYOUT_UNDEFINED};
 
   std::array<MeshFrameResources, FRAME_OVERLAP> m_MeshFrames{};
+  VulkanMaterialResources m_MaterialResources;
+  VulkanOcclusionCulling m_OcclusionCulling;
+  VulkanSceneRenderer m_SceneRenderer;
   RenderScene *m_ActiveScene{nullptr};
   RendererFrameStats m_FrameStats{};
   float m_TimestampPeriod{0.0f};

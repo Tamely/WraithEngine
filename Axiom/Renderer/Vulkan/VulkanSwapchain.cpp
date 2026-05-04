@@ -43,5 +43,26 @@ void VulkanSwapchain::Shutdown(VulkanDevice &Device) {
   Images.clear();
   ImageViews.clear();
 }
+
+uint32_t VulkanSwapchain::AcquireNextImage(VkDevice Device,
+                                           VkSemaphore Semaphore) const {
+  uint32_t ImageIndex = 0;
+  VK_CHECK(vkAcquireNextImageKHR(Device, Swapchain, 1000000000, Semaphore,
+                                 VK_NULL_HANDLE, &ImageIndex));
+  return ImageIndex;
+}
+
+void VulkanSwapchain::Present(VkQueue Queue, uint32_t ImageIndex,
+                              VkSemaphore WaitSemaphore) const {
+  VkPresentInfoKHR PresentInfo = {.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+                                  .pNext = VK_NULL_HANDLE};
+  PresentInfo.pSwapchains = &Swapchain;
+  PresentInfo.swapchainCount = 1;
+  PresentInfo.pWaitSemaphores = &WaitSemaphore;
+  PresentInfo.waitSemaphoreCount = 1;
+  PresentInfo.pImageIndices = &ImageIndex;
+
+  VK_CHECK(vkQueuePresentKHR(Queue, &PresentInfo));
+}
 } // namespace Axiom
 

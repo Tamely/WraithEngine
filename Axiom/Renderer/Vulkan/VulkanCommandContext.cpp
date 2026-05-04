@@ -59,6 +59,15 @@ void VulkanCommandContext::Shutdown(VkDevice Device) {
   vkDestroyFence(Device, m_ImmFence, VK_NULL_HANDLE);
 }
 
+FrameData &VulkanCommandContext::PrepareFrame(VkDevice Device,
+                                              uint64_t FrameNumber) {
+  auto &Frame = GetFrame(FrameNumber);
+  VK_CHECK(vkWaitForFences(Device, 1, &Frame.RenderFence, VK_TRUE, 1000000000));
+  VK_CHECK(vkResetFences(Device, 1, &Frame.RenderFence));
+  Frame.DeletionQueue.Flush();
+  return Frame;
+}
+
 void VulkanCommandContext::ImmediateSubmit(
     VkDevice Device, VkQueue Queue,
     std::function<void(VkCommandBuffer Command)> &&Function) {
