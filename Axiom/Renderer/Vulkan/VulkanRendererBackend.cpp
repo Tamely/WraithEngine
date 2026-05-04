@@ -65,13 +65,19 @@ struct ProjectedMeshVertexGpu {
   glm::vec4 ClipPosition{0.0f};
 };
 
+struct BoundsScreenRect {
+  glm::vec2 Min{0.0f};
+  glm::vec2 Max{0.0f};
+  float NearestDepth{0.0f};
+};
+
 glm::vec3 TransformPoint(const glm::mat4 &Transform, const glm::vec3 &Point) {
   return glm::vec3(Transform * glm::vec4(Point, 1.0f));
 }
 
-bool IsBoundsVisible(const glm::mat4 &ViewProjection, const glm::mat4 &Model,
-                     const glm::vec3 &BoundsMin, const glm::vec3 &BoundsMax) {
-  const std::array<glm::vec3, 8> Corners = {
+std::array<glm::vec3, 8> GetBoundsCorners(const glm::vec3 &BoundsMin,
+                                          const glm::vec3 &BoundsMax) {
+  return {
       glm::vec3(BoundsMin.x, BoundsMin.y, BoundsMin.z),
       glm::vec3(BoundsMax.x, BoundsMin.y, BoundsMin.z),
       glm::vec3(BoundsMin.x, BoundsMax.y, BoundsMin.z),
@@ -81,7 +87,11 @@ bool IsBoundsVisible(const glm::mat4 &ViewProjection, const glm::mat4 &Model,
       glm::vec3(BoundsMin.x, BoundsMax.y, BoundsMax.z),
       glm::vec3(BoundsMax.x, BoundsMax.y, BoundsMax.z),
   };
+}
 
+bool IsBoundsVisible(const glm::mat4 &ViewProjection, const glm::mat4 &Model,
+                     const glm::vec3 &BoundsMin, const glm::vec3 &BoundsMax) {
+  const auto Corners = GetBoundsCorners(BoundsMin, BoundsMax);
   std::array<glm::vec4, 8> ClipCorners{};
   for (size_t Index = 0; Index < Corners.size(); ++Index) {
     const glm::vec3 WorldPoint = TransformPoint(Model, Corners[Index]);
@@ -102,6 +112,125 @@ bool IsBoundsVisible(const glm::mat4 &ViewProjection, const glm::mat4 &Model,
   }
 
   return true;
+}
+
+float GetMatrixMaxAbsDifference(const glm::mat4 &A, const glm::mat4 &B) {
+  float MaxDifference = 0.0f;
+  for (int Column = 0; Column < 4; ++Column) {
+    for (int Row = 0; Row < 4; ++Row) {
+      MaxDifference =
+          std::max(MaxDifference, std::abs(A[Column][Row] - B[Column][Row]));
+    }
+  }
+  return MaxDifference;
+}
+
+uint32_t ComputeMipCount(VkExtent2D Extent) {
+  uint32_t MipCount = 1;
+  uint32_t MaxDimension = std::max(Extent.width, Extent.height);
+  while (MaxDimension > 1) {
+    MaxDimension = std::max(1u, MaxDimension / 2u);
+    ++MipCount;
+  }
+  return MipCount;
+}
+
+VkExtent2D ComputeMipExtent(VkExtent2D BaseExtent, uint32_t MipLevel) {
+  VkExtent2D Extent = BaseExtent;
+  for (uint32_t Level = 0; Level < MipLevel; ++Level) {
+    Extent.width = std::max(1u, Extent.width / 2u);
+    Extent.height = std::max(1u, Extent.height / 2u);
+  }
+  return Extent;
+}
+
+void TransitionImageRange(VkCommandBuffer CommandBuffer, VkImage Image,
+                          VkImageLayout OldLayout, VkImageLayout NewLayout,
+                          VkImageAspectFlags AspectMask, uint32_t BaseMipLevel,
+                          uint32_t LevelCount) {
+  VkImageMemoryBarrier2 ImageBarrier{
+      .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+      .pNext = VK_NULL_HANDLE,
+      .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+      .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+      .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+      .dstAccessMask =
+          VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT,
+      .oldLayout = OldLayout,
+      .newLayout = NewLayout,
+      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .image = Image,
+      .subresourceRange =
+          {.aspectMask = AspectMask,
+           .baseMipLevel = BaseMipLevel,
+           .levelCount = LevelCount,
+           .baseArrayLayer = 0,
+           .layerCount = 1}};
+  VkDependencyInfo DependencyInfo{
+      .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+      .pNext = VK_NULL_HANDLE,
+      .imageMemoryBarrierCount = 1,
+      .pImageMemoryBarriers = &ImageBarrier};
+  vkCmdPipelineBarrier2(CommandBuffer, &DependencyInfo);
+}
+
+bool ProjectBoundsToScreenRect(const glm::mat4 &ViewProjection,
+                               const glm::mat4 &Model,
+                               const glm::vec3 &BoundsMin,
+                               const glm::vec3 &BoundsMax,
+                               const glm::vec2 &ViewportSize,
+                               BoundsScreenRect &Rect) {
+  if (ViewportSize.x <= 0.0f || ViewportSize.y <= 0.0f) {
+    return false;
+  }
+
+  const auto Corners = GetBoundsCorners(BoundsMin, BoundsMax);
+  glm::vec2 MinPixel(ViewportSize);
+  glm::vec2 MaxPixel(0.0f);
+  float NearestDepth = 1.0f;
+
+  for (const glm::vec3 &Corner : Corners) {
+    const glm::vec4 Clip = ViewProjection * glm::vec4(TransformPoint(Model, Corner), 1.0f);
+    if (Clip.w <= 0.0001f) {
+      return false;
+    }
+
+    const glm::vec3 Ndc = glm::vec3(Clip) / Clip.w;
+    if (Ndc.x < -1.0f || Ndc.x > 1.0f || Ndc.y < -1.0f || Ndc.y > 1.0f ||
+        Ndc.z < -1.0f || Ndc.z > 1.0f) {
+      return false;
+    }
+
+    const glm::vec2 Pixel =
+        glm::vec2((Ndc.x * 0.5f + 0.5f) * (ViewportSize.x - 1.0f),
+                  (Ndc.y * 0.5f + 0.5f) * (ViewportSize.y - 1.0f));
+    MinPixel = glm::min(MinPixel, Pixel);
+    MaxPixel = glm::max(MaxPixel, Pixel);
+    NearestDepth = std::min(NearestDepth, Ndc.z * 0.5f + 0.5f);
+  }
+
+  if (MaxPixel.x < 0.0f || MaxPixel.y < 0.0f ||
+      MinPixel.x > ViewportSize.x - 1.0f ||
+      MinPixel.y > ViewportSize.y - 1.0f) {
+    return false;
+  }
+
+  Rect.Min = glm::clamp(glm::floor(MinPixel), glm::vec2(0.0f),
+                        ViewportSize - glm::vec2(1.0f));
+  Rect.Max = glm::clamp(glm::ceil(MaxPixel), glm::vec2(0.0f),
+                        ViewportSize - glm::vec2(1.0f));
+  Rect.NearestDepth = NearestDepth;
+  return Rect.Min.x <= Rect.Max.x && Rect.Min.y <= Rect.Max.y;
+}
+
+float ReadHzbDepth(const std::byte *Bytes, VkDeviceSize OffsetBytes,
+                   VkExtent2D Extent, uint32_t X, uint32_t Y) {
+  const size_t RowStride = static_cast<size_t>(Extent.width);
+  const size_t Index = static_cast<size_t>(Y) * RowStride + static_cast<size_t>(X);
+  const auto *Depths =
+      reinterpret_cast<const float *>(Bytes + static_cast<size_t>(OffsetBytes));
+  return Depths[Index];
 }
 
 } // namespace
@@ -150,6 +279,7 @@ void VulkanRendererBackend::Init(const RendererCreateInfo &CreateInfo) {
 
   m_CommandContext.Init(m_Device.Device, m_Device.GraphicsQueueFamily);
   InitSwapchain();
+  InitHzbResources();
   InitDescriptors();
   InitTextureResources();
   InitPipelines();
@@ -246,6 +376,71 @@ void VulkanRendererBackend::InitSwapchain() {
   });
 }
 
+void VulkanRendererBackend::InitHzbResources() {
+  const VkExtent2D BaseExtent = {m_DrawImage.ImageExtent.width,
+                                 m_DrawImage.ImageExtent.height};
+  const uint32_t MipCount = ComputeMipCount(BaseExtent);
+
+  m_HzbMipImageViews.clear();
+  m_HzbMipExtents.clear();
+  m_HzbMipOffsets.clear();
+  m_HzbReadbackBufferSize = 0;
+  m_HzbImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+  m_HzbImage.ImageFormat = VK_FORMAT_R32_SFLOAT;
+  m_HzbImage.ImageExtent = {BaseExtent.width, BaseExtent.height, 1};
+
+  VkImageCreateInfo HzbInfo =
+      VkInit::ImageCreateInfo(m_HzbImage.ImageFormat,
+                              VK_IMAGE_USAGE_STORAGE_BIT |
+                                  VK_IMAGE_USAGE_SAMPLED_BIT |
+                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                              m_HzbImage.ImageExtent);
+  HzbInfo.mipLevels = MipCount;
+
+  VmaAllocationCreateInfo AllocationInfo{};
+  AllocationInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+  AllocationInfo.requiredFlags =
+      VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  VK_CHECK(vmaCreateImage(m_Device.Allocator, &HzbInfo, &AllocationInfo,
+                          &m_HzbImage.Image, &m_HzbImage.Allocation,
+                          VK_NULL_HANDLE));
+
+  m_HzbMipImageViews.reserve(MipCount);
+  m_HzbMipExtents.reserve(MipCount);
+  m_HzbMipOffsets.reserve(MipCount);
+
+  for (uint32_t MipLevel = 0; MipLevel < MipCount; ++MipLevel) {
+    const VkExtent2D MipExtent = ComputeMipExtent(BaseExtent, MipLevel);
+    m_HzbMipExtents.push_back(MipExtent);
+    m_HzbMipOffsets.push_back(m_HzbReadbackBufferSize);
+    m_HzbReadbackBufferSize +=
+        static_cast<VkDeviceSize>(MipExtent.width) *
+        static_cast<VkDeviceSize>(MipExtent.height) * sizeof(float);
+
+    VkImageViewCreateInfo ViewInfo = VkInit::ImageViewCreateInfo(
+        m_HzbImage.ImageFormat, m_HzbImage.Image, VK_IMAGE_ASPECT_COLOR_BIT);
+    ViewInfo.subresourceRange.baseMipLevel = MipLevel;
+    ViewInfo.subresourceRange.levelCount = 1;
+
+    VkImageView MipView = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateImageView(m_Device.Device, &ViewInfo, VK_NULL_HANDLE,
+                               &MipView));
+    m_HzbMipImageViews.push_back(MipView);
+  }
+
+  m_MainDeletionQueue.PushFunction([this]() {
+    for (VkImageView MipView : m_HzbMipImageViews) {
+      if (MipView != VK_NULL_HANDLE) {
+        vkDestroyImageView(m_Device.Device, MipView, VK_NULL_HANDLE);
+      }
+    }
+    m_HzbMipImageViews.clear();
+    vmaDestroyImage(m_Device.Allocator, m_HzbImage.Image, m_HzbImage.Allocation);
+    m_HzbImage = {};
+  });
+}
+
 void VulkanRendererBackend::Shutdown() {
   A_CORE_INFO("Running Vulkan renderer cleanup...");
 
@@ -255,6 +450,7 @@ void VulkanRendererBackend::Shutdown() {
 
     for (auto &Frame : m_MeshFrames) {
       VkBufferUtil::DestroyBuffer(m_Device.Allocator, Frame.CameraBuffer);
+      VkBufferUtil::DestroyBuffer(m_Device.Allocator, Frame.HzbReadbackBuffer);
     }
 
     m_CommandContext.Shutdown(m_Device.Device);
@@ -270,11 +466,13 @@ void VulkanRendererBackend::Shutdown() {
 }
 
 void VulkanRendererBackend::InitDescriptors() {
-  const uint32_t MaxSets =
-      2 + FRAME_OVERLAP + (MaxMeshSubmissionsPerFrame * 2);
+  const uint32_t MaxSets = 4 +
+                           (FRAME_OVERLAP * (MaxMeshSubmissionsPerFrame + 2)) +
+                           (MaxMeshSubmissionsPerFrame * 2) +
+                           static_cast<uint32_t>(m_HzbMipImageViews.size());
   std::vector<DescriptorAllocator::PoolSizeRatio> Sizes = {
-      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2.0f},
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4.0f},
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 4.0f},
+      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 6.0f},
       {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 2.0f},
       {VK_DESCRIPTOR_TYPE_SAMPLER, 2.0f},
       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4.0f},
@@ -286,6 +484,14 @@ void VulkanRendererBackend::InitDescriptors() {
     DescriptorLayoutBuilder Builder;
     Builder.AddBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
     m_DrawImageDescriptorLayout =
+        Builder.Build(m_Device.Device, VK_SHADER_STAGE_COMPUTE_BIT);
+  }
+
+  {
+    DescriptorLayoutBuilder Builder;
+    Builder.AddBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+    Builder.AddBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    m_HzbReduceDescriptorLayout =
         Builder.Build(m_Device.Device, VK_SHADER_STAGE_COMPUTE_BIT);
   }
 
@@ -358,6 +564,35 @@ void VulkanRendererBackend::InitDescriptors() {
   VK_CHECK(vkCreateSampler(m_Device.Device, &SamplerInfo, VK_NULL_HANDLE,
                            &m_TextureSampler));
 
+  m_HzbReduceDescriptorSets.clear();
+  m_HzbReduceDescriptorSets.reserve(m_HzbMipImageViews.size());
+  for (size_t MipLevel = 0; MipLevel < m_HzbMipImageViews.size(); ++MipLevel) {
+    VkDescriptorSet DescriptorSet = m_GlobalDescriptorAllocator.Allocate(
+        m_Device.Device, m_HzbReduceDescriptorLayout);
+    m_HzbReduceDescriptorSets.push_back(DescriptorSet);
+
+    VkDescriptorImageInfo DestinationImageInfo{};
+    DestinationImageInfo.imageView = m_HzbMipImageViews[MipLevel];
+    DestinationImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    VkDescriptorImageInfo SourceImageInfo{};
+    SourceImageInfo.sampler = m_LinearDepthSampler;
+    SourceImageInfo.imageView =
+        (MipLevel == 0) ? m_RasterDepthImage.ImageView
+                        : m_HzbMipImageViews[MipLevel - 1];
+    SourceImageInfo.imageLayout =
+        (MipLevel == 0) ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                        : VK_IMAGE_LAYOUT_GENERAL;
+
+    std::array<VkWriteDescriptorSet, 2> Writes = {
+        VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                   DescriptorSet, &DestinationImageInfo, 0),
+        VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                   DescriptorSet, &SourceImageInfo, 1)};
+    vkUpdateDescriptorSets(m_Device.Device, static_cast<uint32_t>(Writes.size()),
+                           Writes.data(), 0, VK_NULL_HANDLE);
+  }
+
   m_MainDeletionQueue.PushFunction([this]() {
     vkDestroySampler(m_Device.Device, m_TextureSampler, VK_NULL_HANDLE);
     vkDestroySampler(m_Device.Device, m_LinearDepthSampler, VK_NULL_HANDLE);
@@ -369,6 +604,8 @@ void VulkanRendererBackend::InitDescriptors() {
                                  VK_NULL_HANDLE);
     vkDestroyDescriptorSetLayout(m_Device.Device,
                                  m_MeshGraphicsFrameDescriptorLayout,
+                                 VK_NULL_HANDLE);
+    vkDestroyDescriptorSetLayout(m_Device.Device, m_HzbReduceDescriptorLayout,
                                  VK_NULL_HANDLE);
     vkDestroyDescriptorSetLayout(m_Device.Device, m_DrawImageDescriptorLayout,
                                  VK_NULL_HANDLE);
@@ -464,6 +701,24 @@ void VulkanRendererBackend::InitMeshPipelines() {
   {
     VkPipelineLayoutCreateInfo ComputeLayout =
         VkInit::PipelineLayoutCreateInfo();
+    ComputeLayout.pSetLayouts = &m_HzbReduceDescriptorLayout;
+    ComputeLayout.setLayoutCount = 1;
+
+    VkPushConstantRange PushConstant{};
+    PushConstant.offset = 0;
+    PushConstant.size = sizeof(HzbReducePushConstants);
+    PushConstant.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    ComputeLayout.pPushConstantRanges = &PushConstant;
+    ComputeLayout.pushConstantRangeCount = 1;
+
+    VK_CHECK(vkCreatePipelineLayout(m_Device.Device, &ComputeLayout,
+                                    VK_NULL_HANDLE,
+                                    &m_HzbReducePipelineLayout));
+  }
+
+  {
+    VkPipelineLayoutCreateInfo ComputeLayout =
+        VkInit::PipelineLayoutCreateInfo();
     ComputeLayout.pSetLayouts = ComputeLayouts.data();
     ComputeLayout.setLayoutCount =
         static_cast<uint32_t>(ComputeLayouts.size());
@@ -521,6 +776,32 @@ void VulkanRendererBackend::InitMeshPipelines() {
 
   VK_CHECK(vkCreatePipelineLayout(m_Device.Device, &DepthLayout,
                                   VK_NULL_HANDLE, &m_MeshDepthPipelineLayout));
+
+  VkShaderModule HzbReduceShader;
+  const std::string HzbReduceShaderPath =
+      std::string(AXIOM_CONTENT_DIR) + "/Shaders/hzb_reduce.comp.spv";
+  if (!VkUtil::LoadShaderModule(HzbReduceShaderPath.c_str(), m_Device.Device,
+                                &HzbReduceShader)) {
+    A_ERROR("Error when loading the HZB reduction shader: {0}",
+            HzbReduceShaderPath);
+    Axiom::Log::Flush();
+    abort();
+  }
+
+  VkPipelineShaderStageCreateInfo HzbReduceStageInfo =
+      VkInit::PipelineShaderStageCreateInfo(VK_SHADER_STAGE_COMPUTE_BIT,
+                                            HzbReduceShader);
+
+  VkComputePipelineCreateInfo HzbReducePipelineCreateInfo = {
+      .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+      .pNext = VK_NULL_HANDLE,
+      .stage = HzbReduceStageInfo,
+      .layout = m_HzbReducePipelineLayout};
+
+  VK_CHECK(vkCreateComputePipelines(m_Device.Device, VK_NULL_HANDLE, 1,
+                                    &HzbReducePipelineCreateInfo,
+                                    VK_NULL_HANDLE, &m_HzbReducePipeline));
+  vkDestroyShaderModule(m_Device.Device, HzbReduceShader, VK_NULL_HANDLE);
 
   VkShaderModule MeshProjectShader;
   const std::string MeshProjectShaderPath =
@@ -725,6 +1006,8 @@ void VulkanRendererBackend::InitMeshPipelines() {
   DepthPipelineInfo.pNext = &DepthRenderingInfo;
   DepthPipelineInfo.pColorBlendState = &DepthOnlyBlending;
   DepthPipelineInfo.layout = m_MeshDepthPipelineLayout;
+  DepthPipelineInfo.stageCount = 1;
+  DepthPipelineInfo.pStages = &ShaderStages[0];
   VK_CHECK(vkCreateGraphicsPipelines(m_Device.Device, VK_NULL_HANDLE, 1,
                                      &DepthPipelineInfo, VK_NULL_HANDLE,
                                      &m_MeshDepthPipeline));
@@ -745,6 +1028,9 @@ void VulkanRendererBackend::InitMeshPipelines() {
   vkDestroyShaderModule(m_Device.Device, FragmentShader, VK_NULL_HANDLE);
 
   m_MainDeletionQueue.PushFunction([this]() {
+    vkDestroyPipelineLayout(m_Device.Device, m_HzbReducePipelineLayout,
+                            VK_NULL_HANDLE);
+    vkDestroyPipeline(m_Device.Device, m_HzbReducePipeline, VK_NULL_HANDLE);
     vkDestroyPipelineLayout(m_Device.Device, m_MeshProjectPipelineLayout,
                             VK_NULL_HANDLE);
     vkDestroyPipeline(m_Device.Device, m_MeshProjectPipeline, VK_NULL_HANDLE);
@@ -769,9 +1055,18 @@ void VulkanRendererBackend::InitMeshFrameResources() {
         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
+    Frame.HzbReadbackBuffer = VkBufferUtil::CreateBuffer(
+        m_Device.Allocator, static_cast<size_t>(m_HzbReadbackBufferSize),
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
+            VMA_ALLOCATION_CREATE_MAPPED_BIT);
 
-    Frame.GraphicsFrameDescriptorSet = m_GlobalDescriptorAllocator.Allocate(
+    Frame.DepthFrameDescriptorSet = m_GlobalDescriptorAllocator.Allocate(
         m_Device.Device, m_MeshGraphicsFrameDescriptorLayout);
+    for (VkDescriptorSet &DescriptorSet : Frame.GraphicsFrameDescriptorSets) {
+      DescriptorSet = m_GlobalDescriptorAllocator.Allocate(
+          m_Device.Device, m_MeshGraphicsFrameDescriptorLayout);
+    }
     Frame.ComputeFrameDescriptorSet = m_GlobalDescriptorAllocator.Allocate(
         m_Device.Device, m_MeshComputeFrameDescriptorLayout);
 
@@ -884,6 +1179,103 @@ VkImageView VulkanRendererBackend::ResolveMaterialTextureView(
   return TextureImage.ImageView;
 }
 
+const VulkanRendererBackend::MeshFrameResources *
+VulkanRendererBackend::GetPreviousOcclusionFrame() {
+  if (m_FrameNumber == 0) {
+    return nullptr;
+  }
+
+  const auto &PreviousFrame = m_CommandContext.GetFrame(m_FrameNumber - 1);
+  if (vkGetFenceStatus(m_Device.Device, PreviousFrame.RenderFence) != VK_SUCCESS) {
+    return nullptr;
+  }
+
+  return &m_MeshFrames[(m_FrameNumber - 1) % FRAME_OVERLAP];
+}
+
+bool VulkanRendererBackend::ShouldUsePreviousOcclusionData(
+    const MeshFrameResources &PreviousFrame,
+    const CameraFrameUniform &CameraData) const {
+  if (!PreviousFrame.HasValidOcclusionData) {
+    return false;
+  }
+
+  if (std::abs(PreviousFrame.HzbViewportSize.x - CameraData.ViewportSize.x) >
+          0.5f ||
+      std::abs(PreviousFrame.HzbViewportSize.y - CameraData.ViewportSize.y) >
+          0.5f) {
+    return false;
+  }
+
+  return GetMatrixMaxAbsDifference(PreviousFrame.HzbViewProjection,
+                                   CameraData.ViewProjection) <= 1e-3f;
+}
+
+bool VulkanRendererBackend::IsOccludedByPreviousFrame(
+    const MeshFrameResources &PreviousFrame, const glm::mat4 &Model,
+    const glm::vec3 &BoundsMin, const glm::vec3 &BoundsMax) const {
+  if (!PreviousFrame.HasValidOcclusionData ||
+      PreviousFrame.HzbReadbackBuffer.Info.pMappedData == nullptr ||
+      m_HzbMipExtents.empty()) {
+    return false;
+  }
+
+  BoundsScreenRect ScreenRect{};
+  if (!ProjectBoundsToScreenRect(PreviousFrame.HzbViewProjection, Model, BoundsMin,
+                                 BoundsMax, PreviousFrame.HzbViewportSize,
+                                 ScreenRect)) {
+    return false;
+  }
+
+  const float RectWidth = ScreenRect.Max.x - ScreenRect.Min.x + 1.0f;
+  const float RectHeight = ScreenRect.Max.y - ScreenRect.Min.y + 1.0f;
+  const float LargestDimension = std::max(RectWidth, RectHeight);
+  uint32_t MipLevel = 0;
+  if (LargestDimension > 1.0f) {
+    MipLevel = static_cast<uint32_t>(std::floor(std::log2(LargestDimension)));
+  }
+  MipLevel = std::min<uint32_t>(MipLevel,
+                                static_cast<uint32_t>(m_HzbMipExtents.size() - 1));
+
+  const VkExtent2D MipExtent = m_HzbMipExtents[MipLevel];
+  const float ScaleX =
+      static_cast<float>(MipExtent.width) / PreviousFrame.HzbViewportSize.x;
+  const float ScaleY =
+      static_cast<float>(MipExtent.height) / PreviousFrame.HzbViewportSize.y;
+
+  const uint32_t MinX = std::min(
+      MipExtent.width - 1u,
+      static_cast<uint32_t>(std::floor(ScreenRect.Min.x * ScaleX)));
+  const uint32_t MinY = std::min(
+      MipExtent.height - 1u,
+      static_cast<uint32_t>(std::floor(ScreenRect.Min.y * ScaleY)));
+  const uint32_t MaxX = std::min(
+      MipExtent.width - 1u,
+      static_cast<uint32_t>(std::floor(ScreenRect.Max.x * ScaleX)));
+  const uint32_t MaxY = std::min(
+      MipExtent.height - 1u,
+      static_cast<uint32_t>(std::floor(ScreenRect.Max.y * ScaleY)));
+
+  const auto *Bytes =
+      static_cast<const std::byte *>(PreviousFrame.HzbReadbackBuffer.Info.pMappedData);
+  float MaxDepth = 0.0f;
+  MaxDepth = std::max(MaxDepth,
+                      ReadHzbDepth(Bytes, m_HzbMipOffsets[MipLevel], MipExtent,
+                                   MinX, MinY));
+  MaxDepth = std::max(MaxDepth,
+                      ReadHzbDepth(Bytes, m_HzbMipOffsets[MipLevel], MipExtent,
+                                   MaxX, MinY));
+  MaxDepth = std::max(MaxDepth,
+                      ReadHzbDepth(Bytes, m_HzbMipOffsets[MipLevel], MipExtent,
+                                   MinX, MaxY));
+  MaxDepth = std::max(MaxDepth,
+                      ReadHzbDepth(Bytes, m_HzbMipOffsets[MipLevel], MipExtent,
+                                   MaxX, MaxY));
+
+  constexpr float DepthBias = 0.0015f;
+  return ScreenRect.NearestDepth > (MaxDepth + DepthBias);
+}
+
 void VulkanRendererBackend::CollectFrameStats(MeshFrameResources &Frame) {
   if (!Frame.HasValidTimestamps) {
     return;
@@ -923,6 +1315,9 @@ void VulkanRendererBackend::DrawStatsPanel() {
   ImGui::Text("GPU background: %.2f ms", m_FrameStats.GpuBackgroundMs);
   ImGui::Text("GPU meshes: %.2f ms", m_FrameStats.GpuMeshMs);
   ImGui::Separator();
+  ImGui::Text("Submitted meshes: %u", m_FrameStats.SubmittedMeshCount);
+  ImGui::Text("Frustum culled: %u", m_FrameStats.FrustumCulledMeshCount);
+  ImGui::Text("Occlusion culled: %u", m_FrameStats.OcclusionCulledMeshCount);
   ImGui::Text("Mesh submissions: %u", m_FrameStats.MeshSubmissionCount);
   ImGui::Text("Triangles: %u", m_FrameStats.TriangleCount);
   ImGui::Text("Draw extent: %u x %u", m_FrameStats.DrawExtent.x,
@@ -970,6 +1365,100 @@ void VulkanRendererBackend::DrawBackground(VkCommandBuffer CommandBuffer) {
   vkCmdDispatch(CommandBuffer,
                 static_cast<uint32_t>(std::ceil(m_DrawExtent.width / 16.0f)),
                 static_cast<uint32_t>(std::ceil(m_DrawExtent.height / 16.0f)), 1);
+}
+
+void VulkanRendererBackend::BuildHzb(VkCommandBuffer CommandBuffer,
+                                     MeshFrameResources &Frame) {
+  if (m_HzbReduceDescriptorSets.empty()) {
+    Frame.HasValidOcclusionData = false;
+    return;
+  }
+
+  VkUtil::TransitionImage(CommandBuffer, m_RasterDepthImage.Image,
+                          VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                          VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+  TransitionImageRange(CommandBuffer, m_HzbImage.Image, m_HzbImageLayout,
+                       VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_ASPECT_COLOR_BIT, 0,
+                       static_cast<uint32_t>(m_HzbMipImageViews.size()));
+  m_HzbImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+  vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                    m_HzbReducePipeline);
+  for (size_t MipLevel = 0; MipLevel < m_HzbReduceDescriptorSets.size();
+       ++MipLevel) {
+    vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            m_HzbReducePipelineLayout, 0, 1,
+                            &m_HzbReduceDescriptorSets[MipLevel], 0,
+                            VK_NULL_HANDLE);
+
+    const VkExtent2D SourceExtent =
+        (MipLevel == 0) ? VkExtent2D{m_DrawExtent.width, m_DrawExtent.height}
+                        : m_HzbMipExtents[MipLevel - 1];
+    const VkExtent2D DestinationExtent = m_HzbMipExtents[MipLevel];
+    HzbReducePushConstants PushConstants{};
+    PushConstants.Dimensions = glm::uvec4(SourceExtent.width, SourceExtent.height,
+                                          DestinationExtent.width,
+                                          DestinationExtent.height);
+    vkCmdPushConstants(CommandBuffer, m_HzbReducePipelineLayout,
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                       sizeof(HzbReducePushConstants), &PushConstants);
+
+    vkCmdDispatch(CommandBuffer,
+                  static_cast<uint32_t>(
+                      std::ceil(DestinationExtent.width / 8.0f)),
+                  static_cast<uint32_t>(
+                      std::ceil(DestinationExtent.height / 8.0f)),
+                  1);
+
+    TransitionImageRange(CommandBuffer, m_HzbImage.Image, VK_IMAGE_LAYOUT_GENERAL,
+                         VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_ASPECT_COLOR_BIT,
+                         static_cast<uint32_t>(MipLevel), 1);
+  }
+
+  TransitionImageRange(CommandBuffer, m_HzbImage.Image, VK_IMAGE_LAYOUT_GENERAL,
+                       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       VK_IMAGE_ASPECT_COLOR_BIT, 0,
+                       static_cast<uint32_t>(m_HzbMipImageViews.size()));
+  m_HzbImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+
+  for (size_t MipLevel = 0; MipLevel < m_HzbMipExtents.size(); ++MipLevel) {
+    VkBufferImageCopy CopyRegion{};
+    CopyRegion.bufferOffset = m_HzbMipOffsets[MipLevel];
+    CopyRegion.bufferRowLength = 0;
+    CopyRegion.bufferImageHeight = 0;
+    CopyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    CopyRegion.imageSubresource.mipLevel = static_cast<uint32_t>(MipLevel);
+    CopyRegion.imageSubresource.baseArrayLayer = 0;
+    CopyRegion.imageSubresource.layerCount = 1;
+    CopyRegion.imageExtent = {m_HzbMipExtents[MipLevel].width,
+                              m_HzbMipExtents[MipLevel].height, 1};
+    vkCmdCopyImageToBuffer(CommandBuffer, m_HzbImage.Image,
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           Frame.HzbReadbackBuffer.Buffer, 1, &CopyRegion);
+  }
+
+  VkBufferMemoryBarrier2 ReadbackBarrier{
+      .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+      .pNext = VK_NULL_HANDLE,
+      .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+      .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+      .dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
+      .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT,
+      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .buffer = Frame.HzbReadbackBuffer.Buffer,
+      .offset = 0,
+      .size = Frame.HzbReadbackBuffer.Size};
+  VkDependencyInfo ReadbackDependencyInfo{
+      .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+      .pNext = VK_NULL_HANDLE,
+      .bufferMemoryBarrierCount = 1,
+      .pBufferMemoryBarriers = &ReadbackBarrier};
+  vkCmdPipelineBarrier2(CommandBuffer, &ReadbackDependencyInfo);
+
+  VkUtil::TransitionImage(CommandBuffer, m_RasterDepthImage.Image,
+                          VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                          VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 }
 
 void VulkanRendererBackend::ClearDepthImage(VkCommandBuffer CommandBuffer) {
@@ -1074,13 +1563,13 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
   DefaultGraphicsTextureSamplerInfo.sampler = m_TextureSampler;
   std::array<VkWriteDescriptorSet, 3> DefaultGraphicsFrameWrites = {
       VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                                    Frame.GraphicsFrameDescriptorSet,
+                                    Frame.DepthFrameDescriptorSet,
                                     &CameraBufferInfo, 0),
       VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-                                 Frame.GraphicsFrameDescriptorSet,
+                                 Frame.DepthFrameDescriptorSet,
                                  &DefaultGraphicsTextureImageInfo, 1),
       VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_SAMPLER,
-                                 Frame.GraphicsFrameDescriptorSet,
+                                 Frame.DepthFrameDescriptorSet,
                                  &DefaultGraphicsTextureSamplerInfo, 2)};
   vkUpdateDescriptorSets(m_Device.Device,
                          static_cast<uint32_t>(DefaultGraphicsFrameWrites.size()),
@@ -1114,6 +1603,9 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
     m_HasWarnedMeshSubmissionOverflow = true;
   }
 
+  m_FrameStats.SubmittedMeshCount = static_cast<uint32_t>(SubmissionCount);
+  m_FrameStats.FrustumCulledMeshCount = 0;
+  m_FrameStats.OcclusionCulledMeshCount = 0;
   m_FrameStats.MeshSubmissionCount = 0;
   m_FrameStats.TriangleCount = 0;
 
@@ -1121,8 +1613,15 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
     const RenderMeshSubmission *Submission{nullptr};
     std::shared_ptr<VulkanMesh> Mesh;
   };
+  struct CandidateSubmission {
+    const RenderMeshSubmission *Submission{nullptr};
+    std::shared_ptr<VulkanMesh> Mesh;
+    float SortDepth{0.0f};
+  };
+  std::vector<CandidateSubmission> Candidates;
   std::vector<VisibleMeshSubmission> GraphicsSubmissions;
   std::vector<VisibleMeshSubmission> ComputeSubmissions;
+  Candidates.reserve(SubmissionCount);
   GraphicsSubmissions.reserve(SubmissionCount);
   ComputeSubmissions.reserve(SubmissionCount);
 
@@ -1133,20 +1632,62 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
       continue;
     }
 
-    if (!IsBoundsVisible(CameraData.ViewProjection, Submission.Transform,
+    if (!ForceWireframe &&
+        !IsBoundsVisible(CameraData.ViewProjection, Submission.Transform,
                          VulkanMeshRef->BoundsMin, VulkanMeshRef->BoundsMax)) {
+      ++m_FrameStats.FrustumCulledMeshCount;
       continue;
     }
 
-    VisibleMeshSubmission VisibleSubmission{&Submission, VulkanMeshRef};
-    if (!ForceWireframe && Submission.RenderPath == MeshRenderPath::Compute) {
+    const glm::vec3 LocalCenter =
+        (VulkanMeshRef->BoundsMin + VulkanMeshRef->BoundsMax) * 0.5f;
+    const glm::vec3 WorldCenter = TransformPoint(Submission.Transform, LocalCenter);
+    const glm::vec3 Delta = WorldCenter - Camera.GetPosition();
+    Candidates.push_back(
+        {.Submission = &Submission,
+         .Mesh = std::move(VulkanMeshRef),
+         .SortDepth = glm::dot(Delta, Delta)});
+  }
+
+  if (!ForceWireframe) {
+    std::sort(Candidates.begin(), Candidates.end(),
+              [](const CandidateSubmission &Left,
+                 const CandidateSubmission &Right) {
+                return Left.SortDepth < Right.SortDepth;
+              });
+  }
+
+  const MeshFrameResources *PreviousOcclusionFrame =
+      ForceWireframe ? nullptr : GetPreviousOcclusionFrame();
+  bool UseOcclusion = false;
+  if (PreviousOcclusionFrame != nullptr) {
+    vmaInvalidateAllocation(m_Device.Allocator,
+                            PreviousOcclusionFrame->HzbReadbackBuffer.Allocation, 0,
+                            VK_WHOLE_SIZE);
+    UseOcclusion =
+        ShouldUsePreviousOcclusionData(*PreviousOcclusionFrame, CameraData);
+  }
+
+  for (const CandidateSubmission &Candidate : Candidates) {
+    if (UseOcclusion &&
+        IsOccludedByPreviousFrame(*PreviousOcclusionFrame,
+                                  Candidate.Submission->Transform,
+                                  Candidate.Mesh->BoundsMin,
+                                  Candidate.Mesh->BoundsMax)) {
+      ++m_FrameStats.OcclusionCulledMeshCount;
+      continue;
+    }
+
+    VisibleMeshSubmission VisibleSubmission{Candidate.Submission, Candidate.Mesh};
+    if (!ForceWireframe &&
+        Candidate.Submission->RenderPath == MeshRenderPath::Compute) {
       ComputeSubmissions.push_back(VisibleSubmission);
     } else {
       GraphicsSubmissions.push_back(VisibleSubmission);
     }
 
     ++m_FrameStats.MeshSubmissionCount;
-    m_FrameStats.TriangleCount += VulkanMeshRef->TriangleCount;
+    m_FrameStats.TriangleCount += Candidate.Mesh->TriangleCount;
   }
 
   auto BindMeshBuffers = [&](const std::shared_ptr<VulkanMesh> &MeshRef) {
@@ -1178,7 +1719,7 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
     vkCmdSetScissor(CommandBuffer, 0, 1, &Scissor);
     vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             m_MeshDepthPipelineLayout, 0, 1,
-                            &Frame.GraphicsFrameDescriptorSet, 0, VK_NULL_HANDLE);
+                            &Frame.DepthFrameDescriptorSet, 0, VK_NULL_HANDLE);
     for (const auto &VisibleSubmission : GraphicsSubmissions) {
       MeshGraphicsPushConstants PushConstants{};
       PushConstants.Model = VisibleSubmission.Submission->Transform;
@@ -1202,6 +1743,11 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
     vkCmdEndRendering(CommandBuffer);
   }
 
+  BuildHzb(CommandBuffer, Frame);
+  Frame.HzbViewProjection = CameraData.ViewProjection;
+  Frame.HzbViewportSize = glm::vec2(CameraData.ViewportSize);
+  Frame.HasValidOcclusionData = !m_HzbReduceDescriptorSets.empty();
+
   if (ComputeSubmissions.empty()) {
     if (!GraphicsSubmissions.empty()) {
       vkCmdBeginRendering(CommandBuffer, &RenderingInfo);
@@ -1210,7 +1756,11 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
                                        : m_MeshGraphicsPipeline);
       vkCmdSetViewport(CommandBuffer, 0, 1, &Viewport);
       vkCmdSetScissor(CommandBuffer, 0, 1, &Scissor);
-      for (const auto &VisibleSubmission : GraphicsSubmissions) {
+      for (size_t SubmissionIndex = 0;
+           SubmissionIndex < GraphicsSubmissions.size(); ++SubmissionIndex) {
+        const auto &VisibleSubmission = GraphicsSubmissions[SubmissionIndex];
+        VkDescriptorSet GraphicsDescriptorSet =
+            Frame.GraphicsFrameDescriptorSets[SubmissionIndex];
         VkDescriptorImageInfo GraphicsTextureImageInfo{};
         GraphicsTextureImageInfo.imageView =
             ResolveMaterialTextureView(VisibleSubmission.Submission->Material);
@@ -1220,20 +1770,20 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
         GraphicsTextureSamplerInfo.sampler = m_TextureSampler;
         std::array<VkWriteDescriptorSet, 3> GraphicsFrameWrites = {
             VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                                          Frame.GraphicsFrameDescriptorSet,
+                                          GraphicsDescriptorSet,
                                           &CameraBufferInfo, 0),
             VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-                                       Frame.GraphicsFrameDescriptorSet,
+                                       GraphicsDescriptorSet,
                                        &GraphicsTextureImageInfo, 1),
             VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_SAMPLER,
-                                       Frame.GraphicsFrameDescriptorSet,
+                                       GraphicsDescriptorSet,
                                        &GraphicsTextureSamplerInfo, 2)};
         vkUpdateDescriptorSets(m_Device.Device,
                                static_cast<uint32_t>(GraphicsFrameWrites.size()),
                                GraphicsFrameWrites.data(), 0, VK_NULL_HANDLE);
         vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 m_MeshGraphicsPipelineLayout, 0, 1,
-                                &Frame.GraphicsFrameDescriptorSet, 0,
+                                &GraphicsDescriptorSet, 0,
                                 VK_NULL_HANDLE);
         MeshGraphicsPushConstants PushConstants{};
         PushConstants.Model = VisibleSubmission.Submission->Transform;
@@ -1353,7 +1903,11 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
                                      : m_MeshGraphicsPipeline);
     vkCmdSetViewport(CommandBuffer, 0, 1, &Viewport);
     vkCmdSetScissor(CommandBuffer, 0, 1, &Scissor);
-    for (const auto &VisibleSubmission : GraphicsSubmissions) {
+    for (size_t SubmissionIndex = 0;
+         SubmissionIndex < GraphicsSubmissions.size(); ++SubmissionIndex) {
+      const auto &VisibleSubmission = GraphicsSubmissions[SubmissionIndex];
+      VkDescriptorSet GraphicsDescriptorSet =
+          Frame.GraphicsFrameDescriptorSets[SubmissionIndex];
       VkDescriptorImageInfo GraphicsTextureImageInfo{};
       GraphicsTextureImageInfo.imageView =
           ResolveMaterialTextureView(VisibleSubmission.Submission->Material);
@@ -1363,20 +1917,20 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
       GraphicsTextureSamplerInfo.sampler = m_TextureSampler;
       std::array<VkWriteDescriptorSet, 3> GraphicsFrameWrites = {
           VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                                        Frame.GraphicsFrameDescriptorSet,
+                                        GraphicsDescriptorSet,
                                         &CameraBufferInfo, 0),
           VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-                                     Frame.GraphicsFrameDescriptorSet,
+                                     GraphicsDescriptorSet,
                                      &GraphicsTextureImageInfo, 1),
           VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_SAMPLER,
-                                     Frame.GraphicsFrameDescriptorSet,
+                                     GraphicsDescriptorSet,
                                      &GraphicsTextureSamplerInfo, 2)};
       vkUpdateDescriptorSets(m_Device.Device,
                              static_cast<uint32_t>(GraphicsFrameWrites.size()),
                              GraphicsFrameWrites.data(), 0, VK_NULL_HANDLE);
       vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                               m_MeshGraphicsPipelineLayout, 0, 1,
-                              &Frame.GraphicsFrameDescriptorSet, 0,
+                              &GraphicsDescriptorSet, 0,
                               VK_NULL_HANDLE);
       MeshGraphicsPushConstants PushConstants{};
       PushConstants.Model = VisibleSubmission.Submission->Transform;
@@ -1484,9 +2038,13 @@ void VulkanRendererBackend::Draw() {
   m_DrawExtent.width = m_DrawImage.ImageExtent.width;
   m_DrawExtent.height = m_DrawImage.ImageExtent.height;
   m_FrameStats.DrawExtent = {m_DrawExtent.width, m_DrawExtent.height};
+  m_FrameStats.SubmittedMeshCount = 0;
+  m_FrameStats.FrustumCulledMeshCount = 0;
+  m_FrameStats.OcclusionCulledMeshCount = 0;
   m_FrameStats.MeshSubmissionCount = 0;
   m_FrameStats.TriangleCount = 0;
   MeshFrame.HasValidTimestamps = true;
+  MeshFrame.HasValidOcclusionData = false;
 
   VK_CHECK(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo));
   vkCmdResetQueryPool(CommandBuffer, MeshFrame.TimestampQueryPool, 0,

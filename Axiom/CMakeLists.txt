@@ -5,6 +5,7 @@ set(ENGINE_SOURCES
   Core/LayerStack.cpp
   Core/Window.cpp
   Core/Log.cpp
+  Core/VulkanLoader.cpp
   Renderer/Camera.cpp
   Renderer/ForwardRenderer.cpp
   Renderer/RenderCommand.cpp
@@ -40,6 +41,9 @@ add_library(AxiomCore STATIC ${ENGINE_SOURCES} ${THIRDPARTY_SOURCES})
 
 add_dependencies(AxiomCore Shaders)
 
+set(AXIOM_VULKAN_LOADER_PATH "" CACHE STRING
+    "Optional explicit Vulkan loader path used when platform-default discovery fails")
+
 find_package(Vulkan REQUIRED)
 message(STATUS "Vulkan_FOUND: ${Vulkan_FOUND}")
 message(STATUS "Vulkan_INCLUDE_DIRS: ${Vulkan_INCLUDE_DIRS}")
@@ -68,8 +72,19 @@ target_link_libraries(AxiomCore PUBLIC
 target_compile_definitions(AxiomCore PUBLIC
   VK_NO_PROTOTYPES
   AXIOM_CONTENT_DIR="${CMAKE_SOURCE_DIR}/Content"
-  AXIOM_VULKAN_LOADER_LIBRARY="${Vulkan_LIBRARIES}"
 )
+
+if(AXIOM_VULKAN_LOADER_PATH)
+  string(REPLACE "\\" "\\\\" AXIOM_VULKAN_LOADER_PATH_ESCAPED
+         "${AXIOM_VULKAN_LOADER_PATH}")
+  target_compile_definitions(AxiomCore PUBLIC
+    AXIOM_VULKAN_LOADER_PATH="${AXIOM_VULKAN_LOADER_PATH_ESCAPED}"
+  )
+endif()
+
+if(UNIX AND NOT APPLE)
+  target_link_libraries(AxiomCore PUBLIC ${CMAKE_DL_LIBS})
+endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   target_compile_options(AxiomCore PRIVATE

@@ -1,32 +1,12 @@
 #include "Window.h"
-#include <iostream>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
-#include <volk.h>
 
 #include "Core/Log.h"
+#include "Core/VulkanLoader.h"
 
-#include <dlfcn.h>
-#include <string>
-
-namespace {
-PFN_vkGetInstanceProcAddr LoadVulkanLoaderProcAddr() {
-#ifdef AXIOM_VULKAN_LOADER_LIBRARY
-  void *Loader = dlopen(AXIOM_VULKAN_LOADER_LIBRARY, RTLD_NOW | RTLD_LOCAL);
-  if (!Loader) {
-    A_CORE_ERROR("Failed to load Vulkan loader '{0}': {1}",
-                 AXIOM_VULKAN_LOADER_LIBRARY, dlerror());
-    return nullptr;
-  }
-
-  return reinterpret_cast<PFN_vkGetInstanceProcAddr>(
-      dlsym(Loader, "vkGetInstanceProcAddr"));
-#else
-  return nullptr;
-#endif
-}
-} // namespace
+#include <cstdlib>
 
 namespace Axiom {
 Window::Window(const std::string &Title, uint32_t Width, uint32_t Height)
@@ -35,25 +15,36 @@ Window::Window(const std::string &Title, uint32_t Width, uint32_t Height)
     A_CORE_ERROR("GLFW error {0}: {1}", Error, Description);
   });
 
-  if (PFN_vkGetInstanceProcAddr LoaderProcAddr = LoadVulkanLoaderProcAddr()) {
-    glfwInitVulkanLoader(LoaderProcAddr);
+  const VulkanLoaderInfo &LoaderInfo = GetVulkanLoaderInfo();
+  if (!LoaderInfo.IsAvailable) {
+    A_CORE_CRITICAL("Failed to resolve a Vulkan loader before GLFW startup");
+    Axiom::Log::Flush();
+    std::abort();
   }
 
-  glfwInit();
+  ConfigureGlfwVulkanLoader();
+
+  if (!glfwInit()) {
+    A_CORE_CRITICAL("GLFW initialization failed");
+    Axiom::Log::Flush();
+    std::abort();
+  }
 
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
   m_NativeHandle =
       glfwCreateWindow(m_Width, m_Height, m_Title.c_str(), nullptr, nullptr);
 
   if (!m_NativeHandle) {
-    std::cerr << "Failed to create window!" << std::endl;
-    return;
+    A_CORE_CRITICAL("Failed to create GLFW window '{0}'", m_Title);
+    Axiom::Log::Flush();
+    std::abort();
   }
-
 }
 
 Window::~Window() {
-  glfwDestroyWindow(m_NativeHandle);
+  if (m_NativeHandle != nullptr) {
+    glfwDestroyWindow(m_NativeHandle);
+  }
   glfwTerminate();
 }
 

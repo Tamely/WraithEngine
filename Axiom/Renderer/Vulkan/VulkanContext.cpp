@@ -7,29 +7,13 @@
 #include <VkBootstrap.h>
 
 #include <cstdlib>
-#include <dlfcn.h>
 
 #include "Core/Log.h"
+#include "Core/VulkanLoader.h"
 #include "Renderer/Vulkan/VulkanStringUtils.h"
 
 namespace {
 constexpr bool bUseValidationLayers = true;
-
-PFN_vkGetInstanceProcAddr LoadVulkanLoaderProcAddr() {
-#ifdef AXIOM_VULKAN_LOADER_LIBRARY
-  void *Loader = dlopen(AXIOM_VULKAN_LOADER_LIBRARY, RTLD_NOW | RTLD_LOCAL);
-  if (!Loader) {
-    A_CORE_CRITICAL("Failed to load Vulkan loader '{0}': {1}",
-                    AXIOM_VULKAN_LOADER_LIBRARY, dlerror());
-    return nullptr;
-  }
-
-  return reinterpret_cast<PFN_vkGetInstanceProcAddr>(
-      dlsym(Loader, "vkGetInstanceProcAddr"));
-#else
-  return nullptr;
-#endif
-}
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL
 VulkanDebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT MessageSeverity,
@@ -48,32 +32,42 @@ VulkanDebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT MessageSeverity,
 
 namespace Axiom {
 void VulkanContext::Init(GLFWwindow *Window) {
-  PFN_vkGetInstanceProcAddr LoaderProcAddr = LoadVulkanLoaderProcAddr();
-  if (LoaderProcAddr == nullptr) {
-    A_CORE_CRITICAL("Failed to load vkGetInstanceProcAddr from Vulkan loader");
+  const VulkanLoaderInfo &LoaderInfo = GetVulkanLoaderInfo();
+  if (!LoaderInfo.IsAvailable) {
+    A_CORE_CRITICAL("Failed to resolve a Vulkan loader for Vulkan context init");
     Axiom::Log::Flush();
-    abort();
+    std::abort();
   }
 
-  volkInitializeCustom(LoaderProcAddr);
-  A_CORE_INFO("Volk successfully initialized!");
+  A_CORE_INFO("Vulkan loader source: {0}",
+              LoaderInfo.Source.empty() ? "platform-default Vulkan loader"
+                                        : LoaderInfo.Source);
+  A_CORE_INFO("Volk successfully initialized using {0}",
+              LoaderInfo.UsesCustomLoader ? "custom loader" : "default loader");
 
-  glfwInitVulkanLoader(LoaderProcAddr);
   if (!glfwVulkanSupported()) {
     A_CORE_CRITICAL("GLFW reports Vulkan is not supported on this machine!");
     Axiom::Log::Flush();
-    abort();
+    std::abort();
   }
 
-  vkb::InstanceBuilder Builder{LoaderProcAddr};
+  vkb::InstanceBuilder Builder = [&LoaderInfo]() {
+    if (LoaderInfo.UsesCustomLoader) {
+      return vkb::InstanceBuilder{LoaderInfo.ProcAddr};
+    }
+    return vkb::InstanceBuilder{};
+  }();
 
-  vkb::Result<vkb::SystemInfo> SystemInfoReturn =
-      vkb::SystemInfo::get_system_info(LoaderProcAddr);
+  vkb::Result<vkb::SystemInfo> SystemInfoReturn = LoaderInfo.UsesCustomLoader
+                                                      ? vkb::SystemInfo::get_system_info(
+                                                            LoaderInfo.ProcAddr)
+                                                      : vkb::SystemInfo::get_system_info();
   if (!SystemInfoReturn) {
     A_CORE_CRITICAL(
         "Failed to get device system info! This is a critical crash as we are "
         "unable to get GPU extensions without this.");
-    return;
+    Axiom::Log::Flush();
+    std::abort();
   }
   vkb::SystemInfo SystemInfo = SystemInfoReturn.value();
 
@@ -92,7 +86,8 @@ void VulkanContext::Init(GLFWwindow *Window) {
   if (!InstanceReturn) {
     A_CORE_CRITICAL("Failed to create instance: {0}",
                     InstanceReturn.error().message());
-    return;
+    Axiom::Log::Flush();
+    std::abort();
   }
 
   BootstrapInstance = InstanceReturn.value();
@@ -108,7 +103,14 @@ void VulkanContext::Init(GLFWwindow *Window) {
 
   volkLoadInstance(Instance);
 
-  glfwCreateWindowSurface(Instance, Window, nullptr, &Surface);
+  const VkResult SurfaceResult =
+      glfwCreateWindowSurface(Instance, Window, nullptr, &Surface);
+  if (SurfaceResult != VK_SUCCESS) {
+    A_CORE_CRITICAL("Failed to create Vulkan window surface: {0}",
+                    VkResultToString(SurfaceResult));
+    Axiom::Log::Flush();
+    std::abort();
+  }
 }
 
 void VulkanContext::Shutdown() {
