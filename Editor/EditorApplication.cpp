@@ -1,4 +1,5 @@
 #include <Core/Application.h>
+#include <Core/GlfwEditorInputSource.h>
 #include <Core/Entry.h>
 
 #include "GlfwEditorLayer.h"

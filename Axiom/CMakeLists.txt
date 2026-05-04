@@ -6,8 +6,11 @@ set(ENGINE_SOURCES
   Core/Layer.cpp
   Core/LayerStack.cpp
   Core/Window.cpp
+  Core/WindowInputPlatform.cpp
   Core/Log.cpp
   Core/VulkanLoader.cpp
+  Remote/AxiomSessionEndpoint.cpp
+  Session/BufferedEditorInputSource.cpp
   Session/EditorMessageBus.cpp
   Session/EditorSession.cpp
   Session/StartupScene.cpp

@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Renderer/Mesh.h"
+#include "Renderer/RenderSurface.h"
+#include "Renderer/ViewportFrameOutput.h"
 
 #include <glm/vec2.hpp>
 
@@ -12,7 +14,6 @@
 #include <vector>
 
 namespace Axiom {
-class Window;
 class RenderScene;
 class IRenderSurface;
 struct MeshData;

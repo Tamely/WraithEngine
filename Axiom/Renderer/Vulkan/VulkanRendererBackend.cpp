@@ -29,7 +29,6 @@
 #include <utility>
 
 #include "Core/Log.h"
-#include "Core/Window.h"
 
 Axiom::VulkanRendererBackend *g_LoadedEngine = nullptr;
 
@@ -109,6 +108,7 @@ void VulkanRendererBackend::Init(const RendererCreateInfo &CreateInfo) {
 
   InitSwapchain();
   InitHzbResources();
+  InitViewportReadbackBuffers();
   InitDescriptors();
   InitTextureResources();
   InitPipelines();
@@ -227,6 +227,29 @@ void VulkanRendererBackend::InitSwapchain() {
       VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU,
       VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
           VMA_ALLOCATION_CREATE_MAPPED_BIT);
+}
+
+void VulkanRendererBackend::InitViewportReadbackBuffers() {
+  if (m_Surface->GetKind() != RenderSurfaceKind::Offscreen ||
+      m_FrameOutput == nullptr) {
+    return;
+  }
+
+  m_ViewportReadbackBufferSize =
+      static_cast<VkDeviceSize>(m_WindowExtent.width) * m_WindowExtent.height * 8u;
+  for (AllocatedBuffer &Buffer : m_ViewportReadbackBuffers) {
+    Buffer = VkBufferUtil::CreateBuffer(
+        m_Device.Allocator, static_cast<size_t>(m_ViewportReadbackBufferSize),
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_CPU_ONLY,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
+            VMA_ALLOCATION_CREATE_MAPPED_BIT);
+  }
+
+  m_MainDeletionQueue.PushFunction([this]() {
+    for (AllocatedBuffer &Buffer : m_ViewportReadbackBuffers) {
+      VkBufferUtil::DestroyBuffer(m_Device.Allocator, Buffer);
+    }
+  });
 }
 
 void VulkanRendererBackend::InitHzbResources() {

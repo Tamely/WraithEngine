@@ -77,7 +77,7 @@ void VulkanContext::Init(void *WindowHandle, bool CreateSurface) {
     A_CORE_WARN("Debug utils extension is not available!");
   }
 
-  auto InstanceReturn = Builder.set_app_name("Axiom Engine")
+  auto InstanceReturn = Builder.set_app_name("Wraith Engine")
                             .request_validation_layers(bUseValidationLayers)
                             .set_debug_callback(VulkanDebugCallback)
                             .require_api_version(1, 3, 0)

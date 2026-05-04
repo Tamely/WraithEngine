@@ -4,6 +4,9 @@
 #include "Core/HeadlessWindow.h"
 #include "Core/Log.h"
 
+#include <memory>
+#include <utility>
+
 namespace Axiom {
 Application *Application::s_Instance = nullptr;
 
@@ -48,6 +51,10 @@ Application::~Application() {
 }
 
 Application &Application::Get() { return *s_Instance; }
+
+Window *Application::GetWindow() const {
+  return dynamic_cast<Window *>(m_Surface.get());
+}
 
 void Application::PushLayer(Layer *Layer) { m_LayerStack.PushLayer(Layer); }
 

@@ -1,5 +1,8 @@
 #pragma once
 
+#include "Renderer/RenderSurface.h"
+#include "Renderer/ViewportFrameOutput.h"
+
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -35,7 +38,8 @@ public:
   void Run();
   bool Step();
   void PushLayer(Layer *Layer);
-  [[nodiscard]] Window &GetWindow() const { return *m_Window; }
+  [[nodiscard]] IRenderSurface &GetRenderSurface() const { return *m_Surface; }
+  [[nodiscard]] Window *GetWindow() const;
   [[nodiscard]] float GetDeltaTime() const { return m_DeltaTime; }
   [[nodiscard]] uint64_t GetFrameIndex() const { return m_FrameIndex; }
   [[nodiscard]] RuntimeMode GetRuntimeMode() const { return m_Config.Mode; }

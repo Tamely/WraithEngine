@@ -14,12 +14,11 @@
 #include "Renderer/Vulkan/VulkanSceneRenderer.h"
 #include "Renderer/Vulkan/VulkanSwapchain.h"
 
+#include <array>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <vector>
-
-struct GLFWwindow;
 
 namespace Axiom {
 class VulkanRendererBackend final : public RendererBackend {
@@ -59,6 +58,9 @@ private:
   void BuildHzb(VkCommandBuffer CommandBuffer, MeshFrameResources &Frame);
   void RecordOffscreenCapture(VkCommandBuffer CommandBuffer);
   void ClearDepthImage(VkCommandBuffer CommandBuffer);
+  void InitViewportReadbackBuffers();
+  void CaptureOffscreenFrame(VkCommandBuffer CommandBuffer, FrameData &Frame);
+  void PublishOffscreenFrame(FrameData &Frame);
   void Draw();
   static float HalfToFloat(uint16_t Value);
   static uint8_t LinearToByte(float Value);

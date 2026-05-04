@@ -24,5 +24,10 @@ public:
                              RendererViewMode &ViewMode) const;
   void RecordDrawData(VkCommandBuffer CommandBuffer, VkExtent2D Extent,
                       VkImageView TargetImageView) const;
+
+  [[nodiscard]] bool IsEnabled() const { return m_IsEnabled; }
+
+private:
+  bool m_IsEnabled{false};
 };
 } // namespace Axiom
