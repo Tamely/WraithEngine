@@ -29,9 +29,9 @@ public:
     m_Camera.SetPerspective(55.0f, 1600.0f / 900.0f, 0.1f, 100.0f);
     const auto MeshPath =
         std::filesystem::path(AXIOM_CONTENT_DIR) / "basicmesh.glb";
-    m_Mesh = Axiom::Renderer::Get().LoadMeshFromFile(MeshPath);
-    if (!m_Mesh) {
-      A_CORE_ERROR("Failed to create startup mesh from {0}",
+    m_Submissions = Axiom::Renderer::Get().LoadMeshSceneFromFile(MeshPath);
+    if (m_Submissions.empty()) {
+      A_CORE_ERROR("Failed to create startup mesh scene from {0}",
                    MeshPath.string());
     }
   }
@@ -44,8 +44,8 @@ public:
   void OnUpdate() override {
     UpdateCameraControls();
     Axiom::RenderCommand::SetCamera(m_Camera);
-    if (m_Mesh) {
-      Axiom::RenderCommand::Submit({m_Mesh, glm::mat4(1.0f)});
+    for (const auto &Submission : m_Submissions) {
+      Axiom::RenderCommand::Submit(Submission);
     }
   }
 
@@ -113,7 +113,7 @@ private:
   }
 
   Axiom::Camera m_Camera;
-  Axiom::MeshRef m_Mesh;
+  std::vector<Axiom::RenderMeshSubmission> m_Submissions;
   bool m_IsLooking{false};
   double m_LastCursorX{0.0};
   double m_LastCursorY{0.0};

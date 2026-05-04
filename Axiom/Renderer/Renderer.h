@@ -23,7 +23,8 @@ public:
   void BeginFrame();
   void Render();
   void EndFrame();
-  MeshRef LoadMeshFromFile(const std::filesystem::path &Path);
+  std::vector<RenderMeshSubmission>
+  LoadMeshSceneFromFile(const std::filesystem::path &Path);
 
 private:
   static Renderer *s_Instance;

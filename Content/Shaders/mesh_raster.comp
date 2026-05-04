@@ -104,10 +104,6 @@ void main() {
         return;
     }
 
-    if (area <= 0.0) {
-        return;
-    }
-
     vec2 minPixel = floor(max(vec2(0.0), min(v0.pixel, min(v1.pixel, v2.pixel))));
     vec2 maxPixel = ceil(min(viewport - vec2(1.0), max(v0.pixel, max(v1.pixel, v2.pixel))));
 
@@ -115,6 +111,7 @@ void main() {
     vec3 lightDir = normalize(vec3(0.35, 0.7, 0.2));
     float lighting = max(dot(faceNormal, lightDir), 0.2);
     vec4 shadedColor = vec4(vec3(0.75, 0.82, 0.92) * lighting, 1.0);
+    bool frontFacing = area < 0.0;
 
     for (int y = int(minPixel.y); y <= int(maxPixel.y); ++y) {
         for (int x = int(minPixel.x); x <= int(maxPixel.x); ++x) {
@@ -123,7 +120,9 @@ void main() {
             float w1 = edgeFunction(v2.pixel, v0.pixel, samplePoint);
             float w2 = edgeFunction(v0.pixel, v1.pixel, samplePoint);
 
-            bool inside = (w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0);
+            bool inside = frontFacing
+                ? (w0 <= 0.0 && w1 <= 0.0 && w2 <= 0.0)
+                : (w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0);
             if (!inside) {
                 continue;
             }

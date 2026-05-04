@@ -21,6 +21,15 @@ struct MeshData {
   glm::vec3 BoundsMax{0.0f};
 };
 
+struct MeshSceneData {
+  struct MeshInstanceData {
+    MeshData Mesh;
+    glm::mat4 Transform{1.0f};
+  };
+
+  std::vector<MeshInstanceData> Instances;
+};
+
 class Mesh {
 public:
   virtual ~Mesh() = default;

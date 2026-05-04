@@ -6,5 +6,5 @@
 #include <optional>
 
 namespace Axiom::Assets {
-std::optional<MeshData> LoadBasicMeshAsset(const std::filesystem::path &Path);
+std::optional<MeshSceneData> LoadBasicMeshAsset(const std::filesystem::path &Path);
 }

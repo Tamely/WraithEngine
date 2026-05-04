@@ -60,13 +60,25 @@ void Renderer::EndFrame() {
   m_Backend->EndFrame();
 }
 
-MeshRef Renderer::LoadMeshFromFile(const std::filesystem::path &Path) {
-  auto MeshData = Assets::LoadBasicMeshAsset(Path);
-  if (!MeshData.has_value()) {
-    A_CORE_ERROR("Failed to load mesh asset: {0}", Path.string());
+std::vector<RenderMeshSubmission>
+Renderer::LoadMeshSceneFromFile(const std::filesystem::path &Path) {
+  auto SceneData = Assets::LoadBasicMeshAsset(Path);
+  if (!SceneData.has_value()) {
+    A_CORE_ERROR("Failed to load mesh asset scene: {0}", Path.string());
     return {};
   }
 
-  return m_Backend->CreateMesh(*MeshData);
+  std::vector<RenderMeshSubmission> Result;
+  Result.reserve(SceneData->Instances.size());
+  for (const auto &Instance : SceneData->Instances) {
+    auto Mesh = m_Backend->CreateMesh(Instance.Mesh);
+    if (!Mesh) {
+      continue;
+    }
+
+    Result.push_back({Mesh, Instance.Transform});
+  }
+
+  return Result;
 }
 } // namespace Axiom
