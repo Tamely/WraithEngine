@@ -29,11 +29,11 @@
   } while (0)
 
 struct AllocatedImage {
-  VkImage Image;
-  VkImageView ImageView;
-  VmaAllocation Allocation;
-  VkExtent3D ImageExtent;
-  VkFormat ImageFormat;
+  VkImage Image{VK_NULL_HANDLE};
+  VkImageView ImageView{VK_NULL_HANDLE};
+  VmaAllocation Allocation{VK_NULL_HANDLE};
+  VkExtent3D ImageExtent{};
+  VkFormat ImageFormat{VK_FORMAT_UNDEFINED};
 };
 
 struct AllocatedBuffer {

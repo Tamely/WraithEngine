@@ -46,6 +46,19 @@ Axiom::VulkanRendererBackend *g_LoadedEngine = nullptr;
 
 namespace Axiom {
 namespace {
+const char *RendererViewModeLabel(RendererViewMode Mode) {
+  switch (Mode) {
+  case RendererViewMode::Lit:
+    return "Lit";
+  case RendererViewMode::Unlit:
+    return "Unlit";
+  case RendererViewMode::Wireframe:
+    return "Wireframe";
+  }
+
+  return "Unknown";
+}
+
 struct ProjectedMeshVertexGpu {
   glm::vec4 PixelAndDepth{0.0f};
   glm::vec4 NormalAndValid{0.0f};
@@ -138,6 +151,7 @@ void VulkanRendererBackend::Init(const RendererCreateInfo &CreateInfo) {
   m_CommandContext.Init(m_Device.Device, m_Device.GraphicsQueueFamily);
   InitSwapchain();
   InitDescriptors();
+  InitTextureResources();
   InitPipelines();
   InitMeshFrameResources();
   InitImGui();
@@ -237,6 +251,7 @@ void VulkanRendererBackend::Shutdown() {
 
   if (m_IsInitialized) {
     vkDeviceWaitIdle(m_Device.Device);
+    m_MaterialImageViews.clear();
 
     for (auto &Frame : m_MeshFrames) {
       VkBufferUtil::DestroyBuffer(m_Device.Allocator, Frame.CameraBuffer);
@@ -255,10 +270,13 @@ void VulkanRendererBackend::Shutdown() {
 }
 
 void VulkanRendererBackend::InitDescriptors() {
-  const uint32_t MaxSets = 1 + FRAME_OVERLAP + MaxMeshSubmissionsPerFrame;
+  const uint32_t MaxSets =
+      2 + FRAME_OVERLAP + (MaxMeshSubmissionsPerFrame * 2);
   std::vector<DescriptorAllocator::PoolSizeRatio> Sizes = {
       {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2.0f},
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2.0f},
+      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4.0f},
+      {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 2.0f},
+      {VK_DESCRIPTOR_TYPE_SAMPLER, 2.0f},
       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4.0f},
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2.0f}};
 
@@ -273,12 +291,21 @@ void VulkanRendererBackend::InitDescriptors() {
 
   {
     DescriptorLayoutBuilder Builder;
+    Builder.AddBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    Builder.AddBinding(1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
+    Builder.AddBinding(2, VK_DESCRIPTOR_TYPE_SAMPLER);
+    m_MeshGraphicsFrameDescriptorLayout =
+        Builder.Build(m_Device.Device,
+                      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+  }
+
+  {
+    DescriptorLayoutBuilder Builder;
     Builder.AddBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
     Builder.AddBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     Builder.AddBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-    m_MeshFrameDescriptorLayout =
-        Builder.Build(m_Device.Device,
-                      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT);
+    m_MeshComputeFrameDescriptorLayout =
+        Builder.Build(m_Device.Device, VK_SHADER_STAGE_COMPUTE_BIT);
   }
 
   {
@@ -322,16 +349,57 @@ void VulkanRendererBackend::InitDescriptors() {
   VK_CHECK(vkCreateSampler(m_Device.Device, &SamplerInfo, VK_NULL_HANDLE,
                            &m_LinearDepthSampler));
 
+  SamplerInfo.magFilter = VK_FILTER_LINEAR;
+  SamplerInfo.minFilter = VK_FILTER_LINEAR;
+  SamplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+  SamplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+  SamplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+  SamplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+  VK_CHECK(vkCreateSampler(m_Device.Device, &SamplerInfo, VK_NULL_HANDLE,
+                           &m_TextureSampler));
+
   m_MainDeletionQueue.PushFunction([this]() {
+    vkDestroySampler(m_Device.Device, m_TextureSampler, VK_NULL_HANDLE);
     vkDestroySampler(m_Device.Device, m_LinearDepthSampler, VK_NULL_HANDLE);
     m_GlobalDescriptorAllocator.DestroyPool(m_Device.Device);
     vkDestroyDescriptorSetLayout(m_Device.Device, m_MeshDescriptorLayout,
                                  VK_NULL_HANDLE);
-    vkDestroyDescriptorSetLayout(m_Device.Device, m_MeshFrameDescriptorLayout,
+    vkDestroyDescriptorSetLayout(m_Device.Device,
+                                 m_MeshComputeFrameDescriptorLayout,
+                                 VK_NULL_HANDLE);
+    vkDestroyDescriptorSetLayout(m_Device.Device,
+                                 m_MeshGraphicsFrameDescriptorLayout,
                                  VK_NULL_HANDLE);
     vkDestroyDescriptorSetLayout(m_Device.Device, m_DrawImageDescriptorLayout,
                                  VK_NULL_HANDLE);
   });
+}
+
+void VulkanRendererBackend::InitTextureResources() {
+  TextureSourceData CheckerTexture{};
+  constexpr uint32_t TextureSize = 64;
+  constexpr uint32_t CellSize = 8;
+  constexpr std::array<std::uint8_t, 4> Purple = {0xA0, 0x20, 0xF0, 0xFF};
+  constexpr std::array<std::uint8_t, 4> Black = {0x00, 0x00, 0x00, 0xFF};
+
+  CheckerTexture.Width = TextureSize;
+  CheckerTexture.Height = TextureSize;
+  CheckerTexture.Pixels.resize(TextureSize * TextureSize * 4);
+
+  for (uint32_t Y = 0; Y < TextureSize; ++Y) {
+    for (uint32_t X = 0; X < TextureSize; ++X) {
+      const bool UsePurple = ((X / CellSize) + (Y / CellSize)) % 2 == 0;
+      const auto &Color = UsePurple ? Purple : Black;
+      const size_t PixelIndex =
+          (static_cast<size_t>(Y) * TextureSize + X) * 4;
+      CheckerTexture.Pixels[PixelIndex + 0] = Color[0];
+      CheckerTexture.Pixels[PixelIndex + 1] = Color[1];
+      CheckerTexture.Pixels[PixelIndex + 2] = Color[2];
+      CheckerTexture.Pixels[PixelIndex + 3] = Color[3];
+    }
+  }
+
+  m_FallbackTextureImage = CreateTextureImage(CheckerTexture);
 }
 
 void VulkanRendererBackend::InitPipelines() {
@@ -391,7 +459,7 @@ void VulkanRendererBackend::InitBackgroundPipelines() {
 
 void VulkanRendererBackend::InitMeshPipelines() {
   std::array<VkDescriptorSetLayout, 2> ComputeLayouts = {
-      m_MeshFrameDescriptorLayout, m_MeshDescriptorLayout};
+      m_MeshComputeFrameDescriptorLayout, m_MeshDescriptorLayout};
 
   {
     VkPipelineLayoutCreateInfo ComputeLayout =
@@ -430,21 +498,28 @@ void VulkanRendererBackend::InitMeshPipelines() {
                                     VK_NULL_HANDLE, &m_MeshPipelineLayout));
   }
 
-  VkPipelineLayoutCreateInfo GraphicsLayout = VkInit::PipelineLayoutCreateInfo();
-  GraphicsLayout.pSetLayouts = &m_MeshFrameDescriptorLayout;
-  GraphicsLayout.setLayoutCount = 1;
-
   VkPushConstantRange PushConstant{};
   PushConstant.offset = 0;
   PushConstant.size = sizeof(MeshGraphicsPushConstants);
   PushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+  VkPipelineLayoutCreateInfo GraphicsLayout = VkInit::PipelineLayoutCreateInfo();
+  GraphicsLayout.pSetLayouts = &m_MeshGraphicsFrameDescriptorLayout;
+  GraphicsLayout.setLayoutCount = 1;
   GraphicsLayout.pPushConstantRanges = &PushConstant;
   GraphicsLayout.pushConstantRangeCount = 1;
 
   VK_CHECK(vkCreatePipelineLayout(m_Device.Device, &GraphicsLayout,
                                   VK_NULL_HANDLE,
                                   &m_MeshGraphicsPipelineLayout));
-  VK_CHECK(vkCreatePipelineLayout(m_Device.Device, &GraphicsLayout,
+
+  VkPipelineLayoutCreateInfo DepthLayout = VkInit::PipelineLayoutCreateInfo();
+  DepthLayout.pSetLayouts = &m_MeshGraphicsFrameDescriptorLayout;
+  DepthLayout.setLayoutCount = 1;
+  DepthLayout.pPushConstantRanges = &PushConstant;
+  DepthLayout.pushConstantRangeCount = 1;
+
+  VK_CHECK(vkCreatePipelineLayout(m_Device.Device, &DepthLayout,
                                   VK_NULL_HANDLE, &m_MeshDepthPipelineLayout));
 
   VkShaderModule MeshProjectShader;
@@ -529,11 +604,13 @@ void VulkanRendererBackend::InitMeshPipelines() {
       .binding = 0,
       .stride = sizeof(MeshVertex),
       .inputRate = VK_VERTEX_INPUT_RATE_VERTEX};
-  std::array<VkVertexInputAttributeDescription, 2> AttributeDescriptions = {
+  std::array<VkVertexInputAttributeDescription, 3> AttributeDescriptions = {
       VkVertexInputAttributeDescription{0, 0, VK_FORMAT_R32G32B32A32_SFLOAT,
                                         offsetof(MeshVertex, Position)},
       VkVertexInputAttributeDescription{1, 0, VK_FORMAT_R32G32B32A32_SFLOAT,
-                                        offsetof(MeshVertex, Normal)}};
+                                        offsetof(MeshVertex, Normal)},
+      VkVertexInputAttributeDescription{2, 0, VK_FORMAT_R32G32_SFLOAT,
+                                        offsetof(MeshVertex, TexCoord)}};
 
   VkPipelineVertexInputStateCreateInfo VertexInputInfo{
       .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -652,6 +729,18 @@ void VulkanRendererBackend::InitMeshPipelines() {
                                      &DepthPipelineInfo, VK_NULL_HANDLE,
                                      &m_MeshDepthPipeline));
 
+  VkPipelineRasterizationStateCreateInfo WireframeRasterizer = Rasterizer;
+  WireframeRasterizer.polygonMode = VK_POLYGON_MODE_LINE;
+  VkPipelineDepthStencilStateCreateInfo WireframeDepthStencil = DepthStencil;
+  WireframeDepthStencil.depthTestEnable = VK_FALSE;
+  WireframeDepthStencil.depthWriteEnable = VK_FALSE;
+  VkGraphicsPipelineCreateInfo WireframePipelineInfo = PipelineInfo;
+  WireframePipelineInfo.pRasterizationState = &WireframeRasterizer;
+  WireframePipelineInfo.pDepthStencilState = &WireframeDepthStencil;
+  VK_CHECK(vkCreateGraphicsPipelines(m_Device.Device, VK_NULL_HANDLE, 1,
+                                     &WireframePipelineInfo, VK_NULL_HANDLE,
+                                     &m_MeshWireframePipeline));
+
   vkDestroyShaderModule(m_Device.Device, VertexShader, VK_NULL_HANDLE);
   vkDestroyShaderModule(m_Device.Device, FragmentShader, VK_NULL_HANDLE);
 
@@ -665,6 +754,8 @@ void VulkanRendererBackend::InitMeshPipelines() {
     vkDestroyPipelineLayout(m_Device.Device, m_MeshDepthPipelineLayout,
                             VK_NULL_HANDLE);
     vkDestroyPipeline(m_Device.Device, m_MeshDepthPipeline, VK_NULL_HANDLE);
+    vkDestroyPipeline(m_Device.Device, m_MeshWireframePipeline,
+                      VK_NULL_HANDLE);
     vkDestroyPipelineLayout(m_Device.Device, m_MeshGraphicsPipelineLayout,
                             VK_NULL_HANDLE);
     vkDestroyPipeline(m_Device.Device, m_MeshGraphicsPipeline, VK_NULL_HANDLE);
@@ -679,8 +770,10 @@ void VulkanRendererBackend::InitMeshFrameResources() {
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
 
-    Frame.FrameDescriptorSet = m_GlobalDescriptorAllocator.Allocate(
-        m_Device.Device, m_MeshFrameDescriptorLayout);
+    Frame.GraphicsFrameDescriptorSet = m_GlobalDescriptorAllocator.Allocate(
+        m_Device.Device, m_MeshGraphicsFrameDescriptorLayout);
+    Frame.ComputeFrameDescriptorSet = m_GlobalDescriptorAllocator.Allocate(
+        m_Device.Device, m_MeshComputeFrameDescriptorLayout);
 
     VkQueryPoolCreateInfo QueryPoolInfo{
         .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
@@ -702,6 +795,93 @@ void VulkanRendererBackend::InitMeshFrameResources() {
       }
     }
   });
+}
+
+AllocatedImage
+VulkanRendererBackend::CreateTextureImage(const TextureSourceData &TextureData) {
+  assert(TextureData.IsValid());
+
+  AllocatedImage TextureImage{};
+  TextureImage.ImageFormat = VK_FORMAT_R8G8B8A8_UNORM;
+  TextureImage.ImageExtent = {TextureData.Width, TextureData.Height, 1};
+
+  VkImageCreateInfo ImageInfo = VkInit::ImageCreateInfo(
+      TextureImage.ImageFormat,
+      VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+      TextureImage.ImageExtent);
+
+  VmaAllocationCreateInfo AllocationInfo{};
+  AllocationInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+  AllocationInfo.requiredFlags =
+      VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+  VK_CHECK(vmaCreateImage(m_Device.Allocator, &ImageInfo, &AllocationInfo,
+                          &TextureImage.Image, &TextureImage.Allocation,
+                          VK_NULL_HANDLE));
+
+  VkImageViewCreateInfo ViewInfo = VkInit::ImageViewCreateInfo(
+      TextureImage.ImageFormat, TextureImage.Image, VK_IMAGE_ASPECT_COLOR_BIT);
+  VK_CHECK(vkCreateImageView(m_Device.Device, &ViewInfo, VK_NULL_HANDLE,
+                             &TextureImage.ImageView));
+
+  auto StagingBuffer = VkBufferUtil::CreateBuffer(
+      m_Device.Allocator, TextureData.Pixels.size(), VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+      VMA_MEMORY_USAGE_CPU_ONLY,
+      VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+          VMA_ALLOCATION_CREATE_MAPPED_BIT);
+  std::memcpy(StagingBuffer.Info.pMappedData, TextureData.Pixels.data(),
+              TextureData.Pixels.size());
+
+  ImmediateSubmit([&](VkCommandBuffer CommandBuffer) {
+    VkUtil::TransitionImage(CommandBuffer, TextureImage.Image,
+                            VK_IMAGE_LAYOUT_UNDEFINED,
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    VkBufferImageCopy CopyRegion{};
+    CopyRegion.bufferOffset = 0;
+    CopyRegion.bufferRowLength = 0;
+    CopyRegion.bufferImageHeight = 0;
+    CopyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    CopyRegion.imageSubresource.baseArrayLayer = 0;
+    CopyRegion.imageSubresource.layerCount = 1;
+    CopyRegion.imageSubresource.mipLevel = 0;
+    CopyRegion.imageExtent = TextureImage.ImageExtent;
+
+    vkCmdCopyBufferToImage(CommandBuffer, StagingBuffer.Buffer, TextureImage.Image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &CopyRegion);
+
+    VkUtil::TransitionImage(CommandBuffer, TextureImage.Image,
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  });
+
+  VkBufferUtil::DestroyBuffer(m_Device.Allocator, StagingBuffer);
+
+  const AllocatedImage UploadedImage = TextureImage;
+  m_MainDeletionQueue.PushFunction([this, UploadedImage]() mutable {
+    vkDestroyImageView(m_Device.Device, UploadedImage.ImageView, VK_NULL_HANDLE);
+    vmaDestroyImage(m_Device.Allocator, UploadedImage.Image,
+                    UploadedImage.Allocation);
+  });
+
+  return TextureImage;
+}
+
+VkImageView VulkanRendererBackend::ResolveMaterialTextureView(
+    const MaterialInstanceRef &Material) {
+  if (!Material || !Material->BaseColorTexture ||
+      !Material->BaseColorTexture->IsValid()) {
+    return m_FallbackTextureImage.ImageView;
+  }
+
+  auto It = m_MaterialImageViews.find(Material.get());
+  if (It != m_MaterialImageViews.end()) {
+    return It->second;
+  }
+
+  const AllocatedImage TextureImage = CreateTextureImage(*Material->BaseColorTexture);
+  m_MaterialImageViews.emplace(Material.get(), TextureImage.ImageView);
+  return TextureImage.ImageView;
 }
 
 void VulkanRendererBackend::CollectFrameStats(MeshFrameResources &Frame) {
@@ -747,6 +927,13 @@ void VulkanRendererBackend::DrawStatsPanel() {
   ImGui::Text("Triangles: %u", m_FrameStats.TriangleCount);
   ImGui::Text("Draw extent: %u x %u", m_FrameStats.DrawExtent.x,
               m_FrameStats.DrawExtent.y);
+  int SelectedMode = static_cast<int>(m_ViewMode);
+  const char *ModeLabels[] = {"Lit", "Unlit", "Wireframe"};
+  if (ImGui::Combo("View Mode", &SelectedMode, ModeLabels,
+                   static_cast<int>(std::size(ModeLabels)))) {
+    m_ViewMode = static_cast<RendererViewMode>(SelectedMode);
+  }
+  ImGui::Text("Active mode: %s", RendererViewModeLabel(m_ViewMode));
   ImGui::End();
 }
 
@@ -852,6 +1039,7 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
   CameraData.ViewportSize =
       glm::vec4(static_cast<float>(m_DrawExtent.width),
                 static_cast<float>(m_DrawExtent.height), 0.0f, 0.0f);
+  CameraData.RenderOptions.x = static_cast<uint32_t>(m_ViewMode);
   std::memcpy(Frame.CameraBuffer.Info.pMappedData, &CameraData,
               sizeof(CameraFrameUniform));
 
@@ -865,17 +1053,38 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
   DepthImageInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
   VkDescriptorBufferInfo CameraBufferInfo =
       VkInit::BufferInfo(Frame.CameraBuffer.Buffer, 0, Frame.CameraBuffer.Size);
-  std::array<VkWriteDescriptorSet, 3> FrameWrites = {
+  std::array<VkWriteDescriptorSet, 3> ComputeFrameWrites = {
       VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                                 Frame.FrameDescriptorSet, &ColorImageInfo, 0),
+                                 Frame.ComputeFrameDescriptorSet, &ColorImageInfo,
+                                 0),
       VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                                 Frame.FrameDescriptorSet, &DepthImageInfo, 1),
+                                 Frame.ComputeFrameDescriptorSet, &DepthImageInfo,
+                                 1),
       VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                                    Frame.FrameDescriptorSet, &CameraBufferInfo,
-                                    2)};
+                                    Frame.ComputeFrameDescriptorSet,
+                                    &CameraBufferInfo, 2)};
   vkUpdateDescriptorSets(m_Device.Device,
-                         static_cast<uint32_t>(FrameWrites.size()),
-                         FrameWrites.data(), 0, VK_NULL_HANDLE);
+                         static_cast<uint32_t>(ComputeFrameWrites.size()),
+                         ComputeFrameWrites.data(), 0, VK_NULL_HANDLE);
+  VkDescriptorImageInfo DefaultGraphicsTextureImageInfo{};
+  DefaultGraphicsTextureImageInfo.imageView = m_FallbackTextureImage.ImageView;
+  DefaultGraphicsTextureImageInfo.imageLayout =
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  VkDescriptorImageInfo DefaultGraphicsTextureSamplerInfo{};
+  DefaultGraphicsTextureSamplerInfo.sampler = m_TextureSampler;
+  std::array<VkWriteDescriptorSet, 3> DefaultGraphicsFrameWrites = {
+      VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                    Frame.GraphicsFrameDescriptorSet,
+                                    &CameraBufferInfo, 0),
+      VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                                 Frame.GraphicsFrameDescriptorSet,
+                                 &DefaultGraphicsTextureImageInfo, 1),
+      VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_SAMPLER,
+                                 Frame.GraphicsFrameDescriptorSet,
+                                 &DefaultGraphicsTextureSamplerInfo, 2)};
+  vkUpdateDescriptorSets(m_Device.Device,
+                         static_cast<uint32_t>(DefaultGraphicsFrameWrites.size()),
+                         DefaultGraphicsFrameWrites.data(), 0, VK_NULL_HANDLE);
 
   VkViewport Viewport{0.0f, 0.0f, static_cast<float>(m_DrawExtent.width),
                       static_cast<float>(m_DrawExtent.height), 0.0f, 1.0f};
@@ -896,6 +1105,7 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
   const size_t SubmissionCount =
       std::min(Scene.Submissions.size(),
                static_cast<size_t>(MaxMeshSubmissionsPerFrame));
+  const bool ForceWireframe = m_ViewMode == RendererViewMode::Wireframe;
   if (Scene.Submissions.size() > MaxMeshSubmissionsPerFrame &&
       !m_HasWarnedMeshSubmissionOverflow) {
     A_CORE_WARN(
@@ -929,7 +1139,7 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
     }
 
     VisibleMeshSubmission VisibleSubmission{&Submission, VulkanMeshRef};
-    if (Submission.RenderPath == MeshRenderPath::Compute) {
+    if (!ForceWireframe && Submission.RenderPath == MeshRenderPath::Compute) {
       ComputeSubmissions.push_back(VisibleSubmission);
     } else {
       GraphicsSubmissions.push_back(VisibleSubmission);
@@ -968,7 +1178,7 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
     vkCmdSetScissor(CommandBuffer, 0, 1, &Scissor);
     vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             m_MeshDepthPipelineLayout, 0, 1,
-                            &Frame.FrameDescriptorSet, 0, VK_NULL_HANDLE);
+                            &Frame.GraphicsFrameDescriptorSet, 0, VK_NULL_HANDLE);
     for (const auto &VisibleSubmission : GraphicsSubmissions) {
       MeshGraphicsPushConstants PushConstants{};
       PushConstants.Model = VisibleSubmission.Submission->Transform;
@@ -996,13 +1206,35 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
     if (!GraphicsSubmissions.empty()) {
       vkCmdBeginRendering(CommandBuffer, &RenderingInfo);
       vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                        m_MeshGraphicsPipeline);
+                        ForceWireframe ? m_MeshWireframePipeline
+                                       : m_MeshGraphicsPipeline);
       vkCmdSetViewport(CommandBuffer, 0, 1, &Viewport);
       vkCmdSetScissor(CommandBuffer, 0, 1, &Scissor);
-      vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                              m_MeshGraphicsPipelineLayout, 0, 1,
-                              &Frame.FrameDescriptorSet, 0, VK_NULL_HANDLE);
       for (const auto &VisibleSubmission : GraphicsSubmissions) {
+        VkDescriptorImageInfo GraphicsTextureImageInfo{};
+        GraphicsTextureImageInfo.imageView =
+            ResolveMaterialTextureView(VisibleSubmission.Submission->Material);
+        GraphicsTextureImageInfo.imageLayout =
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkDescriptorImageInfo GraphicsTextureSamplerInfo{};
+        GraphicsTextureSamplerInfo.sampler = m_TextureSampler;
+        std::array<VkWriteDescriptorSet, 3> GraphicsFrameWrites = {
+            VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                          Frame.GraphicsFrameDescriptorSet,
+                                          &CameraBufferInfo, 0),
+            VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                                       Frame.GraphicsFrameDescriptorSet,
+                                       &GraphicsTextureImageInfo, 1),
+            VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_SAMPLER,
+                                       Frame.GraphicsFrameDescriptorSet,
+                                       &GraphicsTextureSamplerInfo, 2)};
+        vkUpdateDescriptorSets(m_Device.Device,
+                               static_cast<uint32_t>(GraphicsFrameWrites.size()),
+                               GraphicsFrameWrites.data(), 0, VK_NULL_HANDLE);
+        vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                m_MeshGraphicsPipelineLayout, 0, 1,
+                                &Frame.GraphicsFrameDescriptorSet, 0,
+                                VK_NULL_HANDLE);
         MeshGraphicsPushConstants PushConstants{};
         PushConstants.Model = VisibleSubmission.Submission->Transform;
         vkCmdPushConstants(CommandBuffer, m_MeshGraphicsPipelineLayout,
@@ -1026,7 +1258,7 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
 
   for (const auto &VisibleSubmission : ComputeSubmissions) {
     std::array<VkDescriptorSet, 2> DescriptorSets = {
-        Frame.FrameDescriptorSet, VisibleSubmission.Mesh->DescriptorSet};
+        Frame.ComputeFrameDescriptorSet, VisibleSubmission.Mesh->DescriptorSet};
 
     vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                       m_MeshProjectPipeline);
@@ -1117,13 +1349,35 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
   if (!GraphicsSubmissions.empty()) {
     vkCmdBeginRendering(CommandBuffer, &RenderingInfo);
     vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      m_MeshGraphicsPipeline);
+                      ForceWireframe ? m_MeshWireframePipeline
+                                     : m_MeshGraphicsPipeline);
     vkCmdSetViewport(CommandBuffer, 0, 1, &Viewport);
     vkCmdSetScissor(CommandBuffer, 0, 1, &Scissor);
-    vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            m_MeshGraphicsPipelineLayout, 0, 1,
-                            &Frame.FrameDescriptorSet, 0, VK_NULL_HANDLE);
     for (const auto &VisibleSubmission : GraphicsSubmissions) {
+      VkDescriptorImageInfo GraphicsTextureImageInfo{};
+      GraphicsTextureImageInfo.imageView =
+          ResolveMaterialTextureView(VisibleSubmission.Submission->Material);
+      GraphicsTextureImageInfo.imageLayout =
+          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      VkDescriptorImageInfo GraphicsTextureSamplerInfo{};
+      GraphicsTextureSamplerInfo.sampler = m_TextureSampler;
+      std::array<VkWriteDescriptorSet, 3> GraphicsFrameWrites = {
+          VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                        Frame.GraphicsFrameDescriptorSet,
+                                        &CameraBufferInfo, 0),
+          VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                                     Frame.GraphicsFrameDescriptorSet,
+                                     &GraphicsTextureImageInfo, 1),
+          VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_SAMPLER,
+                                     Frame.GraphicsFrameDescriptorSet,
+                                     &GraphicsTextureSamplerInfo, 2)};
+      vkUpdateDescriptorSets(m_Device.Device,
+                             static_cast<uint32_t>(GraphicsFrameWrites.size()),
+                             GraphicsFrameWrites.data(), 0, VK_NULL_HANDLE);
+      vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              m_MeshGraphicsPipelineLayout, 0, 1,
+                              &Frame.GraphicsFrameDescriptorSet, 0,
+                              VK_NULL_HANDLE);
       MeshGraphicsPushConstants PushConstants{};
       PushConstants.Model = VisibleSubmission.Submission->Transform;
       vkCmdPushConstants(CommandBuffer, m_MeshGraphicsPipelineLayout,

@@ -1,6 +1,9 @@
 #pragma once
 
+#include "Renderer/Material.h"
+
 #include <glm/mat4x4.hpp>
+#include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 
@@ -19,6 +22,7 @@ enum class MeshRenderPath {
 struct MeshVertex {
   glm::vec4 Position{0.0f, 0.0f, 0.0f, 1.0f};
   glm::vec4 Normal{0.0f, 0.0f, 1.0f, 0.0f};
+  glm::vec2 TexCoord{0.0f, 0.0f};
 };
 
 struct MeshData {
@@ -32,6 +36,7 @@ struct MeshSceneData {
   struct MeshInstanceData {
     std::string Name;
     MeshData Mesh;
+    MaterialInstanceRef Material;
     glm::mat4 Transform{1.0f};
   };
 
@@ -52,6 +57,7 @@ using MeshRef = std::shared_ptr<Mesh>;
 
 struct RenderMeshSubmission {
   MeshRef Mesh;
+  MaterialInstanceRef Material;
   std::string Name;
   MeshRenderPath RenderPath{MeshRenderPath::Graphics};
   glm::mat4 Transform{1.0f};

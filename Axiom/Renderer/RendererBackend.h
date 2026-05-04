@@ -14,6 +14,11 @@ class RenderScene;
 struct MeshData;
 
 enum class RendererBackendType { Vulkan };
+enum class RendererViewMode : uint32_t {
+  Lit = 0,
+  Unlit = 1,
+  Wireframe = 2,
+};
 
 struct RendererCreateInfo {
   Window *TargetWindow{nullptr};

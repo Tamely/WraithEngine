@@ -12,6 +12,9 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <unordered_map>
+
+#include <glm/ext/vector_uint4.hpp>
 
 struct GLFWwindow;
 
@@ -29,6 +32,7 @@ struct CameraFrameUniform {
   glm::mat4 ViewProjection{1.0f};
   glm::vec4 CameraPosition{0.0f};
   glm::vec4 ViewportSize{0.0f};
+  glm::uvec4 RenderOptions{0u};
 };
 
 struct MeshProjectPushConstants {
@@ -69,13 +73,15 @@ private:
 
 struct MeshFrameResources {
   AllocatedBuffer CameraBuffer;
-  VkDescriptorSet FrameDescriptorSet{VK_NULL_HANDLE};
+  VkDescriptorSet GraphicsFrameDescriptorSet{VK_NULL_HANDLE};
+  VkDescriptorSet ComputeFrameDescriptorSet{VK_NULL_HANDLE};
   VkQueryPool TimestampQueryPool{VK_NULL_HANDLE};
   bool HasValidTimestamps{false};
   };
 
   void InitSwapchain();
   void InitDescriptors();
+  void InitTextureResources();
   void InitPipelines();
   void InitBackgroundPipelines();
   void InitMeshPipelines();
@@ -89,6 +95,8 @@ struct MeshFrameResources {
   void DrawImGui(VkCommandBuffer Command, VkImageView TargetImageView);
   void ClearDepthImage(VkCommandBuffer CommandBuffer);
   void Draw();
+  AllocatedImage CreateTextureImage(const TextureSourceData &TextureData);
+  VkImageView ResolveMaterialTextureView(const MaterialInstanceRef &Material);
 
   FrameData &GetCurrentFrame() {
     return m_CommandContext.GetFrame(m_FrameNumber);
@@ -115,9 +123,13 @@ private:
   DescriptorAllocator m_GlobalDescriptorAllocator;
   VkDescriptorSet m_DrawImageDescriptorSet{VK_NULL_HANDLE};
   VkDescriptorSetLayout m_DrawImageDescriptorLayout{VK_NULL_HANDLE};
-  VkDescriptorSetLayout m_MeshFrameDescriptorLayout{VK_NULL_HANDLE};
+  VkDescriptorSetLayout m_MeshGraphicsFrameDescriptorLayout{VK_NULL_HANDLE};
+  VkDescriptorSetLayout m_MeshComputeFrameDescriptorLayout{VK_NULL_HANDLE};
   VkDescriptorSetLayout m_MeshDescriptorLayout{VK_NULL_HANDLE};
   VkSampler m_LinearDepthSampler{VK_NULL_HANDLE};
+  VkSampler m_TextureSampler{VK_NULL_HANDLE};
+  AllocatedImage m_FallbackTextureImage;
+  std::unordered_map<const MaterialInstance *, VkImageView> m_MaterialImageViews;
 
   VkPipeline m_GradientPipeline{VK_NULL_HANDLE};
   VkPipelineLayout m_GradientPipelineLayout{VK_NULL_HANDLE};
@@ -127,6 +139,7 @@ private:
   VkPipelineLayout m_MeshPipelineLayout{VK_NULL_HANDLE};
   VkPipeline m_MeshGraphicsPipeline{VK_NULL_HANDLE};
   VkPipelineLayout m_MeshGraphicsPipelineLayout{VK_NULL_HANDLE};
+  VkPipeline m_MeshWireframePipeline{VK_NULL_HANDLE};
   VkPipeline m_MeshDepthPipeline{VK_NULL_HANDLE};
   VkPipelineLayout m_MeshDepthPipelineLayout{VK_NULL_HANDLE};
 
@@ -143,5 +156,6 @@ private:
   float m_TimestampPeriod{0.0f};
   float m_RenderScale{0.5f};
   bool m_HasWarnedMeshSubmissionOverflow{false};
+  RendererViewMode m_ViewMode{RendererViewMode::Lit};
 };
 } // namespace Axiom
