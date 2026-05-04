@@ -40,6 +40,10 @@ struct MeshRasterPushConstants {
   glm::uvec4 Counts{0u};
 };
 
+struct MeshGraphicsPushConstants {
+  glm::mat4 Model{1.0f};
+};
+
 class VulkanMesh;
 
 class VulkanRendererBackend final : public RendererBackend {
@@ -120,11 +124,14 @@ private:
   VkPipelineLayout m_MeshProjectPipelineLayout{VK_NULL_HANDLE};
   VkPipeline m_MeshPipeline{VK_NULL_HANDLE};
   VkPipelineLayout m_MeshPipelineLayout{VK_NULL_HANDLE};
+  VkPipeline m_MeshGraphicsPipeline{VK_NULL_HANDLE};
+  VkPipelineLayout m_MeshGraphicsPipelineLayout{VK_NULL_HANDLE};
 
   DeletionQueue m_MainDeletionQueue;
 
   AllocatedImage m_DrawImage;
   AllocatedImage m_DepthImage;
+  AllocatedImage m_RasterDepthImage;
   VkExtent2D m_DrawExtent{};
 
   std::array<MeshFrameResources, FRAME_OVERLAP> m_MeshFrames{};
