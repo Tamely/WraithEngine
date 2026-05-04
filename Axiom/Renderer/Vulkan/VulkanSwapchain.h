@@ -13,6 +13,8 @@ public:
   void Init(VulkanContext &Context, VulkanDevice &Device, uint32_t Width,
             uint32_t Height);
   void Shutdown(VulkanDevice &Device);
+  uint32_t AcquireNextImage(VkDevice Device, VkSemaphore Semaphore) const;
+  void Present(VkQueue Queue, uint32_t ImageIndex, VkSemaphore WaitSemaphore) const;
 
   VkSwapchainKHR Swapchain{VK_NULL_HANDLE};
   VkFormat ImageFormat{VK_FORMAT_UNDEFINED};

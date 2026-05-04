@@ -21,8 +21,13 @@ class VulkanCommandContext {
 public:
   void Init(VkDevice Device, uint32_t GraphicsQueueFamily);
   void Shutdown(VkDevice Device);
+  FrameData &PrepareFrame(VkDevice Device, uint64_t FrameNumber);
 
   FrameData &GetFrame(uint64_t FrameNumber) {
+    return m_Frames[FrameNumber % FRAME_OVERLAP];
+  }
+
+  const FrameData &GetFrame(uint64_t FrameNumber) const {
     return m_Frames[FrameNumber % FRAME_OVERLAP];
   }
 
