@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <string>
 
 #include "Core/LayerStack.h"
@@ -14,9 +15,18 @@ struct ApplicationArgs {
   int ArgumentCount;
 };
 
+enum class RuntimeMode { LocalWindowedEditor, HeadlessEditorSession };
+
+struct ApplicationConfig {
+  std::string Title{"Axiom Engine"};
+  uint32_t Width{1600};
+  uint32_t Height{900};
+  RuntimeMode Mode{RuntimeMode::LocalWindowedEditor};
+};
+
 class Application {
 public:
-  Application(const std::string &Title, const ApplicationArgs &Args);
+  Application(const ApplicationConfig &Config, const ApplicationArgs &Args);
   virtual ~Application();
 
   static Application &Get();
@@ -26,13 +36,15 @@ public:
   [[nodiscard]] Window &GetWindow() const { return *m_Window; }
   [[nodiscard]] float GetDeltaTime() const { return m_DeltaTime; }
   [[nodiscard]] uint64_t GetFrameIndex() const { return m_FrameIndex; }
+  [[nodiscard]] RuntimeMode GetRuntimeMode() const { return m_Config.Mode; }
+  void RequestClose();
 
 private:
   static Application *s_Instance;
 
-  std::string m_Title;
-  Window *m_Window;
-  Renderer *m_Renderer;
+  ApplicationConfig m_Config;
+  std::unique_ptr<Window> m_Window;
+  std::unique_ptr<Renderer> m_Renderer;
   LayerStack m_LayerStack;
   std::chrono::steady_clock::time_point m_LastFrameTime;
   float m_DeltaTime{0.0f};

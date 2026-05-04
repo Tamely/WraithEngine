@@ -1,6 +1,8 @@
 set(ENGINE_SOURCES
   Assets/MeshAsset.cpp
   Core/Application.cpp
+  Core/GlfwWindow.cpp
+  Core/HeadlessWindow.cpp
   Core/Layer.cpp
   Core/LayerStack.cpp
   Core/Window.cpp
@@ -8,6 +10,7 @@ set(ENGINE_SOURCES
   Core/VulkanLoader.cpp
   Session/EditorMessageBus.cpp
   Session/EditorSession.cpp
+  Session/StartupScene.cpp
   Renderer/Camera.cpp
   Renderer/ForwardRenderer.cpp
   Renderer/RenderCommand.cpp
