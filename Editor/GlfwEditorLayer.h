@@ -2,6 +2,10 @@
 
 #include <Core/Layer.h>
 
+#include <memory>
+
+#include <Core/InputPlatform.h>
+#include <Session/EditorInputSource.h>
 #include <Session/EditorSession.h>
 
 namespace Axiom {
@@ -15,14 +19,11 @@ public:
   void OnRender() override;
 
 private:
-  void CollectInputCommands();
-  CommandContext MakeContext(float DeltaTime) const;
-  void SyncWindowCursorMode() const;
-
   SessionId m_SessionId{1};
   SessionUserId m_LocalUserId{1};
   EditorSession m_Session;
-  bool m_LastLookInputState{false};
+  std::unique_ptr<IInputPlatform> m_WindowInputPlatform;
+  std::unique_ptr<IEditorInputSource> m_InputSource;
   float m_MoveSpeed{3.5f};
 };
 } // namespace Axiom

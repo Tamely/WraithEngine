@@ -5,7 +5,10 @@
 #include <span>
 
 namespace Axiom {
-enum class ViewportFrameFormat : uint8_t { R16G16B16A16Float };
+enum class ViewportFrameFormat : uint8_t {
+  R16G16B16A16Float,
+  R8G8B8A8Unorm,
+};
 
 struct ViewportFrame {
   uint64_t FrameIndex{0};

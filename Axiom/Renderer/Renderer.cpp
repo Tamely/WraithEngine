@@ -69,6 +69,12 @@ void Renderer::EndFrame() {
   m_Backend->EndFrame();
 }
 
+void Renderer::SetViewportFrameOutput(IViewportFrameOutput *FrameOutput) {
+  if (m_Backend != nullptr) {
+    m_Backend->SetViewportFrameOutput(FrameOutput);
+  }
+}
+
 std::optional<CapturedFrame> Renderer::ConsumeCapturedFrame() {
   return m_Backend->ConsumeCapturedFrame();
 }

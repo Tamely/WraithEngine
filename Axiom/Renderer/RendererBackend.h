@@ -27,7 +27,8 @@ enum class RendererViewMode : uint32_t {
 
 struct RendererCreateInfo {
   Window *TargetWindow{nullptr};
-  std::shared_ptr<IRenderSurface> TargetSurface;
+  RenderSurfacePtr TargetSurface;
+  IViewportFrameOutput *FrameOutput{nullptr};
   uint32_t Width{0};
   uint32_t Height{0};
   RendererBackendType BackendType{RendererBackendType::Vulkan};
@@ -71,6 +72,7 @@ public:
   virtual const RendererFrameStats &GetFrameStats() const = 0;
   virtual void RenderImGui() = 0;
   virtual void EndFrame() = 0;
+  virtual void SetViewportFrameOutput(IViewportFrameOutput *FrameOutput) = 0;
   virtual std::optional<CapturedFrame> ConsumeCapturedFrame() = 0;
 };
 } // namespace Axiom

@@ -25,6 +25,7 @@ public:
   void BeginFrame();
   void Render();
   void EndFrame();
+  void SetViewportFrameOutput(IViewportFrameOutput *FrameOutput);
   std::optional<CapturedFrame> ConsumeCapturedFrame();
   void SetCpuFrameTime(float CpuFrameMs);
   const RendererFrameStats &GetFrameStats() const;

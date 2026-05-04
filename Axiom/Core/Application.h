@@ -26,6 +26,7 @@ struct ApplicationConfig {
   uint32_t Width{1600};
   uint32_t Height{900};
   RuntimeMode Mode{RuntimeMode::LocalWindowedEditor};
+  IViewportFrameOutput *FrameOutput{nullptr};
 };
 
 class Application {
@@ -38,13 +39,16 @@ public:
   void Run();
   bool Step();
   void PushLayer(Layer *Layer);
-  [[nodiscard]] IRenderSurface &GetRenderSurface() const { return *m_Surface; }
+  [[nodiscard]] IRenderSurface &GetRenderSurface() const {
+    return *m_RenderSurface;
+  }
   [[nodiscard]] Window *GetWindow() const;
   [[nodiscard]] float GetDeltaTime() const { return m_DeltaTime; }
   [[nodiscard]] uint64_t GetFrameIndex() const { return m_FrameIndex; }
   [[nodiscard]] RuntimeMode GetRuntimeMode() const { return m_Config.Mode; }
   [[nodiscard]] Renderer &GetRenderer() const { return *m_Renderer; }
   void RequestClose();
+  void SetViewportFrameOutput(IViewportFrameOutput *FrameOutput);
 
 private:
   static Application *s_Instance;

@@ -26,7 +26,7 @@ const char *RendererViewModeLabel(RendererViewMode Mode) {
 } // namespace
 
 void VulkanImGuiRenderer::Init(const InitInfo &InitInfo) {
-  if (InitInfo.Window == nullptr) {
+  if (InitInfo.WindowHandle == nullptr) {
     m_IsEnabled = false;
     return;
   }

@@ -80,6 +80,7 @@ void VulkanRendererBackend::Init(const RendererCreateInfo &CreateInfo) {
   g_LoadedEngine = this;
 
   m_Surface = CreateInfo.TargetSurface;
+  m_FrameOutput = CreateInfo.FrameOutput;
   m_HasPresentationSurface = m_Surface->SupportsPresentation();
   m_EnableImGui = m_HasPresentationSurface;
   m_Window = m_HasPresentationSurface
@@ -230,26 +231,9 @@ void VulkanRendererBackend::InitSwapchain() {
 }
 
 void VulkanRendererBackend::InitViewportReadbackBuffers() {
-  if (m_Surface->GetKind() != RenderSurfaceKind::Offscreen ||
-      m_FrameOutput == nullptr) {
-    return;
-  }
-
-  m_ViewportReadbackBufferSize =
-      static_cast<VkDeviceSize>(m_WindowExtent.width) * m_WindowExtent.height * 8u;
-  for (AllocatedBuffer &Buffer : m_ViewportReadbackBuffers) {
-    Buffer = VkBufferUtil::CreateBuffer(
-        m_Device.Allocator, static_cast<size_t>(m_ViewportReadbackBufferSize),
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_CPU_ONLY,
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
-            VMA_ALLOCATION_CREATE_MAPPED_BIT);
-  }
-
-  m_MainDeletionQueue.PushFunction([this]() {
-    for (AllocatedBuffer &Buffer : m_ViewportReadbackBuffers) {
-      VkBufferUtil::DestroyBuffer(m_Device.Allocator, Buffer);
-    }
-  });
+  // The transport seam consumes the converted capture produced below.
+  // We keep this hook so the offscreen path can evolve without changing
+  // the application/bootstrap contracts again.
 }
 
 void VulkanRendererBackend::InitHzbResources() {
@@ -1367,6 +1351,7 @@ void VulkanRendererBackend::Draw() {
     VK_CHECK(vkWaitForFences(m_Device.Device, 1, &CurrentFrame.RenderFence,
                              VK_TRUE, 1000000000));
     ConvertCapturedFrameToRgba8(m_CaptureReadbackBuffer);
+    PublishOffscreenFrame(CurrentFrame);
   }
 
   m_FrameNumber++;
@@ -1431,9 +1416,32 @@ void VulkanRendererBackend::EndFrame() {
   Draw();
 }
 
+void VulkanRendererBackend::SetViewportFrameOutput(
+    IViewportFrameOutput *FrameOutput) {
+  m_FrameOutput = FrameOutput;
+}
+
 std::optional<CapturedFrame> VulkanRendererBackend::ConsumeCapturedFrame() {
   std::optional<CapturedFrame> Result = std::move(m_CapturedFrame);
   m_CapturedFrame.reset();
   return Result;
+}
+
+void VulkanRendererBackend::PublishOffscreenFrame(FrameData &Frame) {
+  (void)Frame;
+  if (m_FrameOutput == nullptr || !m_CapturedFrame.has_value()) {
+    return;
+  }
+
+  const CapturedFrame &Captured = *m_CapturedFrame;
+  const auto *Bytes =
+      reinterpret_cast<const std::byte *>(Captured.Pixels.data());
+  m_FrameOutput->OnViewportFrame({
+      .FrameIndex = Captured.FrameIndex,
+      .Width = Captured.Width,
+      .Height = Captured.Height,
+      .Format = ViewportFrameFormat::R8G8B8A8Unorm,
+      .Pixels = std::span<const std::byte>(Bytes, Captured.Pixels.size()),
+  });
 }
 } // namespace Axiom

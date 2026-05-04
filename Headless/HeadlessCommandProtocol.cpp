@@ -30,6 +30,11 @@ std::optional<double> ParseDouble(std::string_view Value) {
   return Result;
 }
 
+template <typename MatchType>
+std::string_view MatchView(const MatchType &Match, size_t Index) {
+  return std::string_view(&*Match[Index].first, Match[Index].length());
+}
+
 std::optional<glm::dvec2> MatchVec2(std::string_view Text,
                                     const std::regex &Pattern) {
   std::match_results<std::string_view::const_iterator> Match;
@@ -37,8 +42,8 @@ std::optional<glm::dvec2> MatchVec2(std::string_view Text,
       Match.size() < 3) {
     return std::nullopt;
   }
-  const auto X = ParseDouble(std::string_view(Match[1].first, Match[1].length()));
-  const auto Y = ParseDouble(std::string_view(Match[2].first, Match[2].length()));
+  const auto X = ParseDouble(MatchView(Match, 1));
+  const auto Y = ParseDouble(MatchView(Match, 2));
   if (!X.has_value() || !Y.has_value()) {
     return std::nullopt;
   }
@@ -52,9 +57,9 @@ std::optional<glm::vec3> MatchVec3(std::string_view Text,
       Match.size() < 4) {
     return std::nullopt;
   }
-  const auto X = ParseDouble(std::string_view(Match[1].first, Match[1].length()));
-  const auto Y = ParseDouble(std::string_view(Match[2].first, Match[2].length()));
-  const auto Z = ParseDouble(std::string_view(Match[3].first, Match[3].length()));
+  const auto X = ParseDouble(MatchView(Match, 1));
+  const auto Y = ParseDouble(MatchView(Match, 2));
+  const auto Z = ParseDouble(MatchView(Match, 3));
   if (!X.has_value() || !Y.has_value() || !Z.has_value()) {
     return std::nullopt;
   }

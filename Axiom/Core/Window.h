@@ -1,13 +1,12 @@
 #pragma once
 
 #include "Core/CursorMode.h"
-#include "Renderer/RenderSurface.h"
 
 #include <cstdint>
 #include <string>
 
 namespace Axiom {
-class Window final : public IRenderSurface {
+class Window {
 public:
   Window(std::string Title, uint32_t Width, uint32_t Height);
   virtual ~Window() = default;

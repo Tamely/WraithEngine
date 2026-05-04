@@ -232,6 +232,12 @@ TEST(EditorSessionTests, LookStateEnablesAuthoritativeRotationFromCursorDeltas) 
   Session.Subscribe(&Subscriber);
   Session.EnsureViewportState(Axiom::SessionUserId{7});
 
+  const Axiom::EditorViewportState *InitialViewport =
+      Session.FindViewport(Axiom::SessionUserId{7});
+  ASSERT_NE(InitialViewport, nullptr);
+  const float InitialYaw = InitialViewport->Camera.GetYawDegrees();
+  const float InitialPitch = InitialViewport->Camera.GetPitchDegrees();
+
   Session.Submit(MakeContext(),
                  {.Payload = Axiom::SetLookActiveCommand{
                       .IsLooking = true,
@@ -246,8 +252,9 @@ TEST(EditorSessionTests, LookStateEnablesAuthoritativeRotationFromCursorDeltas) 
   const Axiom::EditorViewportState *Viewport =
       Session.FindViewport(Axiom::SessionUserId{7});
   ASSERT_NE(Viewport, nullptr);
-  EXPECT_NEAR(Viewport->Camera.GetYawDegrees(), -88.8f, 0.0001f);
-  EXPECT_NEAR(Viewport->Camera.GetPitchDegrees(), 0.72f, 0.0001f);
+  EXPECT_NEAR(Viewport->Camera.GetYawDegrees(), InitialYaw + 1.2f, 0.0001f);
+  EXPECT_NEAR(Viewport->Camera.GetPitchDegrees(), InitialPitch + 0.72f,
+              0.0001f);
 
   ASSERT_EQ(Subscriber.Events.size(), 2u);
   EXPECT_TRUE(std::holds_alternative<Axiom::LookStateChangedEvent>(
@@ -353,8 +360,8 @@ TEST(RemoteViewportTests, OffscreenSurfaceExposesHeadlessContract) {
   EXPECT_EQ(Surface.GetKind(), Axiom::RenderSurfaceKind::Offscreen);
   EXPECT_EQ(Surface.GetWidth(), 1280u);
   EXPECT_EQ(Surface.GetHeight(), 720u);
-  EXPECT_FALSE(Surface.ShouldClose());
-  EXPECT_EQ(Surface.GetGlfwWindow(), nullptr);
+  EXPECT_FALSE(Surface.SupportsPresentation());
+  EXPECT_EQ(Surface.GetNativeWindowHandle(), nullptr);
 }
 
 TEST(RemoteViewportTests, AxiomEndpointForwardsEventsAndFrames) {

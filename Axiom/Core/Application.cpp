@@ -35,6 +35,7 @@ Application::Application(const ApplicationConfig &Config,
   m_Renderer->Init({
       .TargetWindow = m_Window.get(),
       .TargetSurface = m_RenderSurface,
+      .FrameOutput = m_Config.FrameOutput,
       .Width = m_Window->GetWidth(),
       .Height = m_Window->GetHeight(),
   });
@@ -52,15 +53,20 @@ Application::~Application() {
 
 Application &Application::Get() { return *s_Instance; }
 
-Window *Application::GetWindow() const {
-  return dynamic_cast<Window *>(m_Surface.get());
-}
+Window *Application::GetWindow() const { return m_Window.get(); }
 
 void Application::PushLayer(Layer *Layer) { m_LayerStack.PushLayer(Layer); }
 
 void Application::RequestClose() {
   if (m_Window) {
     m_Window->RequestClose();
+  }
+}
+
+void Application::SetViewportFrameOutput(IViewportFrameOutput *FrameOutput) {
+  m_Config.FrameOutput = FrameOutput;
+  if (m_Renderer) {
+    m_Renderer->SetViewportFrameOutput(FrameOutput);
   }
 }
 

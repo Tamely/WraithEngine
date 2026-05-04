@@ -20,6 +20,8 @@
 #include <optional>
 #include <vector>
 
+struct GLFWwindow;
+
 namespace Axiom {
 class VulkanRendererBackend final : public RendererBackend {
 public:
@@ -36,6 +38,7 @@ public:
   const RendererFrameStats &GetFrameStats() const override;
   void RenderImGui() override;
   void EndFrame() override;
+  void SetViewportFrameOutput(IViewportFrameOutput *FrameOutput) override;
   std::optional<CapturedFrame> ConsumeCapturedFrame() override;
 
   void ImmediateSubmit(std::function<void(VkCommandBuffer cmd)> &&Function);
@@ -59,7 +62,6 @@ private:
   void RecordOffscreenCapture(VkCommandBuffer CommandBuffer);
   void ClearDepthImage(VkCommandBuffer CommandBuffer);
   void InitViewportReadbackBuffers();
-  void CaptureOffscreenFrame(VkCommandBuffer CommandBuffer, FrameData &Frame);
   void PublishOffscreenFrame(FrameData &Frame);
   void Draw();
   static float HalfToFloat(uint16_t Value);
@@ -85,6 +87,7 @@ private:
 
   GLFWwindow *m_Window{nullptr};
   RenderSurfacePtr m_Surface;
+  IViewportFrameOutput *m_FrameOutput{nullptr};
 
   VulkanContext m_Context;
   VulkanDevice m_Device;

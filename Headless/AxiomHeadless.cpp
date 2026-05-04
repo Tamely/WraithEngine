@@ -1,11 +1,15 @@
 #include <Core/Application.h>
+#include <Remote/AxiomSessionEndpoint.h>
 #include <Renderer/Renderer.h>
 
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <cstring>
+#include <vector>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
@@ -14,16 +18,45 @@
 #include "HeadlessSessionLayer.h"
 
 namespace {
-class HeadlessEventSubscriber final : public Axiom::IEditorEventSubscriber {
+class HeadlessEndpointSubscriber final
+    : public Axiom::IAxiomSessionEndpointSubscriber {
 public:
-  explicit HeadlessEventSubscriber(std::ostream &Output) : m_Output(Output) {}
+  explicit HeadlessEndpointSubscriber(std::ostream &Output) : m_Output(Output) {}
 
-  void OnEditorEvent(const Axiom::PublishedEditorEvent &Event) override {
+  void OnAxiomEditorEvent(const Axiom::PublishedEditorEvent &Event) override {
     m_Output << Axiom::SerializeEvent(Event) << std::endl;
   }
 
+  void OnAxiomViewportFrame(const Axiom::ViewportFrame &Frame) override {
+    m_LastFrame = ConvertFrame(Frame);
+  }
+
+  void DiscardLatestFrame() { m_LastFrame.reset(); }
+
+  std::optional<Axiom::CapturedFrame> TakeLatestFrame() {
+    std::optional<Axiom::CapturedFrame> Result = std::move(m_LastFrame);
+    m_LastFrame.reset();
+    return Result;
+  }
+
 private:
+  static std::optional<Axiom::CapturedFrame>
+  ConvertFrame(const Axiom::ViewportFrame &Frame) {
+    if (Frame.Format != Axiom::ViewportFrameFormat::R8G8B8A8Unorm) {
+      return std::nullopt;
+    }
+
+    Axiom::CapturedFrame Captured{};
+    Captured.FrameIndex = Frame.FrameIndex;
+    Captured.Width = Frame.Width;
+    Captured.Height = Frame.Height;
+    Captured.Pixels.resize(Frame.Pixels.size());
+    std::memcpy(Captured.Pixels.data(), Frame.Pixels.data(), Frame.Pixels.size());
+    return Captured;
+  }
+
   std::ostream &m_Output;
+  std::optional<Axiom::CapturedFrame> m_LastFrame;
 };
 
 class HeadlessApplication final : public Axiom::Application {
@@ -37,12 +70,17 @@ public:
                            Args) {
     m_Layer = new Axiom::HeadlessSessionLayer();
     PushLayer(m_Layer);
+    m_Endpoint =
+        std::make_unique<Axiom::AxiomSessionEndpoint>(m_Layer->GetSession());
+    SetViewportFrameOutput(m_Endpoint.get());
   }
 
   Axiom::HeadlessSessionLayer &GetHeadlessLayer() { return *m_Layer; }
+  Axiom::AxiomSessionEndpoint &GetEndpoint() { return *m_Endpoint; }
 
 private:
   Axiom::HeadlessSessionLayer *m_Layer{nullptr};
+  std::unique_ptr<Axiom::AxiomSessionEndpoint> m_Endpoint;
 };
 
 bool WritePng(const std::filesystem::path &Path,
@@ -84,8 +122,8 @@ int main(int argc, char **argv) {
 
   HeadlessApplication App({argv, argc}, Options->Width, Options->Height);
   auto &Layer = App.GetHeadlessLayer();
-  HeadlessEventSubscriber Subscriber(std::cout);
-  Layer.GetSession().Subscribe(&Subscriber);
+  HeadlessEndpointSubscriber Subscriber(std::cout);
+  App.GetEndpoint().Subscribe(&Subscriber);
 
   std::cout << Axiom::SerializeReady(Options->Width, Options->Height)
             << std::endl;
@@ -124,7 +162,7 @@ int main(int argc, char **argv) {
     case Axiom::HeadlessCommandType::UpdateViewportCamera:
       Layer.Submit(Command->EditorPayload);
       App.Step();
-      App.GetRenderer().ConsumeCapturedFrame();
+      Subscriber.DiscardLatestFrame();
       break;
     case Axiom::HeadlessCommandType::RenderFrame: {
       if (!SceneLoaded) {
@@ -134,7 +172,7 @@ int main(int argc, char **argv) {
         break;
       }
       App.Step();
-      const auto Frame = App.GetRenderer().ConsumeCapturedFrame();
+      const auto Frame = Subscriber.TakeLatestFrame();
       if (!Frame.has_value()) {
         std::cout << Axiom::SerializeError("Renderer did not produce a frame.")
                   << std::endl;

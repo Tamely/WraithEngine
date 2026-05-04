@@ -58,6 +58,10 @@ void VulkanContext::Init(void *WindowHandle, bool CreateSurface) {
     return vkb::InstanceBuilder{};
   }();
 
+  if (!CreateSurface) {
+    Builder.set_headless();
+  }
+
   vkb::Result<vkb::SystemInfo> SystemInfoReturn = LoaderInfo.UsesCustomLoader
                                                       ? vkb::SystemInfo::get_system_info(
                                                             LoaderInfo.ProcAddr)

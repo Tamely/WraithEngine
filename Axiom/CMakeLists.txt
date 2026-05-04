@@ -1,6 +1,7 @@
 set(ENGINE_SOURCES
   Assets/MeshAsset.cpp
   Core/Application.cpp
+  Core/GlfwEditorInputSource.cpp
   Core/GlfwWindow.cpp
   Core/HeadlessWindow.cpp
   Core/Layer.cpp
