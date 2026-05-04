@@ -35,3 +35,10 @@ struct AllocatedImage {
   VkExtent3D ImageExtent;
   VkFormat ImageFormat;
 };
+
+struct AllocatedBuffer {
+  VkBuffer Buffer{VK_NULL_HANDLE};
+  VmaAllocation Allocation{VK_NULL_HANDLE};
+  VmaAllocationInfo Info{};
+  VkDeviceSize Size{0};
+};

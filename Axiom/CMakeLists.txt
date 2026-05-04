@@ -1,4 +1,5 @@
 set(ENGINE_SOURCES
+  Assets/MeshAsset.cpp
   Core/Application.cpp
   Core/Layer.cpp
   Core/LayerStack.cpp
@@ -9,6 +10,7 @@ set(ENGINE_SOURCES
   Renderer/RenderCommand.cpp
   Renderer/Renderer.cpp
   Renderer/RenderScene.cpp
+  Renderer/Vulkan/VulkanBuffer.cpp
   Renderer/Vulkan/VulkanCommandContext.cpp
   Renderer/Vulkan/VulkanContext.cpp
   Renderer/Vulkan/VulkanDescriptors.cpp

@@ -1,10 +1,14 @@
 #pragma once
 
+#include "Renderer/Mesh.h"
+
 #include <cstdint>
+#include <memory>
 
 namespace Axiom {
 class Window;
 class RenderScene;
+struct MeshData;
 
 enum class RendererBackendType { Vulkan };
 
@@ -26,9 +30,10 @@ public:
   virtual void Init(const RendererCreateInfo &CreateInfo) = 0;
   virtual void Shutdown() = 0;
   virtual void BeginFrame() = 0;
+  virtual std::shared_ptr<Mesh> CreateMesh(const MeshData &Mesh) = 0;
+  virtual void RenderSceneMeshes(RenderScene &Scene) = 0;
   virtual void RenderFallbackBackground(RenderScene &Scene) = 0;
   virtual void RenderImGui() = 0;
   virtual void EndFrame() = 0;
 };
 } // namespace Axiom
-

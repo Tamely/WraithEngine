@@ -3,10 +3,13 @@
 #include "Renderer/RenderScene.h"
 
 namespace Axiom {
+class Camera;
+
 class RenderCommand {
 public:
   static void BeginScene(RenderScene &Scene);
-  static void Submit(const RenderSubmission &Submission);
+  static void SetCamera(Camera &Camera);
+  static void Submit(const RenderMeshSubmission &Submission);
   static void EndScene();
 
 private:

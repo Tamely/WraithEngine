@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <string>
 
 #include "Core/LayerStack.h"
@@ -17,16 +18,23 @@ public:
   Application(const std::string &Title, const ApplicationArgs &Args);
   virtual ~Application();
 
+  static Application &Get();
+
   void Run();
   void PushLayer(Layer *Layer);
+  [[nodiscard]] Window &GetWindow() const { return *m_Window; }
+  [[nodiscard]] float GetDeltaTime() const { return m_DeltaTime; }
 
 private:
+  static Application *s_Instance;
+
   std::string m_Title;
   Window *m_Window;
   Renderer *m_Renderer;
   LayerStack m_LayerStack;
+  std::chrono::steady_clock::time_point m_LastFrameTime;
+  float m_DeltaTime{0.0f};
 };
 
 Application *Create(const ApplicationArgs &Args);
 } // namespace Axiom
-

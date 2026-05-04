@@ -1,11 +1,18 @@
 #include "Renderer/Renderer.h"
 
+#include "Assets/MeshAsset.h"
 #include "Renderer/ForwardRenderer.h"
 #include "Renderer/RenderCommand.h"
 #include "Renderer/Vulkan/VulkanRendererBackend.h"
 
+#include "Core/Log.h"
+
 namespace Axiom {
+Renderer *Renderer::s_Instance = nullptr;
+
 Renderer::~Renderer() { Shutdown(); }
+
+Renderer &Renderer::Get() { return *s_Instance; }
 
 void Renderer::Init(const RendererCreateInfo &CreateInfo) {
   if (m_IsInitialized) {
@@ -21,6 +28,7 @@ void Renderer::Init(const RendererCreateInfo &CreateInfo) {
   m_Backend->Init(CreateInfo);
   m_Technique = std::make_unique<ForwardRenderer>();
   m_Technique->Init(m_Backend.get());
+  s_Instance = this;
   m_IsInitialized = true;
 }
 
@@ -33,6 +41,9 @@ void Renderer::Shutdown() {
   m_Technique.reset();
   m_Backend->Shutdown();
   m_Backend.reset();
+  if (s_Instance == this) {
+    s_Instance = nullptr;
+  }
   m_IsInitialized = false;
 }
 
@@ -48,5 +59,26 @@ void Renderer::EndFrame() {
   m_Backend->RenderImGui();
   m_Backend->EndFrame();
 }
-} // namespace Axiom
 
+std::vector<RenderMeshSubmission>
+Renderer::LoadMeshSceneFromFile(const std::filesystem::path &Path) {
+  auto SceneData = Assets::LoadBasicMeshAsset(Path);
+  if (!SceneData.has_value()) {
+    A_CORE_ERROR("Failed to load mesh asset scene: {0}", Path.string());
+    return {};
+  }
+
+  std::vector<RenderMeshSubmission> Result;
+  Result.reserve(SceneData->Instances.size());
+  for (const auto &Instance : SceneData->Instances) {
+    auto Mesh = m_Backend->CreateMesh(Instance.Mesh);
+    if (!Mesh) {
+      continue;
+    }
+
+    Result.push_back({Mesh, Instance.Transform});
+  }
+
+  return Result;
+}
+} // namespace Axiom
