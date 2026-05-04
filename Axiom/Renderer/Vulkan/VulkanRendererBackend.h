@@ -6,6 +6,7 @@
 #include "Renderer/Vulkan/VulkanDeletionQueue.h"
 #include "Renderer/Vulkan/VulkanDescriptors.h"
 #include "Renderer/Vulkan/VulkanDevice.h"
+#include "Renderer/Vulkan/VulkanImGuiRenderer.h"
 #include "Renderer/Vulkan/VulkanMaterialResources.h"
 #include "Renderer/Vulkan/VulkanOcclusionCulling.h"
 #include "Renderer/Vulkan/VulkanRendererTypes.h"
@@ -47,14 +48,11 @@ private:
   void InitBackgroundPipelines();
   void InitMeshPipelines();
   void InitMeshFrameResources();
-  void InitImGui();
 
   void InitHzbResources();
   void CollectFrameStats(MeshFrameResources &Frame);
-  void DrawStatsPanel();
   void DrawBackground(VkCommandBuffer CommandBuffer);
   void DrawMeshes(VkCommandBuffer CommandBuffer, RenderScene &Scene);
-  void DrawImGui(VkCommandBuffer Command, VkImageView TargetImageView);
   void BuildHzb(VkCommandBuffer CommandBuffer, MeshFrameResources &Frame);
   void ClearDepthImage(VkCommandBuffer CommandBuffer);
   void Draw();
@@ -120,6 +118,7 @@ private:
   VkImageLayout m_HzbImageLayout{VK_IMAGE_LAYOUT_UNDEFINED};
 
   std::array<MeshFrameResources, FRAME_OVERLAP> m_MeshFrames{};
+  VulkanImGuiRenderer m_ImGuiRenderer;
   VulkanMaterialResources m_MaterialResources;
   VulkanOcclusionCulling m_OcclusionCulling;
   VulkanSceneRenderer m_SceneRenderer;

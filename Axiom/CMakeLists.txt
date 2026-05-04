@@ -17,6 +17,7 @@ set(ENGINE_SOURCES
   Renderer/Vulkan/VulkanDescriptors.cpp
   Renderer/Vulkan/VulkanDevice.cpp
   Renderer/Vulkan/VulkanImage.cpp
+  Renderer/Vulkan/VulkanImGuiRenderer.cpp
   Renderer/Vulkan/VulkanInitializers.cpp
   Renderer/Vulkan/VulkanMaterialResources.cpp
   Renderer/Vulkan/VulkanMesh.cpp

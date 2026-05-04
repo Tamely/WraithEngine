@@ -28,10 +28,6 @@
 #include "Core/Log.h"
 #include "Core/Window.h"
 
-#include "imgui.h"
-#include "imgui_impl_glfw.h"
-#include "imgui_impl_vulkan.h"
-
 Axiom::VulkanRendererBackend *g_LoadedEngine = nullptr;
 
 #ifndef AXIOM_CONTENT_DIR
@@ -40,19 +36,6 @@ Axiom::VulkanRendererBackend *g_LoadedEngine = nullptr;
 
 namespace Axiom {
 namespace {
-const char *RendererViewModeLabel(RendererViewMode Mode) {
-  switch (Mode) {
-  case RendererViewMode::Lit:
-    return "Lit";
-  case RendererViewMode::Unlit:
-    return "Unlit";
-  case RendererViewMode::Wireframe:
-    return "Wireframe";
-  }
-
-  return "Unknown";
-}
-
 void TransitionImageRange(VkCommandBuffer CommandBuffer, VkImage Image,
                           VkImageLayout OldLayout, VkImageLayout NewLayout,
                           VkImageAspectFlags AspectMask, uint32_t BaseMipLevel,
@@ -122,7 +105,14 @@ void VulkanRendererBackend::Init(const RendererCreateInfo &CreateInfo) {
   InitTextureResources();
   InitPipelines();
   InitMeshFrameResources();
-  InitImGui();
+  m_ImGuiRenderer.Init({.Window = m_Window,
+                        .Instance = m_Context.Instance,
+                        .PhysicalDevice = m_Device.PhysicalDevice,
+                        .Device = m_Device.Device,
+                        .Queue = m_Device.GraphicsQueue,
+                        .QueueFamily = m_Device.GraphicsQueueFamily,
+                        .SwapchainImageFormat = m_Swapchain.ImageFormat,
+                        .DeletionQueue = &m_MainDeletionQueue});
 
   m_IsInitialized = m_Window != nullptr;
 
@@ -942,49 +932,6 @@ void VulkanRendererBackend::CollectFrameStats(MeshFrameResources &Frame) {
   m_FrameStats.GpuMeshMs = ToMilliseconds(Timestamps[2], Timestamps[3]);
 }
 
-void VulkanRendererBackend::DrawStatsPanel() {
-  if (!ImGui::Begin("Renderer Stats")) {
-    ImGui::End();
-    return;
-  }
-
-  ImGui::Text("CPU frame: %.2f ms", m_FrameStats.CpuFrameMs);
-  ImGui::Text("CPU render: %.2f ms", m_FrameStats.CpuRenderMs);
-  ImGui::Text("GPU background: %.2f ms", m_FrameStats.GpuBackgroundMs);
-  ImGui::Text("GPU meshes: %.2f ms", m_FrameStats.GpuMeshMs);
-  ImGui::Separator();
-  ImGui::Text("Submitted meshes: %u", m_FrameStats.SubmittedMeshCount);
-  ImGui::Text("Frustum culled: %u", m_FrameStats.FrustumCulledMeshCount);
-  ImGui::Text("Occlusion culled: %u", m_FrameStats.OcclusionCulledMeshCount);
-  ImGui::Text("Mesh submissions: %u", m_FrameStats.MeshSubmissionCount);
-  ImGui::Text("Triangles: %u", m_FrameStats.TriangleCount);
-  ImGui::Text("Draw extent: %u x %u", m_FrameStats.DrawExtent.x,
-              m_FrameStats.DrawExtent.y);
-  int SelectedMode = static_cast<int>(m_ViewMode);
-  const char *ModeLabels[] = {"Lit", "Unlit", "Wireframe"};
-  if (ImGui::Combo("View Mode", &SelectedMode, ModeLabels,
-                   static_cast<int>(std::size(ModeLabels)))) {
-    m_ViewMode = static_cast<RendererViewMode>(SelectedMode);
-  }
-  ImGui::Text("Active mode: %s", RendererViewModeLabel(m_ViewMode));
-  ImGui::End();
-}
-
-void VulkanRendererBackend::DrawImGui(VkCommandBuffer Command,
-                                      VkImageView TargetImageView) {
-  VkRenderingAttachmentInfo ColorAttachment =
-      VkInit::AttachmentInfo(TargetImageView, VK_NULL_HANDLE,
-                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-  VkRenderingInfo RenderingInfo = VkInit::RenderingInfo(
-      m_Swapchain.Extent, &ColorAttachment, VK_NULL_HANDLE);
-
-  vkCmdBeginRendering(Command, &RenderingInfo);
-
-  ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), Command);
-
-  vkCmdEndRendering(Command);
-}
-
 void VulkanRendererBackend::DrawBackground(VkCommandBuffer CommandBuffer) {
   vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                     m_GradientPipeline);
@@ -1149,73 +1096,6 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
            }});
 }
 
-void VulkanRendererBackend::InitImGui() {
-  VkDescriptorPoolSize PoolSizes[] = {
-      {VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
-      {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000},
-      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000},
-      {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000},
-      {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000},
-      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000},
-      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000},
-      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000},
-      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000},
-      {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000}};
-
-  VkDescriptorPoolCreateInfo PoolInfo = {
-      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-      .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT};
-  PoolInfo.maxSets = 1000;
-  PoolInfo.poolSizeCount = static_cast<uint32_t>(std::size(PoolSizes));
-  PoolInfo.pPoolSizes = PoolSizes;
-
-  VkDescriptorPool ImGuiPool;
-  VK_CHECK(vkCreateDescriptorPool(m_Device.Device, &PoolInfo, VK_NULL_HANDLE,
-                                  &ImGuiPool));
-
-  ImGui::CreateContext();
-  ImGui_ImplGlfw_InitForVulkan(m_Window, true);
-
-  bool LoadedImGuiVulkanFunctions = ImGui_ImplVulkan_LoadFunctions(
-      VK_API_VERSION_1_3,
-      [](const char *FunctionName, void *UserData) {
-        return vkGetInstanceProcAddr(static_cast<VkInstance>(UserData),
-                                     FunctionName);
-      },
-      m_Context.Instance);
-  assert(LoadedImGuiVulkanFunctions);
-
-  ImGui_ImplVulkan_InitInfo InitInfo = {};
-  InitInfo.ApiVersion = VK_API_VERSION_1_3;
-  InitInfo.Instance = m_Context.Instance;
-  InitInfo.PhysicalDevice = m_Device.PhysicalDevice;
-  InitInfo.Device = m_Device.Device;
-  InitInfo.Queue = m_Device.GraphicsQueue;
-  InitInfo.DescriptorPool = ImGuiPool;
-  InitInfo.MinImageCount = 3;
-  InitInfo.ImageCount = 3;
-  InitInfo.UseDynamicRendering = true;
-
-  ImGui_ImplVulkan_PipelineInfo PipelineInfo = {};
-  PipelineInfo.PipelineRenderingCreateInfo = {
-      .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
-  PipelineInfo.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
-  PipelineInfo.PipelineRenderingCreateInfo.pColorAttachmentFormats =
-      &m_Swapchain.ImageFormat;
-
-  PipelineInfo.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-
-  InitInfo.QueueFamily = m_Device.GraphicsQueueFamily;
-  InitInfo.PipelineInfoMain = PipelineInfo;
-  ImGui_ImplVulkan_Init(&InitInfo);
-
-  m_MainDeletionQueue.PushFunction([this, ImGuiPool]() {
-    ImGui_ImplVulkan_Shutdown();
-    vkDestroyDescriptorPool(m_Device.Device, ImGuiPool, VK_NULL_HANDLE);
-  });
-}
-
 void VulkanRendererBackend::Draw() {
   auto &CurrentFrame = m_CommandContext.PrepareFrame(m_Device.Device, m_FrameNumber);
   auto &MeshFrame = GetCurrentMeshFrame();
@@ -1287,7 +1167,8 @@ void VulkanRendererBackend::Draw() {
                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-  DrawImGui(CommandBuffer, m_Swapchain.ImageViews[SwapchainImageIndex]);
+  m_ImGuiRenderer.RecordDrawData(CommandBuffer, m_Swapchain.Extent,
+                                 m_Swapchain.ImageViews[SwapchainImageIndex]);
 
   VkUtil::TransitionImage(CommandBuffer, m_Swapchain.Images[SwapchainImageIndex],
                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -1339,9 +1220,7 @@ void VulkanRendererBackend::BeginFrame() {
     return;
   }
 
-  ImGui_ImplVulkan_NewFrame();
-  ImGui_ImplGlfw_NewFrame();
-  ImGui::NewFrame();
+  m_ImGuiRenderer.BeginFrame();
 }
 
 void VulkanRendererBackend::RenderSceneMeshes(RenderScene &Scene) {
@@ -1366,8 +1245,7 @@ void VulkanRendererBackend::RenderImGui() {
     return;
   }
 
-  DrawStatsPanel();
-  ImGui::Render();
+  m_ImGuiRenderer.BuildStatsUiAndRender(m_FrameStats, m_ViewMode);
 }
 
 void VulkanRendererBackend::EndFrame() {
