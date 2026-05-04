@@ -6,6 +6,13 @@
 - Audience: Engine, tools, networking, web, and infrastructure contributors
 - Intended outcome: Establish the target architecture for evolving WraithEngine into a distributed game engine and browser-based collaborative editor
 
+## Implementation Progress
+- `event-system` branch now contains the first local authoritative editor-session slice
+- Added engine-owned `EditorSession`, `EditorCommand`, `EditorEvent`, `SessionId`, and `SessionUserId` foundations in `Axiom`
+- The native editor now translates GLFW input into commands and renders from session-owned camera/scene state instead of mutating camera state directly in the layer
+- Added deterministic in-process command draining, authoritative event publication, and focused tests for camera/look state transitions and command rejection
+- This work establishes the command/event seam locally, but does not yet add headless rendering, frame capture, transport, browser integration, or collaborative scene editing
+
 ## 1. Executive Summary
 WraithEngine will evolve from a single-process native editor into a distributed platform with one shared C++ engine runtime that supports two execution styles:
 
@@ -71,17 +78,19 @@ At the time of writing, the repository contains:
 The active architecture is roughly:
 
 1. `Application` owns a GLFW window and a renderer.
-2. `Layer`s update every frame.
-3. `RenderCommand` writes into a frame-local `RenderScene`.
-4. `Renderer` passes that scene into a Vulkan backend.
-5. The backend renders to a window-presented swapchain image.
+2. `Layer`s update every frame and can render from authoritative state in a separate pass.
+3. A local `EditorSession` owns viewport camera/look state and drains queued commands deterministically each frame.
+4. `RenderCommand` writes authoritative frame data into a frame-local `RenderScene`.
+5. `Renderer` passes that scene into a Vulkan backend.
+6. The backend renders to a window-presented swapchain image.
 
 This is enough to establish:
 
 - there is already a separation between scene submission and rendering
+- there is now an initial engine-owned command/event authority seam for editor viewport state
 - the renderer can evolve into windowed and headless targets
-- the editor is still largely local and frame-driven rather than command/event authoritative
-- there is not yet a reflection, network, collaboration, or scripting host layer
+- the current authoritative domain is still narrow and local to viewport/input state rather than full world editing
+- there is not yet a reflection, network, collaboration, headless runtime, or scripting host layer
 
 ## 5. Architectural Principles
 - One core runtime, multiple adapters
@@ -336,6 +345,11 @@ Each live editing session owns an `EditorSessionState` that includes:
 - asset locks
 - session activity metadata
 
+Current implementation note:
+
+- the initial local slice currently covers per-user viewport camera state, look/cursor-capture state, last cursor position bookkeeping, and authoritative scene submissions for the startup scene
+- entity/component/object registries, locks, presence, and asset editing state remain future work
+
 ### 11.3 Why This Matters
 The current local editor behavior is mostly frame-local and immediate. That is fine for one user, but collaboration requires:
 
@@ -404,6 +418,11 @@ Commands represent requested mutations or user intentions. Initial editor comman
 - `UpdateViewportCamera`
 - `SetSelection`
 
+Current implementation note:
+
+- `UpdateViewportCamera` is implemented as the first authoritative viewport command
+- `SetLookActive` is implemented locally as an editor-session command to control cursor-capture / mouselook authority
+
 ### 13.2 Events
 Events represent authoritative outcomes or state broadcasts. Initial event set:
 
@@ -424,6 +443,14 @@ Events represent authoritative outcomes or state broadcasts. Initial event set:
 - `UserJoined`
 - `UserLeft`
 - `CommandRejected`
+
+Current implementation note:
+
+- `ViewportCameraUpdated`
+- `LookStateChanged`
+- `CommandRejected`
+
+are now implemented locally as the first authoritative session events
 
 ### 13.3 Validation Rules
 Commands should be validated against:
@@ -824,12 +851,21 @@ The design should define behavior for:
 - introduce core identity and reflection foundations
 - keep native editor path working
 
+Progress update:
+
+- partially completed via the `event-system` branch for editor authority foundations
+- core session identity types and a local command/event seam now exist
+- native editor path still works as the first local adapter
+- rendering surface, capture, and transport interfaces are still pending
+
 ### Phase 1: Remote Viewport Foundation
 - support headless or offscreen rendering
 - add frame capture
 - add H.264 encode path
 - connect a browser viewport over WebRTC
 - support camera control and basic input
+
+This is now the next major step. The local authoritative camera/input seam exists, so the next work should make that same session drive a headless/offscreen runtime and expose it through transport rather than only a local GLFW adapter.
 
 ### Phase 2: Browser Editor Shell
 - build browser editor layout
@@ -929,6 +965,11 @@ The first implementation slice after this design doc should be:
 4. session transport interface with a WebRTC-shaped contract
 5. browser viewport prototype
 6. authoritative per-user viewport camera state
+
+Progress update:
+
+- item 6 is now implemented locally
+- the next slice should focus on items 1 through 5 in a way that reuses the new local session authority seam instead of bypassing it
 
 That slice proves the core thesis:
 
