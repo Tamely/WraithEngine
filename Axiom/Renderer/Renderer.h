@@ -2,10 +2,12 @@
 
 #include "Renderer/RendererBackend.h"
 #include "Renderer/RenderScene.h"
+#include "Renderer/RenderSurface.h"
 #include "Renderer/RenderTechnique.h"
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 
 namespace Axiom {
 class Renderer {
@@ -23,6 +25,7 @@ public:
   void BeginFrame();
   void Render();
   void EndFrame();
+  std::optional<CapturedFrame> ConsumeCapturedFrame();
   void SetCpuFrameTime(float CpuFrameMs);
   const RendererFrameStats &GetFrameStats() const;
   std::vector<RenderMeshSubmission>

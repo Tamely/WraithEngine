@@ -5,12 +5,10 @@
 
 #include <VkBootstrap.h>
 
-struct GLFWwindow;
-
 namespace Axiom {
 class VulkanContext {
 public:
-  void Init(GLFWwindow *Window = nullptr);
+  void Init(void *WindowHandle, bool CreateSurface);
   void Shutdown();
 
   VkInstance Instance{VK_NULL_HANDLE};

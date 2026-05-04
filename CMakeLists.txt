@@ -15,6 +15,7 @@ add_subdirectory(ThirdParty/glm/glm)
 add_subdirectory(Content/Shaders)
 add_subdirectory(Axiom)
 add_subdirectory(Editor)
+add_subdirectory(Headless)
 
 if(BUILD_TESTING)
   include(FetchContent)

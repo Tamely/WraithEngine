@@ -16,10 +16,13 @@
 
 #include <vk_mem_alloc.h>
 
+#include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <cstdlib>
 #include <string>
 #include <thread>
@@ -77,10 +80,14 @@ void VulkanRendererBackend::Init(const RendererCreateInfo &CreateInfo) {
   g_LoadedEngine = this;
 
   m_Surface = CreateInfo.TargetSurface;
-  m_FrameOutput = CreateInfo.FrameOutput;
+  m_HasPresentationSurface = m_Surface->SupportsPresentation();
+  m_EnableImGui = m_HasPresentationSurface;
+  m_Window = m_HasPresentationSurface
+                 ? static_cast<GLFWwindow *>(m_Surface->GetNativeWindowHandle())
+                 : nullptr;
   m_WindowExtent = {CreateInfo.Width, CreateInfo.Height};
 
-  m_Context.Init(m_Surface->GetGlfwWindow());
+  m_Context.Init(m_Surface->GetNativeWindowHandle(), m_HasPresentationSurface);
   m_Device.Init(m_Context);
 
   VkPhysicalDeviceProperties DeviceProperties{};
@@ -106,8 +113,8 @@ void VulkanRendererBackend::Init(const RendererCreateInfo &CreateInfo) {
   InitTextureResources();
   InitPipelines();
   InitMeshFrameResources();
-  if (m_Surface->GetKind() == RenderSurfaceKind::Window) {
-    m_ImGuiRenderer.Init({.Window = m_Surface->GetGlfwWindow(),
+  if (m_EnableImGui) {
+    m_ImGuiRenderer.Init({.WindowHandle = m_Window,
                           .Instance = m_Context.Instance,
                           .PhysicalDevice = m_Device.PhysicalDevice,
                           .Device = m_Device.Device,
@@ -117,19 +124,19 @@ void VulkanRendererBackend::Init(const RendererCreateInfo &CreateInfo) {
                           .DeletionQueue = &m_MainDeletionQueue});
   }
 
-  m_IsInitialized = m_Surface != nullptr;
+  m_IsInitialized = true;
 
   A_CORE_INFO("Vulkan Engine set up was successful: {0}",
               m_IsInitialized ? "True" : "False");
 }
 
 void VulkanRendererBackend::InitSwapchain() {
-  if (m_Surface->GetKind() == RenderSurfaceKind::Window) {
+  if (m_HasPresentationSurface) {
     m_Swapchain.Init(m_Context, m_Device, m_WindowExtent.width,
                      m_WindowExtent.height);
   } else {
-    m_Swapchain.Extent = m_WindowExtent;
     m_Swapchain.ImageFormat = VK_FORMAT_B8G8R8A8_UNORM;
+    m_Swapchain.Extent = m_WindowExtent;
   }
 
   VkExtent3D DrawImageExtent = {m_WindowExtent.width, m_WindowExtent.height, 1};
@@ -199,6 +206,7 @@ void VulkanRendererBackend::InitSwapchain() {
                              VK_NULL_HANDLE, &m_RasterDepthImage.ImageView));
 
   m_MainDeletionQueue.PushFunction([this]() {
+    VkBufferUtil::DestroyBuffer(m_Device.Allocator, m_CaptureReadbackBuffer);
     vkDestroyImageView(m_Device.Device, m_RasterDepthImage.ImageView,
                        VK_NULL_HANDLE);
     vmaDestroyImage(m_Device.Allocator, m_RasterDepthImage.Image,
@@ -210,6 +218,15 @@ void VulkanRendererBackend::InitSwapchain() {
     vmaDestroyImage(m_Device.Allocator, m_DrawImage.Image,
                     m_DrawImage.Allocation);
   });
+
+  m_CaptureReadbackBuffer = VkBufferUtil::CreateBuffer(
+      m_Device.Allocator,
+      static_cast<size_t>(m_DrawImage.ImageExtent.width) *
+          static_cast<size_t>(m_DrawImage.ImageExtent.height) * sizeof(uint16_t) *
+          4u,
+      VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU,
+      VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
+          VMA_ALLOCATION_CREATE_MAPPED_BIT);
 }
 
 void VulkanRendererBackend::InitViewportReadbackBuffers() {
@@ -1127,15 +1144,120 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
            }});
 }
 
+void VulkanRendererBackend::RecordOffscreenCapture(
+    VkCommandBuffer CommandBuffer) {
+  VkBufferImageCopy CopyRegion{};
+  CopyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  CopyRegion.imageSubresource.mipLevel = 0;
+  CopyRegion.imageSubresource.layerCount = 1;
+  CopyRegion.imageExtent = {m_DrawExtent.width, m_DrawExtent.height, 1};
+
+  vkCmdCopyImageToBuffer(CommandBuffer, m_DrawImage.Image,
+                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                         m_CaptureReadbackBuffer.Buffer, 1, &CopyRegion);
+
+  VkBufferMemoryBarrier2 ReadbackBarrier{
+      .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+      .pNext = VK_NULL_HANDLE,
+      .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+      .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+      .dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
+      .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT,
+      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .buffer = m_CaptureReadbackBuffer.Buffer,
+      .offset = 0,
+      .size = m_CaptureReadbackBuffer.Size};
+  VkDependencyInfo ReadbackDependencyInfo{
+      .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+      .pNext = VK_NULL_HANDLE,
+      .bufferMemoryBarrierCount = 1,
+      .pBufferMemoryBarriers = &ReadbackBarrier};
+  vkCmdPipelineBarrier2(CommandBuffer, &ReadbackDependencyInfo);
+}
+
+float VulkanRendererBackend::HalfToFloat(uint16_t Value) {
+  const uint32_t Sign = static_cast<uint32_t>(Value & 0x8000u) << 16u;
+  const uint32_t Exponent = (Value & 0x7C00u) >> 10u;
+  const uint32_t Mantissa = Value & 0x03FFu;
+
+  uint32_t ResultBits = 0;
+  if (Exponent == 0u) {
+    if (Mantissa == 0u) {
+      ResultBits = Sign;
+    } else {
+      uint32_t ShiftedMantissa = Mantissa;
+      uint32_t AdjustedExponent = 127u - 15u + 1u;
+      while ((ShiftedMantissa & 0x0400u) == 0u) {
+        ShiftedMantissa <<= 1u;
+        --AdjustedExponent;
+      }
+      ShiftedMantissa &= 0x03FFu;
+      ResultBits =
+          Sign | (AdjustedExponent << 23u) | (ShiftedMantissa << 13u);
+    }
+  } else if (Exponent == 0x1Fu) {
+    ResultBits = Sign | 0x7F800000u | (Mantissa << 13u);
+  } else {
+    ResultBits =
+        Sign | ((Exponent + (127u - 15u)) << 23u) | (Mantissa << 13u);
+  }
+
+  return std::bit_cast<float>(ResultBits);
+}
+
+uint8_t VulkanRendererBackend::LinearToByte(float Value) {
+  return static_cast<uint8_t>(
+      std::round(std::clamp(Value, 0.0f, 1.0f) * 255.0f));
+}
+
+void VulkanRendererBackend::ConvertCapturedFrameToRgba8(
+    const AllocatedBuffer &ReadbackBuffer) {
+  if (ReadbackBuffer.Info.pMappedData == nullptr) {
+    return;
+  }
+
+  vmaInvalidateAllocation(m_Device.Allocator, ReadbackBuffer.Allocation, 0,
+                          ReadbackBuffer.Size);
+
+  CapturedFrame Frame{};
+  Frame.FrameIndex = m_FrameNumber;
+  Frame.Width = m_DrawExtent.width;
+  Frame.Height = m_DrawExtent.height;
+  Frame.Pixels.resize(static_cast<size_t>(Frame.Width) * Frame.Height * 4u);
+
+  const auto *Source =
+      static_cast<const uint16_t *>(ReadbackBuffer.Info.pMappedData);
+  auto *Destination = reinterpret_cast<uint8_t *>(Frame.Pixels.data());
+  for (size_t PixelIndex = 0;
+       PixelIndex <
+       static_cast<size_t>(Frame.Width) * static_cast<size_t>(Frame.Height);
+       ++PixelIndex) {
+    const size_t SourceIndex = PixelIndex * 4u;
+    const size_t DestinationIndex = PixelIndex * 4u;
+    Destination[DestinationIndex + 0] =
+        LinearToByte(HalfToFloat(Source[SourceIndex + 0]));
+    Destination[DestinationIndex + 1] =
+        LinearToByte(HalfToFloat(Source[SourceIndex + 1]));
+    Destination[DestinationIndex + 2] =
+        LinearToByte(HalfToFloat(Source[SourceIndex + 2]));
+    Destination[DestinationIndex + 3] =
+        LinearToByte(HalfToFloat(Source[SourceIndex + 3]));
+  }
+
+  m_CapturedFrame = std::move(Frame);
+}
+
 void VulkanRendererBackend::Draw() {
-  auto &CurrentFrame = m_CommandContext.PrepareFrame(m_Device.Device, m_FrameNumber);
+  auto &CurrentFrame =
+      m_CommandContext.PrepareFrame(m_Device.Device, m_FrameNumber);
   auto &MeshFrame = GetCurrentMeshFrame();
 
   CollectFrameStats(MeshFrame);
+  m_CapturedFrame.reset();
 
-  const bool PresentsToWindow = m_Surface->GetKind() == RenderSurfaceKind::Window;
   uint32_t SwapchainImageIndex = 0;
-  if (PresentsToWindow) {
+  if (m_HasPresentationSurface) {
     SwapchainImageIndex = m_Swapchain.AcquireNextImage(
         m_Device.Device, CurrentFrame.SwapchainSemaphore);
   }
@@ -1190,7 +1312,7 @@ void VulkanRendererBackend::Draw() {
   VkUtil::TransitionImage(CommandBuffer, m_DrawImage.Image,
                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-  if (PresentsToWindow) {
+  if (m_HasPresentationSurface) {
     VkUtil::TransitionImage(CommandBuffer, m_Swapchain.Images[SwapchainImageIndex],
                             VK_IMAGE_LAYOUT_UNDEFINED,
                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
@@ -1203,40 +1325,48 @@ void VulkanRendererBackend::Draw() {
                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-    m_ImGuiRenderer.RecordDrawData(CommandBuffer, m_Swapchain.Extent,
-                                   m_Swapchain.ImageViews[SwapchainImageIndex]);
+    if (m_EnableImGui) {
+      m_ImGuiRenderer.RecordDrawData(CommandBuffer, m_Swapchain.Extent,
+                                     m_Swapchain.ImageViews[SwapchainImageIndex]);
+    }
 
     VkUtil::TransitionImage(CommandBuffer, m_Swapchain.Images[SwapchainImageIndex],
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                             VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
   } else {
-    CaptureOffscreenFrame(CommandBuffer, CurrentFrame);
+    RecordOffscreenCapture(CommandBuffer);
   }
 
   VK_CHECK(vkEndCommandBuffer(CommandBuffer));
 
   VkCommandBufferSubmitInfo CommandBufferSubmitInfo =
       VkInit::CommandBufferSubmitInfo(CommandBuffer);
-  VkSemaphoreSubmitInfo RenderSemaphoreSubmitInfo = VkInit::SemaphoreSubmitInfo(
-      VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, CurrentFrame.RenderSemaphore);
-  VkSemaphoreSubmitInfo SwapchainSemaphoreSubmitInfo = VkInit::SemaphoreSubmitInfo(
-      VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR,
-      CurrentFrame.SwapchainSemaphore);
+  if (m_HasPresentationSurface) {
+    VkSemaphoreSubmitInfo SwapchainSemaphoreSubmitInfo =
+        VkInit::SemaphoreSubmitInfo(
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR,
+            CurrentFrame.SwapchainSemaphore);
+    VkSemaphoreSubmitInfo RenderSemaphoreSubmitInfo =
+        VkInit::SemaphoreSubmitInfo(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                    CurrentFrame.RenderSemaphore);
 
-  VkSubmitInfo2 Submit = VkInit::SubmitInfo(
-      &CommandBufferSubmitInfo, &RenderSemaphoreSubmitInfo,
-      PresentsToWindow ? &SwapchainSemaphoreSubmitInfo : nullptr);
+    VkSubmitInfo2 Submit =
+        VkInit::SubmitInfo(&CommandBufferSubmitInfo, &RenderSemaphoreSubmitInfo,
+                           &SwapchainSemaphoreSubmitInfo);
+    VK_CHECK(vkQueueSubmit2(m_Device.GraphicsQueue, 1, &Submit,
+                            CurrentFrame.RenderFence));
 
-  VK_CHECK(vkQueueSubmit2(m_Device.GraphicsQueue, 1, &Submit,
-                          CurrentFrame.RenderFence));
-
-  if (PresentsToWindow) {
     m_Swapchain.Present(m_Device.GraphicsQueue, SwapchainImageIndex,
                         CurrentFrame.RenderSemaphore);
   } else {
-    VK_CHECK(vkWaitForFences(m_Device.Device, 1, &CurrentFrame.RenderFence, VK_TRUE,
-                             1000000000));
-    PublishOffscreenFrame(CurrentFrame);
+    VkSubmitInfo2 Submit =
+        VkInit::SubmitInfo(&CommandBufferSubmitInfo, VK_NULL_HANDLE,
+                           VK_NULL_HANDLE);
+    VK_CHECK(vkQueueSubmit2(m_Device.GraphicsQueue, 1, &Submit,
+                            CurrentFrame.RenderFence));
+    VK_CHECK(vkWaitForFences(m_Device.Device, 1, &CurrentFrame.RenderFence,
+                             VK_TRUE, 1000000000));
+    ConvertCapturedFrameToRgba8(m_CaptureReadbackBuffer);
   }
 
   m_FrameNumber++;
@@ -1254,7 +1384,8 @@ void VulkanRendererBackend::EnqueueDeferredDestroy(
 }
 
 void VulkanRendererBackend::BeginFrame() {
-  m_StopRendering = m_Surface->IsMinimized();
+  m_StopRendering =
+      m_HasPresentationSurface && glfwGetWindowAttrib(m_Window, GLFW_ICONIFIED);
   m_RenderFallbackBackground = false;
   m_ActiveScene = nullptr;
   if (m_StopRendering) {
@@ -1262,7 +1393,9 @@ void VulkanRendererBackend::BeginFrame() {
     return;
   }
 
-  m_ImGuiRenderer.BeginFrame();
+  if (m_EnableImGui) {
+    m_ImGuiRenderer.BeginFrame();
+  }
 }
 
 void VulkanRendererBackend::RenderSceneMeshes(RenderScene &Scene) {
@@ -1283,7 +1416,7 @@ const RendererFrameStats &VulkanRendererBackend::GetFrameStats() const {
 }
 
 void VulkanRendererBackend::RenderImGui() {
-  if (m_StopRendering) {
+  if (m_StopRendering || !m_EnableImGui) {
     return;
   }
 
@@ -1298,67 +1431,9 @@ void VulkanRendererBackend::EndFrame() {
   Draw();
 }
 
-void VulkanRendererBackend::CaptureOffscreenFrame(VkCommandBuffer CommandBuffer,
-                                                  FrameData &Frame) {
-  if (m_FrameOutput == nullptr || m_ViewportReadbackBufferSize == 0) {
-    return;
-  }
-
-  AllocatedBuffer &ReadbackBuffer =
-      m_ViewportReadbackBuffers[m_FrameNumber % FRAME_OVERLAP];
-  VkBufferImageCopy CopyRegion{
-      .bufferOffset = 0,
-      .bufferRowLength = 0,
-      .bufferImageHeight = 0,
-      .imageSubresource =
-          {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-           .mipLevel = 0,
-           .baseArrayLayer = 0,
-           .layerCount = 1},
-      .imageOffset = {0, 0, 0},
-      .imageExtent = m_DrawImage.ImageExtent};
-  vkCmdCopyImageToBuffer(CommandBuffer, m_DrawImage.Image,
-                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                         ReadbackBuffer.Buffer, 1, &CopyRegion);
-
-  VkBufferMemoryBarrier2 ReadbackBarrier{
-      .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-      .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-      .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-      .dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
-      .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT,
-      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-      .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-      .buffer = ReadbackBuffer.Buffer,
-      .offset = 0,
-      .size = ReadbackBuffer.Size};
-  VkDependencyInfo ReadbackDependencyInfo{
-      .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-      .bufferMemoryBarrierCount = 1,
-      .pBufferMemoryBarriers = &ReadbackBarrier};
-  vkCmdPipelineBarrier2(CommandBuffer, &ReadbackDependencyInfo);
-  (void)Frame;
-}
-
-void VulkanRendererBackend::PublishOffscreenFrame(FrameData &Frame) {
-  (void)Frame;
-  if (m_FrameOutput == nullptr || m_ViewportReadbackBufferSize == 0) {
-    return;
-  }
-
-  const AllocatedBuffer &ReadbackBuffer =
-      m_ViewportReadbackBuffers[m_FrameNumber % FRAME_OVERLAP];
-  const auto *Bytes = static_cast<const std::byte *>(ReadbackBuffer.Info.pMappedData);
-  if (Bytes == nullptr) {
-    return;
-  }
-
-  m_FrameOutput->OnViewportFrame({
-      .FrameIndex = m_FrameNumber,
-      .Width = m_DrawExtent.width,
-      .Height = m_DrawExtent.height,
-      .Format = ViewportFrameFormat::R16G16B16A16Float,
-      .Pixels = std::span(Bytes, static_cast<size_t>(ReadbackBuffer.Size)),
-  });
+std::optional<CapturedFrame> VulkanRendererBackend::ConsumeCapturedFrame() {
+  std::optional<CapturedFrame> Result = std::move(m_CapturedFrame);
+  m_CapturedFrame.reset();
+  return Result;
 }
 } // namespace Axiom

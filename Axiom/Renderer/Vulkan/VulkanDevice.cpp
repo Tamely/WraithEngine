@@ -32,6 +32,7 @@ void VulkanDevice::Init(VulkanContext &Context) {
   if (Context.Surface != VK_NULL_HANDLE) {
     Selector.set_surface(Context.Surface);
   }
+
   vkb::PhysicalDevice SelectedPhysicalDevice = Selector.select().value();
 
   vkb::DeviceBuilder DeviceBuilder{SelectedPhysicalDevice};

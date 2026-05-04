@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Renderer/RendererBackend.h"
+#include "Renderer/RenderSurface.h"
 #include "Renderer/Vulkan/VulkanCommandContext.h"
 #include "Renderer/Vulkan/VulkanContext.h"
 #include "Renderer/Vulkan/VulkanDeletionQueue.h"
@@ -16,6 +17,7 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace Axiom {
@@ -34,6 +36,7 @@ public:
   const RendererFrameStats &GetFrameStats() const override;
   void RenderImGui() override;
   void EndFrame() override;
+  std::optional<CapturedFrame> ConsumeCapturedFrame() override;
 
   void ImmediateSubmit(std::function<void(VkCommandBuffer cmd)> &&Function);
   void EnqueueDeferredDestroy(std::function<void()> &&Function);
@@ -53,11 +56,15 @@ private:
   void DrawBackground(VkCommandBuffer CommandBuffer);
   void DrawMeshes(VkCommandBuffer CommandBuffer, RenderScene &Scene);
   void BuildHzb(VkCommandBuffer CommandBuffer, MeshFrameResources &Frame);
+  void RecordOffscreenCapture(VkCommandBuffer CommandBuffer);
   void ClearDepthImage(VkCommandBuffer CommandBuffer);
   void InitViewportReadbackBuffers();
   void CaptureOffscreenFrame(VkCommandBuffer CommandBuffer, FrameData &Frame);
   void PublishOffscreenFrame(FrameData &Frame);
   void Draw();
+  static float HalfToFloat(uint16_t Value);
+  static uint8_t LinearToByte(float Value);
+  void ConvertCapturedFrameToRgba8(const AllocatedBuffer &ReadbackBuffer);
 
   FrameData &GetCurrentFrame() {
     return m_CommandContext.GetFrame(m_FrameNumber);
@@ -73,10 +80,11 @@ private:
   bool m_StopRendering{false};
   bool m_RenderFallbackBackground{false};
   VkExtent2D m_WindowExtent{1700, 900};
-  IRenderSurface *m_Surface{nullptr};
-  IViewportFrameOutput *m_FrameOutput{nullptr};
-  VkDeviceSize m_ViewportReadbackBufferSize{0};
-  std::array<AllocatedBuffer, FRAME_OVERLAP> m_ViewportReadbackBuffers{};
+  bool m_HasPresentationSurface{false};
+  bool m_EnableImGui{true};
+
+  GLFWwindow *m_Window{nullptr};
+  RenderSurfacePtr m_Surface;
 
   VulkanContext m_Context;
   VulkanDevice m_Device;
@@ -113,6 +121,7 @@ private:
   AllocatedImage m_DepthImage;
   AllocatedImage m_RasterDepthImage;
   AllocatedImage m_HzbImage;
+  AllocatedBuffer m_CaptureReadbackBuffer;
   VkExtent2D m_DrawExtent{};
   std::vector<VkImageView> m_HzbMipImageViews;
   std::vector<VkDescriptorSet> m_HzbReduceDescriptorSets;
@@ -132,5 +141,6 @@ private:
   float m_RenderScale{0.5f};
   bool m_HasWarnedMeshSubmissionOverflow{false};
   RendererViewMode m_ViewMode{RendererViewMode::Lit};
+  std::optional<CapturedFrame> m_CapturedFrame;
 };
 } // namespace Axiom

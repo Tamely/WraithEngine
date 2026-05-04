@@ -4,13 +4,11 @@
 #include "Renderer/Vulkan/VulkanDeletionQueue.h"
 #include "Renderer/Vulkan/VulkanTypes.h"
 
-struct GLFWwindow;
-
 namespace Axiom {
 class VulkanImGuiRenderer {
 public:
   struct InitInfo {
-    GLFWwindow *Window{nullptr};
+    void *WindowHandle{nullptr};
     VkInstance Instance{VK_NULL_HANDLE};
     VkPhysicalDevice PhysicalDevice{VK_NULL_HANDLE};
     VkDevice Device{VK_NULL_HANDLE};
