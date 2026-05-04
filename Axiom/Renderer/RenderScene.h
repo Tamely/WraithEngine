@@ -14,7 +14,7 @@ class RenderScene {
 public:
   void Reset();
 
-  Camera *ActiveCamera{nullptr};
+  const Camera *ActiveCamera{nullptr};
   glm::vec4 BackgroundColor{1.0f, 0.0f, 0.0f, 1.0f};
   std::vector<RenderMeshSubmission> Submissions;
 };

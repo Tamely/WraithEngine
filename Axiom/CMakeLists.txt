@@ -6,6 +6,8 @@ set(ENGINE_SOURCES
   Core/Window.cpp
   Core/Log.cpp
   Core/VulkanLoader.cpp
+  Session/EditorMessageBus.cpp
+  Session/EditorSession.cpp
   Renderer/Camera.cpp
   Renderer/ForwardRenderer.cpp
   Renderer/RenderCommand.cpp

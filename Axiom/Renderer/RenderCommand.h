@@ -8,7 +8,7 @@ class Camera;
 class RenderCommand {
 public:
   static void BeginScene(RenderScene &Scene);
-  static void SetCamera(Camera &Camera);
+  static void SetCamera(const Camera &Camera);
   static void Submit(const RenderMeshSubmission &Submission);
   static void EndScene();
 
