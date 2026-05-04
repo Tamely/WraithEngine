@@ -2,6 +2,8 @@
 
 `AxiomHeadless` is a prototype executable that runs the Axiom editor session without a GLFW window, accepts newline-delimited JSON commands on `stdin`, and writes captured PNG frames plus NDJSON status/events.
 
+`AxiomRemoteViewportDevClient` is a companion dev executable that exercises the same authoritative session through the new transport seam and writes the frames it receives as a transport subscriber.
+
 ## Current Status
 
 - Status: working prototype
@@ -9,6 +11,9 @@
 - This subphase is complete for the runtime-side seam restoration work
 - `AxiomHeadless` is a command-driven authoritative runtime, not a full editor client
 - viewport frames are emitted through the engine/session frame-output seam and then written to PNG by the prototype executable
+- `ISessionTransport` now exists as the engine-facing remote boundary
+- `AxiomSessionEndpoint` is the first in-process transport implementation
+- `AxiomRemoteViewportDevClient` is a dev harness for transport-delivered frames/events, not a browser client
 
 ## CLI
 
@@ -25,6 +30,12 @@ Example:
 
 ```powershell
 .\AxiomHeadless.exe --output-dir D:\Temp\axiom-headless --width 1280 --height 720
+```
+
+Dev-client example:
+
+```powershell
+.\AxiomRemoteViewportDevClient.exe --output-dir D:\Temp\axiom-remote-dev --width 1280 --height 720
 ```
 
 Tested one-shot example:
@@ -58,6 +69,7 @@ Example `ready` message:
 Supported command types:
 
 - `load_startup_scene`
+- `set_view_mode`
 - `set_look_active`
 - `update_viewport_camera`
 - `render_frame`
@@ -67,11 +79,18 @@ Example session:
 
 ```json
 {"type":"load_startup_scene"}
+{"type":"set_view_mode","viewMode":"wireframe"}
 {"type":"set_look_active","isLooking":true,"cursorPosition":[100.0,120.0]}
 {"type":"update_viewport_camera","worldMovement":[0.0,0.0,-0.25],"cursorPosition":[108.0,116.0]}
 {"type":"render_frame"}
 {"type":"quit"}
 ```
+
+Supported view modes:
+
+- `lit`
+- `unlit`
+- `wireframe`
 
 ## Frame Files
 
@@ -100,10 +119,12 @@ This prototype proves that:
 - the authoritative editor session can run without a visible GLFW window
 - the startup scene can be loaded and rendered offscreen
 - the process can emit status/events and write captured viewport frames
+- the transport seam can deliver authoritative events and viewport frames to a dev subscriber
+- remote-style command submission can reuse the same session authority path as the local adapter
 
 This prototype does not yet provide:
 
 - a browser client
-- a native remote-viewer/editor client
+- a production remote-viewer/editor client
 - realtime transport such as WebRTC
 - a replacement for the current local windowed editor executable

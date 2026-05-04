@@ -49,6 +49,15 @@ TEST(HeadlessProtocolTests, ParsesWireframeViewModeCommand) {
   EXPECT_EQ(Command->ViewMode, Axiom::RendererViewMode::Wireframe);
 }
 
+TEST(HeadlessProtocolTests, RejectsUnsupportedViewMode) {
+  std::string Error;
+  const auto Command = Axiom::ParseHeadlessCommand(
+      R"json({"type":"set_view_mode","viewMode":"xray"})json", Error);
+
+  EXPECT_FALSE(Command.has_value());
+  EXPECT_NE(Error.find("Unsupported view mode"), std::string::npos);
+}
+
 TEST(HeadlessProtocolTests, SerializesCommandRejectedEvent) {
   const Axiom::PublishedEditorEvent Event{
       .Id = Axiom::EventId{4},

@@ -410,3 +410,34 @@ TEST(RemoteViewportTests, AxiomEndpointForwardsEventsAndFrames) {
   EXPECT_EQ(Subscriber.DisconnectedCount, 1u);
 }
 
+TEST(RemoteViewportTests, AxiomEndpointConnectIsIdempotentAndStopsAfterDisconnect) {
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  Axiom::AxiomSessionEndpoint Endpoint(Session);
+  RecordingEndpointSubscriber Subscriber;
+
+  Endpoint.Connect(&Subscriber);
+  Endpoint.Connect(&Subscriber);
+
+  EXPECT_EQ(Subscriber.ConnectedCount, 1u);
+
+  Endpoint.Submit(MakeContext(),
+                  {.Payload = Axiom::SetLookActiveCommand{
+                       .IsLooking = true,
+                       .CursorPosition = glm::dvec2(3.0, 4.0),
+                   }});
+  Session.Tick();
+  ASSERT_EQ(Subscriber.Events.size(), 1u);
+
+  Endpoint.Disconnect(&Subscriber);
+  Endpoint.Disconnect(&Subscriber);
+  EXPECT_EQ(Subscriber.DisconnectedCount, 1u);
+
+  Endpoint.Submit(MakeContext(2),
+                  {.Payload = Axiom::SetLookActiveCommand{
+                       .IsLooking = false,
+                       .CursorPosition = glm::dvec2(5.0, 6.0),
+                   }});
+  Session.Tick();
+  EXPECT_EQ(Subscriber.Events.size(), 1u);
+}
+

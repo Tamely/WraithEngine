@@ -13,7 +13,9 @@
 - Added deterministic in-process command draining, authoritative event publication, and focused tests for camera/look state transitions and command rejection
 - Restored the `GLFW split` and application/runtime seams after the `headless` merge so local windowed input remains an adapter rather than the editor authority boundary
 - `AxiomHeadless` now boots successfully in headless Vulkan mode, renders offscreen, and publishes viewport frames back through `AxiomSessionEndpoint`
-- This subphase establishes the runtime-mode, surface, and frame-output seams needed for remote viewport work, but does not yet add a browser client, WebRTC transport, or a full remote editor UI
+- Added engine-facing `ISessionTransport` and made `AxiomSessionEndpoint` the first in-process transport implementation
+- Added `AxiomRemoteViewportDevClient` as a transport-subscriber harness that receives authoritative events and writes client-received frames to disk
+- This subphase establishes the runtime-mode, surface, frame-output, and initial transport seams needed for remote viewport work, but does not yet add a browser client, WebRTC transport, or a full remote editor UI
 
 ## 1. Executive Summary
 WraithEngine will evolve from a single-process native editor into a distributed platform with one shared C++ engine runtime that supports two execution styles:
@@ -860,6 +862,8 @@ Progress update:
 - native editor path still works as the first local adapter
 - runtime modes, render surfaces, and endpoint-oriented frame output are now wired back together
 - `AxiomHeadless` is working as a command-driven headless runtime prototype
+- `ISessionTransport` now formalizes the engine-facing remote boundary
+- `AxiomRemoteViewportDevClient` now proves transport-delivered command/event/frame flow without claiming browser or network support yet
 - browser transport, encode/streaming, and a true remote editor client are still pending
 
 ### Phase 1: Remote Viewport Foundation
@@ -877,7 +881,8 @@ Subphase status update:
 - headless startup now works again without requiring a presentation surface
 - the local editor still uses `WindowInputPlatform + GlfwEditorInputSource`
 - offscreen frame publication is routed through `AxiomSessionEndpoint` rather than being hard-wired only to renderer-local capture polling
-- the next slice should build a real client on top of that runtime instead of extending the raw NDJSON prototype indefinitely
+- the current dev-client slice now proves the transport seam with an in-process subscriber harness
+- the next slice should replace the dev harness with a true browser/network client rather than extending the raw NDJSON prototype indefinitely
 
 The first implementation step inside that phase is the `GLFW split`:
 
