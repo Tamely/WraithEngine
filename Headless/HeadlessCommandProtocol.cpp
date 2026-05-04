@@ -203,6 +203,29 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
   return std::nullopt;
 }
 
+std::optional<HeadlessCommand>
+ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
+  const auto Command = ParseHeadlessCommand(JsonLine, Error);
+  if (!Command.has_value()) {
+    return std::nullopt;
+  }
+
+  switch (Command->Type) {
+  case HeadlessCommandType::SetViewMode:
+  case HeadlessCommandType::SetLookActive:
+  case HeadlessCommandType::UpdateViewportCamera:
+  case HeadlessCommandType::Quit:
+    return Command;
+  case HeadlessCommandType::LoadStartupScene:
+  case HeadlessCommandType::RenderFrame:
+    Error = "Remote viewport server does not accept that command type.";
+    return std::nullopt;
+  }
+
+  Error = "Unsupported remote command.";
+  return std::nullopt;
+}
+
 std::string EscapeJson(std::string_view Value) {
   std::string Escaped;
   Escaped.reserve(Value.size());
@@ -262,12 +285,26 @@ std::string SerializeReady(uint32_t Width, uint32_t Height) {
   return Stream.str();
 }
 
+std::string SerializeConnected() { return "{\"type\":\"connected\"}"; }
+
+std::string SerializeDisconnected() { return "{\"type\":\"disconnected\"}"; }
+
 std::string SerializeFrame(const std::filesystem::path &Path,
                            const CapturedFrame &Frame) {
   std::ostringstream Stream;
   Stream << "{\"type\":\"frame\",\"frameIndex\":" << Frame.FrameIndex
          << ",\"path\":\"" << EscapeJson(Path.string()) << "\",\"width\":"
          << Frame.Width << ",\"height\":" << Frame.Height << "}";
+  return Stream.str();
+}
+
+std::string SerializeFrameMetadata(uint64_t FrameIndex, uint32_t Width,
+                                   uint32_t Height,
+                                   std::string_view FrameUrl) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"frame\",\"frameIndex\":" << FrameIndex
+         << ",\"path\":\"" << EscapeJson(FrameUrl) << "\",\"width\":" << Width
+         << ",\"height\":" << Height << "}";
   return Stream.str();
 }
 

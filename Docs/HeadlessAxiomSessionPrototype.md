@@ -4,6 +4,8 @@
 
 `AxiomRemoteViewportDevClient` is a companion dev executable that exercises the same authoritative session through the new transport seam and writes the frames it receives as a transport subscriber.
 
+`AxiomRemoteViewportServer` is now the primary remote viewport prototype. It runs the authoritative headless session, serves a browser client over HTTP, streams JSON session messages over server-sent events, and exposes the latest captured PNG frame at `/frame`.
+
 ## Current Status
 
 - Status: working prototype
@@ -14,6 +16,7 @@
 - `ISessionTransport` now exists as the engine-facing remote boundary
 - `AxiomSessionEndpoint` is the first in-process transport implementation
 - `AxiomRemoteViewportDevClient` is a dev harness for transport-delivered frames/events, not a browser client
+- `AxiomRemoteViewportServer` is the current browser-facing demo path for remote viewport work
 
 ## CLI
 
@@ -37,6 +40,14 @@ Dev-client example:
 ```powershell
 .\AxiomRemoteViewportDevClient.exe --output-dir D:\Temp\axiom-remote-dev --width 1280 --height 720
 ```
+
+Remote viewport server example:
+
+```powershell
+.\AxiomRemoteViewportServer.exe --host 127.0.0.1 --port 8080 --width 1280 --height 720
+```
+
+Then open [http://127.0.0.1:8080](http://127.0.0.1:8080) in a browser on the same machine.
 
 Tested one-shot example:
 
@@ -121,10 +132,11 @@ This prototype proves that:
 - the process can emit status/events and write captured viewport frames
 - the transport seam can deliver authoritative events and viewport frames to a dev subscriber
 - remote-style command submission can reuse the same session authority path as the local adapter
+- a browser can connect to the headless authoritative session over a real network boundary and drive the existing viewport camera commands
 
 This prototype does not yet provide:
 
-- a browser client
-- a production remote-viewer/editor client
-- realtime transport such as WebRTC
+- WebRTC or H.264 streaming
+- a full browser editor shell beyond the viewport-focused prototype
+- a production-ready remote viewer/editor client
 - a replacement for the current local windowed editor executable

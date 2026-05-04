@@ -15,6 +15,7 @@
 - `AxiomHeadless` now boots successfully in headless Vulkan mode, renders offscreen, and publishes viewport frames back through `AxiomSessionEndpoint`
 - Added engine-facing `ISessionTransport` and made `AxiomSessionEndpoint` the first in-process transport implementation
 - Added `AxiomRemoteViewportDevClient` as a transport-subscriber harness that receives authoritative events and writes client-received frames to disk
+- Added `AxiomRemoteViewportServer` as the first real browser-facing remote viewport prototype using HTTP plus server-sent events and browser-served frame polling
 - This subphase establishes the runtime-mode, surface, frame-output, and initial transport seams needed for remote viewport work, but does not yet add a browser client, WebRTC transport, or a full remote editor UI
 
 ## 1. Executive Summary
@@ -863,8 +864,9 @@ Progress update:
 - runtime modes, render surfaces, and endpoint-oriented frame output are now wired back together
 - `AxiomHeadless` is working as a command-driven headless runtime prototype
 - `ISessionTransport` now formalizes the engine-facing remote boundary
-- `AxiomRemoteViewportDevClient` now proves transport-delivered command/event/frame flow without claiming browser or network support yet
-- browser transport, encode/streaming, and a true remote editor client are still pending
+- `AxiomRemoteViewportDevClient` remains available as a transport debug harness
+- `AxiomRemoteViewportServer` now proves browser-driven remote viewport control against the same authoritative session seam
+- WebRTC/H.264 transport and the broader browser editor shell are still pending
 
 ### Phase 1: Remote Viewport Foundation
 - support headless or offscreen rendering
@@ -882,7 +884,7 @@ Subphase status update:
 - the local editor still uses `WindowInputPlatform + GlfwEditorInputSource`
 - offscreen frame publication is routed through `AxiomSessionEndpoint` rather than being hard-wired only to renderer-local capture polling
 - the current dev-client slice now proves the transport seam with an in-process subscriber harness
-- the next slice should replace the dev harness with a true browser/network client rather than extending the raw NDJSON prototype indefinitely
+- the current slice has replaced the dev harness as the main demo path; the next slice should harden protocol/test coverage and then evolve transport quality without bypassing the same authority seam
 
 The first implementation step inside that phase is the `GLFW split`:
 
