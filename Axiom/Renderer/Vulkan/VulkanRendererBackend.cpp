@@ -16,6 +16,8 @@
 
 #include <vk_mem_alloc.h>
 
+#include <algorithm>
+#include <array>
 #include <cassert>
 #include <chrono>
 #include <cmath>
@@ -24,6 +26,10 @@
 #include <string>
 #include <thread>
 #include <utility>
+
+#include <glm/common.hpp>
+#include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 
 #include "Core/Log.h"
 #include "Core/Window.h"
@@ -39,22 +45,76 @@ Axiom::VulkanRendererBackend *g_LoadedEngine = nullptr;
 #endif
 
 namespace Axiom {
+namespace {
+struct ProjectedMeshVertexGpu {
+  glm::vec4 PixelAndDepth{0.0f};
+  glm::vec4 NormalAndValid{0.0f};
+  glm::vec4 ClipPosition{0.0f};
+};
+
+glm::vec3 TransformPoint(const glm::mat4 &Transform, const glm::vec3 &Point) {
+  return glm::vec3(Transform * glm::vec4(Point, 1.0f));
+}
+
+bool IsBoundsVisible(const glm::mat4 &ViewProjection, const glm::mat4 &Model,
+                     const glm::vec3 &BoundsMin, const glm::vec3 &BoundsMax) {
+  const std::array<glm::vec3, 8> Corners = {
+      glm::vec3(BoundsMin.x, BoundsMin.y, BoundsMin.z),
+      glm::vec3(BoundsMax.x, BoundsMin.y, BoundsMin.z),
+      glm::vec3(BoundsMin.x, BoundsMax.y, BoundsMin.z),
+      glm::vec3(BoundsMax.x, BoundsMax.y, BoundsMin.z),
+      glm::vec3(BoundsMin.x, BoundsMin.y, BoundsMax.z),
+      glm::vec3(BoundsMax.x, BoundsMin.y, BoundsMax.z),
+      glm::vec3(BoundsMin.x, BoundsMax.y, BoundsMax.z),
+      glm::vec3(BoundsMax.x, BoundsMax.y, BoundsMax.z),
+  };
+
+  std::array<glm::vec4, 8> ClipCorners{};
+  for (size_t Index = 0; Index < Corners.size(); ++Index) {
+    const glm::vec3 WorldPoint = TransformPoint(Model, Corners[Index]);
+    ClipCorners[Index] = ViewProjection * glm::vec4(WorldPoint, 1.0f);
+  }
+
+  auto AllOutsidePlane = [&ClipCorners](auto Predicate) {
+    return std::all_of(ClipCorners.begin(), ClipCorners.end(), Predicate);
+  };
+
+  if (AllOutsidePlane([](const glm::vec4 &Clip) { return Clip.x < -Clip.w; }) ||
+      AllOutsidePlane([](const glm::vec4 &Clip) { return Clip.x > Clip.w; }) ||
+      AllOutsidePlane([](const glm::vec4 &Clip) { return Clip.y < -Clip.w; }) ||
+      AllOutsidePlane([](const glm::vec4 &Clip) { return Clip.y > Clip.w; }) ||
+      AllOutsidePlane([](const glm::vec4 &Clip) { return Clip.z < -Clip.w; }) ||
+      AllOutsidePlane([](const glm::vec4 &Clip) { return Clip.z > Clip.w; })) {
+    return false;
+  }
+
+  return true;
+}
+} // namespace
+
 class VulkanMesh final : public Mesh {
 public:
   explicit VulkanMesh(MeshData SourceData, VmaAllocator InAllocator)
-      : CpuData(std::move(SourceData)), Allocator(InAllocator) {}
+      : CpuData(std::move(SourceData)), Allocator(InAllocator),
+        BoundsMin(CpuData.BoundsMin), BoundsMax(CpuData.BoundsMax) {}
 
   ~VulkanMesh() override {
     VkBufferUtil::DestroyBuffer(Allocator, VertexBuffer);
     VkBufferUtil::DestroyBuffer(Allocator, IndexBuffer);
+    VkBufferUtil::DestroyBuffer(Allocator, ProjectedVertexBuffer);
   }
 
   VmaAllocator Allocator{nullptr};
   MeshData CpuData;
   AllocatedBuffer VertexBuffer;
   AllocatedBuffer IndexBuffer;
+  AllocatedBuffer ProjectedVertexBuffer;
+  VkDescriptorSet DescriptorSet{VK_NULL_HANDLE};
+  glm::vec3 BoundsMin{0.0f};
+  glm::vec3 BoundsMax{0.0f};
   uint32_t VertexCount{0};
   uint32_t IndexCount{0};
+  uint32_t TriangleCount{0};
 };
 
 VulkanRendererBackend &VulkanRendererBackend::Get() { return *g_LoadedEngine; }
@@ -69,6 +129,11 @@ void VulkanRendererBackend::Init(const RendererCreateInfo &CreateInfo) {
 
   m_Context.Init(m_Window);
   m_Device.Init(m_Context);
+
+  VkPhysicalDeviceProperties DeviceProperties{};
+  vkGetPhysicalDeviceProperties(m_Device.PhysicalDevice, &DeviceProperties);
+  m_TimestampPeriod = DeviceProperties.limits.timestampPeriod;
+
   m_CommandContext.Init(m_Device.Device, m_Device.GraphicsQueueFamily);
   InitSwapchain();
   InitDescriptors();
@@ -137,7 +202,8 @@ void VulkanRendererBackend::InitSwapchain() {
     vmaDestroyImage(m_Device.Allocator, m_DepthImage.Image,
                     m_DepthImage.Allocation);
     vkDestroyImageView(m_Device.Device, m_DrawImage.ImageView, VK_NULL_HANDLE);
-    vmaDestroyImage(m_Device.Allocator, m_DrawImage.Image, m_DrawImage.Allocation);
+    vmaDestroyImage(m_Device.Allocator, m_DrawImage.Image,
+                    m_DrawImage.Allocation);
   });
 }
 
@@ -164,11 +230,12 @@ void VulkanRendererBackend::Shutdown() {
 }
 
 void VulkanRendererBackend::InitDescriptors() {
-  const uint32_t MaxSets = 1 + FRAME_OVERLAP * MaxMeshSubmissionsPerFrame;
+  const uint32_t MaxSets =
+      1 + FRAME_OVERLAP + (MaxMeshSubmissionsPerFrame * 2);
   std::vector<DescriptorAllocator::PoolSizeRatio> Sizes = {
-      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 3.0f},
-      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2.0f},
-      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1.0f}};
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 4.0f},
+      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 6.0f},
+      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2.0f}};
 
   m_GlobalDescriptorAllocator.InitPool(m_Device.Device, MaxSets, Sizes);
 
@@ -183,14 +250,21 @@ void VulkanRendererBackend::InitDescriptors() {
     DescriptorLayoutBuilder Builder;
     Builder.AddBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
     Builder.AddBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+    Builder.AddBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    m_MeshFrameDescriptorLayout =
+        Builder.Build(m_Device.Device, VK_SHADER_STAGE_COMPUTE_BIT);
+  }
+
+  {
+    DescriptorLayoutBuilder Builder;
+    Builder.AddBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    Builder.AddBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     Builder.AddBinding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-    Builder.AddBinding(3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-    Builder.AddBinding(4, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
     m_MeshDescriptorLayout =
         Builder.Build(m_Device.Device, VK_SHADER_STAGE_COMPUTE_BIT);
   }
 
-  m_DrawImageDescriptors = m_GlobalDescriptorAllocator.Allocate(
+  m_DrawImageDescriptorSet = m_GlobalDescriptorAllocator.Allocate(
       m_Device.Device, m_DrawImageDescriptorLayout);
 
   VkDescriptorImageInfo ImageInfo{};
@@ -198,13 +272,16 @@ void VulkanRendererBackend::InitDescriptors() {
   ImageInfo.imageView = m_DrawImage.ImageView;
 
   VkWriteDescriptorSet DrawImageWrite = VkInit::WriteDescriptorSet(
-      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, m_DrawImageDescriptors, &ImageInfo, 0);
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, m_DrawImageDescriptorSet, &ImageInfo, 0);
 
-  vkUpdateDescriptorSets(m_Device.Device, 1, &DrawImageWrite, 0, VK_NULL_HANDLE);
+  vkUpdateDescriptorSets(m_Device.Device, 1, &DrawImageWrite, 0,
+                         VK_NULL_HANDLE);
 
   m_MainDeletionQueue.PushFunction([this]() {
     m_GlobalDescriptorAllocator.DestroyPool(m_Device.Device);
     vkDestroyDescriptorSetLayout(m_Device.Device, m_MeshDescriptorLayout,
+                                 VK_NULL_HANDLE);
+    vkDestroyDescriptorSetLayout(m_Device.Device, m_MeshFrameDescriptorLayout,
                                  VK_NULL_HANDLE);
     vkDestroyDescriptorSetLayout(m_Device.Device, m_DrawImageDescriptorLayout,
                                  VK_NULL_HANDLE);
@@ -230,8 +307,8 @@ void VulkanRendererBackend::InitBackgroundPipelines() {
   ComputeLayout.pPushConstantRanges = &PushConstant;
   ComputeLayout.pushConstantRangeCount = 1;
 
-  VK_CHECK(vkCreatePipelineLayout(m_Device.Device, &ComputeLayout, VK_NULL_HANDLE,
-                                  &m_GradientPipelineLayout));
+  VK_CHECK(vkCreatePipelineLayout(m_Device.Device, &ComputeLayout,
+                                  VK_NULL_HANDLE, &m_GradientPipelineLayout));
 
   VkShaderModule ComputeDrawShader;
   const std::string ShaderPath =
@@ -254,8 +331,8 @@ void VulkanRendererBackend::InitBackgroundPipelines() {
       .layout = m_GradientPipelineLayout};
 
   VK_CHECK(vkCreateComputePipelines(m_Device.Device, VK_NULL_HANDLE, 1,
-                                    &ComputePipelineCreateInfo, VK_NULL_HANDLE,
-                                    &m_GradientPipeline));
+                                    &ComputePipelineCreateInfo,
+                                    VK_NULL_HANDLE, &m_GradientPipeline));
 
   vkDestroyShaderModule(m_Device.Device, ComputeDrawShader, VK_NULL_HANDLE);
 
@@ -267,48 +344,100 @@ void VulkanRendererBackend::InitBackgroundPipelines() {
 }
 
 void VulkanRendererBackend::InitMeshPipelines() {
-  VkPipelineLayoutCreateInfo ComputeLayout =
-      VkInit::PipelineLayoutCreateInfo();
-  ComputeLayout.pSetLayouts = &m_MeshDescriptorLayout;
-  ComputeLayout.setLayoutCount = 1;
+  std::array<VkDescriptorSetLayout, 2> MeshLayouts = {
+      m_MeshFrameDescriptorLayout, m_MeshDescriptorLayout};
 
-  VkPushConstantRange PushConstant{};
-  PushConstant.offset = 0;
-  PushConstant.size = sizeof(MeshPushConstants);
-  PushConstant.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-  ComputeLayout.pPushConstantRanges = &PushConstant;
-  ComputeLayout.pushConstantRangeCount = 1;
+  {
+    VkPipelineLayoutCreateInfo ComputeLayout =
+        VkInit::PipelineLayoutCreateInfo();
+    ComputeLayout.pSetLayouts = MeshLayouts.data();
+    ComputeLayout.setLayoutCount = static_cast<uint32_t>(MeshLayouts.size());
 
-  VK_CHECK(vkCreatePipelineLayout(m_Device.Device, &ComputeLayout, VK_NULL_HANDLE,
-                                  &m_MeshPipelineLayout));
+    VkPushConstantRange PushConstant{};
+    PushConstant.offset = 0;
+    PushConstant.size = sizeof(MeshProjectPushConstants);
+    PushConstant.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    ComputeLayout.pPushConstantRanges = &PushConstant;
+    ComputeLayout.pushConstantRangeCount = 1;
 
-  VkShaderModule MeshShader;
-  const std::string ShaderPath =
-      std::string(AXIOM_CONTENT_DIR) + "/Shaders/mesh_raster.comp.spv";
-  if (!VkUtil::LoadShaderModule(ShaderPath.c_str(), m_Device.Device,
-                                &MeshShader)) {
-    A_ERROR("Error when loading the mesh compute shader: {0}", ShaderPath);
+    VK_CHECK(vkCreatePipelineLayout(m_Device.Device, &ComputeLayout,
+                                    VK_NULL_HANDLE,
+                                    &m_MeshProjectPipelineLayout));
+  }
+
+  {
+    VkPipelineLayoutCreateInfo ComputeLayout =
+        VkInit::PipelineLayoutCreateInfo();
+    ComputeLayout.pSetLayouts = MeshLayouts.data();
+    ComputeLayout.setLayoutCount = static_cast<uint32_t>(MeshLayouts.size());
+
+    VkPushConstantRange PushConstant{};
+    PushConstant.offset = 0;
+    PushConstant.size = sizeof(MeshRasterPushConstants);
+    PushConstant.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    ComputeLayout.pPushConstantRanges = &PushConstant;
+    ComputeLayout.pushConstantRangeCount = 1;
+
+    VK_CHECK(vkCreatePipelineLayout(m_Device.Device, &ComputeLayout,
+                                    VK_NULL_HANDLE, &m_MeshPipelineLayout));
+  }
+
+  VkShaderModule MeshProjectShader;
+  const std::string MeshProjectShaderPath =
+      std::string(AXIOM_CONTENT_DIR) + "/Shaders/mesh_project.comp.spv";
+  if (!VkUtil::LoadShaderModule(MeshProjectShaderPath.c_str(), m_Device.Device,
+                                &MeshProjectShader)) {
+    A_ERROR("Error when loading the mesh projection shader: {0}",
+            MeshProjectShaderPath);
     Axiom::Log::Flush();
     abort();
   }
 
-  VkPipelineShaderStageCreateInfo StageInfo =
+  VkPipelineShaderStageCreateInfo MeshProjectStageInfo =
+      VkInit::PipelineShaderStageCreateInfo(VK_SHADER_STAGE_COMPUTE_BIT,
+                                            MeshProjectShader);
+
+  VkComputePipelineCreateInfo MeshProjectPipelineCreateInfo = {
+      .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+      .pNext = VK_NULL_HANDLE,
+      .stage = MeshProjectStageInfo,
+      .layout = m_MeshProjectPipelineLayout};
+
+  VK_CHECK(vkCreateComputePipelines(m_Device.Device, VK_NULL_HANDLE, 1,
+                                    &MeshProjectPipelineCreateInfo,
+                                    VK_NULL_HANDLE, &m_MeshProjectPipeline));
+  vkDestroyShaderModule(m_Device.Device, MeshProjectShader, VK_NULL_HANDLE);
+
+  VkShaderModule MeshShader;
+  const std::string MeshShaderPath =
+      std::string(AXIOM_CONTENT_DIR) + "/Shaders/mesh_raster.comp.spv";
+  if (!VkUtil::LoadShaderModule(MeshShaderPath.c_str(), m_Device.Device,
+                                &MeshShader)) {
+    A_ERROR("Error when loading the mesh compute shader: {0}", MeshShaderPath);
+    Axiom::Log::Flush();
+    abort();
+  }
+
+  VkPipelineShaderStageCreateInfo MeshStageInfo =
       VkInit::PipelineShaderStageCreateInfo(VK_SHADER_STAGE_COMPUTE_BIT,
                                             MeshShader);
 
-  VkComputePipelineCreateInfo ComputePipelineCreateInfo = {
+  VkComputePipelineCreateInfo MeshPipelineCreateInfo = {
       .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
       .pNext = VK_NULL_HANDLE,
-      .stage = StageInfo,
+      .stage = MeshStageInfo,
       .layout = m_MeshPipelineLayout};
 
   VK_CHECK(vkCreateComputePipelines(m_Device.Device, VK_NULL_HANDLE, 1,
-                                    &ComputePipelineCreateInfo, VK_NULL_HANDLE,
+                                    &MeshPipelineCreateInfo, VK_NULL_HANDLE,
                                     &m_MeshPipeline));
 
   vkDestroyShaderModule(m_Device.Device, MeshShader, VK_NULL_HANDLE);
 
   m_MainDeletionQueue.PushFunction([this]() {
+    vkDestroyPipelineLayout(m_Device.Device, m_MeshProjectPipelineLayout,
+                            VK_NULL_HANDLE);
+    vkDestroyPipeline(m_Device.Device, m_MeshProjectPipeline, VK_NULL_HANDLE);
     vkDestroyPipelineLayout(m_Device.Device, m_MeshPipelineLayout,
                             VK_NULL_HANDLE);
     vkDestroyPipeline(m_Device.Device, m_MeshPipeline, VK_NULL_HANDLE);
@@ -323,11 +452,75 @@ void VulkanRendererBackend::InitMeshFrameResources() {
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
 
-    for (auto &DescriptorSet : Frame.DescriptorSets) {
-      DescriptorSet = m_GlobalDescriptorAllocator.Allocate(m_Device.Device,
-                                                           m_MeshDescriptorLayout);
-    }
+    Frame.FrameDescriptorSet = m_GlobalDescriptorAllocator.Allocate(
+        m_Device.Device, m_MeshFrameDescriptorLayout);
+
+    VkQueryPoolCreateInfo QueryPoolInfo{
+        .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+        .pNext = VK_NULL_HANDLE,
+        .flags = 0,
+        .queryType = VK_QUERY_TYPE_TIMESTAMP,
+        .queryCount = TimestampQueryCount,
+        .pipelineStatistics = 0};
+    VK_CHECK(vkCreateQueryPool(m_Device.Device, &QueryPoolInfo, VK_NULL_HANDLE,
+                               &Frame.TimestampQueryPool));
   }
+
+  m_MainDeletionQueue.PushFunction([this]() {
+    for (auto &Frame : m_MeshFrames) {
+      if (Frame.TimestampQueryPool != VK_NULL_HANDLE) {
+        vkDestroyQueryPool(m_Device.Device, Frame.TimestampQueryPool,
+                           VK_NULL_HANDLE);
+        Frame.TimestampQueryPool = VK_NULL_HANDLE;
+      }
+    }
+  });
+}
+
+void VulkanRendererBackend::CollectFrameStats(MeshFrameResources &Frame) {
+  if (!Frame.HasValidTimestamps) {
+    return;
+  }
+
+  uint64_t Timestamps[TimestampQueryCount] = {};
+  const VkResult Result = vkGetQueryPoolResults(
+      m_Device.Device, Frame.TimestampQueryPool, 0, TimestampQueryCount,
+      sizeof(Timestamps), Timestamps, sizeof(uint64_t),
+      VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+  if (Result != VK_SUCCESS) {
+    return;
+  }
+
+  const auto ToMilliseconds = [this](uint64_t Start, uint64_t End) {
+    if (End <= Start) {
+      return 0.0f;
+    }
+
+    const double Nanoseconds =
+        static_cast<double>(End - Start) * static_cast<double>(m_TimestampPeriod);
+    return static_cast<float>(Nanoseconds / 1'000'000.0);
+  };
+
+  m_FrameStats.GpuBackgroundMs = ToMilliseconds(Timestamps[0], Timestamps[1]);
+  m_FrameStats.GpuMeshMs = ToMilliseconds(Timestamps[2], Timestamps[3]);
+}
+
+void VulkanRendererBackend::DrawStatsPanel() {
+  if (!ImGui::Begin("Renderer Stats")) {
+    ImGui::End();
+    return;
+  }
+
+  ImGui::Text("CPU frame: %.2f ms", m_FrameStats.CpuFrameMs);
+  ImGui::Text("CPU render: %.2f ms", m_FrameStats.CpuRenderMs);
+  ImGui::Text("GPU background: %.2f ms", m_FrameStats.GpuBackgroundMs);
+  ImGui::Text("GPU meshes: %.2f ms", m_FrameStats.GpuMeshMs);
+  ImGui::Separator();
+  ImGui::Text("Mesh submissions: %u", m_FrameStats.MeshSubmissionCount);
+  ImGui::Text("Triangles: %u", m_FrameStats.TriangleCount);
+  ImGui::Text("Draw extent: %u x %u", m_FrameStats.DrawExtent.x,
+              m_FrameStats.DrawExtent.y);
+  ImGui::End();
 }
 
 void VulkanRendererBackend::DrawImGui(VkCommandBuffer Command,
@@ -350,7 +543,7 @@ void VulkanRendererBackend::DrawBackground(VkCommandBuffer CommandBuffer) {
                     m_GradientPipeline);
   vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                           m_GradientPipelineLayout, 0, 1,
-                          &m_DrawImageDescriptors, 0, VK_NULL_HANDLE);
+                          &m_DrawImageDescriptorSet, 0, VK_NULL_HANDLE);
 
   ComputePushConstants PC;
   PC.data1 = glm::vec4(0.08f, 0.09f, 0.14f, 1.0f);
@@ -360,8 +553,9 @@ void VulkanRendererBackend::DrawBackground(VkCommandBuffer CommandBuffer) {
                      VK_SHADER_STAGE_COMPUTE_BIT, 0,
                      sizeof(ComputePushConstants), &PC);
 
-  vkCmdDispatch(CommandBuffer, std::ceil(m_DrawExtent.width / 16.0f),
-                std::ceil(m_DrawExtent.height / 16.0f), 1);
+  vkCmdDispatch(CommandBuffer,
+                static_cast<uint32_t>(std::ceil(m_DrawExtent.width / 16.0f)),
+                static_cast<uint32_t>(std::ceil(m_DrawExtent.height / 16.0f)), 1);
 }
 
 void VulkanRendererBackend::ClearDepthImage(VkCommandBuffer CommandBuffer) {
@@ -384,10 +578,12 @@ void VulkanRendererBackend::ClearDepthImage(VkCommandBuffer CommandBuffer) {
                           VK_IMAGE_LAYOUT_GENERAL);
 }
 
-std::shared_ptr<Mesh> VulkanRendererBackend::CreateMesh(const MeshData &MeshSource) {
+std::shared_ptr<Mesh>
+VulkanRendererBackend::CreateMesh(const MeshData &MeshSource) {
   auto MeshRef = std::make_shared<VulkanMesh>(MeshSource, m_Device.Allocator);
   MeshRef->VertexCount = static_cast<uint32_t>(MeshSource.Vertices.size());
   MeshRef->IndexCount = static_cast<uint32_t>(MeshSource.Indices.size());
+  MeshRef->TriangleCount = MeshRef->IndexCount / 3;
 
   MeshRef->VertexBuffer = VkBufferUtil::CreateBufferFromData(
       m_Device.Allocator, m_Device.Device, m_Device.GraphicsQueue,
@@ -399,6 +595,31 @@ std::shared_ptr<Mesh> VulkanRendererBackend::CreateMesh(const MeshData &MeshSour
       GetCurrentFrame().CommandPool, MeshSource.Indices.data(),
       MeshSource.Indices.size() * sizeof(uint32_t),
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+  MeshRef->ProjectedVertexBuffer = VkBufferUtil::CreateBuffer(
+      m_Device.Allocator,
+      std::max<size_t>(1, MeshSource.Vertices.size()) *
+          sizeof(ProjectedMeshVertexGpu),
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+  MeshRef->DescriptorSet = m_GlobalDescriptorAllocator.Allocate(
+      m_Device.Device, m_MeshDescriptorLayout);
+
+  VkDescriptorBufferInfo VertexBufferInfo =
+      VkInit::BufferInfo(MeshRef->VertexBuffer.Buffer, 0,
+                         MeshRef->VertexBuffer.Size);
+  VkDescriptorBufferInfo IndexBufferInfo =
+      VkInit::BufferInfo(MeshRef->IndexBuffer.Buffer, 0, MeshRef->IndexBuffer.Size);
+  VkDescriptorBufferInfo ProjectedBufferInfo = VkInit::BufferInfo(
+      MeshRef->ProjectedVertexBuffer.Buffer, 0, MeshRef->ProjectedVertexBuffer.Size);
+
+  std::array<VkWriteDescriptorSet, 3> Writes = {
+      VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                    MeshRef->DescriptorSet, &VertexBufferInfo, 0),
+      VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                    MeshRef->DescriptorSet, &IndexBufferInfo, 1),
+      VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                    MeshRef->DescriptorSet, &ProjectedBufferInfo, 2)};
+  vkUpdateDescriptorSets(m_Device.Device, static_cast<uint32_t>(Writes.size()),
+                         Writes.data(), 0, VK_NULL_HANDLE);
 
   return MeshRef;
 }
@@ -419,11 +640,42 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
   std::memcpy(Frame.CameraBuffer.Info.pMappedData, &CameraData,
               sizeof(CameraFrameUniform));
 
-  vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_MeshPipeline);
+  VkDescriptorImageInfo ColorImageInfo{};
+  ColorImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+  ColorImageInfo.imageView = m_DrawImage.ImageView;
+
+  VkDescriptorImageInfo DepthImageInfo{};
+  DepthImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+  DepthImageInfo.imageView = m_DepthImage.ImageView;
+
+  VkDescriptorBufferInfo CameraBufferInfo =
+      VkInit::BufferInfo(Frame.CameraBuffer.Buffer, 0, Frame.CameraBuffer.Size);
+
+  std::array<VkWriteDescriptorSet, 3> FrameWrites = {
+      VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                 Frame.FrameDescriptorSet, &ColorImageInfo, 0),
+      VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                 Frame.FrameDescriptorSet, &DepthImageInfo, 1),
+      VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                    Frame.FrameDescriptorSet, &CameraBufferInfo,
+                                    2)};
+  vkUpdateDescriptorSets(m_Device.Device,
+                         static_cast<uint32_t>(FrameWrites.size()),
+                         FrameWrites.data(), 0, VK_NULL_HANDLE);
 
   const size_t SubmissionCount =
       std::min(Scene.Submissions.size(),
                static_cast<size_t>(MaxMeshSubmissionsPerFrame));
+  if (Scene.Submissions.size() > MaxMeshSubmissionsPerFrame &&
+      !m_HasWarnedMeshSubmissionOverflow) {
+    A_CORE_WARN(
+        "Scene submitted {0} meshes, exceeding MaxMeshSubmissionsPerFrame ({1}).",
+        Scene.Submissions.size(), MaxMeshSubmissionsPerFrame);
+    m_HasWarnedMeshSubmissionOverflow = true;
+  }
+
+  m_FrameStats.MeshSubmissionCount = 0;
+  m_FrameStats.TriangleCount = 0;
 
   for (size_t Index = 0; Index < SubmissionCount; ++Index) {
     const auto &Submission = Scene.Submissions[Index];
@@ -432,56 +684,73 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
       continue;
     }
 
-    VkDescriptorImageInfo ColorImageInfo{};
-    ColorImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-    ColorImageInfo.imageView = m_DrawImage.ImageView;
+    if (!IsBoundsVisible(CameraData.ViewProjection, Submission.Transform,
+                         VulkanMeshRef->BoundsMin, VulkanMeshRef->BoundsMax)) {
+      continue;
+    }
 
-    VkDescriptorImageInfo DepthImageInfo{};
-    DepthImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-    DepthImageInfo.imageView = m_DepthImage.ImageView;
+    std::array<VkDescriptorSet, 2> DescriptorSets = {
+        Frame.FrameDescriptorSet, VulkanMeshRef->DescriptorSet};
 
-    VkDescriptorBufferInfo VertexBufferInfo = VkInit::BufferInfo(
-        VulkanMeshRef->VertexBuffer.Buffer, 0, VulkanMeshRef->VertexBuffer.Size);
-    VkDescriptorBufferInfo IndexBufferInfo = VkInit::BufferInfo(
-        VulkanMeshRef->IndexBuffer.Buffer, 0, VulkanMeshRef->IndexBuffer.Size);
-    VkDescriptorBufferInfo CameraBufferInfo =
-        VkInit::BufferInfo(Frame.CameraBuffer.Buffer, 0, Frame.CameraBuffer.Size);
-
-    std::array<VkWriteDescriptorSet, 5> Writes = {
-        VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                                   Frame.DescriptorSets[Index], &ColorImageInfo, 0),
-        VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                                   Frame.DescriptorSets[Index], &DepthImageInfo, 1),
-        VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                                      Frame.DescriptorSets[Index], &VertexBufferInfo,
-                                      2),
-        VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                                      Frame.DescriptorSets[Index], &IndexBufferInfo,
-                                      3),
-        VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                                      Frame.DescriptorSets[Index], &CameraBufferInfo,
-                                      4)};
-    vkUpdateDescriptorSets(m_Device.Device, static_cast<uint32_t>(Writes.size()),
-                           Writes.data(), 0, VK_NULL_HANDLE);
-
+    vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      m_MeshProjectPipeline);
     vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            m_MeshPipelineLayout, 0, 1,
-                            &Frame.DescriptorSets[Index], 0, VK_NULL_HANDLE);
+                            m_MeshProjectPipelineLayout, 0,
+                            static_cast<uint32_t>(DescriptorSets.size()),
+                            DescriptorSets.data(), 0, VK_NULL_HANDLE);
 
-    MeshPushConstants PushConstants{};
-    PushConstants.Model = Submission.Transform;
-    PushConstants.TriangleCount.x =
-        static_cast<float>(VulkanMeshRef->IndexCount / 3);
+    MeshProjectPushConstants ProjectPushConstants{};
+    ProjectPushConstants.Model = Submission.Transform;
+    ProjectPushConstants.Counts.x = VulkanMeshRef->VertexCount;
+    vkCmdPushConstants(CommandBuffer, m_MeshProjectPipelineLayout,
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                       sizeof(MeshProjectPushConstants),
+                       &ProjectPushConstants);
+
+    const uint32_t VertexGroupCount =
+        std::max(1u, (VulkanMeshRef->VertexCount + 63u) / 64u);
+    vkCmdDispatch(CommandBuffer, VertexGroupCount, 1, 1);
+
+    VkBufferMemoryBarrier2 ProjectedVertexBarrier{
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+        .pNext = VK_NULL_HANDLE,
+        .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = VulkanMeshRef->ProjectedVertexBuffer.Buffer,
+        .offset = 0,
+        .size = VulkanMeshRef->ProjectedVertexBuffer.Size};
+    VkDependencyInfo ProjectDependencyInfo{
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .pNext = VK_NULL_HANDLE,
+        .bufferMemoryBarrierCount = 1,
+        .pBufferMemoryBarriers = &ProjectedVertexBarrier};
+    vkCmdPipelineBarrier2(CommandBuffer, &ProjectDependencyInfo);
+
+    vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      m_MeshPipeline);
+    vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            m_MeshPipelineLayout, 0,
+                            static_cast<uint32_t>(DescriptorSets.size()),
+                            DescriptorSets.data(), 0, VK_NULL_HANDLE);
+
+    MeshRasterPushConstants RasterPushConstants{};
+    RasterPushConstants.Counts.x = VulkanMeshRef->TriangleCount;
     vkCmdPushConstants(CommandBuffer, m_MeshPipelineLayout,
                        VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                       sizeof(MeshPushConstants), &PushConstants);
+                       sizeof(MeshRasterPushConstants),
+                       &RasterPushConstants);
 
-    const uint32_t TriangleCount = VulkanMeshRef->IndexCount / 3;
-    const uint32_t GroupCount = std::max(1u, (TriangleCount + 63u) / 64u);
+    const uint32_t GroupCount =
+        std::max(1u, (VulkanMeshRef->TriangleCount + 63u) / 64u);
     vkCmdDispatch(CommandBuffer, GroupCount, 1, 1);
 
     VkImageMemoryBarrier2 ImageBarriers[2] = {
         {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+         .pNext = VK_NULL_HANDLE,
          .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
          .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
          .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -489,10 +758,13 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
                           VK_ACCESS_2_SHADER_WRITE_BIT,
          .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
          .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
          .image = m_DrawImage.Image,
          .subresourceRange =
              VkInit::ImageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT)},
         {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+         .pNext = VK_NULL_HANDLE,
          .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
          .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
          .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -500,6 +772,8 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
                           VK_ACCESS_2_SHADER_WRITE_BIT,
          .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
          .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
          .image = m_DepthImage.Image,
          .subresourceRange =
              VkInit::ImageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT)}};
@@ -510,6 +784,9 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
         .imageMemoryBarrierCount = 2,
         .pImageMemoryBarriers = ImageBarriers};
     vkCmdPipelineBarrier2(CommandBuffer, &DependencyInfo);
+
+    ++m_FrameStats.MeshSubmissionCount;
+    m_FrameStats.TriangleCount += VulkanMeshRef->TriangleCount;
   }
 }
 
@@ -535,8 +812,8 @@ void VulkanRendererBackend::InitImGui() {
   PoolInfo.pPoolSizes = PoolSizes;
 
   VkDescriptorPool ImGuiPool;
-  VK_CHECK(
-      vkCreateDescriptorPool(m_Device.Device, &PoolInfo, VK_NULL_HANDLE, &ImGuiPool));
+  VK_CHECK(vkCreateDescriptorPool(m_Device.Device, &PoolInfo, VK_NULL_HANDLE,
+                                  &ImGuiPool));
 
   ImGui::CreateContext();
   ImGui_ImplGlfw_InitForVulkan(m_Window, true);
@@ -581,18 +858,22 @@ void VulkanRendererBackend::InitImGui() {
 }
 
 void VulkanRendererBackend::Draw() {
-  VK_CHECK(vkWaitForFences(m_Device.Device, 1, &GetCurrentFrame().RenderFence, VK_TRUE,
-                           1000000000));
-  VK_CHECK(vkResetFences(m_Device.Device, 1, &GetCurrentFrame().RenderFence));
+  auto &CurrentFrame = GetCurrentFrame();
+  auto &MeshFrame = GetCurrentMeshFrame();
 
-  GetCurrentFrame().DeletionQueue.Flush();
+  VK_CHECK(vkWaitForFences(m_Device.Device, 1, &CurrentFrame.RenderFence, VK_TRUE,
+                           1000000000));
+  CollectFrameStats(MeshFrame);
+  VK_CHECK(vkResetFences(m_Device.Device, 1, &CurrentFrame.RenderFence));
+
+  CurrentFrame.DeletionQueue.Flush();
 
   uint32_t SwapchainImageIndex;
-  VK_CHECK(vkAcquireNextImageKHR(m_Device.Device, m_Swapchain.Swapchain, 1000000000,
-                                 GetCurrentFrame().SwapchainSemaphore,
+  VK_CHECK(vkAcquireNextImageKHR(m_Device.Device, m_Swapchain.Swapchain,
+                                 1000000000, CurrentFrame.SwapchainSemaphore,
                                  VK_NULL_HANDLE, &SwapchainImageIndex));
 
-  VkCommandBuffer CommandBuffer = GetCurrentFrame().MainCommandBuffer;
+  VkCommandBuffer CommandBuffer = CurrentFrame.MainCommandBuffer;
   VK_CHECK(vkResetCommandBuffer(CommandBuffer, 0));
 
   VkCommandBufferBeginInfo CommandBufferBeginInfo =
@@ -601,19 +882,34 @@ void VulkanRendererBackend::Draw() {
 
   m_DrawExtent.width = m_DrawImage.ImageExtent.width;
   m_DrawExtent.height = m_DrawImage.ImageExtent.height;
+  m_FrameStats.DrawExtent = {m_DrawExtent.width, m_DrawExtent.height};
+  m_FrameStats.MeshSubmissionCount = 0;
+  m_FrameStats.TriangleCount = 0;
+  MeshFrame.HasValidTimestamps = true;
 
   VK_CHECK(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo));
+  vkCmdResetQueryPool(CommandBuffer, MeshFrame.TimestampQueryPool, 0,
+                      TimestampQueryCount);
 
   VkUtil::TransitionImage(CommandBuffer, m_DrawImage.Image,
                           VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
+  vkCmdWriteTimestamp2(CommandBuffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                       MeshFrame.TimestampQueryPool, 0);
   DrawBackground(CommandBuffer);
+  vkCmdWriteTimestamp2(CommandBuffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                       MeshFrame.TimestampQueryPool, 1);
+
   ClearDepthImage(CommandBuffer);
 
+  vkCmdWriteTimestamp2(CommandBuffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                       MeshFrame.TimestampQueryPool, 2);
   if (m_ActiveScene != nullptr && !m_ActiveScene->Submissions.empty() &&
       m_ActiveScene->ActiveCamera != nullptr) {
     DrawMeshes(CommandBuffer, *m_ActiveScene);
   }
+  vkCmdWriteTimestamp2(CommandBuffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                       MeshFrame.TimestampQueryPool, 3);
 
   VkUtil::TransitionImage(CommandBuffer, m_DrawImage.Image,
                           VK_IMAGE_LAYOUT_GENERAL,
@@ -644,22 +940,23 @@ void VulkanRendererBackend::Draw() {
   VkSemaphoreSubmitInfo SwapchainSemaphoreSubmitInfo =
       VkInit::SemaphoreSubmitInfo(
           VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR,
-          GetCurrentFrame().SwapchainSemaphore);
-  VkSemaphoreSubmitInfo RenderSemaphoreSubmitInfo = VkInit::SemaphoreSubmitInfo(
-      VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, GetCurrentFrame().RenderSemaphore);
+          CurrentFrame.SwapchainSemaphore);
+  VkSemaphoreSubmitInfo RenderSemaphoreSubmitInfo =
+      VkInit::SemaphoreSubmitInfo(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                  CurrentFrame.RenderSemaphore);
 
   VkSubmitInfo2 Submit =
       VkInit::SubmitInfo(&CommandBufferSubmitInfo, &RenderSemaphoreSubmitInfo,
                          &SwapchainSemaphoreSubmitInfo);
 
   VK_CHECK(vkQueueSubmit2(m_Device.GraphicsQueue, 1, &Submit,
-                          GetCurrentFrame().RenderFence));
+                          CurrentFrame.RenderFence));
 
   VkPresentInfoKHR PresentInfo = {.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
                                   .pNext = VK_NULL_HANDLE};
   PresentInfo.pSwapchains = &m_Swapchain.Swapchain;
   PresentInfo.swapchainCount = 1;
-  PresentInfo.pWaitSemaphores = &GetCurrentFrame().RenderSemaphore;
+  PresentInfo.pWaitSemaphores = &CurrentFrame.RenderSemaphore;
   PresentInfo.waitSemaphoreCount = 1;
   PresentInfo.pImageIndices = &SwapchainImageIndex;
 
@@ -697,12 +994,20 @@ void VulkanRendererBackend::RenderFallbackBackground(RenderScene &Scene) {
   m_RenderFallbackBackground = true;
 }
 
+RendererFrameStats &VulkanRendererBackend::AccessFrameStats() {
+  return m_FrameStats;
+}
+
+const RendererFrameStats &VulkanRendererBackend::GetFrameStats() const {
+  return m_FrameStats;
+}
+
 void VulkanRendererBackend::RenderImGui() {
   if (m_StopRendering) {
     return;
   }
 
-  ImGui::ShowDemoWindow();
+  DrawStatsPanel();
   ImGui::Render();
 }
 

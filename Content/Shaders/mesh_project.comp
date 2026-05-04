@@ -1,0 +1,64 @@
+#version 460
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+struct MeshVertex {
+    vec4 position;
+    vec4 normal;
+};
+
+struct ProjectedVertex {
+    vec4 pixelAndDepth;
+    vec4 normalAndValid;
+    vec4 clipPosition;
+};
+
+layout(std430, set = 1, binding = 0) readonly buffer VertexBuffer {
+    MeshVertex vertices[];
+};
+layout(std430, set = 1, binding = 2) writeonly buffer ProjectedVertexBuffer {
+    ProjectedVertex projectedVertices[];
+};
+
+layout(std140, set = 0, binding = 2) uniform CameraFrame {
+    mat4 view;
+    mat4 projection;
+    mat4 viewProjection;
+    vec4 cameraPosition;
+    vec4 viewportSize;
+} cameraFrame;
+
+layout(push_constant) uniform MeshProjectPushConstants {
+    mat4 model;
+    uvec4 counts;
+} pushConstants;
+
+void main() {
+    uint vertexIndex = gl_GlobalInvocationID.x;
+    if (vertexIndex >= pushConstants.counts.x) {
+        return;
+    }
+
+    MeshVertex vertex = vertices[vertexIndex];
+    vec4 worldPosition = pushConstants.model * vec4(vertex.position.xyz, 1.0);
+    vec4 clipPosition = cameraFrame.viewProjection * worldPosition;
+
+    ProjectedVertex result;
+    result.clipPosition = clipPosition;
+    result.normalAndValid.xyz = normalize(mat3(pushConstants.model) * vertex.normal.xyz);
+    result.normalAndValid.w = clipPosition.w > 0.0001 ? 1.0 : 0.0;
+
+    if (result.normalAndValid.w > 0.5) {
+        vec3 ndc = clipPosition.xyz / clipPosition.w;
+        result.pixelAndDepth.xy = vec2(
+            (ndc.x * 0.5 + 0.5) * (cameraFrame.viewportSize.x - 1.0),
+            (1.0 - (ndc.y * 0.5 + 0.5)) * (cameraFrame.viewportSize.y - 1.0)
+        );
+        result.pixelAndDepth.z = ndc.z * 0.5 + 0.5;
+        result.pixelAndDepth.w = 0.0;
+    } else {
+        result.pixelAndDepth = vec4(0.0);
+    }
+
+    projectedVertices[vertexIndex] = result;
+}

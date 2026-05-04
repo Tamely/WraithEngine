@@ -7,6 +7,8 @@
 
 #include "Core/Log.h"
 
+#include <chrono>
+
 namespace Axiom {
 Renderer *Renderer::s_Instance = nullptr;
 
@@ -52,12 +54,30 @@ void Renderer::BeginFrame() {
   RenderCommand::BeginScene(m_Scene);
 }
 
-void Renderer::Render() { m_Technique->Render(m_Scene); }
+void Renderer::Render() {
+  const auto StartTime = std::chrono::steady_clock::now();
+  m_Technique->Render(m_Scene);
+  const auto EndTime = std::chrono::steady_clock::now();
+  UpdateCpuRenderTime(
+      std::chrono::duration<float, std::milli>(EndTime - StartTime).count());
+}
 
 void Renderer::EndFrame() {
   RenderCommand::EndScene();
   m_Backend->RenderImGui();
   m_Backend->EndFrame();
+}
+
+void Renderer::SetCpuFrameTime(float CpuFrameMs) {
+  m_Backend->AccessFrameStats().CpuFrameMs = CpuFrameMs;
+}
+
+const RendererFrameStats &Renderer::GetFrameStats() const {
+  return m_Backend->GetFrameStats();
+}
+
+void Renderer::UpdateCpuRenderTime(float CpuRenderMs) {
+  m_Backend->AccessFrameStats().CpuRenderMs = CpuRenderMs;
 }
 
 std::vector<RenderMeshSubmission>

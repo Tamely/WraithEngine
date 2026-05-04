@@ -40,6 +40,7 @@ void Application::Run() {
     m_DeltaTime =
         std::chrono::duration<float>(Now - m_LastFrameTime).count();
     m_LastFrameTime = Now;
+    m_Renderer->SetCpuFrameTime(m_DeltaTime * 1000.0f);
 
     m_Window->PollEvents();
 

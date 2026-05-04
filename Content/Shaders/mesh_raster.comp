@@ -2,58 +2,24 @@
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
-struct MeshVertex {
-    vec4 position;
-    vec4 normal;
+struct ProjectedVertex {
+    vec4 pixelAndDepth;
+    vec4 normalAndValid;
+    vec4 clipPosition;
 };
 
 layout(rgba16f, set = 0, binding = 0) uniform image2D colorImage;
 layout(r32ui, set = 0, binding = 1) uniform uimage2D depthImage;
-layout(std430, set = 0, binding = 2) readonly buffer VertexBuffer {
-    MeshVertex vertices[];
-};
-layout(std430, set = 0, binding = 3) readonly buffer IndexBuffer {
+layout(std430, set = 1, binding = 1) readonly buffer IndexBuffer {
     uint indices[];
 };
-layout(std140, set = 0, binding = 4) uniform CameraFrame {
-    mat4 view;
-    mat4 projection;
-    mat4 viewProjection;
-    vec4 cameraPosition;
-    vec4 viewportSize;
-} cameraFrame;
-
-layout(push_constant) uniform MeshPushConstants {
-    mat4 model;
-    vec4 triangleCount;
-} pushConstants;
-
-struct ScreenVertex {
-    vec2 pixel;
-    float depth;
-    vec3 normal;
-    vec4 clipPosition;
-    bool valid;
+layout(std430, set = 1, binding = 2) readonly buffer ProjectedVertexBuffer {
+    ProjectedVertex projectedVertices[];
 };
 
-ScreenVertex projectVertex(uint vertexIndex) {
-    MeshVertex vertex = vertices[vertexIndex];
-    vec4 worldPosition = pushConstants.model * vec4(vertex.position.xyz, 1.0);
-    vec4 clipPosition = cameraFrame.viewProjection * worldPosition;
-    float invW = 1.0 / clipPosition.w;
-    vec3 ndc = clipPosition.xyz * invW;
-
-    ScreenVertex result;
-    result.clipPosition = clipPosition;
-    result.valid = clipPosition.w > 0.0001;
-    result.pixel = vec2(
-        (ndc.x * 0.5 + 0.5) * (cameraFrame.viewportSize.x - 1.0),
-        (1.0 - (ndc.y * 0.5 + 0.5)) * (cameraFrame.viewportSize.y - 1.0)
-    );
-    result.depth = ndc.z * 0.5 + 0.5;
-    result.normal = normalize(mat3(pushConstants.model) * vertex.normal.xyz);
-    return result;
-}
+layout(push_constant) uniform MeshRasterPushConstants {
+    uvec4 counts;
+} pushConstants;
 
 float edgeFunction(vec2 a, vec2 b, vec2 c) {
     return (c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x);
@@ -61,7 +27,7 @@ float edgeFunction(vec2 a, vec2 b, vec2 c) {
 
 void main() {
     uint triangleIndex = gl_GlobalInvocationID.x;
-    uint triangleCount = uint(pushConstants.triangleCount.x);
+    uint triangleCount = pushConstants.counts.x;
     if (triangleIndex >= triangleCount) {
         return;
     }
@@ -70,11 +36,11 @@ void main() {
     uint i1 = indices[triangleIndex * 3 + 1];
     uint i2 = indices[triangleIndex * 3 + 2];
 
-    ScreenVertex v0 = projectVertex(i0);
-    ScreenVertex v1 = projectVertex(i1);
-    ScreenVertex v2 = projectVertex(i2);
+    ProjectedVertex v0 = projectedVertices[i0];
+    ProjectedVertex v1 = projectedVertices[i1];
+    ProjectedVertex v2 = projectedVertices[i2];
 
-    if (!v0.valid || !v1.valid || !v2.valid) {
+    if (v0.normalAndValid.w < 0.5 || v1.normalAndValid.w < 0.5 || v2.normalAndValid.w < 0.5) {
         return;
     }
 
@@ -93,37 +59,35 @@ void main() {
         return;
     }
 
-    vec2 viewport = cameraFrame.viewportSize.xy;
-    if (v0.depth < 0.0 || v1.depth < 0.0 || v2.depth < 0.0 ||
-        v0.depth > 1.0 || v1.depth > 1.0 || v2.depth > 1.0) {
+    vec2 viewport = vec2(imageSize(colorImage));
+    vec2 p0 = v0.pixelAndDepth.xy;
+    vec2 p1 = v1.pixelAndDepth.xy;
+    vec2 p2 = v2.pixelAndDepth.xy;
+
+    float area = edgeFunction(p0, p1, p2);
+    if (abs(area) < 0.00001 || area >= 0.0) {
         return;
     }
 
-    float area = edgeFunction(v0.pixel, v1.pixel, v2.pixel);
-    if (abs(area) < 0.00001) {
+    vec2 minPixel = floor(max(vec2(0.0), min(p0, min(p1, p2))));
+    vec2 maxPixel = ceil(min(viewport - vec2(1.0), max(p0, max(p1, p2))));
+    if (minPixel.x > viewport.x - 1.0 || minPixel.y > viewport.y - 1.0 ||
+        maxPixel.x < 0.0 || maxPixel.y < 0.0) {
         return;
     }
 
-    vec2 minPixel = floor(max(vec2(0.0), min(v0.pixel, min(v1.pixel, v2.pixel))));
-    vec2 maxPixel = ceil(min(viewport - vec2(1.0), max(v0.pixel, max(v1.pixel, v2.pixel))));
-
-    vec3 faceNormal = normalize(v0.normal + v1.normal + v2.normal);
+    vec3 faceNormal = normalize(v0.normalAndValid.xyz + v1.normalAndValid.xyz + v2.normalAndValid.xyz);
     vec3 lightDir = normalize(vec3(0.35, 0.7, 0.2));
     float lighting = max(dot(faceNormal, lightDir), 0.2);
     vec4 shadedColor = vec4(vec3(0.75, 0.82, 0.92) * lighting, 1.0);
-    bool frontFacing = area < 0.0;
 
     for (int y = int(minPixel.y); y <= int(maxPixel.y); ++y) {
         for (int x = int(minPixel.x); x <= int(maxPixel.x); ++x) {
             vec2 samplePoint = vec2(x, y) + vec2(0.5);
-            float w0 = edgeFunction(v1.pixel, v2.pixel, samplePoint);
-            float w1 = edgeFunction(v2.pixel, v0.pixel, samplePoint);
-            float w2 = edgeFunction(v0.pixel, v1.pixel, samplePoint);
-
-            bool inside = frontFacing
-                ? (w0 <= 0.0 && w1 <= 0.0 && w2 <= 0.0)
-                : (w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0);
-            if (!inside) {
+            float w0 = edgeFunction(p1, p2, samplePoint);
+            float w1 = edgeFunction(p2, p0, samplePoint);
+            float w2 = edgeFunction(p0, p1, samplePoint);
+            if (w0 > 0.0 || w1 > 0.0 || w2 > 0.0) {
                 continue;
             }
 
@@ -131,7 +95,7 @@ void main() {
             w1 /= area;
             w2 /= area;
 
-            float depth = w0 * v0.depth + w1 * v1.depth + w2 * v2.depth;
+            float depth = w0 * v0.pixelAndDepth.z + w1 * v1.pixelAndDepth.z + w2 * v2.pixelAndDepth.z;
             uint depthBits = floatBitsToUint(clamp(depth, 0.0, 1.0));
 
             uint previousDepth = imageAtomicMin(depthImage, ivec2(x, y), depthBits);

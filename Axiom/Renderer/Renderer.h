@@ -23,8 +23,13 @@ public:
   void BeginFrame();
   void Render();
   void EndFrame();
+  void SetCpuFrameTime(float CpuFrameMs);
+  const RendererFrameStats &GetFrameStats() const;
   std::vector<RenderMeshSubmission>
   LoadMeshSceneFromFile(const std::filesystem::path &Path);
+
+private:
+  void UpdateCpuRenderTime(float CpuRenderMs);
 
 private:
   static Renderer *s_Instance;

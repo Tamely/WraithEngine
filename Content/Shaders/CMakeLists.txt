@@ -15,7 +15,7 @@ if(NOT GLSL_VALIDATOR)
 endif()
 
 ## Find all the shader files under the shaders folder
-file(GLOB_RECURSE GLSL_SOURCE_FILES
+file(GLOB_RECURSE GLSL_SOURCE_FILES CONFIGURE_DEPENDS
   "${CMAKE_SOURCE_DIR}/Content/Shaders/*.frag"
   "${CMAKE_SOURCE_DIR}/Content/Shaders/*.vert"
   "${CMAKE_SOURCE_DIR}/Content/Shaders/*.comp"
