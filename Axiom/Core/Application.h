@@ -8,6 +8,7 @@
 #include "Core/LayerStack.h"
 #include "Core/Window.h"
 #include "Renderer/Renderer.h"
+#include "Renderer/RenderSurface.h"
 
 namespace Axiom {
 struct ApplicationArgs {
@@ -32,11 +33,13 @@ public:
   static Application &Get();
 
   void Run();
+  bool Step();
   void PushLayer(Layer *Layer);
   [[nodiscard]] Window &GetWindow() const { return *m_Window; }
   [[nodiscard]] float GetDeltaTime() const { return m_DeltaTime; }
   [[nodiscard]] uint64_t GetFrameIndex() const { return m_FrameIndex; }
   [[nodiscard]] RuntimeMode GetRuntimeMode() const { return m_Config.Mode; }
+  [[nodiscard]] Renderer &GetRenderer() const { return *m_Renderer; }
   void RequestClose();
 
 private:
@@ -44,6 +47,7 @@ private:
 
   ApplicationConfig m_Config;
   std::unique_ptr<Window> m_Window;
+  RenderSurfacePtr m_RenderSurface;
   std::unique_ptr<Renderer> m_Renderer;
   LayerStack m_LayerStack;
   std::chrono::steady_clock::time_point m_LastFrameTime;

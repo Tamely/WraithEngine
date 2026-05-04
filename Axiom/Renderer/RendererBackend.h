@@ -4,13 +4,17 @@
 
 #include <glm/vec2.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace Axiom {
 class Window;
 class RenderScene;
+class IRenderSurface;
 struct MeshData;
 
 enum class RendererBackendType { Vulkan };
@@ -22,9 +26,17 @@ enum class RendererViewMode : uint32_t {
 
 struct RendererCreateInfo {
   Window *TargetWindow{nullptr};
+  std::shared_ptr<IRenderSurface> TargetSurface;
   uint32_t Width{0};
   uint32_t Height{0};
   RendererBackendType BackendType{RendererBackendType::Vulkan};
+};
+
+struct CapturedFrame {
+  uint64_t FrameIndex{0};
+  uint32_t Width{0};
+  uint32_t Height{0};
+  std::vector<std::byte> Pixels;
 };
 
 struct RenderFrameInfo {
@@ -58,5 +70,6 @@ public:
   virtual const RendererFrameStats &GetFrameStats() const = 0;
   virtual void RenderImGui() = 0;
   virtual void EndFrame() = 0;
+  virtual std::optional<CapturedFrame> ConsumeCapturedFrame() = 0;
 };
 } // namespace Axiom

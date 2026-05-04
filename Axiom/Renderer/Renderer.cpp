@@ -69,6 +69,10 @@ void Renderer::EndFrame() {
   m_Backend->EndFrame();
 }
 
+std::optional<CapturedFrame> Renderer::ConsumeCapturedFrame() {
+  return m_Backend->ConsumeCapturedFrame();
+}
+
 void Renderer::SetCpuFrameTime(float CpuFrameMs) {
   m_Backend->AccessFrameStats().CpuFrameMs = CpuFrameMs;
 }

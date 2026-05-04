@@ -51,7 +51,8 @@ void VulkanImGuiRenderer::Init(const InitInfo &InitInfo) {
                                   &ImGuiPool));
 
   ImGui::CreateContext();
-  ImGui_ImplGlfw_InitForVulkan(InitInfo.Window, true);
+  ImGui_ImplGlfw_InitForVulkan(
+      static_cast<GLFWwindow *>(InitInfo.WindowHandle), true);
 
   const bool LoadedImGuiVulkanFunctions = ImGui_ImplVulkan_LoadFunctions(
       VK_API_VERSION_1_3,
