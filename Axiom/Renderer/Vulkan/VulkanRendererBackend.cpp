@@ -46,6 +46,19 @@ Axiom::VulkanRendererBackend *g_LoadedEngine = nullptr;
 
 namespace Axiom {
 namespace {
+const char *RendererViewModeLabel(RendererViewMode Mode) {
+  switch (Mode) {
+  case RendererViewMode::Lit:
+    return "Lit";
+  case RendererViewMode::Unlit:
+    return "Unlit";
+  case RendererViewMode::Wireframe:
+    return "Wireframe";
+  }
+
+  return "Unknown";
+}
+
 struct ProjectedMeshVertexGpu {
   glm::vec4 PixelAndDepth{0.0f};
   glm::vec4 NormalAndValid{0.0f};
@@ -716,6 +729,18 @@ void VulkanRendererBackend::InitMeshPipelines() {
                                      &DepthPipelineInfo, VK_NULL_HANDLE,
                                      &m_MeshDepthPipeline));
 
+  VkPipelineRasterizationStateCreateInfo WireframeRasterizer = Rasterizer;
+  WireframeRasterizer.polygonMode = VK_POLYGON_MODE_LINE;
+  VkPipelineDepthStencilStateCreateInfo WireframeDepthStencil = DepthStencil;
+  WireframeDepthStencil.depthTestEnable = VK_FALSE;
+  WireframeDepthStencil.depthWriteEnable = VK_FALSE;
+  VkGraphicsPipelineCreateInfo WireframePipelineInfo = PipelineInfo;
+  WireframePipelineInfo.pRasterizationState = &WireframeRasterizer;
+  WireframePipelineInfo.pDepthStencilState = &WireframeDepthStencil;
+  VK_CHECK(vkCreateGraphicsPipelines(m_Device.Device, VK_NULL_HANDLE, 1,
+                                     &WireframePipelineInfo, VK_NULL_HANDLE,
+                                     &m_MeshWireframePipeline));
+
   vkDestroyShaderModule(m_Device.Device, VertexShader, VK_NULL_HANDLE);
   vkDestroyShaderModule(m_Device.Device, FragmentShader, VK_NULL_HANDLE);
 
@@ -729,6 +754,8 @@ void VulkanRendererBackend::InitMeshPipelines() {
     vkDestroyPipelineLayout(m_Device.Device, m_MeshDepthPipelineLayout,
                             VK_NULL_HANDLE);
     vkDestroyPipeline(m_Device.Device, m_MeshDepthPipeline, VK_NULL_HANDLE);
+    vkDestroyPipeline(m_Device.Device, m_MeshWireframePipeline,
+                      VK_NULL_HANDLE);
     vkDestroyPipelineLayout(m_Device.Device, m_MeshGraphicsPipelineLayout,
                             VK_NULL_HANDLE);
     vkDestroyPipeline(m_Device.Device, m_MeshGraphicsPipeline, VK_NULL_HANDLE);
@@ -900,6 +927,13 @@ void VulkanRendererBackend::DrawStatsPanel() {
   ImGui::Text("Triangles: %u", m_FrameStats.TriangleCount);
   ImGui::Text("Draw extent: %u x %u", m_FrameStats.DrawExtent.x,
               m_FrameStats.DrawExtent.y);
+  int SelectedMode = static_cast<int>(m_ViewMode);
+  const char *ModeLabels[] = {"Lit", "Unlit", "Wireframe"};
+  if (ImGui::Combo("View Mode", &SelectedMode, ModeLabels,
+                   static_cast<int>(std::size(ModeLabels)))) {
+    m_ViewMode = static_cast<RendererViewMode>(SelectedMode);
+  }
+  ImGui::Text("Active mode: %s", RendererViewModeLabel(m_ViewMode));
   ImGui::End();
 }
 
@@ -1005,6 +1039,7 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
   CameraData.ViewportSize =
       glm::vec4(static_cast<float>(m_DrawExtent.width),
                 static_cast<float>(m_DrawExtent.height), 0.0f, 0.0f);
+  CameraData.RenderOptions.x = static_cast<uint32_t>(m_ViewMode);
   std::memcpy(Frame.CameraBuffer.Info.pMappedData, &CameraData,
               sizeof(CameraFrameUniform));
 
@@ -1031,6 +1066,25 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
   vkUpdateDescriptorSets(m_Device.Device,
                          static_cast<uint32_t>(ComputeFrameWrites.size()),
                          ComputeFrameWrites.data(), 0, VK_NULL_HANDLE);
+  VkDescriptorImageInfo DefaultGraphicsTextureImageInfo{};
+  DefaultGraphicsTextureImageInfo.imageView = m_FallbackTextureImage.ImageView;
+  DefaultGraphicsTextureImageInfo.imageLayout =
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  VkDescriptorImageInfo DefaultGraphicsTextureSamplerInfo{};
+  DefaultGraphicsTextureSamplerInfo.sampler = m_TextureSampler;
+  std::array<VkWriteDescriptorSet, 3> DefaultGraphicsFrameWrites = {
+      VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                    Frame.GraphicsFrameDescriptorSet,
+                                    &CameraBufferInfo, 0),
+      VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                                 Frame.GraphicsFrameDescriptorSet,
+                                 &DefaultGraphicsTextureImageInfo, 1),
+      VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_SAMPLER,
+                                 Frame.GraphicsFrameDescriptorSet,
+                                 &DefaultGraphicsTextureSamplerInfo, 2)};
+  vkUpdateDescriptorSets(m_Device.Device,
+                         static_cast<uint32_t>(DefaultGraphicsFrameWrites.size()),
+                         DefaultGraphicsFrameWrites.data(), 0, VK_NULL_HANDLE);
 
   VkViewport Viewport{0.0f, 0.0f, static_cast<float>(m_DrawExtent.width),
                       static_cast<float>(m_DrawExtent.height), 0.0f, 1.0f};
@@ -1051,6 +1105,7 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
   const size_t SubmissionCount =
       std::min(Scene.Submissions.size(),
                static_cast<size_t>(MaxMeshSubmissionsPerFrame));
+  const bool ForceWireframe = m_ViewMode == RendererViewMode::Wireframe;
   if (Scene.Submissions.size() > MaxMeshSubmissionsPerFrame &&
       !m_HasWarnedMeshSubmissionOverflow) {
     A_CORE_WARN(
@@ -1084,7 +1139,7 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
     }
 
     VisibleMeshSubmission VisibleSubmission{&Submission, VulkanMeshRef};
-    if (Submission.RenderPath == MeshRenderPath::Compute) {
+    if (!ForceWireframe && Submission.RenderPath == MeshRenderPath::Compute) {
       ComputeSubmissions.push_back(VisibleSubmission);
     } else {
       GraphicsSubmissions.push_back(VisibleSubmission);
@@ -1151,7 +1206,8 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
     if (!GraphicsSubmissions.empty()) {
       vkCmdBeginRendering(CommandBuffer, &RenderingInfo);
       vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                        m_MeshGraphicsPipeline);
+                        ForceWireframe ? m_MeshWireframePipeline
+                                       : m_MeshGraphicsPipeline);
       vkCmdSetViewport(CommandBuffer, 0, 1, &Viewport);
       vkCmdSetScissor(CommandBuffer, 0, 1, &Scissor);
       for (const auto &VisibleSubmission : GraphicsSubmissions) {
@@ -1293,7 +1349,8 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
   if (!GraphicsSubmissions.empty()) {
     vkCmdBeginRendering(CommandBuffer, &RenderingInfo);
     vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      m_MeshGraphicsPipeline);
+                      ForceWireframe ? m_MeshWireframePipeline
+                                     : m_MeshGraphicsPipeline);
     vkCmdSetViewport(CommandBuffer, 0, 1, &Viewport);
     vkCmdSetScissor(CommandBuffer, 0, 1, &Scissor);
     for (const auto &VisibleSubmission : GraphicsSubmissions) {

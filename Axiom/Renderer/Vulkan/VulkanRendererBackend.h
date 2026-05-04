@@ -14,6 +14,8 @@
 #include <memory>
 #include <unordered_map>
 
+#include <glm/ext/vector_uint4.hpp>
+
 struct GLFWwindow;
 
 namespace Axiom {
@@ -30,6 +32,7 @@ struct CameraFrameUniform {
   glm::mat4 ViewProjection{1.0f};
   glm::vec4 CameraPosition{0.0f};
   glm::vec4 ViewportSize{0.0f};
+  glm::uvec4 RenderOptions{0u};
 };
 
 struct MeshProjectPushConstants {
@@ -136,6 +139,7 @@ private:
   VkPipelineLayout m_MeshPipelineLayout{VK_NULL_HANDLE};
   VkPipeline m_MeshGraphicsPipeline{VK_NULL_HANDLE};
   VkPipelineLayout m_MeshGraphicsPipelineLayout{VK_NULL_HANDLE};
+  VkPipeline m_MeshWireframePipeline{VK_NULL_HANDLE};
   VkPipeline m_MeshDepthPipeline{VK_NULL_HANDLE};
   VkPipelineLayout m_MeshDepthPipelineLayout{VK_NULL_HANDLE};
 
@@ -152,5 +156,6 @@ private:
   float m_TimestampPeriod{0.0f};
   float m_RenderScale{0.5f};
   bool m_HasWarnedMeshSubmissionOverflow{false};
+  RendererViewMode m_ViewMode{RendererViewMode::Lit};
 };
 } // namespace Axiom

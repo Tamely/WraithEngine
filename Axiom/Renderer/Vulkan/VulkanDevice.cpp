@@ -11,6 +11,9 @@
 
 namespace Axiom {
 void VulkanDevice::Init(VulkanContext &Context) {
+  VkPhysicalDeviceFeatures RequiredFeatures{};
+  RequiredFeatures.fillModeNonSolid = VK_TRUE;
+
   VkPhysicalDeviceVulkan13Features Features13{
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
   Features13.dynamicRendering = true;
@@ -24,6 +27,7 @@ void VulkanDevice::Init(VulkanContext &Context) {
   vkb::PhysicalDeviceSelector Selector{Context.BootstrapInstance};
   vkb::PhysicalDevice SelectedPhysicalDevice =
       Selector.set_minimum_version(1, 3)
+          .set_required_features(RequiredFeatures)
           .set_required_features_13(Features13)
           .set_required_features_12(Features12)
           .set_surface(Context.Surface)

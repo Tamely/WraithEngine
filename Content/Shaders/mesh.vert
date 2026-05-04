@@ -13,6 +13,7 @@ layout(std140, set = 0, binding = 0) uniform CameraFrame {
     mat4 viewProjection;
     vec4 cameraPosition;
     vec4 viewportSize;
+    uvec4 renderOptions;
 } cameraFrame;
 
 layout(push_constant) uniform MeshGraphicsPushConstants {

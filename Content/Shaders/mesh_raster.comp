@@ -16,6 +16,7 @@ layout(std140, set = 0, binding = 2) uniform CameraFrame {
     mat4 viewProjection;
     vec4 cameraPosition;
     vec4 viewportSize;
+    uvec4 renderOptions;
 } cameraFrame;
 layout(std430, set = 1, binding = 1) readonly buffer IndexBuffer {
     uint indices[];
@@ -89,7 +90,10 @@ void main() {
 
     vec3 faceNormal = normalize(v0.normalAndValid.xyz + v1.normalAndValid.xyz + v2.normalAndValid.xyz);
     vec3 lightDir = normalize(vec3(0.35, 0.7, 0.2));
-    float lighting = max(dot(faceNormal, lightDir), 0.2);
+    float lighting = 1.0;
+    if (cameraFrame.renderOptions.x == 0u) {
+        lighting = max(dot(faceNormal, lightDir), 0.2);
+    }
     vec4 shadedColor = vec4(vec3(0.75, 0.82, 0.92) * lighting, 1.0);
 
     for (int y = int(minPixel.y); y <= int(maxPixel.y); ++y) {
