@@ -5,6 +5,22 @@
 #include "Renderer/Vulkan/VulkanInitializers.h"
 
 namespace VkUtil {
+namespace {
+bool IsDepthLayout(VkImageLayout Layout) {
+  switch (Layout) {
+  case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
+  case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+  case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL:
+  case VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL:
+  case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL:
+  case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL:
+    return true;
+  default:
+    return false;
+  }
+}
+} // namespace
+
 void TransitionImage(VkCommandBuffer Command, VkImage Image,
                      VkImageLayout CurrentLayout, VkImageLayout NewLayout) {
   VkImageMemoryBarrier2 ImageBarrier{
@@ -21,7 +37,7 @@ void TransitionImage(VkCommandBuffer Command, VkImage Image,
   ImageBarrier.newLayout = NewLayout;
 
   VkImageAspectFlags AspectMask =
-      (NewLayout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL)
+      (IsDepthLayout(CurrentLayout) || IsDepthLayout(NewLayout))
           ? VK_IMAGE_ASPECT_DEPTH_BIT
           : VK_IMAGE_ASPECT_COLOR_BIT;
   ImageBarrier.subresourceRange = VkInit::ImageSubresourceRange(AspectMask);
@@ -73,4 +89,3 @@ void CopyImageToImage(VkCommandBuffer Command, VkImage Source,
   vkCmdBlitImage2(Command, &BlitInfo);
 }
 } // namespace VkUtil
-

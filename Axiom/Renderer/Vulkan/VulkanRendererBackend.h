@@ -13,7 +13,10 @@
 #include <functional>
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
+#include <glm/mat4x4.hpp>
+#include <glm/vec2.hpp>
 #include <glm/ext/vector_uint4.hpp>
 
 struct GLFWwindow;
@@ -48,6 +51,10 @@ struct MeshGraphicsPushConstants {
   glm::mat4 Model{1.0f};
 };
 
+struct HzbReducePushConstants {
+  glm::uvec4 Dimensions{0u};
+};
+
 class VulkanMesh;
 
 class VulkanRendererBackend final : public RendererBackend {
@@ -71,12 +78,16 @@ private:
   static constexpr uint32_t MaxMeshSubmissionsPerFrame = 64;
   static constexpr uint32_t TimestampQueryCount = 4;
 
-struct MeshFrameResources {
-  AllocatedBuffer CameraBuffer;
-  VkDescriptorSet GraphicsFrameDescriptorSet{VK_NULL_HANDLE};
-  VkDescriptorSet ComputeFrameDescriptorSet{VK_NULL_HANDLE};
-  VkQueryPool TimestampQueryPool{VK_NULL_HANDLE};
-  bool HasValidTimestamps{false};
+  struct MeshFrameResources {
+    AllocatedBuffer CameraBuffer;
+    AllocatedBuffer HzbReadbackBuffer;
+    VkDescriptorSet GraphicsFrameDescriptorSet{VK_NULL_HANDLE};
+    VkDescriptorSet ComputeFrameDescriptorSet{VK_NULL_HANDLE};
+    VkQueryPool TimestampQueryPool{VK_NULL_HANDLE};
+    glm::mat4 HzbViewProjection{1.0f};
+    glm::vec2 HzbViewportSize{0.0f};
+    bool HasValidTimestamps{false};
+    bool HasValidOcclusionData{false};
   };
 
   void InitSwapchain();
@@ -88,15 +99,24 @@ struct MeshFrameResources {
   void InitMeshFrameResources();
   void InitImGui();
 
+  void InitHzbResources();
   void CollectFrameStats(MeshFrameResources &Frame);
   void DrawStatsPanel();
   void DrawBackground(VkCommandBuffer CommandBuffer);
   void DrawMeshes(VkCommandBuffer CommandBuffer, RenderScene &Scene);
   void DrawImGui(VkCommandBuffer Command, VkImageView TargetImageView);
+  void BuildHzb(VkCommandBuffer CommandBuffer, MeshFrameResources &Frame);
   void ClearDepthImage(VkCommandBuffer CommandBuffer);
   void Draw();
   AllocatedImage CreateTextureImage(const TextureSourceData &TextureData);
   VkImageView ResolveMaterialTextureView(const MaterialInstanceRef &Material);
+  const MeshFrameResources *GetPreviousOcclusionFrame();
+  bool ShouldUsePreviousOcclusionData(const MeshFrameResources &PreviousFrame,
+                                      const CameraFrameUniform &CameraData) const;
+  bool IsOccludedByPreviousFrame(const MeshFrameResources &PreviousFrame,
+                                 const glm::mat4 &Model,
+                                 const glm::vec3 &BoundsMin,
+                                 const glm::vec3 &BoundsMax) const;
 
   FrameData &GetCurrentFrame() {
     return m_CommandContext.GetFrame(m_FrameNumber);
@@ -123,6 +143,7 @@ private:
   DescriptorAllocator m_GlobalDescriptorAllocator;
   VkDescriptorSet m_DrawImageDescriptorSet{VK_NULL_HANDLE};
   VkDescriptorSetLayout m_DrawImageDescriptorLayout{VK_NULL_HANDLE};
+  VkDescriptorSetLayout m_HzbReduceDescriptorLayout{VK_NULL_HANDLE};
   VkDescriptorSetLayout m_MeshGraphicsFrameDescriptorLayout{VK_NULL_HANDLE};
   VkDescriptorSetLayout m_MeshComputeFrameDescriptorLayout{VK_NULL_HANDLE};
   VkDescriptorSetLayout m_MeshDescriptorLayout{VK_NULL_HANDLE};
@@ -133,6 +154,8 @@ private:
 
   VkPipeline m_GradientPipeline{VK_NULL_HANDLE};
   VkPipelineLayout m_GradientPipelineLayout{VK_NULL_HANDLE};
+  VkPipeline m_HzbReducePipeline{VK_NULL_HANDLE};
+  VkPipelineLayout m_HzbReducePipelineLayout{VK_NULL_HANDLE};
   VkPipeline m_MeshProjectPipeline{VK_NULL_HANDLE};
   VkPipelineLayout m_MeshProjectPipelineLayout{VK_NULL_HANDLE};
   VkPipeline m_MeshPipeline{VK_NULL_HANDLE};
@@ -148,7 +171,14 @@ private:
   AllocatedImage m_DrawImage;
   AllocatedImage m_DepthImage;
   AllocatedImage m_RasterDepthImage;
+  AllocatedImage m_HzbImage;
   VkExtent2D m_DrawExtent{};
+  std::vector<VkImageView> m_HzbMipImageViews;
+  std::vector<VkDescriptorSet> m_HzbReduceDescriptorSets;
+  std::vector<VkExtent2D> m_HzbMipExtents;
+  std::vector<VkDeviceSize> m_HzbMipOffsets;
+  VkDeviceSize m_HzbReadbackBufferSize{0};
+  VkImageLayout m_HzbImageLayout{VK_IMAGE_LAYOUT_UNDEFINED};
 
   std::array<MeshFrameResources, FRAME_OVERLAP> m_MeshFrames{};
   RenderScene *m_ActiveScene{nullptr};

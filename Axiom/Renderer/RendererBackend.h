@@ -36,6 +36,9 @@ struct RendererFrameStats {
   float CpuRenderMs{0.0f};
   float GpuBackgroundMs{0.0f};
   float GpuMeshMs{0.0f};
+  uint32_t SubmittedMeshCount{0};
+  uint32_t FrustumCulledMeshCount{0};
+  uint32_t OcclusionCulledMeshCount{0};
   uint32_t MeshSubmissionCount{0};
   uint32_t TriangleCount{0};
   glm::uvec2 DrawExtent{0u, 0u};
