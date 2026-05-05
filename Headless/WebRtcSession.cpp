@@ -86,6 +86,19 @@ public:
     return true;
   }
 
+  void SetCommandMessageHandler(
+      std::function<void(std::string_view)> Handler) override {
+    m_CommandMessageHandler = std::move(Handler);
+  }
+
+  void SendReliableMessage(std::string_view Message) override {
+    (void)Message;
+  }
+
+  void OnViewportFrame(const ViewportFrame &Frame) override {
+    (void)Frame;
+  }
+
   void OnEncodedVideoPacket(const EncodedVideoPacket &Packet) override {
     m_Status.Video.LastFrameIndex = Packet.FrameIndex;
     if (Packet.IsKeyframe) {
@@ -183,11 +196,22 @@ private:
   std::vector<WebRtcIceCandidate> m_RemoteCandidates;
   std::vector<WebRtcIceCandidate> m_LocalCandidates;
   std::vector<EncodedVideoPacket> m_PendingVideoPackets;
+  std::function<void(std::string_view)> m_CommandMessageHandler;
   bool m_HasBufferedKeyframe{false};
 };
 } // namespace
 
+#if AXIOM_PLATFORM_MACOS && defined(AXIOM_ENABLE_WEBRTC) && AXIOM_ENABLE_WEBRTC && \
+    defined(AXIOM_WEBRTC_LINKED) && AXIOM_WEBRTC_LINKED
+std::unique_ptr<IWebRtcSession> CreateMacOSWebRtcSession();
+#endif
+
 std::unique_ptr<IWebRtcSession> CreateWebRtcSession() {
+#if AXIOM_PLATFORM_MACOS && defined(AXIOM_ENABLE_WEBRTC) && AXIOM_ENABLE_WEBRTC && \
+    defined(AXIOM_WEBRTC_LINKED) && AXIOM_WEBRTC_LINKED
+  return CreateMacOSWebRtcSession();
+#else
   return std::make_unique<StubWebRtcSession>();
+#endif
 }
 } // namespace Axiom

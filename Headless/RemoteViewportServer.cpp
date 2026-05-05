@@ -503,7 +503,14 @@ std::vector<unsigned char> BuildWebSocketFrame(uint8_t Opcode, const void *Data,
 
 RemoteViewportServer::RemoteViewportServer(
     HeadlessSessionHost &Host, const RemoteViewportServerOptions &Options)
-    : m_Host(Host), m_Options(Options), m_WebRtcSession(CreateWebRtcSession()) {}
+    : m_Host(Host), m_Options(Options), m_WebRtcSession(CreateWebRtcSession()) {
+  if (m_WebRtcSession != nullptr) {
+    m_WebRtcSession->SetCommandMessageHandler(
+        [this](std::string_view Payload) {
+          HandleWebSocketMessage(Payload);
+        });
+  }
+}
 
 RemoteViewportServer::~RemoteViewportServer() { Stop(); }
 
@@ -591,7 +598,11 @@ void RemoteViewportServer::OnSessionTransportDisconnected() {
 
 void RemoteViewportServer::OnSessionTransportEditorEvent(
     const PublishedEditorEvent &Event) {
-  BroadcastTextMessage(SerializeEvent(Event));
+  const std::string Message = SerializeEvent(Event);
+  BroadcastTextMessage(Message);
+  if (m_WebRtcSession != nullptr) {
+    m_WebRtcSession->SendReliableMessage(Message);
+  }
 }
 
 void RemoteViewportServer::OnSessionTransportViewportFrame(
@@ -603,6 +614,9 @@ void RemoteViewportServer::OnSessionTransportViewportFrame(
   }
 
   SetLatestFrame(*Captured);
+  if (m_WebRtcSession != nullptr) {
+    m_WebRtcSession->OnViewportFrame(Frame);
+  }
 }
 
 void RemoteViewportServer::OnSessionTransportEncodedVideoPacket(

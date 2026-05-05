@@ -3,8 +3,10 @@
 #include "HeadlessCommandProtocol.h"
 
 #include <Renderer/VideoEncoding.h>
+#include <Renderer/ViewportFrameOutput.h>
 
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -36,6 +38,10 @@ public:
   virtual std::vector<WebRtcIceCandidate> TakePendingLocalIceCandidates() = 0;
   virtual std::vector<EncodedVideoPacket> TakePendingEncodedVideoPackets() = 0;
   virtual bool CloseSession(std::string_view Reason, std::string &Error) = 0;
+  virtual void SetCommandMessageHandler(
+      std::function<void(std::string_view)> Handler) = 0;
+  virtual void SendReliableMessage(std::string_view Message) = 0;
+  virtual void OnViewportFrame(const ViewportFrame &Frame) = 0;
   virtual void OnEncodedVideoPacket(const EncodedVideoPacket &Packet) = 0;
   virtual void ResetPeer(std::string_view Reason) = 0;
 };

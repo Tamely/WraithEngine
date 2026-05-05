@@ -235,6 +235,8 @@ constexpr std::string_view BrowserScript = R"js(const state = {
   peerConnection: null,
   reliableChannel: null,
   unreliableChannel: null,
+  pendingLocalIceCandidates: [],
+  remoteDescriptionApplied: false,
   statusPollHandle: null,
   icePollHandle: null,
   keepPollingStatus: false,
@@ -290,6 +292,27 @@ function canSendReliably() {
 
 function canSendUnreliably() {
   return channelOpen(state.unreliableChannel);
+}
+
+async function flushPendingLocalIceCandidates(expectedGeneration) {
+  if (!state.peerConnection || expectedGeneration !== currentGeneration()) {
+    return;
+  }
+  if (!state.remoteDescriptionApplied || state.pendingLocalIceCandidates.length === 0) {
+    return;
+  }
+
+  const pending = state.pendingLocalIceCandidates.splice(0, state.pendingLocalIceCandidates.length);
+  for (const candidate of pending) {
+    try {
+      await postJson('/webrtc/ice-candidate', candidate);
+      appendLog({ type: 'local_ice_uploaded', candidate: candidate.candidate });
+    } catch (error) {
+      appendError('local ICE upload failed', error);
+      state.pendingLocalIceCandidates.unshift(candidate);
+      break;
+    }
+  }
 }
 
 async function postJson(url, payload) {
@@ -569,6 +592,8 @@ async function connect() {
   await destroyPeerConnection('reconnect', true);
   state.signalingInFlight = true;
   state.keepPollingStatus = true;
+  state.pendingLocalIceCandidates = [];
+  state.remoteDescriptionApplied = false;
 
   setStatus('idle', 'Connecting');
   viewportOverlay.textContent = 'Creating browser WebRTC offer...';
@@ -636,6 +661,11 @@ async function connect() {
     }
   });
 
+  peer.addTransceiver('video', {
+    direction: 'recvonly'
+  });
+  appendLog({ type: 'transceiver_added', kind: 'video', direction: 'recvonly' });
+
   peer.addEventListener('icecandidate', async (event) => {
     if (generation !== currentGeneration()) {
       return;
@@ -646,14 +676,17 @@ async function connect() {
     }
 
     appendLog({ type: 'local_ice_candidate', candidate: event.candidate.candidate });
-    try {
-      await postJson('/webrtc/ice-candidate', {
-        candidate: event.candidate.candidate,
-        sdpMid: event.candidate.sdpMid,
-        sdpMLineIndex: event.candidate.sdpMLineIndex
-      });
-    } catch (error) {
-      appendError('local ICE upload failed', error);
+    if (!event.candidate.candidate) {
+      return;
+    }
+
+    state.pendingLocalIceCandidates.push({
+      candidate: event.candidate.candidate,
+      sdpMid: event.candidate.sdpMid,
+      sdpMLineIndex: event.candidate.sdpMLineIndex
+    });
+    if (state.remoteDescriptionApplied) {
+      await flushPendingLocalIceCandidates(generation);
     }
   });
 
@@ -669,11 +702,11 @@ async function connect() {
   wireDataChannel(state.unreliableChannel, 'viewport-input');
 
   try {
-    const offer = await peer.createOffer({
-      offerToReceiveAudio: false,
-      offerToReceiveVideo: true
-    });
+    appendLog({ type: 'creating_offer' });
+    const offer = await peer.createOffer();
+    appendLog({ type: 'offer_created', typeName: offer.type, sdpLength: offer.sdp ? offer.sdp.length : 0 });
     await peer.setLocalDescription(offer);
+    appendLog({ type: 'local_description_set', signalingState: peer.signalingState });
 
     const answer = await postJson('/webrtc/offer', {
       type: offer.type,
@@ -691,6 +724,9 @@ async function connect() {
     }
 
     await peer.setRemoteDescription(answer);
+    state.remoteDescriptionApplied = true;
+    appendLog({ type: 'remote_description_set', signalingState: peer.signalingState });
+    await flushPendingLocalIceCandidates(generation);
     setStatus('idle', 'Awaiting Media');
     viewportOverlay.textContent = 'Offer accepted. Waiting for remote media...';
   } catch (error) {

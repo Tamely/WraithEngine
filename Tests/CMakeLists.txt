@@ -5,6 +5,12 @@ add_executable(AxiomTests
   ../Headless/WebRtcSession.cpp
 )
 
+if(APPLE)
+  target_sources(AxiomTests PRIVATE
+    ../Headless/MacOSWebRtcSession.mm
+  )
+endif()
+
 target_link_libraries(AxiomTests PRIVATE
   AxiomCore
   GTest::gtest_main

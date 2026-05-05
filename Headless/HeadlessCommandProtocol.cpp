@@ -30,6 +30,50 @@ std::optional<double> ParseDouble(std::string_view Value) {
   return Result;
 }
 
+std::string UnescapeJsonString(std::string_view Value) {
+  std::string Unescaped;
+  Unescaped.reserve(Value.size());
+  for (size_t Index = 0; Index < Value.size(); ++Index) {
+    const char Character = Value[Index];
+    if (Character != '\\' || Index + 1 >= Value.size()) {
+      Unescaped.push_back(Character);
+      continue;
+    }
+
+    const char Escape = Value[++Index];
+    switch (Escape) {
+    case '\\':
+      Unescaped.push_back('\\');
+      break;
+    case '"':
+      Unescaped.push_back('"');
+      break;
+    case '/':
+      Unescaped.push_back('/');
+      break;
+    case 'b':
+      Unescaped.push_back('\b');
+      break;
+    case 'f':
+      Unescaped.push_back('\f');
+      break;
+    case 'n':
+      Unescaped.push_back('\n');
+      break;
+    case 'r':
+      Unescaped.push_back('\r');
+      break;
+    case 't':
+      Unescaped.push_back('\t');
+      break;
+    default:
+      Unescaped.push_back(Escape);
+      break;
+    }
+  }
+  return Unescaped;
+}
+
 std::optional<uint16_t> ParseUnsigned16(std::string_view Value) {
   uint16_t Result = 0;
   const auto [Ptr, Ec] =
@@ -358,7 +402,8 @@ ParseWebRtcSessionDescription(std::string_view JsonLine, std::string &Error) {
     return std::nullopt;
   }
 
-  return WebRtcSessionDescription{.Type = *Type, .Sdp = *Sdp};
+  return WebRtcSessionDescription{.Type = *Type,
+                                  .Sdp = UnescapeJsonString(*Sdp)};
 }
 
 std::optional<WebRtcIceCandidate>
@@ -375,8 +420,10 @@ ParseWebRtcIceCandidate(std::string_view JsonLine, std::string &Error) {
     return std::nullopt;
   }
 
-  WebRtcIceCandidate Parsed{.Candidate = *Candidate};
-  Parsed.SdpMid = MatchString(JsonLine, MidPattern);
+  WebRtcIceCandidate Parsed{.Candidate = UnescapeJsonString(*Candidate)};
+  if (const auto Mid = MatchString(JsonLine, MidPattern); Mid.has_value()) {
+    Parsed.SdpMid = UnescapeJsonString(*Mid);
+  }
 
   const auto MLineValue = MatchString(JsonLine, MLinePattern);
   if (MLineValue.has_value()) {
