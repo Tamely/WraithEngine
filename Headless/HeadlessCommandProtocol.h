@@ -8,8 +8,10 @@
 #include <filesystem>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Axiom {
 enum class HeadlessCommandType {
@@ -33,6 +35,17 @@ struct HeadlessAppOptions {
   uint32_t Height{900};
 };
 
+struct WebRtcSessionDescription {
+  std::string Type;
+  std::string Sdp;
+};
+
+struct WebRtcIceCandidate {
+  std::string Candidate;
+  std::optional<std::string> SdpMid;
+  std::optional<uint16_t> SdpMLineIndex;
+};
+
 std::optional<HeadlessAppOptions> ParseHeadlessOptions(int argc, char **argv,
                                                        std::string &Error);
 std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
@@ -50,6 +63,22 @@ std::string SerializeFrameMetadata(uint64_t FrameIndex, uint32_t Width,
 std::string SerializeEncodedVideoPacketMetadata(
     const EncodedVideoPacket &Packet,
     std::string_view PacketUrl = "/h264");
+std::optional<WebRtcSessionDescription>
+ParseWebRtcSessionDescription(std::string_view JsonLine, std::string &Error);
+std::optional<WebRtcIceCandidate>
+ParseWebRtcIceCandidate(std::string_view JsonLine, std::string &Error);
+std::string SerializeWebRtcSessionDescription(
+    const WebRtcSessionDescription &Description,
+    std::string_view SessionId = {});
+std::string SerializeWebRtcIceCandidate(const WebRtcIceCandidate &Candidate);
+std::string SerializeWebRtcIceCandidateList(
+    std::span<const WebRtcIceCandidate> Candidates);
+std::string SerializeWebRtcStatus(bool Enabled, bool Available,
+                                  std::string_view SignalingState,
+                                  std::string_view ConnectionState,
+                                  std::string_view Detail,
+                                  std::string_view SessionId,
+                                  size_t PendingLocalIceCandidateCount);
 std::string SerializeError(std::string_view Message);
 std::string SerializeShutdown();
 std::optional<HeadlessCommand>

@@ -1,12 +1,14 @@
 #pragma once
 
 #include "HeadlessSessionHost.h"
+#include "WebRtcSession.h"
 
 #include <Remote/SessionTransport.h>
 #include <Renderer/RendererBackend.h>
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -73,6 +75,10 @@ private:
   bool HandleGetRequest(uintptr_t ClientSocketValue, std::string_view Path);
   bool HandlePostRequest(uintptr_t ClientSocketValue, std::string_view Path,
                          std::string_view Body);
+  bool HandleWebRtcOfferRequest(uintptr_t ClientSocketValue,
+                                std::string_view Body);
+  bool HandleWebRtcIceCandidateRequest(uintptr_t ClientSocketValue,
+                                       std::string_view Body);
   bool HandleWebSocketUpgrade(uintptr_t ClientSocketValue,
                               std::string_view HeaderBlock,
                               std::string_view Path);
@@ -98,6 +104,7 @@ private:
   mutable std::mutex m_ClientMutex;
   std::vector<WebSocketClient> m_WebSocketClients;
   mutable std::mutex m_SendMutex;
+  std::unique_ptr<IWebRtcSession> m_WebRtcSession;
 };
 
 bool ParseRemoteViewportServerOptions(int argc, char **argv,

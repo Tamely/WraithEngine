@@ -30,6 +30,16 @@ std::optional<double> ParseDouble(std::string_view Value) {
   return Result;
 }
 
+std::optional<uint16_t> ParseUnsigned16(std::string_view Value) {
+  uint16_t Result = 0;
+  const auto [Ptr, Ec] =
+      std::from_chars(Value.data(), Value.data() + Value.size(), Result);
+  if (Ec != std::errc{} || Ptr != Value.data() + Value.size()) {
+    return std::nullopt;
+  }
+  return Result;
+}
+
 template <typename MatchType>
 std::string_view MatchView(const MatchType &Match, size_t Index) {
   return std::string_view(&*Match[Index].first, Match[Index].length());
@@ -323,6 +333,123 @@ std::string SerializeEncodedVideoPacketMetadata(
          << ",\"isKeyframe\":"
          << (Packet.IsKeyframe ? "true" : "false")
          << ",\"byteLength\":" << Packet.Bytes.size() << "}";
+  return Stream.str();
+}
+
+std::optional<WebRtcSessionDescription>
+ParseWebRtcSessionDescription(std::string_view JsonLine, std::string &Error) {
+  static const std::regex TypePattern(R"json("type"\s*:\s*"([^"]+)")json");
+  static const std::regex SdpPattern(R"json("sdp"\s*:\s*"((?:\\.|[^"])*)")json");
+
+  const auto Type = MatchString(JsonLine, TypePattern);
+  if (!Type.has_value()) {
+    Error = "WebRTC session description is missing a string `type` field.";
+    return std::nullopt;
+  }
+
+  const auto Sdp = MatchString(JsonLine, SdpPattern);
+  if (!Sdp.has_value()) {
+    Error = "WebRTC session description is missing a string `sdp` field.";
+    return std::nullopt;
+  }
+
+  if (*Type != "offer" && *Type != "answer") {
+    Error = "Unsupported WebRTC session description type: " + *Type;
+    return std::nullopt;
+  }
+
+  return WebRtcSessionDescription{.Type = *Type, .Sdp = *Sdp};
+}
+
+std::optional<WebRtcIceCandidate>
+ParseWebRtcIceCandidate(std::string_view JsonLine, std::string &Error) {
+  static const std::regex CandidatePattern(
+      R"json("candidate"\s*:\s*"((?:\\.|[^"])*)")json");
+  static const std::regex MidPattern(R"json("sdpMid"\s*:\s*"([^"]+)")json");
+  static const std::regex MLinePattern(
+      R"json("sdpMLineIndex"\s*:\s*([0-9]+))json");
+
+  const auto Candidate = MatchString(JsonLine, CandidatePattern);
+  if (!Candidate.has_value()) {
+    Error = "WebRTC ICE candidate is missing a string `candidate` field.";
+    return std::nullopt;
+  }
+
+  WebRtcIceCandidate Parsed{.Candidate = *Candidate};
+  Parsed.SdpMid = MatchString(JsonLine, MidPattern);
+
+  const auto MLineValue = MatchString(JsonLine, MLinePattern);
+  if (MLineValue.has_value()) {
+    const auto ParsedIndex = ParseUnsigned16(*MLineValue);
+    if (!ParsedIndex.has_value()) {
+      Error = "WebRTC ICE candidate `sdpMLineIndex` must be an unsigned integer.";
+      return std::nullopt;
+    }
+    Parsed.SdpMLineIndex = *ParsedIndex;
+  }
+
+  return Parsed;
+}
+
+std::string SerializeWebRtcSessionDescription(
+    const WebRtcSessionDescription &Description, std::string_view SessionId) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"" << EscapeJson(Description.Type) << "\",\"sdp\":\""
+         << EscapeJson(Description.Sdp) << "\"";
+  if (!SessionId.empty()) {
+    Stream << ",\"sessionId\":\"" << EscapeJson(SessionId) << "\"";
+  }
+  Stream << "}";
+  return Stream.str();
+}
+
+std::string SerializeWebRtcIceCandidate(const WebRtcIceCandidate &Candidate) {
+  std::ostringstream Stream;
+  Stream << "{\"candidate\":\"" << EscapeJson(Candidate.Candidate) << "\"";
+  if (Candidate.SdpMid.has_value()) {
+    Stream << ",\"sdpMid\":\"" << EscapeJson(*Candidate.SdpMid) << "\"";
+  }
+  if (Candidate.SdpMLineIndex.has_value()) {
+    Stream << ",\"sdpMLineIndex\":" << *Candidate.SdpMLineIndex;
+  }
+  Stream << "}";
+  return Stream.str();
+}
+
+std::string SerializeWebRtcIceCandidateList(
+    std::span<const WebRtcIceCandidate> Candidates) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"ice_candidates\",\"candidates\":[";
+  for (size_t Index = 0; Index < Candidates.size(); ++Index) {
+    if (Index != 0) {
+      Stream << ",";
+    }
+    Stream << SerializeWebRtcIceCandidate(Candidates[Index]);
+  }
+  Stream << "]}";
+  return Stream.str();
+}
+
+std::string SerializeWebRtcStatus(bool Enabled, bool Available,
+                                  std::string_view SignalingState,
+                                  std::string_view ConnectionState,
+                                  std::string_view Detail,
+                                  std::string_view SessionId,
+                                  size_t PendingLocalIceCandidateCount) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"webrtc_status\",\"enabled\":"
+         << (Enabled ? "true" : "false") << ",\"available\":"
+         << (Available ? "true" : "false") << ",\"signalingState\":\""
+         << EscapeJson(SignalingState) << "\",\"connectionState\":\""
+         << EscapeJson(ConnectionState) << "\",\"detail\":\""
+         << EscapeJson(Detail) << "\",\"sessionId\":\""
+         << EscapeJson(SessionId) << "\",\"pendingLocalIceCandidateCount\":"
+         << PendingLocalIceCandidateCount
+         << ",\"video\":{\"codec\":\"h264\"},\"dataChannels\":["
+         << "{\"label\":\"editor-events\",\"ordered\":true,"
+            "\"maxRetransmits\":null},"
+         << "{\"label\":\"viewport-input\",\"ordered\":false,"
+            "\"maxRetransmits\":0}]}";
   return Stream.str();
 }
 

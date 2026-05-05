@@ -95,6 +95,12 @@ target_compile_definitions(AxiomCore PUBLIC
   AXIOM_CONTENT_DIR="${CMAKE_SOURCE_DIR}/Content"
 )
 
+if(AXIOM_ENABLE_WEBRTC)
+  target_compile_definitions(AxiomCore PUBLIC AXIOM_ENABLE_WEBRTC=1)
+else()
+  target_compile_definitions(AxiomCore PUBLIC AXIOM_ENABLE_WEBRTC=0)
+endif()
+
 if(AXIOM_VULKAN_LOADER_PATH)
   string(REPLACE "\\" "\\\\" AXIOM_VULKAN_LOADER_PATH_ESCAPED
          "${AXIOM_VULKAN_LOADER_PATH}")

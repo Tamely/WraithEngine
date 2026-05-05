@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(BUILD_TESTING "Build tests" OFF)
+option(AXIOM_ENABLE_WEBRTC
+       "Enable the macOS WebRTC transport integration seam" OFF)
 
 add_subdirectory(ThirdParty/spdlog)
 add_subdirectory(ThirdParty/glfw)

@@ -2,6 +2,7 @@ add_executable(AxiomTests
   LayerTests.cpp
   HeadlessProtocolTests.cpp
   ../Headless/HeadlessCommandProtocol.cpp
+  ../Headless/WebRtcSession.cpp
 )
 
 target_link_libraries(AxiomTests PRIVATE
