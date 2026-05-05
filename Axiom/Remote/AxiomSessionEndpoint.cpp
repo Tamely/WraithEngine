@@ -55,4 +55,11 @@ void AxiomSessionEndpoint::OnViewportFrame(const ViewportFrame &Frame) {
     Subscriber->OnSessionTransportViewportFrame(Frame);
   }
 }
+
+void AxiomSessionEndpoint::OnEncodedVideoPacket(
+    const EncodedVideoPacket &Packet) {
+  for (ISessionTransportSubscriber *Subscriber : m_Subscribers) {
+    Subscriber->OnSessionTransportEncodedVideoPacket(Packet);
+  }
+}
 } // namespace Axiom

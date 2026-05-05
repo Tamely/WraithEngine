@@ -77,6 +77,14 @@ public:
         Axiom::ViewportFrameFormat::R16G16B16A16Float};
   };
 
+  struct EncodedPacketRecord {
+    Axiom::EncodedVideoCodec Codec{Axiom::EncodedVideoCodec::H264};
+    uint64_t FrameIndex{0};
+    uint32_t Width{0};
+    uint32_t Height{0};
+    bool IsKeyframe{false};
+  };
+
   void OnSessionTransportConnected() override { ++ConnectedCount; }
 
   void OnSessionTransportDisconnected() override { ++DisconnectedCount; }
@@ -95,11 +103,23 @@ public:
     LastFrameBytes.assign(Frame.Pixels.begin(), Frame.Pixels.end());
   }
 
+  void OnSessionTransportEncodedVideoPacket(
+      const Axiom::EncodedVideoPacket &Packet) override {
+    EncodedPackets.push_back({.Codec = Packet.Codec,
+                              .FrameIndex = Packet.FrameIndex,
+                              .Width = Packet.Width,
+                              .Height = Packet.Height,
+                              .IsKeyframe = Packet.IsKeyframe});
+    LastEncodedPacketBytes = Packet.Bytes;
+  }
+
   size_t ConnectedCount{0};
   size_t DisconnectedCount{0};
   std::vector<Axiom::PublishedEditorEvent> Events;
   std::vector<FrameRecord> Frames;
+  std::vector<EncodedPacketRecord> EncodedPackets;
   std::vector<std::byte> LastFrameBytes;
+  std::vector<std::byte> LastEncodedPacketBytes;
 };
 
 Axiom::CommandContext MakeContext(uint64_t FrameIndex = 1) {
@@ -406,6 +426,23 @@ TEST(RemoteViewportTests, AxiomEndpointForwardsEventsAndFrames) {
   EXPECT_EQ(Subscriber.LastFrameBytes.size(), Bytes.size());
   EXPECT_EQ(Subscriber.LastFrameBytes[0], Bytes[0]);
 
+  Endpoint.OnEncodedVideoPacket({
+      .Codec = Axiom::EncodedVideoCodec::H264,
+      .FrameIndex = 100,
+      .Width = 640,
+      .Height = 360,
+      .IsKeyframe = true,
+      .Bytes = {std::byte{0x05}, std::byte{0x06}, std::byte{0x07}},
+  });
+
+  ASSERT_EQ(Subscriber.EncodedPackets.size(), 1u);
+  EXPECT_EQ(Subscriber.EncodedPackets.front().Codec,
+            Axiom::EncodedVideoCodec::H264);
+  EXPECT_EQ(Subscriber.EncodedPackets.front().FrameIndex, 100u);
+  EXPECT_TRUE(Subscriber.EncodedPackets.front().IsKeyframe);
+  EXPECT_EQ(Subscriber.LastEncodedPacketBytes.size(), 3u);
+  EXPECT_EQ(Subscriber.LastEncodedPacketBytes[1], std::byte{0x06});
+
   Endpoint.Disconnect(&Subscriber);
   EXPECT_EQ(Subscriber.DisconnectedCount, 1u);
 }
@@ -440,4 +477,3 @@ TEST(RemoteViewportTests, AxiomEndpointConnectIsIdempotentAndStopsAfterDisconnec
   Session.Tick();
   EXPECT_EQ(Subscriber.Events.size(), 1u);
 }
-

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Renderer/VideoEncoding.h"
 #include "Renderer/ViewportFrameOutput.h"
 #include "Session/EditorCommand.h"
 #include "Session/EditorEvent.h"
@@ -14,6 +15,8 @@ public:
   virtual void OnSessionTransportEditorEvent(
       const PublishedEditorEvent &Event) = 0;
   virtual void OnSessionTransportViewportFrame(const ViewportFrame &Frame) = 0;
+  virtual void OnSessionTransportEncodedVideoPacket(
+      const EncodedVideoPacket &Packet) {}
 };
 
 class ISessionTransport {
