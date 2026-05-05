@@ -39,6 +39,45 @@ TEST(HeadlessProtocolTests, RejectsRenderWithoutType) {
   EXPECT_NE(Error.find("type"), std::string::npos);
 }
 
+TEST(HeadlessProtocolTests, ParsesWireframeViewModeCommand) {
+  std::string Error;
+  const auto Command = Axiom::ParseHeadlessCommand(
+      R"json({"type":"set_view_mode","viewMode":"wireframe"})json", Error);
+
+  ASSERT_TRUE(Command.has_value()) << Error;
+  EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::SetViewMode);
+  EXPECT_EQ(Command->ViewMode, Axiom::RendererViewMode::Wireframe);
+}
+
+TEST(HeadlessProtocolTests, RejectsUnsupportedViewMode) {
+  std::string Error;
+  const auto Command = Axiom::ParseHeadlessCommand(
+      R"json({"type":"set_view_mode","viewMode":"xray"})json", Error);
+
+  EXPECT_FALSE(Command.has_value());
+  EXPECT_NE(Error.find("Unsupported view mode"), std::string::npos);
+}
+
+TEST(HeadlessProtocolTests, RemoteViewportRejectsRenderFrameCommand) {
+  std::string Error;
+  const auto Command =
+      Axiom::ParseRemoteViewportCommand(R"json({"type":"render_frame"})json",
+                                        Error);
+
+  EXPECT_FALSE(Command.has_value());
+  EXPECT_NE(Error.find("does not accept"), std::string::npos);
+}
+
+TEST(HeadlessProtocolTests, RemoteViewportAcceptsCameraCommand) {
+  std::string Error;
+  const auto Command = Axiom::ParseRemoteViewportCommand(
+      R"json({"type":"update_viewport_camera","worldMovement":[0.0,0.0,-0.25]})json",
+      Error);
+
+  ASSERT_TRUE(Command.has_value()) << Error;
+  EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::UpdateViewportCamera);
+}
+
 TEST(HeadlessProtocolTests, SerializesCommandRejectedEvent) {
   const Axiom::PublishedEditorEvent Event{
       .Id = Axiom::EventId{4},
@@ -54,4 +93,17 @@ TEST(HeadlessProtocolTests, SerializesCommandRejectedEvent) {
             std::string::npos);
   EXPECT_NE(Json.find("\"rejectedCommandId\":9"), std::string::npos);
   EXPECT_NE(Json.find("\"reason\":\"bad input\""), std::string::npos);
+}
+
+TEST(HeadlessProtocolTests, SerializesRemoteViewportLifecycleMessages) {
+  EXPECT_EQ(Axiom::SerializeConnected(), "{\"type\":\"connected\"}");
+  EXPECT_EQ(Axiom::SerializeDisconnected(), "{\"type\":\"disconnected\"}");
+
+  const std::string Json =
+      Axiom::SerializeFrameMetadata(7, 1280, 720, "/frame");
+  EXPECT_NE(Json.find("\"type\":\"frame\""), std::string::npos);
+  EXPECT_NE(Json.find("\"frameIndex\":7"), std::string::npos);
+  EXPECT_NE(Json.find("\"path\":\"/frame\""), std::string::npos);
+  EXPECT_NE(Json.find("\"width\":1280"), std::string::npos);
+  EXPECT_NE(Json.find("\"height\":720"), std::string::npos);
 }

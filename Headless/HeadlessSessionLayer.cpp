@@ -35,6 +35,11 @@ void HeadlessSessionLayer::Submit(const EditorCommand &Command) {
   m_Session.Submit(MakeContext(), Command);
 }
 
+void HeadlessSessionLayer::SubmitToTransport(ISessionTransport &Transport,
+                                             const EditorCommand &Command) {
+  Transport.Submit(MakeContext(), Command);
+}
+
 CommandContext HeadlessSessionLayer::MakeContext() const {
   return {
       .Session = m_SessionId,

@@ -69,6 +69,12 @@ void Renderer::EndFrame() {
   m_Backend->EndFrame();
 }
 
+void Renderer::SetViewMode(RendererViewMode ViewMode) {
+  if (m_Backend != nullptr) {
+    m_Backend->SetViewMode(ViewMode);
+  }
+}
+
 void Renderer::SetViewportFrameOutput(IViewportFrameOutput *FrameOutput) {
   if (m_Backend != nullptr) {
     m_Backend->SetViewportFrameOutput(FrameOutput);

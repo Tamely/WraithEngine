@@ -13,6 +13,7 @@
 namespace Axiom {
 enum class HeadlessCommandType {
   LoadStartupScene,
+  SetViewMode,
   SetLookActive,
   UpdateViewportCamera,
   RenderFrame,
@@ -22,6 +23,7 @@ enum class HeadlessCommandType {
 struct HeadlessCommand {
   HeadlessCommandType Type;
   EditorCommand EditorPayload;
+  RendererViewMode ViewMode{RendererViewMode::Lit};
 };
 
 struct HeadlessAppOptions {
@@ -37,8 +39,15 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
 std::string EscapeJson(std::string_view Value);
 std::string SerializeEvent(const PublishedEditorEvent &Event);
 std::string SerializeReady(uint32_t Width, uint32_t Height);
+std::string SerializeConnected();
+std::string SerializeDisconnected();
 std::string SerializeFrame(const std::filesystem::path &Path,
                            const CapturedFrame &Frame);
+std::string SerializeFrameMetadata(uint64_t FrameIndex, uint32_t Width,
+                                   uint32_t Height,
+                                   std::string_view FrameUrl = "/frame");
 std::string SerializeError(std::string_view Message);
 std::string SerializeShutdown();
+std::optional<HeadlessCommand>
+ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error);
 } // namespace Axiom

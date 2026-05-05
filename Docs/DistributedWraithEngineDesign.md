@@ -2,7 +2,7 @@
 
 ## Document Status
 - Status: Draft
-- Date: 2026-05-04
+- Date: 2026-05-05
 - Audience: Engine, tools, networking, web, and infrastructure contributors
 - Intended outcome: Establish the target architecture for evolving WraithEngine into a distributed game engine and browser-based collaborative editor
 
@@ -13,7 +13,12 @@
 - Added deterministic in-process command draining, authoritative event publication, and focused tests for camera/look state transitions and command rejection
 - Restored the `GLFW split` and application/runtime seams after the `headless` merge so local windowed input remains an adapter rather than the editor authority boundary
 - `AxiomHeadless` now boots successfully in headless Vulkan mode, renders offscreen, and publishes viewport frames back through `AxiomSessionEndpoint`
-- This subphase establishes the runtime-mode, surface, and frame-output seams needed for remote viewport work, but does not yet add a browser client, WebRTC transport, or a full remote editor UI
+- Added engine-facing `ISessionTransport` and made `AxiomSessionEndpoint` the first in-process transport implementation
+- Added `AxiomRemoteViewportDevClient` as a transport-subscriber harness that receives authoritative events and writes client-received frames to disk
+- Added `AxiomRemoteViewportServer` as the first real browser-facing remote viewport prototype, first using HTTP plus image polling and now using WebSocket plus JPEG frame push
+- The WebSocket plus JPEG slice improves the prototype substantially, but it is still too choppy for the target remote-editor experience
+- WebRTC plus H.264 is now the highest-priority next transport step
+- The long-lived browser editor UI should move into a root-level `EditorFrontend` workspace using React, Next.js, and Tailwind CSS instead of continuing to grow only inside the temporary localhost prototype
 
 ## 1. Executive Summary
 WraithEngine will evolve from a single-process native editor into a distributed platform with one shared C++ engine runtime that supports two execution styles:
@@ -126,6 +131,11 @@ The distributed platform is made of three primary roles:
    - React/Next.js/Tailwind app
    - Owns all browser editor UI outside the streamed viewport
    - Connects to control APIs and realtime session transport
+
+Current implementation direction:
+
+- add a root-level `EditorFrontend` folder as the home for the browser editor shell
+- treat the current localhost viewport page served by `AxiomRemoteViewportServer` as a temporary bring-up client that can be migrated or retired once `EditorFrontend` is in place
 
 ### 6.2 Conceptual Topology
 ```text
@@ -860,7 +870,11 @@ Progress update:
 - native editor path still works as the first local adapter
 - runtime modes, render surfaces, and endpoint-oriented frame output are now wired back together
 - `AxiomHeadless` is working as a command-driven headless runtime prototype
-- browser transport, encode/streaming, and a true remote editor client are still pending
+- `ISessionTransport` now formalizes the engine-facing remote boundary
+- `AxiomRemoteViewportDevClient` remains available as a transport debug harness
+- `AxiomRemoteViewportServer` now proves browser-driven remote viewport control against the same authoritative session seam
+- the current WebSocket plus JPEG transport is still visibly choppy and should not be treated as the endpoint architecture
+- WebRTC/H.264 transport and the broader browser editor shell are now the highest-priority remaining items in the remote viewport slice
 
 ### Phase 1: Remote Viewport Foundation
 - support headless or offscreen rendering
@@ -877,7 +891,10 @@ Subphase status update:
 - headless startup now works again without requiring a presentation surface
 - the local editor still uses `WindowInputPlatform + GlfwEditorInputSource`
 - offscreen frame publication is routed through `AxiomSessionEndpoint` rather than being hard-wired only to renderer-local capture polling
-- the next slice should build a real client on top of that runtime instead of extending the raw NDJSON prototype indefinitely
+- the current dev-client slice now proves the transport seam with an in-process subscriber harness
+- the current slice has replaced the dev harness as the main demo path
+- the current localhost:8080 browser client is still a temporary prototype and should be migrated into a root-level `EditorFrontend` application as the browser shell work begins
+- the next slice should prioritize WebRTC plus H.264 transport quality rather than continuing to invest heavily in the temporary JPEG-streaming path
 
 The first implementation step inside that phase is the `GLFW split`:
 
@@ -892,6 +909,11 @@ The first implementation step inside that phase is the `GLFW split`:
 - selection
 - logs
 - project/session joining
+
+Current implementation note:
+
+- this phase should start in a new root-level `EditorFrontend` folder
+- `EditorFrontend` should be the home for the React/Next.js/Tailwind editor shell and should eventually absorb or replace the temporary browser UI currently served by `AxiomRemoteViewportServer`
 
 ### Phase 3: Authoritative Editing
 - introduce command/event model
@@ -988,6 +1010,7 @@ Progress update:
 
 - item 6 is now implemented locally
 - the next slice should focus on items 1 through 5 in a way that reuses the new local session authority seam instead of bypassing it
+- the immediate priority inside items 3 through 5 is now WebRTC plus H.264 transport, not further iteration on the temporary JPEG-streaming localhost page
 
 That slice proves the core thesis:
 

@@ -48,6 +48,7 @@ public:
   [[nodiscard]] RuntimeMode GetRuntimeMode() const { return m_Config.Mode; }
   [[nodiscard]] Renderer &GetRenderer() const { return *m_Renderer; }
   void RequestClose();
+  void SetRendererViewMode(RendererViewMode ViewMode);
   void SetViewportFrameOutput(IViewportFrameOutput *FrameOutput);
 
 private:

@@ -15,6 +15,7 @@
 #include "Renderer/Vulkan/VulkanSwapchain.h"
 
 #include <array>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -38,6 +39,7 @@ public:
   const RendererFrameStats &GetFrameStats() const override;
   void RenderImGui() override;
   void EndFrame() override;
+  void SetViewMode(RendererViewMode ViewMode) override;
   void SetViewportFrameOutput(IViewportFrameOutput *FrameOutput) override;
   std::optional<CapturedFrame> ConsumeCapturedFrame() override;
 
@@ -59,14 +61,22 @@ private:
   void DrawBackground(VkCommandBuffer CommandBuffer);
   void DrawMeshes(VkCommandBuffer CommandBuffer, RenderScene &Scene);
   void BuildHzb(VkCommandBuffer CommandBuffer, MeshFrameResources &Frame);
-  void RecordOffscreenCapture(VkCommandBuffer CommandBuffer);
+  void RecordOffscreenCapture(VkCommandBuffer CommandBuffer,
+                              const AllocatedBuffer &ReadbackBuffer);
   void ClearDepthImage(VkCommandBuffer CommandBuffer);
   void InitViewportReadbackBuffers();
-  void PublishOffscreenFrame(FrameData &Frame);
+  void PublishCompletedOffscreenFrame(uint64_t FrameNumber);
   void Draw();
   static float HalfToFloat(uint16_t Value);
   static uint8_t LinearToByte(float Value);
-  void ConvertCapturedFrameToRgba8(const AllocatedBuffer &ReadbackBuffer);
+  void ConvertCapturedFrameToRgba8(const AllocatedBuffer &ReadbackBuffer,
+                                   uint64_t FrameNumber);
+
+  struct OffscreenCaptureFrame {
+    AllocatedBuffer ReadbackBuffer;
+    bool HasPendingReadback{false};
+    uint64_t SubmittedFrameNumber{0};
+  };
 
   FrameData &GetCurrentFrame() {
     return m_CommandContext.GetFrame(m_FrameNumber);
@@ -124,8 +134,8 @@ private:
   AllocatedImage m_DepthImage;
   AllocatedImage m_RasterDepthImage;
   AllocatedImage m_HzbImage;
-  AllocatedBuffer m_CaptureReadbackBuffer;
   VkExtent2D m_DrawExtent{};
+  std::array<OffscreenCaptureFrame, FRAME_OVERLAP> m_OffscreenCaptureFrames{};
   std::vector<VkImageView> m_HzbMipImageViews;
   std::vector<VkDescriptorSet> m_HzbReduceDescriptorSets;
   std::vector<VkExtent2D> m_HzbMipExtents;

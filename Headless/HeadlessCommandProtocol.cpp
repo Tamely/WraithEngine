@@ -116,6 +116,7 @@ std::optional<HeadlessAppOptions> ParseHeadlessOptions(int argc, char **argv,
 std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
                                                     std::string &Error) {
   static const std::regex TypePattern(R"json("type"\s*:\s*"([^"]+)")json");
+  static const std::regex ViewModePattern(R"json("viewMode"\s*:\s*"([^"]+)")json");
   static const std::regex BoolPattern(
       R"json("isLooking"\s*:\s*(true|false))json");
   static const std::regex CursorPattern(
@@ -138,6 +139,29 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
   if (*Type == "render_frame") {
     return HeadlessCommand{.Type = HeadlessCommandType::RenderFrame,
                            .EditorPayload = {}};
+  }
+  if (*Type == "set_view_mode") {
+    const auto ViewMode = MatchString(JsonLine, ViewModePattern);
+    if (!ViewMode.has_value()) {
+      Error = "`set_view_mode` requires `viewMode`.";
+      return std::nullopt;
+    }
+
+    RendererViewMode ParsedMode{};
+    if (*ViewMode == "lit") {
+      ParsedMode = RendererViewMode::Lit;
+    } else if (*ViewMode == "unlit") {
+      ParsedMode = RendererViewMode::Unlit;
+    } else if (*ViewMode == "wireframe") {
+      ParsedMode = RendererViewMode::Wireframe;
+    } else {
+      Error = "Unsupported view mode: " + *ViewMode;
+      return std::nullopt;
+    }
+
+    return HeadlessCommand{.Type = HeadlessCommandType::SetViewMode,
+                           .EditorPayload = {},
+                           .ViewMode = ParsedMode};
   }
   if (*Type == "quit") {
     return HeadlessCommand{.Type = HeadlessCommandType::Quit, .EditorPayload = {}};
@@ -176,6 +200,29 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
   }
 
   Error = "Unsupported command type: " + *Type;
+  return std::nullopt;
+}
+
+std::optional<HeadlessCommand>
+ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
+  const auto Command = ParseHeadlessCommand(JsonLine, Error);
+  if (!Command.has_value()) {
+    return std::nullopt;
+  }
+
+  switch (Command->Type) {
+  case HeadlessCommandType::SetViewMode:
+  case HeadlessCommandType::SetLookActive:
+  case HeadlessCommandType::UpdateViewportCamera:
+  case HeadlessCommandType::Quit:
+    return Command;
+  case HeadlessCommandType::LoadStartupScene:
+  case HeadlessCommandType::RenderFrame:
+    Error = "Remote viewport server does not accept that command type.";
+    return std::nullopt;
+  }
+
+  Error = "Unsupported remote command.";
   return std::nullopt;
 }
 
@@ -238,12 +285,26 @@ std::string SerializeReady(uint32_t Width, uint32_t Height) {
   return Stream.str();
 }
 
+std::string SerializeConnected() { return "{\"type\":\"connected\"}"; }
+
+std::string SerializeDisconnected() { return "{\"type\":\"disconnected\"}"; }
+
 std::string SerializeFrame(const std::filesystem::path &Path,
                            const CapturedFrame &Frame) {
   std::ostringstream Stream;
   Stream << "{\"type\":\"frame\",\"frameIndex\":" << Frame.FrameIndex
          << ",\"path\":\"" << EscapeJson(Path.string()) << "\",\"width\":"
          << Frame.Width << ",\"height\":" << Frame.Height << "}";
+  return Stream.str();
+}
+
+std::string SerializeFrameMetadata(uint64_t FrameIndex, uint32_t Width,
+                                   uint32_t Height,
+                                   std::string_view FrameUrl) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"frame\",\"frameIndex\":" << FrameIndex
+         << ",\"path\":\"" << EscapeJson(FrameUrl) << "\",\"width\":" << Width
+         << ",\"height\":" << Height << "}";
   return Stream.str();
 }
 

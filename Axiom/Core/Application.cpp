@@ -63,6 +63,12 @@ void Application::RequestClose() {
   }
 }
 
+void Application::SetRendererViewMode(RendererViewMode ViewMode) {
+  if (m_Renderer) {
+    m_Renderer->SetViewMode(ViewMode);
+  }
+}
+
 void Application::SetViewportFrameOutput(IViewportFrameOutput *FrameOutput) {
   m_Config.FrameOutput = FrameOutput;
   if (m_Renderer) {
