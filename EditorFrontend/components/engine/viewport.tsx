@@ -20,7 +20,7 @@ export function Viewport() {
   }, [])
 
   return (
-    <div className="flex-1 flex flex-col bg-neutral-900 border-b border-neutral-800">
+    <div className="h-full flex flex-col bg-neutral-900">
       <div className="flex items-center justify-between h-8 bg-neutral-950 border-b border-neutral-800 px-2">
         <div className="flex items-center gap-2">
           <button className="flex items-center gap-1 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 rounded">

@@ -107,9 +107,8 @@ export function Outliner({ selectedItem, onSelectItem }: OutlinerProps) {
     return (
       <div key={item.id}>
         <div
-          className={`flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-neutral-800 ${
-            isSelected ? "bg-neutral-700" : ""
-          }`}
+          className={`flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-neutral-800 ${isSelected ? "bg-neutral-700" : ""
+            }`}
           style={{ paddingLeft: `${depth * 16 + 8}px` }}
           onClick={() => onSelectItem(item.id)}
         >
@@ -146,7 +145,7 @@ export function Outliner({ selectedItem, onSelectItem }: OutlinerProps) {
   }
 
   return (
-    <div className="flex-1 flex flex-col border-b border-neutral-800 overflow-hidden">
+    <div className="h-full flex flex-col overflow-hidden">
       <div className="flex items-center justify-between h-8 bg-neutral-950 border-b border-neutral-800 px-2">
         <div className="flex items-center gap-1">
           <Layers className="w-4 h-4 text-neutral-400" />

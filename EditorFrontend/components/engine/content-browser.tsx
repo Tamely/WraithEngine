@@ -92,9 +92,8 @@ export function ContentBrowser() {
     return (
       <div key={folder.id}>
         <div
-          className={`flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-neutral-800 ${
-            isSelected ? "bg-neutral-700" : ""
-          }`}
+          className={`flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-neutral-800 ${isSelected ? "bg-neutral-700" : ""
+            }`}
           style={{ paddingLeft: `${depth * 12 + 8}px` }}
           onClick={() => setSelectedFolder(folder.id)}
         >
@@ -124,7 +123,7 @@ export function ContentBrowser() {
   }
 
   return (
-    <div className="h-48 flex flex-col bg-neutral-950 border-t border-neutral-800">
+    <div className="h-full flex flex-col bg-neutral-950">
       <div className="flex items-center h-8 border-b border-neutral-800 px-2 gap-2">
         <button className="flex items-center gap-1 px-2 py-1 text-xs bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded">
           <Plus className="w-3 h-3" />
@@ -182,9 +181,8 @@ export function ContentBrowser() {
                 <div
                   key={asset.id}
                   onClick={() => setSelectedAsset(asset.id)}
-                  className={`flex flex-col items-center p-1 rounded cursor-pointer hover:bg-neutral-800 ${
-                    selectedAsset === asset.id ? "bg-neutral-700 ring-1 ring-white/30" : ""
-                  }`}
+                  className={`flex flex-col items-center p-1 rounded cursor-pointer hover:bg-neutral-800 ${selectedAsset === asset.id ? "bg-neutral-700 ring-1 ring-white/30" : ""
+                    }`}
                 >
                   <div
                     className="w-12 h-12 rounded-full mb-1 border border-neutral-700"
