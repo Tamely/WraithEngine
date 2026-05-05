@@ -23,7 +23,6 @@
 #  endif
 #include <winsock2.h>
 #include <windows.h>
-#include <wincrypt.h>
 #include <ws2tcpip.h>
 #else
 #include <arpa/inet.h>
@@ -369,39 +368,96 @@ std::string Base64Encode(const unsigned char *Data, size_t Size) {
 
 std::optional<std::array<unsigned char, 20>>
 ComputeSha1(std::string_view Input) {
-#ifdef _WIN32
-  HCRYPTPROV Provider = 0;
-  HCRYPTHASH Hash = 0;
   std::array<unsigned char, 20> Digest{};
-
-  if (!CryptAcquireContext(&Provider, nullptr, nullptr, PROV_RSA_FULL,
-                           CRYPT_VERIFYCONTEXT)) {
-    return std::nullopt;
+  uint64_t BitLength = static_cast<uint64_t>(Input.size()) * 8u;
+  std::vector<unsigned char> Buffer(Input.begin(), Input.end());
+  Buffer.push_back(0x80u);
+  while ((Buffer.size() % 64u) != 56u) {
+    Buffer.push_back(0u);
   }
-  if (!CryptCreateHash(Provider, CALG_SHA1, 0, 0, &Hash)) {
-    CryptReleaseContext(Provider, 0);
-    return std::nullopt;
-  }
-  if (!CryptHashData(Hash,
-                     reinterpret_cast<const BYTE *>(Input.data()),
-                     static_cast<DWORD>(Input.size()), 0)) {
-    CryptDestroyHash(Hash);
-    CryptReleaseContext(Provider, 0);
-    return std::nullopt;
+  for (int Shift = 56; Shift >= 0; Shift -= 8) {
+    Buffer.push_back(
+        static_cast<unsigned char>((BitLength >> Shift) & 0xFFu));
   }
 
-  DWORD DigestSize = static_cast<DWORD>(Digest.size());
-  if (!CryptGetHashParam(Hash, HP_HASHVAL, Digest.data(), &DigestSize, 0) ||
-      DigestSize != Digest.size()) {
-    CryptDestroyHash(Hash);
-    CryptReleaseContext(Provider, 0);
-    return std::nullopt;
+  uint32_t H0 = 0x67452301u;
+  uint32_t H1 = 0xEFCDAB89u;
+  uint32_t H2 = 0x98BADCFEu;
+  uint32_t H3 = 0x10325476u;
+  uint32_t H4 = 0xC3D2E1F0u;
+
+  auto LeftRotate = [](uint32_t Value, int Shift) {
+    return static_cast<uint32_t>((Value << Shift) | (Value >> (32 - Shift)));
+  };
+
+  for (size_t ChunkOffset = 0; ChunkOffset < Buffer.size();
+       ChunkOffset += 64u) {
+    std::array<uint32_t, 80> Words{};
+    for (size_t Index = 0; Index < 16u; ++Index) {
+      const size_t Base = ChunkOffset + (Index * 4u);
+      Words[Index] = (static_cast<uint32_t>(Buffer[Base]) << 24u) |
+                     (static_cast<uint32_t>(Buffer[Base + 1u]) << 16u) |
+                     (static_cast<uint32_t>(Buffer[Base + 2u]) << 8u) |
+                     static_cast<uint32_t>(Buffer[Base + 3u]);
+    }
+    for (size_t Index = 16u; Index < Words.size(); ++Index) {
+      Words[Index] = LeftRotate(
+          Words[Index - 3u] ^ Words[Index - 8u] ^ Words[Index - 14u] ^
+              Words[Index - 16u],
+          1);
+    }
+
+    uint32_t A = H0;
+    uint32_t B = H1;
+    uint32_t C = H2;
+    uint32_t D = H3;
+    uint32_t E = H4;
+
+    for (size_t Index = 0; Index < Words.size(); ++Index) {
+      uint32_t F = 0;
+      uint32_t K = 0;
+      if (Index < 20u) {
+        F = (B & C) | ((~B) & D);
+        K = 0x5A827999u;
+      } else if (Index < 40u) {
+        F = B ^ C ^ D;
+        K = 0x6ED9EBA1u;
+      } else if (Index < 60u) {
+        F = (B & C) | (B & D) | (C & D);
+        K = 0x8F1BBCDCu;
+      } else {
+        F = B ^ C ^ D;
+        K = 0xCA62C1D6u;
+      }
+
+      const uint32_t Temp =
+          LeftRotate(A, 5) + F + E + K + Words[Index];
+      E = D;
+      D = C;
+      C = LeftRotate(B, 30);
+      B = A;
+      A = Temp;
+    }
+
+    H0 += A;
+    H1 += B;
+    H2 += C;
+    H3 += D;
+    H4 += E;
   }
 
-  CryptDestroyHash(Hash);
-  CryptReleaseContext(Provider, 0);
+  const std::array<uint32_t, 5> State{H0, H1, H2, H3, H4};
+  for (size_t Index = 0; Index < State.size(); ++Index) {
+    const uint32_t Word = State[Index];
+    Digest[Index * 4u] = static_cast<unsigned char>((Word >> 24u) & 0xFFu);
+    Digest[Index * 4u + 1u] =
+        static_cast<unsigned char>((Word >> 16u) & 0xFFu);
+    Digest[Index * 4u + 2u] =
+        static_cast<unsigned char>((Word >> 8u) & 0xFFu);
+    Digest[Index * 4u + 3u] = static_cast<unsigned char>(Word & 0xFFu);
+  }
+
   return Digest;
-#endif
 }
 
 bool IsWebSocketUpgradeRequest(std::string_view HeaderBlock) {
