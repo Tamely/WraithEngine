@@ -602,6 +602,11 @@ void RemoteViewportServer::OnSessionTransportViewportFrame(
   SetLatestFrame(*Captured);
 }
 
+void RemoteViewportServer::OnSessionTransportEncodedVideoPacket(
+    const EncodedVideoPacket &Packet) {
+  SetLatestEncodedPacket(Packet);
+}
+
 void RemoteViewportServer::AcceptLoop() {
   const SocketHandle ListenSocket = ToSocket(m_ListenSocket);
   while (!m_StopRequested.load()) {
@@ -799,6 +804,40 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
       return false;
     }
     SendAll(ClientSocket, Frame.JpegBytes.data(), Frame.JpegBytes.size());
+    return false;
+  }
+  if (Route == "/h264/metadata") {
+    LatestEncodedPacket Packet{};
+    if (!TryGetLatestEncodedPacket(Packet)) {
+      const std::string Response = JsonResponse(
+          "404 Not Found",
+          SerializeError("No encoded H.264 packet is available yet."));
+      SendAll(ClientSocket, Response.data(), Response.size());
+      return false;
+    }
+
+    const std::string Body =
+        SerializeEncodedVideoPacketMetadata(Packet.Packet, "/h264");
+    const std::string Response = JsonResponse("200 OK", Body);
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+  if (Route == "/h264") {
+    LatestEncodedPacket Packet{};
+    if (!TryGetLatestEncodedPacket(Packet)) {
+      const std::string Response = JsonResponse(
+          "404 Not Found",
+          SerializeError("No encoded H.264 packet is available yet."));
+      SendAll(ClientSocket, Response.data(), Response.size());
+      return false;
+    }
+
+    const std::string Headers =
+        BuildBinaryResponse("200 OK", "video/h264", Packet.Packet.Bytes.size());
+    if (!SendAll(ClientSocket, Headers.data(), Headers.size())) {
+      return false;
+    }
+    SendAll(ClientSocket, Packet.Packet.Bytes.data(), Packet.Packet.Bytes.size());
     return false;
   }
 
@@ -1048,6 +1087,29 @@ bool RemoteViewportServer::TryGetLatestFrame(LatestFrame &Frame) const {
     return false;
   }
   Frame = m_LatestFrame;
+  return true;
+}
+
+void RemoteViewportServer::SetLatestEncodedPacket(
+    const EncodedVideoPacket &Packet) {
+  {
+    std::scoped_lock Lock(m_FrameMutex);
+    m_LatestEncodedPacket.Packet = Packet;
+    m_LatestEncodedPacket.HasPacket = true;
+  }
+
+  std::cout << SerializeEncodedVideoPacketMetadata(Packet, "/h264")
+            << std::endl;
+}
+
+bool RemoteViewportServer::TryGetLatestEncodedPacket(
+    LatestEncodedPacket &Packet) const {
+  std::scoped_lock Lock(m_FrameMutex);
+  if (!m_LatestEncodedPacket.HasPacket) {
+    return false;
+  }
+
+  Packet = m_LatestEncodedPacket;
   return true;
 }
 

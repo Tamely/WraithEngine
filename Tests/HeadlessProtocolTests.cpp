@@ -107,3 +107,26 @@ TEST(HeadlessProtocolTests, SerializesRemoteViewportLifecycleMessages) {
   EXPECT_NE(Json.find("\"width\":1280"), std::string::npos);
   EXPECT_NE(Json.find("\"height\":720"), std::string::npos);
 }
+
+TEST(HeadlessProtocolTests, SerializesEncodedVideoPacketMetadata) {
+  const Axiom::EncodedVideoPacket Packet{
+      .Codec = Axiom::EncodedVideoCodec::H264,
+      .FrameIndex = 12,
+      .Width = 1920,
+      .Height = 1080,
+      .IsKeyframe = true,
+      .Bytes = {std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
+                std::byte{0x01}, std::byte{0x67}},
+  };
+
+  const std::string Json =
+      Axiom::SerializeEncodedVideoPacketMetadata(Packet, "/h264");
+  EXPECT_NE(Json.find("\"type\":\"encoded_video\""), std::string::npos);
+  EXPECT_NE(Json.find("\"codec\":\"h264\""), std::string::npos);
+  EXPECT_NE(Json.find("\"frameIndex\":12"), std::string::npos);
+  EXPECT_NE(Json.find("\"path\":\"/h264\""), std::string::npos);
+  EXPECT_NE(Json.find("\"width\":1920"), std::string::npos);
+  EXPECT_NE(Json.find("\"height\":1080"), std::string::npos);
+  EXPECT_NE(Json.find("\"isKeyframe\":true"), std::string::npos);
+  EXPECT_NE(Json.find("\"byteLength\":5"), std::string::npos);
+}

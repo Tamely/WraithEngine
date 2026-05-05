@@ -38,6 +38,8 @@ public:
   void OnSessionTransportEditorEvent(
       const PublishedEditorEvent &Event) override;
   void OnSessionTransportViewportFrame(const ViewportFrame &Frame) override;
+  void OnSessionTransportEncodedVideoPacket(
+      const EncodedVideoPacket &Packet) override;
 
 private:
   struct LatestFrame {
@@ -45,6 +47,11 @@ private:
     uint32_t Width{0};
     uint32_t Height{0};
     std::vector<unsigned char> JpegBytes;
+  };
+
+  struct LatestEncodedPacket {
+    EncodedVideoPacket Packet;
+    bool HasPacket{false};
   };
 
   struct WebSocketClient {
@@ -74,6 +81,8 @@ private:
 
   void SetLatestFrame(const CapturedFrame &Frame);
   bool TryGetLatestFrame(LatestFrame &Frame) const;
+  void SetLatestEncodedPacket(const EncodedVideoPacket &Packet);
+  bool TryGetLatestEncodedPacket(LatestEncodedPacket &Packet) const;
 
 private:
   HeadlessSessionHost &m_Host;
@@ -84,6 +93,7 @@ private:
 
   mutable std::mutex m_FrameMutex;
   LatestFrame m_LatestFrame;
+  LatestEncodedPacket m_LatestEncodedPacket;
 
   mutable std::mutex m_ClientMutex;
   std::vector<WebSocketClient> m_WebSocketClients;

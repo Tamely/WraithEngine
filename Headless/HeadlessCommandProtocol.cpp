@@ -308,6 +308,24 @@ std::string SerializeFrameMetadata(uint64_t FrameIndex, uint32_t Width,
   return Stream.str();
 }
 
+std::string SerializeEncodedVideoPacketMetadata(
+    const EncodedVideoPacket &Packet, std::string_view PacketUrl) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"encoded_video\",\"codec\":\"";
+  switch (Packet.Codec) {
+  case EncodedVideoCodec::H264:
+    Stream << "h264";
+    break;
+  }
+  Stream << "\",\"frameIndex\":" << Packet.FrameIndex
+         << ",\"path\":\"" << EscapeJson(PacketUrl) << "\",\"width\":"
+         << Packet.Width << ",\"height\":" << Packet.Height
+         << ",\"isKeyframe\":"
+         << (Packet.IsKeyframe ? "true" : "false")
+         << ",\"byteLength\":" << Packet.Bytes.size() << "}";
+  return Stream.str();
+}
+
 std::string SerializeError(std::string_view Message) {
   return std::string("{\"type\":\"error\",\"message\":\"") +
          EscapeJson(Message) + "\"}";

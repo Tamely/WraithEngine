@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Renderer/RendererBackend.h>
+#include <Renderer/VideoEncoding.h>
 #include <Session/EditorCommand.h>
 #include <Session/EditorEvent.h>
 
@@ -46,6 +47,9 @@ std::string SerializeFrame(const std::filesystem::path &Path,
 std::string SerializeFrameMetadata(uint64_t FrameIndex, uint32_t Width,
                                    uint32_t Height,
                                    std::string_view FrameUrl = "/frame");
+std::string SerializeEncodedVideoPacketMetadata(
+    const EncodedVideoPacket &Packet,
+    std::string_view PacketUrl = "/h264");
 std::string SerializeError(std::string_view Message);
 std::string SerializeShutdown();
 std::optional<HeadlessCommand>
