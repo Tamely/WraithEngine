@@ -1,5 +1,7 @@
 #include "RemoteViewportServer.h"
 
+#include <Core/Platform.h>
+
 #include "HeadlessCommandProtocol.h"
 #include "RemoteViewportBrowserAssets.h"
 
@@ -15,14 +17,19 @@
 #include <string_view>
 #include <vector>
 
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
+#if AXIOM_PLATFORM_WINDOWS
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
 #include <winsock2.h>
 #include <windows.h>
-#include <wincrypt.h>
 #include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
 #endif
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -30,10 +37,12 @@
 
 namespace Axiom {
 namespace {
-#ifdef _WIN32
-constexpr SOCKET InvalidSocket = INVALID_SOCKET;
 constexpr std::string_view WebSocketGuid =
     "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+#if AXIOM_PLATFORM_WINDOWS
+using SocketHandle = SOCKET;
+constexpr SocketHandle InvalidSocket = INVALID_SOCKET;
 
 class WinsockRuntime final {
 public:
@@ -45,16 +54,36 @@ public:
     });
   }
 };
+#else
+using SocketHandle = int;
+constexpr SocketHandle InvalidSocket = -1;
+#endif
 
-SOCKET ToSocket(uintptr_t Value) { return static_cast<SOCKET>(Value); }
-uintptr_t ToValue(SOCKET Socket) { return static_cast<uintptr_t>(Socket); }
+SocketHandle ToSocket(uintptr_t Value) {
+  return static_cast<SocketHandle>(Value);
+}
 
-void CloseSocket(SOCKET Socket) {
+uintptr_t ToValue(SocketHandle Socket) { return static_cast<uintptr_t>(Socket); }
+
+void CloseSocket(SocketHandle Socket) {
   if (Socket != InvalidSocket) {
+#if AXIOM_PLATFORM_WINDOWS
     closesocket(Socket);
+#else
+    close(Socket);
+#endif
   }
 }
+
+void SetReuseAddress(SocketHandle Socket) {
+  constexpr int Reuse = 1;
+#if AXIOM_PLATFORM_WINDOWS
+  setsockopt(Socket, SOL_SOCKET, SO_REUSEADDR,
+             reinterpret_cast<const char *>(&Reuse), sizeof(Reuse));
+#else
+  setsockopt(Socket, SOL_SOCKET, SO_REUSEADDR, &Reuse, sizeof(Reuse));
 #endif
+}
 
 struct HttpRequest {
   std::string Method;
@@ -123,13 +152,18 @@ std::string BuildBinaryResponse(std::string_view Status,
   return Stream.str();
 }
 
-bool SendAll(SOCKET Socket, const void *Data, size_t Size) {
+bool SendAll(SocketHandle Socket, const void *Data, size_t Size) {
   const auto *Bytes = static_cast<const char *>(Data);
   size_t Offset = 0;
   while (Offset < Size) {
+#if AXIOM_PLATFORM_WINDOWS
     const int Sent =
         send(Socket, Bytes + Offset, static_cast<int>(Size - Offset), 0);
     if (Sent == SOCKET_ERROR || Sent == 0) {
+#else
+    const ssize_t Sent = send(Socket, Bytes + Offset, Size - Offset, 0);
+    if (Sent <= 0) {
+#endif
       return false;
     }
     Offset += static_cast<size_t>(Sent);
@@ -137,18 +171,38 @@ bool SendAll(SOCKET Socket, const void *Data, size_t Size) {
   return true;
 }
 
-bool RecvExact(SOCKET Socket, void *Data, size_t Size) {
+bool RecvExact(SocketHandle Socket, void *Data, size_t Size) {
   auto *Bytes = static_cast<unsigned char *>(Data);
   size_t Offset = 0;
   while (Offset < Size) {
+#if AXIOM_PLATFORM_WINDOWS
     const int Received =
         recv(Socket, reinterpret_cast<char *>(Bytes + Offset),
              static_cast<int>(Size - Offset), 0);
+#else
+    const ssize_t Received = recv(
+        Socket, reinterpret_cast<char *>(Bytes + Offset), Size - Offset, 0);
+#endif
     if (Received <= 0) {
       return false;
     }
     Offset += static_cast<size_t>(Received);
   }
+  return true;
+}
+
+bool RecvChunk(SocketHandle Socket, char *Data, size_t Size, size_t &ReceivedOut) {
+#if AXIOM_PLATFORM_WINDOWS
+  const int Received = recv(Socket, Data, static_cast<int>(Size), 0);
+#else
+  const ssize_t Received = recv(Socket, Data, Size, 0);
+#endif
+  if (Received <= 0) {
+    ReceivedOut = 0;
+    return false;
+  }
+
+  ReceivedOut = static_cast<size_t>(Received);
   return true;
 }
 
@@ -228,19 +282,19 @@ std::optional<std::string> FindHeaderValue(std::string_view HeaderBlock,
   return std::nullopt;
 }
 
-bool ReadHttpRequest(SOCKET Socket, HttpRequest &Request, std::string &Error) {
+bool ReadHttpRequest(SocketHandle Socket, HttpRequest &Request,
+                     std::string &Error) {
   std::string Buffer;
   std::array<char, 4096> Chunk{};
   size_t HeaderEnd = std::string::npos;
 
   while (HeaderEnd == std::string::npos) {
-    const int Received =
-        recv(Socket, Chunk.data(), static_cast<int>(Chunk.size()), 0);
-    if (Received <= 0) {
+    size_t Received = 0;
+    if (!RecvChunk(Socket, Chunk.data(), Chunk.size(), Received)) {
       Error = "Failed to read HTTP request headers.";
       return false;
     }
-    Buffer.append(Chunk.data(), static_cast<size_t>(Received));
+    Buffer.append(Chunk.data(), Received);
     HeaderEnd = Buffer.find("\r\n\r\n");
   }
 
@@ -275,13 +329,12 @@ bool ReadHttpRequest(SOCKET Socket, HttpRequest &Request, std::string &Error) {
 
   const size_t BodyOffset = HeaderEnd + 4;
   while (Buffer.size() < BodyOffset + Request.ContentLength) {
-    const int Received =
-        recv(Socket, Chunk.data(), static_cast<int>(Chunk.size()), 0);
-    if (Received <= 0) {
+    size_t Received = 0;
+    if (!RecvChunk(Socket, Chunk.data(), Chunk.size(), Received)) {
       Error = "Failed to read HTTP request body.";
       return false;
     }
-    Buffer.append(Chunk.data(), static_cast<size_t>(Received));
+    Buffer.append(Chunk.data(), Received);
   }
 
   Request.Body.assign(Buffer.data() + BodyOffset, Request.ContentLength);
@@ -315,39 +368,96 @@ std::string Base64Encode(const unsigned char *Data, size_t Size) {
 
 std::optional<std::array<unsigned char, 20>>
 ComputeSha1(std::string_view Input) {
-#ifdef _WIN32
-  HCRYPTPROV Provider = 0;
-  HCRYPTHASH Hash = 0;
   std::array<unsigned char, 20> Digest{};
-
-  if (!CryptAcquireContext(&Provider, nullptr, nullptr, PROV_RSA_FULL,
-                           CRYPT_VERIFYCONTEXT)) {
-    return std::nullopt;
+  uint64_t BitLength = static_cast<uint64_t>(Input.size()) * 8u;
+  std::vector<unsigned char> Buffer(Input.begin(), Input.end());
+  Buffer.push_back(0x80u);
+  while ((Buffer.size() % 64u) != 56u) {
+    Buffer.push_back(0u);
   }
-  if (!CryptCreateHash(Provider, CALG_SHA1, 0, 0, &Hash)) {
-    CryptReleaseContext(Provider, 0);
-    return std::nullopt;
-  }
-  if (!CryptHashData(Hash,
-                     reinterpret_cast<const BYTE *>(Input.data()),
-                     static_cast<DWORD>(Input.size()), 0)) {
-    CryptDestroyHash(Hash);
-    CryptReleaseContext(Provider, 0);
-    return std::nullopt;
+  for (int Shift = 56; Shift >= 0; Shift -= 8) {
+    Buffer.push_back(
+        static_cast<unsigned char>((BitLength >> Shift) & 0xFFu));
   }
 
-  DWORD DigestSize = static_cast<DWORD>(Digest.size());
-  if (!CryptGetHashParam(Hash, HP_HASHVAL, Digest.data(), &DigestSize, 0) ||
-      DigestSize != Digest.size()) {
-    CryptDestroyHash(Hash);
-    CryptReleaseContext(Provider, 0);
-    return std::nullopt;
+  uint32_t H0 = 0x67452301u;
+  uint32_t H1 = 0xEFCDAB89u;
+  uint32_t H2 = 0x98BADCFEu;
+  uint32_t H3 = 0x10325476u;
+  uint32_t H4 = 0xC3D2E1F0u;
+
+  auto LeftRotate = [](uint32_t Value, int Shift) {
+    return static_cast<uint32_t>((Value << Shift) | (Value >> (32 - Shift)));
+  };
+
+  for (size_t ChunkOffset = 0; ChunkOffset < Buffer.size();
+       ChunkOffset += 64u) {
+    std::array<uint32_t, 80> Words{};
+    for (size_t Index = 0; Index < 16u; ++Index) {
+      const size_t Base = ChunkOffset + (Index * 4u);
+      Words[Index] = (static_cast<uint32_t>(Buffer[Base]) << 24u) |
+                     (static_cast<uint32_t>(Buffer[Base + 1u]) << 16u) |
+                     (static_cast<uint32_t>(Buffer[Base + 2u]) << 8u) |
+                     static_cast<uint32_t>(Buffer[Base + 3u]);
+    }
+    for (size_t Index = 16u; Index < Words.size(); ++Index) {
+      Words[Index] = LeftRotate(
+          Words[Index - 3u] ^ Words[Index - 8u] ^ Words[Index - 14u] ^
+              Words[Index - 16u],
+          1);
+    }
+
+    uint32_t A = H0;
+    uint32_t B = H1;
+    uint32_t C = H2;
+    uint32_t D = H3;
+    uint32_t E = H4;
+
+    for (size_t Index = 0; Index < Words.size(); ++Index) {
+      uint32_t F = 0;
+      uint32_t K = 0;
+      if (Index < 20u) {
+        F = (B & C) | ((~B) & D);
+        K = 0x5A827999u;
+      } else if (Index < 40u) {
+        F = B ^ C ^ D;
+        K = 0x6ED9EBA1u;
+      } else if (Index < 60u) {
+        F = (B & C) | (B & D) | (C & D);
+        K = 0x8F1BBCDCu;
+      } else {
+        F = B ^ C ^ D;
+        K = 0xCA62C1D6u;
+      }
+
+      const uint32_t Temp =
+          LeftRotate(A, 5) + F + E + K + Words[Index];
+      E = D;
+      D = C;
+      C = LeftRotate(B, 30);
+      B = A;
+      A = Temp;
+    }
+
+    H0 += A;
+    H1 += B;
+    H2 += C;
+    H3 += D;
+    H4 += E;
   }
 
-  CryptDestroyHash(Hash);
-  CryptReleaseContext(Provider, 0);
+  const std::array<uint32_t, 5> State{H0, H1, H2, H3, H4};
+  for (size_t Index = 0; Index < State.size(); ++Index) {
+    const uint32_t Word = State[Index];
+    Digest[Index * 4u] = static_cast<unsigned char>((Word >> 24u) & 0xFFu);
+    Digest[Index * 4u + 1u] =
+        static_cast<unsigned char>((Word >> 16u) & 0xFFu);
+    Digest[Index * 4u + 2u] =
+        static_cast<unsigned char>((Word >> 8u) & 0xFFu);
+    Digest[Index * 4u + 3u] = static_cast<unsigned char>(Word & 0xFFu);
+  }
+
   return Digest;
-#endif
 }
 
 bool IsWebSocketUpgradeRequest(std::string_view HeaderBlock) {
@@ -398,9 +508,10 @@ RemoteViewportServer::RemoteViewportServer(
 RemoteViewportServer::~RemoteViewportServer() { Stop(); }
 
 bool RemoteViewportServer::Start(std::string &Error) {
-#ifdef _WIN32
+#if AXIOM_PLATFORM_WINDOWS
   WinsockRuntime Winsock;
   (void)Winsock;
+#endif
 
   addrinfo Hint{};
   Hint.ai_family = AF_INET;
@@ -416,7 +527,7 @@ bool RemoteViewportServer::Start(std::string &Error) {
     return false;
   }
 
-  SOCKET ListenSocket = InvalidSocket;
+  SocketHandle ListenSocket = InvalidSocket;
   for (addrinfo *Current = AddressInfo; Current != nullptr;
        Current = Current->ai_next) {
     ListenSocket =
@@ -425,12 +536,9 @@ bool RemoteViewportServer::Start(std::string &Error) {
       continue;
     }
 
-    constexpr int Reuse = 1;
-    setsockopt(ListenSocket, SOL_SOCKET, SO_REUSEADDR,
-               reinterpret_cast<const char *>(&Reuse), sizeof(Reuse));
+    SetReuseAddress(ListenSocket);
 
-    if (bind(ListenSocket, Current->ai_addr,
-             static_cast<int>(Current->ai_addrlen)) == 0 &&
+    if (bind(ListenSocket, Current->ai_addr, Current->ai_addrlen) == 0 &&
         listen(ListenSocket, SOMAXCONN) == 0) {
       break;
     }
@@ -451,10 +559,6 @@ bool RemoteViewportServer::Start(std::string &Error) {
   m_Host.GetTransport().Connect(this);
   m_AcceptThread = std::thread([this]() { AcceptLoop(); });
   return true;
-#else
-  Error = "Remote viewport server is currently implemented for Windows only.";
-  return false;
-#endif
 }
 
 void RemoteViewportServer::Stop() {
@@ -463,15 +567,13 @@ void RemoteViewportServer::Stop() {
     return;
   }
 
-#ifdef _WIN32
-  const SOCKET ListenSocket = ToSocket(m_ListenSocket);
+  const SocketHandle ListenSocket = ToSocket(m_ListenSocket);
   m_ListenSocket = ToValue(InvalidSocket);
   CloseSocket(ListenSocket);
   CloseAllClients();
   if (m_AcceptThread.joinable()) {
     m_AcceptThread.join();
   }
-#endif
 
   m_Host.GetTransport().Disconnect(this);
 }
@@ -501,12 +603,11 @@ void RemoteViewportServer::OnSessionTransportViewportFrame(
 }
 
 void RemoteViewportServer::AcceptLoop() {
-#ifdef _WIN32
-  const SOCKET ListenSocket = ToSocket(m_ListenSocket);
+  const SocketHandle ListenSocket = ToSocket(m_ListenSocket);
   while (!m_StopRequested.load()) {
     sockaddr_in ClientAddress{};
-    int ClientAddressLength = sizeof(ClientAddress);
-    SOCKET ClientSocket =
+    socklen_t ClientAddressLength = sizeof(ClientAddress);
+    const SocketHandle ClientSocket =
         accept(ListenSocket, reinterpret_cast<sockaddr *>(&ClientAddress),
                &ClientAddressLength);
     if (ClientSocket == InvalidSocket) {
@@ -519,19 +620,14 @@ void RemoteViewportServer::AcceptLoop() {
     std::thread(&RemoteViewportServer::HandleClient, this, ToValue(ClientSocket))
         .detach();
   }
-#endif
 }
 
 void RemoteViewportServer::HandleClient(uintptr_t ClientSocketValue) {
-#ifdef _WIN32
-  const SOCKET ClientSocket = ToSocket(ClientSocketValue);
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
   if (HandleHttpRequest(ClientSocketValue)) {
     return;
   }
   CloseSocket(ClientSocket);
-#else
-  (void)ClientSocketValue;
-#endif
 }
 
 void RemoteViewportServer::BroadcastTextMessage(std::string Message) {
@@ -582,7 +678,6 @@ void RemoteViewportServer::BroadcastBinaryFrame(const LatestFrame &Frame) {
 }
 
 void RemoteViewportServer::CloseAllClients() {
-#ifdef _WIN32
   std::vector<uintptr_t> ClientSockets;
   {
     std::scoped_lock Lock(m_ClientMutex);
@@ -596,11 +691,9 @@ void RemoteViewportServer::CloseAllClients() {
   for (const uintptr_t ClientSocketValue : ClientSockets) {
     CloseSocket(ToSocket(ClientSocketValue));
   }
-#endif
 }
 
 void RemoteViewportServer::RemoveWebSocketClient(uintptr_t ClientSocketValue) {
-#ifdef _WIN32
   bool Removed = false;
   {
     std::scoped_lock Lock(m_ClientMutex);
@@ -619,41 +712,24 @@ void RemoteViewportServer::RemoveWebSocketClient(uintptr_t ClientSocketValue) {
     CloseSocket(ToSocket(ClientSocketValue));
     std::cout << SerializeDisconnected() << std::endl;
   }
-#else
-  (void)ClientSocketValue;
-#endif
 }
 
 bool RemoteViewportServer::SendTextMessage(uintptr_t ClientSocketValue,
                                            std::string_view Message) {
-#ifdef _WIN32
   const auto Frame = BuildWebSocketFrame(0x1u, Message.data(), Message.size());
   std::scoped_lock Lock(m_SendMutex);
   return SendAll(ToSocket(ClientSocketValue), Frame.data(), Frame.size());
-#else
-  (void)ClientSocketValue;
-  (void)Message;
-  return false;
-#endif
 }
 
 bool RemoteViewportServer::SendBinaryMessage(uintptr_t ClientSocketValue,
                                              const void *Data, size_t Size) {
-#ifdef _WIN32
   const auto Frame = BuildWebSocketFrame(0x2u, Data, Size);
   std::scoped_lock Lock(m_SendMutex);
   return SendAll(ToSocket(ClientSocketValue), Frame.data(), Frame.size());
-#else
-  (void)ClientSocketValue;
-  (void)Data;
-  (void)Size;
-  return false;
-#endif
 }
 
 bool RemoteViewportServer::HandleHttpRequest(uintptr_t ClientSocketValue) {
-#ifdef _WIN32
-  const SOCKET ClientSocket = ToSocket(ClientSocketValue);
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
   HttpRequest Request{};
   std::string Error;
   if (!ReadHttpRequest(ClientSocket, Request, Error)) {
@@ -688,16 +764,11 @@ bool RemoteViewportServer::HandleHttpRequest(uintptr_t ClientSocketValue) {
       SerializeError("Only GET, POST, and OPTIONS are supported."));
   SendAll(ClientSocket, Response.data(), Response.size());
   return false;
-#else
-  (void)ClientSocketValue;
-  return false;
-#endif
 }
 
 bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
                                             std::string_view Path) {
-#ifdef _WIN32
-  const SOCKET ClientSocket = ToSocket(ClientSocketValue);
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
   const std::string_view Route = StripQuery(Path);
   RemoteViewportBrowserAsset BrowserAsset{};
   if (TryGetRemoteViewportBrowserAsset(Route, BrowserAsset)) {
@@ -735,18 +806,12 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
       JsonResponse("404 Not Found", SerializeError("Unknown GET endpoint."));
   SendAll(ClientSocket, Response.data(), Response.size());
   return false;
-#else
-  (void)ClientSocketValue;
-  (void)Path;
-  return false;
-#endif
 }
 
 bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
                                              std::string_view Path,
                                              std::string_view Body) {
-#ifdef _WIN32
-  const SOCKET ClientSocket = ToSocket(ClientSocketValue);
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
   const std::string_view Route = StripQuery(Path);
   if (Route != "/command") {
     const std::string Response =
@@ -786,18 +851,11 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
       JsonResponse("202 Accepted", "{\"type\":\"accepted\"}");
   SendAll(ClientSocket, Response.data(), Response.size());
   return false;
-#else
-  (void)ClientSocketValue;
-  (void)Path;
-  (void)Body;
-  return false;
-#endif
 }
 
 bool RemoteViewportServer::HandleWebSocketUpgrade(uintptr_t ClientSocketValue,
                                                   std::string_view HeaderBlock,
                                                   std::string_view Path) {
-#ifdef _WIN32
   const std::string_view Route = StripQuery(Path);
   if (Route != "/ws" || !IsWebSocketUpgradeRequest(HeaderBlock)) {
     return false;
@@ -808,7 +866,7 @@ bool RemoteViewportServer::HandleWebSocketUpgrade(uintptr_t ClientSocketValue,
     const std::string Response = JsonResponse(
         "400 Bad Request",
         SerializeError("Missing Sec-WebSocket-Key for WebSocket upgrade."));
-    const SOCKET ClientSocket = ToSocket(ClientSocketValue);
+    const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
     SendAll(ClientSocket, Response.data(), Response.size());
     return false;
   }
@@ -818,7 +876,7 @@ bool RemoteViewportServer::HandleWebSocketUpgrade(uintptr_t ClientSocketValue,
     const std::string Response = JsonResponse(
         "500 Internal Server Error",
         SerializeError("Failed to compute WebSocket handshake."));
-    const SOCKET ClientSocket = ToSocket(ClientSocketValue);
+    const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
     SendAll(ClientSocket, Response.data(), Response.size());
     return false;
   }
@@ -830,7 +888,7 @@ bool RemoteViewportServer::HandleWebSocketUpgrade(uintptr_t ClientSocketValue,
            << "Connection: Upgrade\r\n"
            << "Sec-WebSocket-Accept: " << Accept << "\r\n\r\n";
   const std::string ResponseText = Response.str();
-  const SOCKET ClientSocket = ToSocket(ClientSocketValue);
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
   if (!SendAll(ClientSocket, ResponseText.data(), ResponseText.size())) {
     return false;
   }
@@ -855,17 +913,10 @@ bool RemoteViewportServer::HandleWebSocketUpgrade(uintptr_t ClientSocketValue,
 
   RunWebSocketSession(ClientSocketValue);
   return true;
-#else
-  (void)ClientSocketValue;
-  (void)HeaderBlock;
-  (void)Path;
-  return false;
-#endif
 }
 
 void RemoteViewportServer::RunWebSocketSession(uintptr_t ClientSocketValue) {
-#ifdef _WIN32
-  const SOCKET ClientSocket = ToSocket(ClientSocketValue);
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
   while (!m_StopRequested.load()) {
     std::array<unsigned char, 2> Header{};
     if (!RecvExact(ClientSocket, Header.data(), Header.size())) {
@@ -937,9 +988,6 @@ void RemoteViewportServer::RunWebSocketSession(uintptr_t ClientSocketValue) {
   }
 
   RemoveWebSocketClient(ClientSocketValue);
-#else
-  (void)ClientSocketValue;
-#endif
 }
 
 bool RemoteViewportServer::HandleWebSocketMessage(std::string_view Payload) {

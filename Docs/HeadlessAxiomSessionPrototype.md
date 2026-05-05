@@ -10,6 +10,8 @@
 
 - Status: working prototype
 - Verified on Windows as of 2026-05-05
+- Builds on macOS as of 2026-05-05
+- Runtime validation on macOS requires a Vulkan/MoltenVK-capable environment with Metal available
 - This subphase is complete for the runtime-side seam restoration work
 - `AxiomHeadless` is a command-driven authoritative runtime, not a full editor client
 - viewport frames are emitted through the engine/session frame-output seam and then written to PNG by the prototype executable
@@ -47,8 +49,8 @@ Dev-client example:
 
 Remote viewport server example:
 
-```powershell
-.\AxiomRemoteViewportServer.exe --host 127.0.0.1 --port 8080 --width 1280 --height 720 --jpeg-quality 75
+```sh
+./AxiomRemoteViewportServer --host 127.0.0.1 --port 8080 --width 1280 --height 720 --jpeg-quality 75
 ```
 
 Then open [http://127.0.0.1:8080](http://127.0.0.1:8080) in a browser on the same machine.
