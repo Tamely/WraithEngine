@@ -435,7 +435,8 @@ std::string SerializeWebRtcStatus(bool Enabled, bool Available,
                                   std::string_view ConnectionState,
                                   std::string_view Detail,
                                   std::string_view SessionId,
-                                  size_t PendingLocalIceCandidateCount) {
+                                  size_t PendingLocalIceCandidateCount,
+                                  const WebRtcVideoStatus &VideoStatus) {
   std::ostringstream Stream;
   Stream << "{\"type\":\"webrtc_status\",\"enabled\":"
          << (Enabled ? "true" : "false") << ",\"available\":"
@@ -444,8 +445,26 @@ std::string SerializeWebRtcStatus(bool Enabled, bool Available,
          << EscapeJson(ConnectionState) << "\",\"detail\":\""
          << EscapeJson(Detail) << "\",\"sessionId\":\""
          << EscapeJson(SessionId) << "\",\"pendingLocalIceCandidateCount\":"
-         << PendingLocalIceCandidateCount
-         << ",\"video\":{\"codec\":\"h264\"},\"dataChannels\":["
+         << PendingLocalIceCandidateCount << ",\"video\":{\"codec\":\""
+         << EscapeJson(VideoStatus.Codec) << "\",\"senderBound\":"
+         << (VideoStatus.SenderBound ? "true" : "false")
+         << ",\"waitingForKeyframe\":"
+         << (VideoStatus.WaitingForKeyframe ? "true" : "false")
+         << ",\"pendingPacketCount\":" << VideoStatus.PendingPacketCount
+         << ",\"droppedPacketCount\":" << VideoStatus.DroppedPacketCount
+         << ",\"lastFrameIndex\":";
+  if (VideoStatus.LastFrameIndex.has_value()) {
+    Stream << *VideoStatus.LastFrameIndex;
+  } else {
+    Stream << "null";
+  }
+  Stream << ",\"lastKeyframeFrameIndex\":";
+  if (VideoStatus.LastKeyframeFrameIndex.has_value()) {
+    Stream << *VideoStatus.LastKeyframeFrameIndex;
+  } else {
+    Stream << "null";
+  }
+  Stream << "},\"dataChannels\":["
          << "{\"label\":\"editor-events\",\"ordered\":true,"
             "\"maxRetransmits\":null},"
          << "{\"label\":\"viewport-input\",\"ordered\":false,"

@@ -4,7 +4,9 @@
 
 #include <Renderer/VideoEncoding.h>
 
+#include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,6 +20,7 @@ struct WebRtcSessionStatus {
   std::string Detail;
   std::string SessionId;
   size_t PendingLocalIceCandidateCount{0};
+  WebRtcVideoStatus Video;
 };
 
 class IWebRtcSession {
@@ -31,6 +34,7 @@ public:
   virtual bool AddRemoteIceCandidate(const WebRtcIceCandidate &Candidate,
                                      std::string &Error) = 0;
   virtual std::vector<WebRtcIceCandidate> TakePendingLocalIceCandidates() = 0;
+  virtual std::vector<EncodedVideoPacket> TakePendingEncodedVideoPackets() = 0;
   virtual void OnEncodedVideoPacket(const EncodedVideoPacket &Packet) = 0;
   virtual void ResetPeer(std::string_view Reason) = 0;
 };

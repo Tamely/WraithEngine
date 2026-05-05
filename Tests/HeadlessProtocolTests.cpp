@@ -167,13 +167,15 @@ TEST(HeadlessProtocolTests, ParsesWebRtcIceCandidate) {
 }
 
 TEST(HeadlessProtocolTests, SerializesWebRtcStatus) {
+  Axiom::WebRtcVideoStatus VideoStatus{};
   const std::string Json = Axiom::SerializeWebRtcStatus(
-      false, false, "new", "new", "disabled", "", 0);
+      false, false, "new", "new", "disabled", "", 0, VideoStatus);
 
   EXPECT_NE(Json.find("\"type\":\"webrtc_status\""), std::string::npos);
   EXPECT_NE(Json.find("\"enabled\":false"), std::string::npos);
   EXPECT_NE(Json.find("\"available\":false"), std::string::npos);
-  EXPECT_NE(Json.find("\"video\":{\"codec\":\"h264\"}"), std::string::npos);
+  EXPECT_NE(Json.find("\"video\":{\"codec\":\"h264\""), std::string::npos);
+  EXPECT_NE(Json.find("\"waitingForKeyframe\":true"), std::string::npos);
   EXPECT_NE(Json.find("\"label\":\"editor-events\""), std::string::npos);
   EXPECT_NE(Json.find("\"label\":\"viewport-input\""), std::string::npos);
 }
@@ -192,4 +194,53 @@ TEST(HeadlessProtocolTests, StubWebRtcSessionReportsBuildAvailability) {
       {.Type = "offer", .Sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1"}, Answer,
       Error));
   EXPECT_NE(Error.find("WebRTC"), std::string::npos);
+}
+
+TEST(HeadlessProtocolTests, StubWebRtcSessionBuffersVideoAfterFirstKeyframe) {
+  auto Session = Axiom::CreateWebRtcSession();
+  ASSERT_NE(Session, nullptr);
+
+  Session->OnEncodedVideoPacket({
+      .Codec = Axiom::EncodedVideoCodec::H264,
+      .FrameIndex = 10,
+      .Width = 1280,
+      .Height = 720,
+      .IsKeyframe = false,
+      .Bytes = {std::byte{0x01}},
+  });
+
+  auto Status = Session->GetStatus();
+  EXPECT_EQ(Status.Video.PendingPacketCount, 0u);
+  EXPECT_EQ(Status.Video.DroppedPacketCount, 1u);
+  EXPECT_TRUE(Status.Video.WaitingForKeyframe);
+
+  Session->OnEncodedVideoPacket({
+      .Codec = Axiom::EncodedVideoCodec::H264,
+      .FrameIndex = 11,
+      .Width = 1280,
+      .Height = 720,
+      .IsKeyframe = true,
+      .Bytes = {std::byte{0x02}},
+  });
+  Session->OnEncodedVideoPacket({
+      .Codec = Axiom::EncodedVideoCodec::H264,
+      .FrameIndex = 12,
+      .Width = 1280,
+      .Height = 720,
+      .IsKeyframe = false,
+      .Bytes = {std::byte{0x03}},
+  });
+
+  Status = Session->GetStatus();
+  EXPECT_EQ(Status.Video.PendingPacketCount, 2u);
+  ASSERT_TRUE(Status.Video.LastFrameIndex.has_value());
+  EXPECT_EQ(*Status.Video.LastFrameIndex, 12u);
+  ASSERT_TRUE(Status.Video.LastKeyframeFrameIndex.has_value());
+  EXPECT_EQ(*Status.Video.LastKeyframeFrameIndex, 11u);
+
+  const auto Packets = Session->TakePendingEncodedVideoPackets();
+  ASSERT_EQ(Packets.size(), 2u);
+  EXPECT_TRUE(Packets.front().IsKeyframe);
+  EXPECT_EQ(Packets.front().FrameIndex, 11u);
+  EXPECT_EQ(Packets.back().FrameIndex, 12u);
 }

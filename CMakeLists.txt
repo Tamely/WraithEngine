@@ -8,6 +8,12 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(BUILD_TESTING "Build tests" OFF)
 option(AXIOM_ENABLE_WEBRTC
        "Enable the macOS WebRTC transport integration seam" OFF)
+set(AXIOM_WEBRTC_FRAMEWORK_PATH "" CACHE PATH
+    "Optional path to a locally built WebRTC.framework for macOS WebRTC integration")
+set(AXIOM_WEBRTC_LIBRARY_PATH "" CACHE FILEPATH
+    "Optional path to a locally built libwebrtc binary when not using WebRTC.framework")
+set(AXIOM_WEBRTC_INCLUDE_DIR "" CACHE PATH
+    "Optional include directory for a locally built libwebrtc binary")
 
 add_subdirectory(ThirdParty/spdlog)
 add_subdirectory(ThirdParty/glfw)

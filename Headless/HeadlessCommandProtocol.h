@@ -46,6 +46,16 @@ struct WebRtcIceCandidate {
   std::optional<uint16_t> SdpMLineIndex;
 };
 
+struct WebRtcVideoStatus {
+  std::string Codec{"h264"};
+  bool SenderBound{false};
+  bool WaitingForKeyframe{true};
+  size_t PendingPacketCount{0};
+  size_t DroppedPacketCount{0};
+  std::optional<uint64_t> LastFrameIndex;
+  std::optional<uint64_t> LastKeyframeFrameIndex;
+};
+
 std::optional<HeadlessAppOptions> ParseHeadlessOptions(int argc, char **argv,
                                                        std::string &Error);
 std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
@@ -78,7 +88,8 @@ std::string SerializeWebRtcStatus(bool Enabled, bool Available,
                                   std::string_view ConnectionState,
                                   std::string_view Detail,
                                   std::string_view SessionId,
-                                  size_t PendingLocalIceCandidateCount);
+                                  size_t PendingLocalIceCandidateCount,
+                                  const WebRtcVideoStatus &VideoStatus);
 std::string SerializeError(std::string_view Message);
 std::string SerializeShutdown();
 std::optional<HeadlessCommand>

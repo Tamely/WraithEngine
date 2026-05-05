@@ -803,7 +803,8 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
         SerializeWebRtcStatus(Status.Enabled, Status.Available,
                               Status.SignalingState, Status.ConnectionState,
                               Status.Detail, Status.SessionId,
-                              Status.PendingLocalIceCandidateCount);
+                              Status.PendingLocalIceCandidateCount,
+                              Status.Video);
     const std::string Response = JsonResponse("200 OK", Body);
     SendAll(ClientSocket, Response.data(), Response.size());
     return false;
@@ -960,7 +961,8 @@ bool RemoteViewportServer::HandleWebRtcOfferRequest(uintptr_t ClientSocketValue,
     const std::string Payload = SerializeWebRtcStatus(
         Status.Enabled, Status.Available, Status.SignalingState,
         Status.ConnectionState, Error.empty() ? Status.Detail : Error,
-        Status.SessionId, Status.PendingLocalIceCandidateCount);
+        Status.SessionId, Status.PendingLocalIceCandidateCount,
+        Status.Video);
     const std::string Response =
         JsonResponse("503 Service Unavailable", Payload);
     SendAll(ClientSocket, Response.data(), Response.size());
@@ -999,7 +1001,8 @@ bool RemoteViewportServer::HandleWebRtcIceCandidateRequest(
     const std::string Payload = SerializeWebRtcStatus(
         Status.Enabled, Status.Available, Status.SignalingState,
         Status.ConnectionState, Error.empty() ? Status.Detail : Error,
-        Status.SessionId, Status.PendingLocalIceCandidateCount);
+        Status.SessionId, Status.PendingLocalIceCandidateCount,
+        Status.Video);
     const std::string Response =
         JsonResponse("503 Service Unavailable", Payload);
     SendAll(ClientSocket, Response.data(), Response.size());
