@@ -16,8 +16,11 @@
 - Added engine-facing `ISessionTransport` and made `AxiomSessionEndpoint` the first in-process transport implementation
 - Added `AxiomRemoteViewportDevClient` as a transport-subscriber harness that receives authoritative events and writes client-received frames to disk
 - Added `AxiomRemoteViewportServer` as the first real browser-facing remote viewport prototype, first using HTTP plus image polling and now using WebSocket plus JPEG frame push
+- Added engine-owned encoded-video packet types plus `IVideoEncoder` and extended `AxiomSessionEndpoint` so encoded packets can flow beside raw viewport frames
+- Added a macOS-first `VideoToolbox` H.264 encoder path for headless remote-viewport bring-up
+- Added H.264 diagnostics to `AxiomRemoteViewportServer` through `/h264` and `/h264/metadata` while keeping the temporary browser UI on the existing JPEG path
 - The WebSocket plus JPEG slice improves the prototype substantially, but it is still too choppy for the target remote-editor experience
-- WebRTC plus H.264 is now the highest-priority next transport step
+- WebRTC hookup for the new H.264 path is now the highest-priority next transport step
 - The long-lived browser editor UI should move into a root-level `EditorFrontend` workspace using React, Next.js, and Tailwind CSS instead of continuing to grow only inside the temporary localhost prototype
 
 ## 1. Executive Summary
@@ -874,6 +877,7 @@ Progress update:
 - `AxiomRemoteViewportDevClient` remains available as a transport debug harness
 - `AxiomRemoteViewportServer` now proves browser-driven remote viewport control against the same authoritative session seam
 - the current WebSocket plus JPEG transport is still visibly choppy and should not be treated as the endpoint architecture
+- encoded video packet publication and macOS H.264 encode now exist as additive seams beside the temporary JPEG browser path
 - WebRTC/H.264 transport and the broader browser editor shell are now the highest-priority remaining items in the remote viewport slice
 
 ### Phase 1: Remote Viewport Foundation
@@ -893,8 +897,10 @@ Subphase status update:
 - offscreen frame publication is routed through `AxiomSessionEndpoint` rather than being hard-wired only to renderer-local capture polling
 - the current dev-client slice now proves the transport seam with an in-process subscriber harness
 - the current slice has replaced the dev harness as the main demo path
+- encoded H.264 diagnostics are now exposed through the current server without requiring the temporary browser page to decode them
+- validation on macOS should treat sandboxed media capability checks with caution because the sandbox can hide VideoToolbox encoder availability even when the machine supports H.264 encode
 - the current localhost:8080 browser client is still a temporary prototype and should be migrated into a root-level `EditorFrontend` application as the browser shell work begins
-- the next slice should prioritize WebRTC plus H.264 transport quality rather than continuing to invest heavily in the temporary JPEG-streaming path
+- the next slice should prioritize wiring the existing H.264 packet path into WebRTC transport quality rather than continuing to invest heavily in the temporary JPEG-streaming path
 
 The first implementation step inside that phase is the `GLFW split`:
 
