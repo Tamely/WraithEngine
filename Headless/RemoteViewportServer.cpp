@@ -887,6 +887,9 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   if (Route == "/webrtc/ice-candidate") {
     return HandleWebRtcIceCandidateRequest(ClientSocketValue, Body);
   }
+  if (Route == "/webrtc/close") {
+    return HandleWebRtcCloseRequest(ClientSocketValue, Body);
+  }
   if (Route != "/command") {
     const std::string Response =
         JsonResponse("404 Not Found", SerializeError("Unknown POST endpoint."));
@@ -1011,6 +1014,43 @@ bool RemoteViewportServer::HandleWebRtcIceCandidateRequest(
 
   const std::string Response =
       JsonResponse("202 Accepted", "{\"type\":\"accepted\"}");
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
+bool RemoteViewportServer::HandleWebRtcCloseRequest(
+    uintptr_t ClientSocketValue, std::string_view Body) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  std::string Reason = "browser_requested_close";
+  if (!Body.empty()) {
+    Reason = Body;
+  }
+
+  if (m_WebRtcSession == nullptr) {
+    const std::string Response = JsonResponse(
+        "503 Service Unavailable",
+        SerializeError("WebRTC session support is unavailable."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  std::string Error;
+  if (!m_WebRtcSession->CloseSession(Reason, Error)) {
+    const std::string Response =
+        JsonResponse("500 Internal Server Error",
+                     SerializeError(Error.empty()
+                                        ? "Failed to close WebRTC session."
+                                        : Error));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const WebRtcSessionStatus Status = m_WebRtcSession->GetStatus();
+  const std::string Payload = SerializeWebRtcStatus(
+      Status.Enabled, Status.Available, Status.SignalingState,
+      Status.ConnectionState, Status.Detail, Status.SessionId,
+      Status.PendingLocalIceCandidateCount, Status.Video);
+  const std::string Response = JsonResponse("200 OK", Payload);
   SendAll(ClientSocket, Response.data(), Response.size());
   return false;
 }

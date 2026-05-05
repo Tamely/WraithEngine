@@ -35,6 +35,7 @@ public:
                                      std::string &Error) = 0;
   virtual std::vector<WebRtcIceCandidate> TakePendingLocalIceCandidates() = 0;
   virtual std::vector<EncodedVideoPacket> TakePendingEncodedVideoPackets() = 0;
+  virtual bool CloseSession(std::string_view Reason, std::string &Error) = 0;
   virtual void OnEncodedVideoPacket(const EncodedVideoPacket &Packet) = 0;
   virtual void ResetPeer(std::string_view Reason) = 0;
 };

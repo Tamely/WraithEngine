@@ -80,6 +80,12 @@ public:
     return Packets;
   }
 
+  bool CloseSession(std::string_view Reason, std::string &Error) override {
+    Error.clear();
+    ResetPeer(Reason);
+    return true;
+  }
+
   void OnEncodedVideoPacket(const EncodedVideoPacket &Packet) override {
     m_Status.Video.LastFrameIndex = Packet.FrameIndex;
     if (Packet.IsKeyframe) {

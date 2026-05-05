@@ -237,6 +237,7 @@ constexpr std::string_view BrowserScript = R"js(const state = {
   unreliableChannel: null,
   statusPollHandle: null,
   icePollHandle: null,
+  keepPollingStatus: false,
   isLooking: false,
   keys: new Set(),
   pointerLocked: false,
@@ -244,7 +245,8 @@ constexpr std::string_view BrowserScript = R"js(const state = {
   pendingLookDelta: { x: 0, y: 0 },
   lastFrameIndex: 0,
   webrtcStatus: null,
-  signalingInFlight: false
+  signalingInFlight: false,
+  connectionGeneration: 0
 };
 
 const statusPill = document.getElementById('status-pill');
@@ -272,6 +274,10 @@ function appendError(context, error) {
     ? error.message
     : String(error);
   appendLog(`${context}: ${message}`);
+}
+
+function currentGeneration() {
+  return state.connectionGeneration;
 }
 
 function channelOpen(channel) {
@@ -302,6 +308,35 @@ async function postJson(url, payload) {
       data = JSON.parse(text);
     } catch (error) {
       data = { type: 'raw', body: text };
+    }
+  }
+
+  if (!response.ok) {
+    const detail = data && data.detail ? data.detail
+      : data && data.message ? data.message
+      : `${response.status} ${response.statusText}`;
+    throw new Error(detail);
+  }
+
+  return data;
+}
+
+async function postText(url, text) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8'
+    },
+    body: text
+  });
+
+  const raw = await response.text();
+  let data = null;
+  if (raw.length > 0) {
+    try {
+      data = JSON.parse(raw);
+    } catch (error) {
+      data = { type: 'raw', body: raw };
     }
   }
 
@@ -425,7 +460,7 @@ function updateStatusFromWebRtc(status) {
   viewportOverlay.style.display = 'grid';
 }
 
-function destroyPeerConnection() {
+function stopPolling() {
   if (state.statusPollHandle) {
     clearInterval(state.statusPollHandle);
     state.statusPollHandle = null;
@@ -434,6 +469,20 @@ function destroyPeerConnection() {
     clearInterval(state.icePollHandle);
     state.icePollHandle = null;
   }
+  state.keepPollingStatus = false;
+}
+
+async function notifyServerSessionClosed(reason) {
+  try {
+    const response = await postText('/webrtc/close', reason);
+    appendLog({ type: 'webrtc_close_ack', reason, response });
+  } catch (error) {
+    appendError('server close notification failed', error);
+  }
+}
+
+async function destroyPeerConnection(reason = 'client_reset', notifyServer = false) {
+  stopPolling();
   if (state.reliableChannel) {
     state.reliableChannel.close();
     state.reliableChannel = null;
@@ -447,12 +496,20 @@ function destroyPeerConnection() {
     state.peerConnection = null;
   }
   viewportVideo.srcObject = null;
+  if (notifyServer) {
+    await notifyServerSessionClosed(reason);
+  }
 }
 
-async function pollWebRtcStatus() {
+async function pollWebRtcStatus(expectedGeneration) {
+  if (!state.keepPollingStatus || expectedGeneration !== currentGeneration()) {
+    return;
+  }
   try {
     const status = await fetch('/webrtc', { cache: 'no-store' }).then((response) => response.json());
-    appendLog(status);
+    if (!state.keepPollingStatus || expectedGeneration !== currentGeneration()) {
+      return;
+    }
     updateStatusFromWebRtc(status);
   } catch (error) {
     appendError('status poll failed', error);
@@ -460,14 +517,17 @@ async function pollWebRtcStatus() {
   }
 }
 
-async function pollIceCandidates() {
-  if (!state.peerConnection) {
+async function pollIceCandidates(expectedGeneration) {
+  if (!state.peerConnection || expectedGeneration !== currentGeneration()) {
     return;
   }
 
   try {
     const response = await fetch('/webrtc/ice-candidates', { cache: 'no-store' });
     const payload = await response.json();
+    if (!state.peerConnection || expectedGeneration !== currentGeneration()) {
+      return;
+    }
     if (!payload.candidates || payload.candidates.length === 0) {
       return;
     }
@@ -504,8 +564,11 @@ function wireDataChannel(channel, label) {
 }
 
 async function connect() {
-  destroyPeerConnection();
+  const generation = currentGeneration() + 1;
+  state.connectionGeneration = generation;
+  await destroyPeerConnection('reconnect', true);
   state.signalingInFlight = true;
+  state.keepPollingStatus = true;
 
   setStatus('idle', 'Connecting');
   viewportOverlay.textContent = 'Creating browser WebRTC offer...';
@@ -514,6 +577,7 @@ async function connect() {
   if (!window.RTCPeerConnection) {
     setStatus('error', 'Unsupported');
     viewportOverlay.textContent = 'This browser does not support RTCPeerConnection.';
+    state.signalingInFlight = false;
     return;
   }
 
@@ -524,10 +588,17 @@ async function connect() {
   state.peerConnection = peer;
 
   peer.addEventListener('connectionstatechange', () => {
+    if (generation !== currentGeneration()) {
+      return;
+    }
     appendLog({ type: 'connection_state', state: peer.connectionState });
     if (peer.connectionState === 'connected') {
       setStatus('connected', 'Streaming');
       viewportOverlay.style.display = 'none';
+    } else if (peer.connectionState === 'closed') {
+      setStatus('idle', 'Closed');
+      viewportOverlay.textContent = 'Peer connection closed.';
+      viewportOverlay.style.display = 'grid';
     } else if (peer.connectionState === 'failed' || peer.connectionState === 'disconnected') {
       setStatus('error', 'Peer Failed');
       viewportOverlay.textContent = `Peer connection ${peer.connectionState}.`;
@@ -536,14 +607,27 @@ async function connect() {
   });
 
   peer.addEventListener('signalingstatechange', () => {
+    if (generation !== currentGeneration()) {
+      return;
+    }
     appendLog({ type: 'signaling_state', state: peer.signalingState });
   });
 
   peer.addEventListener('iceconnectionstatechange', () => {
+    if (generation !== currentGeneration()) {
+      return;
+    }
     appendLog({ type: 'ice_connection_state', state: peer.iceConnectionState });
+    if (peer.iceConnectionState === 'failed') {
+      viewportOverlay.textContent = 'ICE failed. Reconnect after the server is ready.';
+      viewportOverlay.style.display = 'grid';
+    }
   });
 
   peer.addEventListener('track', (event) => {
+    if (generation !== currentGeneration()) {
+      return;
+    }
     appendLog({ type: 'remote_track', kind: event.track.kind });
     const [stream] = event.streams;
     if (stream) {
@@ -553,6 +637,9 @@ async function connect() {
   });
 
   peer.addEventListener('icecandidate', async (event) => {
+    if (generation !== currentGeneration()) {
+      return;
+    }
     if (!event.candidate) {
       appendLog({ type: 'ice_gathering_complete' });
       return;
@@ -592,6 +679,9 @@ async function connect() {
       type: offer.type,
       sdp: offer.sdp
     });
+    if (generation !== currentGeneration()) {
+      return;
+    }
     appendLog({ type: 'offer_response', body: answer });
 
     if (!answer || answer.type !== 'answer' || !answer.sdp) {
@@ -604,6 +694,9 @@ async function connect() {
     setStatus('idle', 'Awaiting Media');
     viewportOverlay.textContent = 'Offer accepted. Waiting for remote media...';
   } catch (error) {
+    if (generation !== currentGeneration()) {
+      return;
+    }
     appendError('WebRTC negotiation failed', error);
     setStatus('error', 'Negotiation Failed');
     viewportOverlay.textContent = String(error.message || error);
@@ -613,13 +706,13 @@ async function connect() {
   }
 
   state.statusPollHandle = window.setInterval(() => {
-    void pollWebRtcStatus();
+    void pollWebRtcStatus(generation);
   }, 1500);
   state.icePollHandle = window.setInterval(() => {
-    void pollIceCandidates();
+    void pollIceCandidates(generation);
   }, 1000);
 
-  void pollWebRtcStatus();
+  void pollWebRtcStatus(generation);
 }
 
 connectButton.addEventListener('click', connect);
@@ -643,6 +736,10 @@ document.addEventListener('pointerlockchange', () => {
   } else if (state.pointerLocked && !state.isLooking) {
     setLookEnabled(true);
   }
+});
+
+window.addEventListener('beforeunload', () => {
+  void destroyPeerConnection('page_unload', true);
 });
 
 document.addEventListener('mousemove', (event) => {

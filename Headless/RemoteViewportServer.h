@@ -79,6 +79,8 @@ private:
                                 std::string_view Body);
   bool HandleWebRtcIceCandidateRequest(uintptr_t ClientSocketValue,
                                        std::string_view Body);
+  bool HandleWebRtcCloseRequest(uintptr_t ClientSocketValue,
+                                std::string_view Body);
   bool HandleWebSocketUpgrade(uintptr_t ClientSocketValue,
                               std::string_view HeaderBlock,
                               std::string_view Path);
