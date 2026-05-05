@@ -134,6 +134,33 @@ public:
   std::vector<Axiom::EncodedVideoPacket> Packets;
 };
 
+class PassthroughTestVideoEncoder final : public Axiom::IVideoEncoder {
+public:
+  bool EncodeFrame(const Axiom::VideoEncoderInputFrame &Frame) override {
+    if (Output == nullptr) {
+      return false;
+    }
+
+    Output->OnEncodedVideoPacket({
+        .Codec = Axiom::EncodedVideoCodec::H264,
+        .FrameIndex = Frame.FrameIndex,
+        .Width = Frame.Width,
+        .Height = Frame.Height,
+        .IsKeyframe = true,
+        .Bytes = {std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
+                  std::byte{0x01}, std::byte{0x09}},
+    });
+    return true;
+  }
+
+  void SetOutput(Axiom::IEncodedVideoPacketOutput *NewOutput) override {
+    Output = NewOutput;
+  }
+
+private:
+  Axiom::IEncodedVideoPacketOutput *Output{nullptr};
+};
+
 Axiom::CommandContext MakeContext(uint64_t FrameIndex = 1) {
   return {
       .Session = Axiom::SessionId{1},
@@ -488,6 +515,37 @@ TEST(RemoteViewportTests, AxiomEndpointConnectIsIdempotentAndStopsAfterDisconnec
                    }});
   Session.Tick();
   EXPECT_EQ(Subscriber.Events.size(), 1u);
+}
+
+TEST(RemoteViewportTests, AxiomEndpointCanEncodeRawFramesThroughInstalledEncoder) {
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  Axiom::AxiomSessionEndpoint Endpoint(Session);
+  RecordingEndpointSubscriber Subscriber;
+  Endpoint.Connect(&Subscriber);
+  Endpoint.SetVideoEncoder(std::make_unique<PassthroughTestVideoEncoder>());
+
+  std::array<std::byte, 16> Bytes{
+      std::byte{0x10}, std::byte{0x20}, std::byte{0x30}, std::byte{0x40},
+      std::byte{0x50}, std::byte{0x60}, std::byte{0x70}, std::byte{0x80},
+      std::byte{0x90}, std::byte{0xA0}, std::byte{0xB0}, std::byte{0xC0},
+      std::byte{0xD0}, std::byte{0xE0}, std::byte{0xF0}, std::byte{0xFF},
+  };
+  Endpoint.OnViewportFrame({
+      .FrameIndex = 123,
+      .Width = 2,
+      .Height = 2,
+      .Format = Axiom::ViewportFrameFormat::R8G8B8A8Unorm,
+      .Pixels = std::span<const std::byte>(Bytes.data(), Bytes.size()),
+  });
+
+  ASSERT_EQ(Subscriber.Frames.size(), 1u);
+  EXPECT_EQ(Subscriber.Frames.front().FrameIndex, 123u);
+  ASSERT_EQ(Subscriber.EncodedPackets.size(), 1u);
+  EXPECT_EQ(Subscriber.EncodedPackets.front().Codec,
+            Axiom::EncodedVideoCodec::H264);
+  EXPECT_EQ(Subscriber.EncodedPackets.front().FrameIndex, 123u);
+  EXPECT_TRUE(Subscriber.EncodedPackets.front().IsKeyframe);
+  EXPECT_EQ(Subscriber.LastEncodedPacketBytes.size(), 5u);
 }
 
 #if AXIOM_PLATFORM_MACOS
