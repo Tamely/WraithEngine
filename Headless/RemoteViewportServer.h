@@ -18,6 +18,7 @@ struct RemoteViewportServerOptions {
   uint16_t Port{8080};
   uint32_t Width{1600};
   uint32_t Height{900};
+  int JpegQuality{75};
 };
 
 class RemoteViewportServer final : public ISessionTransportSubscriber {
@@ -43,20 +44,33 @@ private:
     uint64_t FrameIndex{0};
     uint32_t Width{0};
     uint32_t Height{0};
-    std::vector<unsigned char> PngBytes;
+    std::vector<unsigned char> JpegBytes;
+  };
+
+  struct WebSocketClient {
+    uintptr_t SocketValue{static_cast<uintptr_t>(~0ull)};
+    bool IsOpen{true};
   };
 
 private:
   void AcceptLoop();
   void HandleClient(uintptr_t ClientSocketValue);
-  void BroadcastSse(std::string Message);
+  void BroadcastTextMessage(std::string Message);
+  void BroadcastBinaryFrame(const LatestFrame &Frame);
   void CloseAllClients();
-  void RemoveClient(uintptr_t ClientSocketValue);
-  bool SendSseMessage(uintptr_t ClientSocketValue, std::string_view Message);
+  void RemoveWebSocketClient(uintptr_t ClientSocketValue);
+  bool SendTextMessage(uintptr_t ClientSocketValue, std::string_view Message);
+  bool SendBinaryMessage(uintptr_t ClientSocketValue, const void *Data,
+                         size_t Size);
   bool HandleHttpRequest(uintptr_t ClientSocketValue);
   bool HandleGetRequest(uintptr_t ClientSocketValue, std::string_view Path);
   bool HandlePostRequest(uintptr_t ClientSocketValue, std::string_view Path,
                          std::string_view Body);
+  bool HandleWebSocketUpgrade(uintptr_t ClientSocketValue,
+                              std::string_view HeaderBlock,
+                              std::string_view Path);
+  void RunWebSocketSession(uintptr_t ClientSocketValue);
+  bool HandleWebSocketMessage(std::string_view Payload);
 
   void SetLatestFrame(const CapturedFrame &Frame);
   bool TryGetLatestFrame(LatestFrame &Frame) const;
@@ -72,7 +86,8 @@ private:
   LatestFrame m_LatestFrame;
 
   mutable std::mutex m_ClientMutex;
-  std::vector<uintptr_t> m_SseClients;
+  std::vector<WebSocketClient> m_WebSocketClients;
+  mutable std::mutex m_SendMutex;
 };
 
 bool ParseRemoteViewportServerOptions(int argc, char **argv,

@@ -229,12 +229,15 @@ button:hover {
 })css";
 
 constexpr std::string_view BrowserScript = R"js(const state = {
-  source: null,
-  status: 'Connecting',
+  socket: null,
+  socketUrl: `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`,
   isLooking: false,
   keys: new Set(),
   pointerLocked: false,
-  lastPointer: { x: 0, y: 0 },
+  cursor: { x: 0, y: 0 },
+  pendingLookDelta: { x: 0, y: 0 },
+  pendingFrameMeta: null,
+  currentFrameUrl: null,
   lastFrameIndex: 0
 };
 
@@ -258,101 +261,135 @@ function setStatus(kind, text) {
   statusPill.textContent = text;
 }
 
-async function sendCommand(payload) {
-  try {
-    const response = await fetch('/command', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (!response.ok) {
-      const error = await response.text();
-      appendLog(`command failed: ${error}`);
-    }
-  } catch (error) {
-    appendLog(`command error: ${error}`);
-    setStatus('error', 'Command Error');
-  }
+function canSend() {
+  return state.socket && state.socket.readyState === WebSocket.OPEN;
 }
 
-function reconnect() {
-  if (state.source) {
-    state.source.close();
+function sendCommand(payload) {
+  if (!canSend()) {
+    return;
   }
+  state.socket.send(JSON.stringify(payload));
+}
 
-  state.source = new EventSource('/events');
-  setStatus('idle', 'Connecting');
+function updateLookButton() {
+  lookButton.textContent = state.isLooking ? 'Disable Look' : 'Toggle Look';
+}
 
-  state.source.onmessage = (event) => {
-    const message = JSON.parse(event.data);
-    appendLog(message);
-
-    switch (message.type) {
-      case 'ready':
-        frameMeta.textContent = `${message.width} x ${message.height}`;
-        break;
-      case 'connected':
-        setStatus('connected', 'Connected');
-        viewportOverlay.textContent = 'Waiting for the next frame...';
-        break;
-      case 'frame':
-        state.lastFrameIndex = message.frameIndex;
-        viewportImage.src = `${message.path}?frameIndex=${message.frameIndex}&t=${Date.now()}`;
-        frameMeta.textContent = `Frame ${message.frameIndex} - ${message.width} x ${message.height}`;
-        viewportOverlay.style.display = 'none';
-        break;
-      case 'error':
-        setStatus('error', 'Server Error');
-        viewportOverlay.textContent = message.message;
-        viewportOverlay.style.display = 'grid';
-        break;
-      case 'shutdown':
-        setStatus('idle', 'Server Stopped');
-        viewportOverlay.textContent = 'Server shut down.';
-        viewportOverlay.style.display = 'grid';
-        break;
-      default:
-        break;
-    }
-  };
-
-  state.source.onerror = () => {
-    setStatus('error', 'Disconnected');
-    viewportOverlay.textContent = 'Stream disconnected. Reconnect when the server is ready.';
-    viewportOverlay.style.display = 'grid';
-  };
+function setLookEnabled(nextValue) {
+  if (state.isLooking === nextValue) {
+    return;
+  }
+  state.isLooking = nextValue;
+  updateLookButton();
+  sendCommand({
+    type: 'set_look_active',
+    isLooking: state.isLooking,
+    cursorPosition: [state.cursor.x, state.cursor.y]
+  });
 }
 
 function movementVector() {
   const forward = (state.keys.has('KeyW') ? 1 : 0) - (state.keys.has('KeyS') ? 1 : 0);
   const strafe = (state.keys.has('KeyD') ? 1 : 0) - (state.keys.has('KeyA') ? 1 : 0);
-  const lift = (state.keys.has('KeyE') ? 1 : 0) - (state.keys.has('KeyQ') ? 1 : 0);
-  return [strafe * 0.08, lift * 0.08, forward * -0.08];
+  const lift = (state.keys.has('Space') ? 1 : 0) -
+    ((state.keys.has('ShiftLeft') || state.keys.has('ShiftRight')) ? 1 : 0);
+  return [strafe * 0.08, lift * 0.08, forward * 0.08];
 }
 
-function tickMovement() {
-  const [x, y, z] = movementVector();
-  if (x !== 0 || y !== 0 || z !== 0) {
-    sendCommand({
-      type: 'update_viewport_camera',
-      worldMovement: [x, y, z],
-      cursorPosition: [state.lastPointer.x, state.lastPointer.y]
-    });
+function applyPendingLook() {
+  if (!state.isLooking) {
+    state.pendingLookDelta.x = 0;
+    state.pendingLookDelta.y = 0;
+    return false;
   }
-  window.requestAnimationFrame(tickMovement);
+
+  if (state.pendingLookDelta.x === 0 && state.pendingLookDelta.y === 0) {
+    return false;
+  }
+
+  state.cursor.x += state.pendingLookDelta.x;
+  state.cursor.y += state.pendingLookDelta.y;
+  state.pendingLookDelta.x = 0;
+  state.pendingLookDelta.y = 0;
+  return true;
 }
 
-function setLookEnabled(nextValue) {
-  state.isLooking = nextValue;
-  lookButton.textContent = state.isLooking ? 'Disable Look' : 'Toggle Look';
-  sendCommand({
-    type: 'set_look_active',
-    isLooking: state.isLooking,
-    cursorPosition: [state.lastPointer.x, state.lastPointer.y]
+function connect() {
+  if (state.socket) {
+    state.socket.close();
+  }
+
+  setStatus('idle', 'Connecting');
+  viewportOverlay.textContent = 'Connecting to remote viewport...';
+  viewportOverlay.style.display = 'grid';
+
+  const socket = new WebSocket(state.socketUrl);
+  socket.binaryType = 'blob';
+  state.socket = socket;
+
+  socket.addEventListener('open', () => {
+    setStatus('connected', 'Connected');
+  });
+
+  socket.addEventListener('message', async (event) => {
+    if (typeof event.data === 'string') {
+      const message = JSON.parse(event.data);
+      appendLog(message);
+
+      switch (message.type) {
+        case 'ready':
+          frameMeta.textContent = `${message.width} x ${message.height}`;
+          break;
+        case 'connected':
+          setStatus('connected', 'Connected');
+          viewportOverlay.textContent = 'Waiting for the next frame...';
+          break;
+        case 'frame':
+          state.pendingFrameMeta = message;
+          break;
+        case 'error':
+          setStatus('error', 'Server Error');
+          viewportOverlay.textContent = message.message;
+          viewportOverlay.style.display = 'grid';
+          break;
+        case 'shutdown':
+          setStatus('idle', 'Server Stopped');
+          viewportOverlay.textContent = 'Server shut down.';
+          viewportOverlay.style.display = 'grid';
+          break;
+        default:
+          break;
+      }
+      return;
+    }
+
+    if (state.currentFrameUrl) {
+      URL.revokeObjectURL(state.currentFrameUrl);
+    }
+    state.currentFrameUrl = URL.createObjectURL(event.data);
+    viewportImage.src = state.currentFrameUrl;
+    viewportOverlay.style.display = 'none';
+
+    if (state.pendingFrameMeta) {
+      state.lastFrameIndex = state.pendingFrameMeta.frameIndex;
+      frameMeta.textContent = `Frame ${state.pendingFrameMeta.frameIndex} - ${state.pendingFrameMeta.width} x ${state.pendingFrameMeta.height}`;
+      state.pendingFrameMeta = null;
+    }
+  });
+
+  socket.addEventListener('close', () => {
+    setStatus('error', 'Disconnected');
+    viewportOverlay.textContent = 'Stream disconnected. Reconnect when the server is ready.';
+    viewportOverlay.style.display = 'grid';
+  });
+
+  socket.addEventListener('error', () => {
+    setStatus('error', 'Socket Error');
   });
 }
 
-connectButton.addEventListener('click', reconnect);
+connectButton.addEventListener('click', connect);
 lookButton.addEventListener('click', () => setLookEnabled(!state.isLooking));
 clearLogButton.addEventListener('click', () => {
   eventLog.textContent = '';
@@ -376,29 +413,59 @@ document.addEventListener('pointerlockchange', () => {
 });
 
 document.addEventListener('mousemove', (event) => {
-  state.lastPointer.x += event.movementX;
-  state.lastPointer.y += event.movementY;
-  if (!state.isLooking) {
+  if (!state.pointerLocked) {
+    return;
+  }
+  state.pendingLookDelta.x += event.movementX;
+  state.pendingLookDelta.y += event.movementY;
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.code === 'Space' ||
+      event.code === 'ShiftLeft' ||
+      event.code === 'ShiftRight' ||
+      event.code === 'KeyW' ||
+      event.code === 'KeyA' ||
+      event.code === 'KeyS' ||
+      event.code === 'KeyD') {
+    event.preventDefault();
+  }
+  state.keys.add(event.code);
+});
+
+document.addEventListener('keyup', (event) => {
+  if (event.code === 'Space' ||
+      event.code === 'ShiftLeft' ||
+      event.code === 'ShiftRight' ||
+      event.code === 'KeyW' ||
+      event.code === 'KeyA' ||
+      event.code === 'KeyS' ||
+      event.code === 'KeyD') {
+    event.preventDefault();
+  }
+  state.keys.delete(event.code);
+});
+
+setInterval(() => {
+  if (!canSend()) {
+    return;
+  }
+
+  const lookChanged = applyPendingLook();
+  const [x, y, z] = movementVector();
+  if (!lookChanged && x === 0 && y === 0 && z === 0) {
     return;
   }
 
   sendCommand({
     type: 'update_viewport_camera',
-    worldMovement: [0, 0, 0],
-    cursorPosition: [state.lastPointer.x, state.lastPointer.y]
+    worldMovement: [x, y, z],
+    cursorPosition: [state.cursor.x, state.cursor.y]
   });
-});
+}, 16);
 
-document.addEventListener('keydown', (event) => {
-  state.keys.add(event.code);
-});
-
-document.addEventListener('keyup', (event) => {
-  state.keys.delete(event.code);
-});
-
-reconnect();
-window.requestAnimationFrame(tickMovement);
+updateLookButton();
+connect();
 )js";
 } // namespace
 

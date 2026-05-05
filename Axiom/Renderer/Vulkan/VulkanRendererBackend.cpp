@@ -207,7 +207,10 @@ void VulkanRendererBackend::InitSwapchain() {
                              VK_NULL_HANDLE, &m_RasterDepthImage.ImageView));
 
   m_MainDeletionQueue.PushFunction([this]() {
-    VkBufferUtil::DestroyBuffer(m_Device.Allocator, m_CaptureReadbackBuffer);
+    for (auto &CaptureFrame : m_OffscreenCaptureFrames) {
+      VkBufferUtil::DestroyBuffer(m_Device.Allocator, CaptureFrame.ReadbackBuffer);
+      CaptureFrame = {};
+    }
     vkDestroyImageView(m_Device.Device, m_RasterDepthImage.ImageView,
                        VK_NULL_HANDLE);
     vmaDestroyImage(m_Device.Allocator, m_RasterDepthImage.Image,
@@ -219,21 +222,22 @@ void VulkanRendererBackend::InitSwapchain() {
     vmaDestroyImage(m_Device.Allocator, m_DrawImage.Image,
                     m_DrawImage.Allocation);
   });
-
-  m_CaptureReadbackBuffer = VkBufferUtil::CreateBuffer(
-      m_Device.Allocator,
-      static_cast<size_t>(m_DrawImage.ImageExtent.width) *
-          static_cast<size_t>(m_DrawImage.ImageExtent.height) * sizeof(uint16_t) *
-          4u,
-      VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU,
-      VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
-          VMA_ALLOCATION_CREATE_MAPPED_BIT);
 }
 
 void VulkanRendererBackend::InitViewportReadbackBuffers() {
-  // The transport seam consumes the converted capture produced below.
-  // We keep this hook so the offscreen path can evolve without changing
-  // the application/bootstrap contracts again.
+  const size_t BufferSize =
+      static_cast<size_t>(m_DrawImage.ImageExtent.width) *
+      static_cast<size_t>(m_DrawImage.ImageExtent.height) * sizeof(uint16_t) *
+      4u;
+  for (auto &CaptureFrame : m_OffscreenCaptureFrames) {
+    CaptureFrame.ReadbackBuffer = VkBufferUtil::CreateBuffer(
+        m_Device.Allocator, BufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VMA_MEMORY_USAGE_GPU_TO_CPU,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
+            VMA_ALLOCATION_CREATE_MAPPED_BIT);
+    CaptureFrame.HasPendingReadback = false;
+    CaptureFrame.SubmittedFrameNumber = 0;
+  }
 }
 
 void VulkanRendererBackend::InitHzbResources() {
@@ -1129,7 +1133,7 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
 }
 
 void VulkanRendererBackend::RecordOffscreenCapture(
-    VkCommandBuffer CommandBuffer) {
+    VkCommandBuffer CommandBuffer, const AllocatedBuffer &ReadbackBuffer) {
   VkBufferImageCopy CopyRegion{};
   CopyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
   CopyRegion.imageSubresource.mipLevel = 0;
@@ -1138,7 +1142,7 @@ void VulkanRendererBackend::RecordOffscreenCapture(
 
   vkCmdCopyImageToBuffer(CommandBuffer, m_DrawImage.Image,
                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                         m_CaptureReadbackBuffer.Buffer, 1, &CopyRegion);
+                         ReadbackBuffer.Buffer, 1, &CopyRegion);
 
   VkBufferMemoryBarrier2 ReadbackBarrier{
       .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
@@ -1149,9 +1153,9 @@ void VulkanRendererBackend::RecordOffscreenCapture(
       .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT,
       .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
       .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-      .buffer = m_CaptureReadbackBuffer.Buffer,
+      .buffer = ReadbackBuffer.Buffer,
       .offset = 0,
-      .size = m_CaptureReadbackBuffer.Size};
+      .size = ReadbackBuffer.Size};
   VkDependencyInfo ReadbackDependencyInfo{
       .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
       .pNext = VK_NULL_HANDLE,
@@ -1196,7 +1200,7 @@ uint8_t VulkanRendererBackend::LinearToByte(float Value) {
 }
 
 void VulkanRendererBackend::ConvertCapturedFrameToRgba8(
-    const AllocatedBuffer &ReadbackBuffer) {
+    const AllocatedBuffer &ReadbackBuffer, uint64_t FrameNumber) {
   if (ReadbackBuffer.Info.pMappedData == nullptr) {
     return;
   }
@@ -1205,7 +1209,7 @@ void VulkanRendererBackend::ConvertCapturedFrameToRgba8(
                           ReadbackBuffer.Size);
 
   CapturedFrame Frame{};
-  Frame.FrameIndex = m_FrameNumber;
+  Frame.FrameIndex = FrameNumber;
   Frame.Width = m_DrawExtent.width;
   Frame.Height = m_DrawExtent.height;
   Frame.Pixels.resize(static_cast<size_t>(Frame.Width) * Frame.Height * 4u);
@@ -1236,9 +1240,13 @@ void VulkanRendererBackend::Draw() {
   auto &CurrentFrame =
       m_CommandContext.PrepareFrame(m_Device.Device, m_FrameNumber);
   auto &MeshFrame = GetCurrentMeshFrame();
+  auto &CaptureFrame = m_OffscreenCaptureFrames[m_FrameNumber % FRAME_OVERLAP];
 
   CollectFrameStats(MeshFrame);
   m_CapturedFrame.reset();
+  if (!m_HasPresentationSurface) {
+    PublishCompletedOffscreenFrame(m_FrameNumber);
+  }
 
   uint32_t SwapchainImageIndex = 0;
   if (m_HasPresentationSurface) {
@@ -1318,7 +1326,7 @@ void VulkanRendererBackend::Draw() {
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                             VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
   } else {
-    RecordOffscreenCapture(CommandBuffer);
+    RecordOffscreenCapture(CommandBuffer, CaptureFrame.ReadbackBuffer);
   }
 
   VK_CHECK(vkEndCommandBuffer(CommandBuffer));
@@ -1348,10 +1356,8 @@ void VulkanRendererBackend::Draw() {
                            VK_NULL_HANDLE);
     VK_CHECK(vkQueueSubmit2(m_Device.GraphicsQueue, 1, &Submit,
                             CurrentFrame.RenderFence));
-    VK_CHECK(vkWaitForFences(m_Device.Device, 1, &CurrentFrame.RenderFence,
-                             VK_TRUE, 1000000000));
-    ConvertCapturedFrameToRgba8(m_CaptureReadbackBuffer);
-    PublishOffscreenFrame(CurrentFrame);
+    CaptureFrame.HasPendingReadback = true;
+    CaptureFrame.SubmittedFrameNumber = m_FrameNumber;
   }
 
   m_FrameNumber++;
@@ -1431,8 +1437,15 @@ std::optional<CapturedFrame> VulkanRendererBackend::ConsumeCapturedFrame() {
   return Result;
 }
 
-void VulkanRendererBackend::PublishOffscreenFrame(FrameData &Frame) {
-  (void)Frame;
+void VulkanRendererBackend::PublishCompletedOffscreenFrame(uint64_t FrameNumber) {
+  auto &CaptureFrame = m_OffscreenCaptureFrames[FrameNumber % FRAME_OVERLAP];
+  if (!CaptureFrame.HasPendingReadback) {
+    return;
+  }
+
+  ConvertCapturedFrameToRgba8(CaptureFrame.ReadbackBuffer,
+                              CaptureFrame.SubmittedFrameNumber);
+  CaptureFrame.HasPendingReadback = false;
   if (m_FrameOutput == nullptr || !m_CapturedFrame.has_value()) {
     return;
   }

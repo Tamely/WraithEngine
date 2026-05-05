@@ -20,8 +20,9 @@
 #define NOMINMAX
 #endif
 #include <winsock2.h>
+#include <windows.h>
+#include <wincrypt.h>
 #include <ws2tcpip.h>
-#pragma comment(lib, "ws2_32.lib")
 #endif
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -31,6 +32,8 @@ namespace Axiom {
 namespace {
 #ifdef _WIN32
 constexpr SOCKET InvalidSocket = INVALID_SOCKET;
+constexpr std::string_view WebSocketGuid =
+    "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 class WinsockRuntime final {
 public:
@@ -56,16 +59,17 @@ void CloseSocket(SOCKET Socket) {
 struct HttpRequest {
   std::string Method;
   std::string Path;
+  std::string HeaderBlock;
   std::string Body;
   size_t ContentLength{0};
 };
 
-struct PngBuffer {
+struct EncodedImageBuffer {
   std::vector<unsigned char> Bytes;
 };
 
-void WritePngToVector(void *Context, void *Data, int Size) {
-  auto *Buffer = static_cast<PngBuffer *>(Context);
+void WriteImageBytes(void *Context, void *Data, int Size) {
+  auto *Buffer = static_cast<EncodedImageBuffer *>(Context);
   const auto *Bytes = static_cast<const unsigned char *>(Data);
   Buffer->Bytes.insert(Buffer->Bytes.end(), Bytes, Bytes + Size);
 }
@@ -84,7 +88,8 @@ std::optional<CapturedFrame> ConvertFrame(const ViewportFrame &Frame) {
   return Captured;
 }
 
-std::string BuildHttpResponse(std::string_view Status, std::string_view ContentType,
+std::string BuildHttpResponse(std::string_view Status,
+                              std::string_view ContentType,
                               std::string_view Body,
                               std::string_view ExtraHeaders = {}) {
   std::ostringstream Stream;
@@ -132,6 +137,21 @@ bool SendAll(SOCKET Socket, const void *Data, size_t Size) {
   return true;
 }
 
+bool RecvExact(SOCKET Socket, void *Data, size_t Size) {
+  auto *Bytes = static_cast<unsigned char *>(Data);
+  size_t Offset = 0;
+  while (Offset < Size) {
+    const int Received =
+        recv(Socket, reinterpret_cast<char *>(Bytes + Offset),
+             static_cast<int>(Size - Offset), 0);
+    if (Received <= 0) {
+      return false;
+    }
+    Offset += static_cast<size_t>(Received);
+  }
+  return true;
+}
+
 std::string_view StripQuery(std::string_view Path) {
   const size_t Query = Path.find('?');
   return Query == std::string_view::npos ? Path : Path.substr(0, Query);
@@ -147,6 +167,20 @@ std::string Trim(std::string_view Value) {
     Value.remove_suffix(1);
   }
   return std::string(Value);
+}
+
+bool EqualsCaseInsensitive(std::string_view Left, std::string_view Right) {
+  if (Left.size() != Right.size()) {
+    return false;
+  }
+
+  for (size_t Index = 0; Index < Left.size(); ++Index) {
+    if (std::tolower(static_cast<unsigned char>(Left[Index])) !=
+        std::tolower(static_cast<unsigned char>(Right[Index]))) {
+      return false;
+    }
+  }
+  return true;
 }
 
 std::optional<size_t> ParseContentLength(std::string_view Headers) {
@@ -171,13 +205,37 @@ std::optional<size_t> ParseContentLength(std::string_view Headers) {
   return Result;
 }
 
+std::optional<std::string> FindHeaderValue(std::string_view HeaderBlock,
+                                           std::string_view HeaderName) {
+  size_t LineStart = 0;
+  while (LineStart < HeaderBlock.size()) {
+    const size_t LineEnd = HeaderBlock.find("\r\n", LineStart);
+    const std::string_view Line =
+        HeaderBlock.substr(LineStart, LineEnd == std::string_view::npos
+                                          ? std::string_view::npos
+                                          : LineEnd - LineStart);
+    const size_t Colon = Line.find(':');
+    if (Colon != std::string_view::npos &&
+        EqualsCaseInsensitive(Trim(Line.substr(0, Colon)), HeaderName)) {
+      return Trim(Line.substr(Colon + 1));
+    }
+
+    if (LineEnd == std::string_view::npos) {
+      break;
+    }
+    LineStart = LineEnd + 2;
+  }
+  return std::nullopt;
+}
+
 bool ReadHttpRequest(SOCKET Socket, HttpRequest &Request, std::string &Error) {
   std::string Buffer;
   std::array<char, 4096> Chunk{};
   size_t HeaderEnd = std::string::npos;
 
   while (HeaderEnd == std::string::npos) {
-    const int Received = recv(Socket, Chunk.data(), static_cast<int>(Chunk.size()), 0);
+    const int Received =
+        recv(Socket, Chunk.data(), static_cast<int>(Chunk.size()), 0);
     if (Received <= 0) {
       Error = "Failed to read HTTP request headers.";
       return false;
@@ -206,6 +264,7 @@ bool ReadHttpRequest(SOCKET Socket, HttpRequest &Request, std::string &Error) {
   Request.Method = std::string(RequestLine.substr(0, MethodEnd));
   Request.Path =
       std::string(RequestLine.substr(MethodEnd + 1, PathEnd - MethodEnd - 1));
+  Request.HeaderBlock = std::string(HeaderView);
 
   const auto ContentLength = ParseContentLength(HeaderView);
   if (!ContentLength.has_value()) {
@@ -216,7 +275,8 @@ bool ReadHttpRequest(SOCKET Socket, HttpRequest &Request, std::string &Error) {
 
   const size_t BodyOffset = HeaderEnd + 4;
   while (Buffer.size() < BodyOffset + Request.ContentLength) {
-    const int Received = recv(Socket, Chunk.data(), static_cast<int>(Chunk.size()), 0);
+    const int Received =
+        recv(Socket, Chunk.data(), static_cast<int>(Chunk.size()), 0);
     if (Received <= 0) {
       Error = "Failed to read HTTP request body.";
       return false;
@@ -230,6 +290,104 @@ bool ReadHttpRequest(SOCKET Socket, HttpRequest &Request, std::string &Error) {
 
 std::string JsonResponse(std::string_view Status, std::string_view Payload) {
   return BuildHttpResponse(Status, "application/json; charset=utf-8", Payload);
+}
+
+std::string Base64Encode(const unsigned char *Data, size_t Size) {
+  static constexpr char Alphabet[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+  std::string Encoded;
+  Encoded.reserve(((Size + 2u) / 3u) * 4u);
+  for (size_t Index = 0; Index < Size; Index += 3u) {
+    const uint32_t Byte0 = Data[Index];
+    const uint32_t Byte1 = Index + 1u < Size ? Data[Index + 1u] : 0u;
+    const uint32_t Byte2 = Index + 2u < Size ? Data[Index + 2u] : 0u;
+    const uint32_t Triple = (Byte0 << 16u) | (Byte1 << 8u) | Byte2;
+
+    Encoded.push_back(Alphabet[(Triple >> 18u) & 0x3Fu]);
+    Encoded.push_back(Alphabet[(Triple >> 12u) & 0x3Fu]);
+    Encoded.push_back(Index + 1u < Size ? Alphabet[(Triple >> 6u) & 0x3Fu]
+                                        : '=');
+    Encoded.push_back(Index + 2u < Size ? Alphabet[Triple & 0x3Fu] : '=');
+  }
+  return Encoded;
+}
+
+std::optional<std::array<unsigned char, 20>>
+ComputeSha1(std::string_view Input) {
+#ifdef _WIN32
+  HCRYPTPROV Provider = 0;
+  HCRYPTHASH Hash = 0;
+  std::array<unsigned char, 20> Digest{};
+
+  if (!CryptAcquireContext(&Provider, nullptr, nullptr, PROV_RSA_FULL,
+                           CRYPT_VERIFYCONTEXT)) {
+    return std::nullopt;
+  }
+  if (!CryptCreateHash(Provider, CALG_SHA1, 0, 0, &Hash)) {
+    CryptReleaseContext(Provider, 0);
+    return std::nullopt;
+  }
+  if (!CryptHashData(Hash,
+                     reinterpret_cast<const BYTE *>(Input.data()),
+                     static_cast<DWORD>(Input.size()), 0)) {
+    CryptDestroyHash(Hash);
+    CryptReleaseContext(Provider, 0);
+    return std::nullopt;
+  }
+
+  DWORD DigestSize = static_cast<DWORD>(Digest.size());
+  if (!CryptGetHashParam(Hash, HP_HASHVAL, Digest.data(), &DigestSize, 0) ||
+      DigestSize != Digest.size()) {
+    CryptDestroyHash(Hash);
+    CryptReleaseContext(Provider, 0);
+    return std::nullopt;
+  }
+
+  CryptDestroyHash(Hash);
+  CryptReleaseContext(Provider, 0);
+  return Digest;
+#endif
+}
+
+bool IsWebSocketUpgradeRequest(std::string_view HeaderBlock) {
+  const auto Upgrade = FindHeaderValue(HeaderBlock, "Upgrade");
+  const auto Connection = FindHeaderValue(HeaderBlock, "Connection");
+  std::string LowerConnection =
+      Connection.has_value() ? *Connection : std::string();
+  std::transform(LowerConnection.begin(), LowerConnection.end(),
+                 LowerConnection.begin(),
+                 [](unsigned char Character) {
+                   return static_cast<char>(std::tolower(Character));
+                 });
+  return Upgrade.has_value() && Connection.has_value() &&
+         EqualsCaseInsensitive(*Upgrade, "websocket") &&
+         LowerConnection.find("upgrade") != std::string::npos;
+}
+
+std::vector<unsigned char> BuildWebSocketFrame(uint8_t Opcode, const void *Data,
+                                               size_t Size) {
+  std::vector<unsigned char> Frame;
+  Frame.reserve(Size + 10u);
+  Frame.push_back(static_cast<unsigned char>(0x80u | (Opcode & 0x0Fu)));
+  if (Size <= 125u) {
+    Frame.push_back(static_cast<unsigned char>(Size));
+  } else if (Size <= 0xFFFFu) {
+    Frame.push_back(126u);
+    Frame.push_back(static_cast<unsigned char>((Size >> 8u) & 0xFFu));
+    Frame.push_back(static_cast<unsigned char>(Size & 0xFFu));
+  } else {
+    Frame.push_back(127u);
+    for (int Shift = 56; Shift >= 0; Shift -= 8) {
+      Frame.push_back(
+          static_cast<unsigned char>((static_cast<uint64_t>(Size) >> Shift) &
+                                     0xFFu));
+    }
+  }
+
+  const auto *Bytes = static_cast<const unsigned char *>(Data);
+  Frame.insert(Frame.end(), Bytes, Bytes + Size);
+  return Frame;
 }
 } // namespace
 
@@ -271,8 +429,8 @@ bool RemoteViewportServer::Start(std::string &Error) {
     setsockopt(ListenSocket, SOL_SOCKET, SO_REUSEADDR,
                reinterpret_cast<const char *>(&Reuse), sizeof(Reuse));
 
-    if (bind(ListenSocket, Current->ai_addr, static_cast<int>(Current->ai_addrlen)) ==
-        0 &&
+    if (bind(ListenSocket, Current->ai_addr,
+             static_cast<int>(Current->ai_addrlen)) == 0 &&
         listen(ListenSocket, SOMAXCONN) == 0) {
       break;
     }
@@ -328,20 +486,18 @@ void RemoteViewportServer::OnSessionTransportDisconnected() {
 
 void RemoteViewportServer::OnSessionTransportEditorEvent(
     const PublishedEditorEvent &Event) {
-  BroadcastSse(SerializeEvent(Event));
+  BroadcastTextMessage(SerializeEvent(Event));
 }
 
 void RemoteViewportServer::OnSessionTransportViewportFrame(
     const ViewportFrame &Frame) {
   const auto Captured = ConvertFrame(Frame);
   if (!Captured.has_value()) {
-    BroadcastSse(SerializeError("Unsupported viewport frame format."));
+    BroadcastTextMessage(SerializeError("Unsupported viewport frame format."));
     return;
   }
 
   SetLatestFrame(*Captured);
-  BroadcastSse(SerializeFrameMetadata(Captured->FrameIndex, Captured->Width,
-                                      Captured->Height));
 }
 
 void RemoteViewportServer::AcceptLoop() {
@@ -378,47 +534,83 @@ void RemoteViewportServer::HandleClient(uintptr_t ClientSocketValue) {
 #endif
 }
 
-void RemoteViewportServer::BroadcastSse(std::string Message) {
-  std::vector<uintptr_t> FailedClients;
+void RemoteViewportServer::BroadcastTextMessage(std::string Message) {
   std::vector<uintptr_t> Clients;
   {
     std::scoped_lock Lock(m_ClientMutex);
-    Clients = m_SseClients;
-  }
-
-  for (const uintptr_t Client : Clients) {
-    if (!SendSseMessage(Client, Message)) {
-      FailedClients.push_back(Client);
+    for (const auto &Client : m_WebSocketClients) {
+      if (Client.IsOpen) {
+        Clients.push_back(Client.SocketValue);
+      }
     }
   }
 
-  for (const uintptr_t Client : FailedClients) {
-    RemoveClient(Client);
+  std::vector<uintptr_t> FailedClients;
+  for (const uintptr_t ClientSocketValue : Clients) {
+    if (!SendTextMessage(ClientSocketValue, Message)) {
+      FailedClients.push_back(ClientSocketValue);
+    }
+  }
+
+  for (const uintptr_t FailedClient : FailedClients) {
+    RemoveWebSocketClient(FailedClient);
+  }
+}
+
+void RemoteViewportServer::BroadcastBinaryFrame(const LatestFrame &Frame) {
+  std::vector<uintptr_t> Clients;
+  {
+    std::scoped_lock Lock(m_ClientMutex);
+    for (const auto &Client : m_WebSocketClients) {
+      if (Client.IsOpen) {
+        Clients.push_back(Client.SocketValue);
+      }
+    }
+  }
+
+  std::vector<uintptr_t> FailedClients;
+  for (const uintptr_t ClientSocketValue : Clients) {
+    if (!SendBinaryMessage(ClientSocketValue, Frame.JpegBytes.data(),
+                           Frame.JpegBytes.size())) {
+      FailedClients.push_back(ClientSocketValue);
+    }
+  }
+
+  for (const uintptr_t FailedClient : FailedClients) {
+    RemoveWebSocketClient(FailedClient);
   }
 }
 
 void RemoteViewportServer::CloseAllClients() {
 #ifdef _WIN32
-  std::vector<uintptr_t> Clients;
+  std::vector<uintptr_t> ClientSockets;
   {
     std::scoped_lock Lock(m_ClientMutex);
-    Clients.swap(m_SseClients);
+    for (auto &Client : m_WebSocketClients) {
+      Client.IsOpen = false;
+      ClientSockets.push_back(Client.SocketValue);
+    }
+    m_WebSocketClients.clear();
   }
 
-  for (const uintptr_t Client : Clients) {
-    CloseSocket(ToSocket(Client));
+  for (const uintptr_t ClientSocketValue : ClientSockets) {
+    CloseSocket(ToSocket(ClientSocketValue));
   }
 #endif
 }
 
-void RemoteViewportServer::RemoveClient(uintptr_t ClientSocketValue) {
+void RemoteViewportServer::RemoveWebSocketClient(uintptr_t ClientSocketValue) {
 #ifdef _WIN32
   bool Removed = false;
   {
     std::scoped_lock Lock(m_ClientMutex);
-    auto It = std::find(m_SseClients.begin(), m_SseClients.end(), ClientSocketValue);
-    if (It != m_SseClients.end()) {
-      m_SseClients.erase(It);
+    auto It = std::find_if(m_WebSocketClients.begin(), m_WebSocketClients.end(),
+                           [ClientSocketValue](const WebSocketClient &Client) {
+                             return Client.SocketValue == ClientSocketValue;
+                           });
+    if (It != m_WebSocketClients.end()) {
+      It->IsOpen = false;
+      m_WebSocketClients.erase(It);
       Removed = true;
     }
   }
@@ -432,14 +624,29 @@ void RemoteViewportServer::RemoveClient(uintptr_t ClientSocketValue) {
 #endif
 }
 
-bool RemoteViewportServer::SendSseMessage(uintptr_t ClientSocketValue,
-                                          std::string_view Message) {
+bool RemoteViewportServer::SendTextMessage(uintptr_t ClientSocketValue,
+                                           std::string_view Message) {
 #ifdef _WIN32
-  std::string Payload = "data: " + std::string(Message) + "\n\n";
-  return SendAll(ToSocket(ClientSocketValue), Payload.data(), Payload.size());
+  const auto Frame = BuildWebSocketFrame(0x1u, Message.data(), Message.size());
+  std::scoped_lock Lock(m_SendMutex);
+  return SendAll(ToSocket(ClientSocketValue), Frame.data(), Frame.size());
 #else
   (void)ClientSocketValue;
   (void)Message;
+  return false;
+#endif
+}
+
+bool RemoteViewportServer::SendBinaryMessage(uintptr_t ClientSocketValue,
+                                             const void *Data, size_t Size) {
+#ifdef _WIN32
+  const auto Frame = BuildWebSocketFrame(0x2u, Data, Size);
+  std::scoped_lock Lock(m_SendMutex);
+  return SendAll(ToSocket(ClientSocketValue), Frame.data(), Frame.size());
+#else
+  (void)ClientSocketValue;
+  (void)Data;
+  (void)Size;
   return false;
 #endif
 }
@@ -456,6 +663,11 @@ bool RemoteViewportServer::HandleHttpRequest(uintptr_t ClientSocketValue) {
     return false;
   }
 
+  if (Request.Method == "GET" &&
+      HandleWebSocketUpgrade(ClientSocketValue, Request.HeaderBlock,
+                             Request.Path)) {
+    return true;
+  }
   if (Request.Method == "GET") {
     return HandleGetRequest(ClientSocketValue, Request.Path);
   }
@@ -496,8 +708,7 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
     return false;
   }
   if (Route == "/health") {
-    const std::string Body =
-        SerializeReady(m_Options.Width, m_Options.Height);
+    const std::string Body = SerializeReady(m_Options.Width, m_Options.Height);
     const std::string Response = JsonResponse("200 OK", Body);
     SendAll(ClientSocket, Response.data(), Response.size());
     return false;
@@ -512,42 +723,12 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
     }
 
     const std::string Headers =
-        BuildBinaryResponse("200 OK", "image/png", Frame.PngBytes.size());
+        BuildBinaryResponse("200 OK", "image/jpeg", Frame.JpegBytes.size());
     if (!SendAll(ClientSocket, Headers.data(), Headers.size())) {
       return false;
     }
-    SendAll(ClientSocket, Frame.PngBytes.data(), Frame.PngBytes.size());
+    SendAll(ClientSocket, Frame.JpegBytes.data(), Frame.JpegBytes.size());
     return false;
-  }
-  if (Route == "/events") {
-    std::ostringstream Response;
-    Response << "HTTP/1.1 200 OK\r\n"
-             << "Content-Type: text/event-stream\r\n"
-             << "Cache-Control: no-cache\r\n"
-             << "Connection: keep-alive\r\n"
-             << "Access-Control-Allow-Origin: *\r\n\r\n";
-    const std::string ResponseText = Response.str();
-    if (!SendAll(ClientSocket, ResponseText.data(), ResponseText.size())) {
-      return false;
-    }
-
-    {
-      std::scoped_lock Lock(m_ClientMutex);
-      m_SseClients.push_back(ClientSocketValue);
-    }
-
-    std::cout << SerializeConnected() << std::endl;
-    SendSseMessage(ClientSocketValue,
-                   SerializeReady(m_Options.Width, m_Options.Height));
-    SendSseMessage(ClientSocketValue, SerializeConnected());
-
-    LatestFrame Frame{};
-    if (TryGetLatestFrame(Frame)) {
-      SendSseMessage(ClientSocketValue,
-                     SerializeFrameMetadata(Frame.FrameIndex, Frame.Width,
-                                            Frame.Height));
-    }
-    return true;
   }
 
   const std::string Response =
@@ -594,7 +775,7 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
     m_Host.RequestClose();
-    BroadcastSse(SerializeShutdown());
+    BroadcastTextMessage(SerializeShutdown());
     break;
   case HeadlessCommandType::LoadStartupScene:
   case HeadlessCommandType::RenderFrame:
@@ -613,27 +794,209 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
 #endif
 }
 
+bool RemoteViewportServer::HandleWebSocketUpgrade(uintptr_t ClientSocketValue,
+                                                  std::string_view HeaderBlock,
+                                                  std::string_view Path) {
+#ifdef _WIN32
+  const std::string_view Route = StripQuery(Path);
+  if (Route != "/ws" || !IsWebSocketUpgradeRequest(HeaderBlock)) {
+    return false;
+  }
+
+  const auto Key = FindHeaderValue(HeaderBlock, "Sec-WebSocket-Key");
+  if (!Key.has_value()) {
+    const std::string Response = JsonResponse(
+        "400 Bad Request",
+        SerializeError("Missing Sec-WebSocket-Key for WebSocket upgrade."));
+    const SOCKET ClientSocket = ToSocket(ClientSocketValue);
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const auto Digest = ComputeSha1(*Key + std::string(WebSocketGuid));
+  if (!Digest.has_value()) {
+    const std::string Response = JsonResponse(
+        "500 Internal Server Error",
+        SerializeError("Failed to compute WebSocket handshake."));
+    const SOCKET ClientSocket = ToSocket(ClientSocketValue);
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const std::string Accept = Base64Encode(Digest->data(), Digest->size());
+  std::ostringstream Response;
+  Response << "HTTP/1.1 101 Switching Protocols\r\n"
+           << "Upgrade: websocket\r\n"
+           << "Connection: Upgrade\r\n"
+           << "Sec-WebSocket-Accept: " << Accept << "\r\n\r\n";
+  const std::string ResponseText = Response.str();
+  const SOCKET ClientSocket = ToSocket(ClientSocketValue);
+  if (!SendAll(ClientSocket, ResponseText.data(), ResponseText.size())) {
+    return false;
+  }
+
+  {
+    std::scoped_lock Lock(m_ClientMutex);
+    m_WebSocketClients.push_back({.SocketValue = ClientSocketValue});
+  }
+
+  std::cout << SerializeConnected() << std::endl;
+  SendTextMessage(ClientSocketValue,
+                  SerializeReady(m_Options.Width, m_Options.Height));
+  SendTextMessage(ClientSocketValue, SerializeConnected());
+  LatestFrame Frame{};
+  if (TryGetLatestFrame(Frame)) {
+    SendTextMessage(ClientSocketValue,
+                    SerializeFrameMetadata(Frame.FrameIndex, Frame.Width,
+                                           Frame.Height, "jpeg"));
+    SendBinaryMessage(ClientSocketValue, Frame.JpegBytes.data(),
+                      Frame.JpegBytes.size());
+  }
+
+  RunWebSocketSession(ClientSocketValue);
+  return true;
+#else
+  (void)ClientSocketValue;
+  (void)HeaderBlock;
+  (void)Path;
+  return false;
+#endif
+}
+
+void RemoteViewportServer::RunWebSocketSession(uintptr_t ClientSocketValue) {
+#ifdef _WIN32
+  const SOCKET ClientSocket = ToSocket(ClientSocketValue);
+  while (!m_StopRequested.load()) {
+    std::array<unsigned char, 2> Header{};
+    if (!RecvExact(ClientSocket, Header.data(), Header.size())) {
+      break;
+    }
+
+    const bool IsFinal = (Header[0] & 0x80u) != 0u;
+    const uint8_t Opcode = static_cast<uint8_t>(Header[0] & 0x0Fu);
+    const bool IsMasked = (Header[1] & 0x80u) != 0u;
+    uint64_t PayloadLength = static_cast<uint64_t>(Header[1] & 0x7Fu);
+    if (!IsFinal || !IsMasked) {
+      break;
+    }
+
+    if (PayloadLength == 126u) {
+      std::array<unsigned char, 2> ExtendedLength{};
+      if (!RecvExact(ClientSocket, ExtendedLength.data(),
+                     ExtendedLength.size())) {
+        break;
+      }
+      PayloadLength = (static_cast<uint64_t>(ExtendedLength[0]) << 8u) |
+                      static_cast<uint64_t>(ExtendedLength[1]);
+    } else if (PayloadLength == 127u) {
+      std::array<unsigned char, 8> ExtendedLength{};
+      if (!RecvExact(ClientSocket, ExtendedLength.data(),
+                     ExtendedLength.size())) {
+        break;
+      }
+      PayloadLength = 0;
+      for (const unsigned char Byte : ExtendedLength) {
+        PayloadLength = (PayloadLength << 8u) | static_cast<uint64_t>(Byte);
+      }
+    }
+
+    std::array<unsigned char, 4> MaskingKey{};
+    if (!RecvExact(ClientSocket, MaskingKey.data(), MaskingKey.size())) {
+      break;
+    }
+
+    std::vector<unsigned char> Payload(PayloadLength);
+    if (PayloadLength > 0u &&
+        !RecvExact(ClientSocket, Payload.data(), Payload.size())) {
+      break;
+    }
+    for (size_t Index = 0; Index < Payload.size(); ++Index) {
+      Payload[Index] ^= MaskingKey[Index % MaskingKey.size()];
+    }
+
+    if (Opcode == 0x8u) {
+      break;
+    }
+    if (Opcode == 0x9u) {
+      const auto Pong = BuildWebSocketFrame(0xAu, Payload.data(), Payload.size());
+      std::scoped_lock Lock(m_SendMutex);
+      if (!SendAll(ClientSocket, Pong.data(), Pong.size())) {
+        break;
+      }
+      continue;
+    }
+    if (Opcode != 0x1u) {
+      continue;
+    }
+
+    const std::string TextPayload(Payload.begin(), Payload.end());
+    if (!HandleWebSocketMessage(TextPayload)) {
+      SendTextMessage(ClientSocketValue,
+                      SerializeError("Invalid WebSocket command payload."));
+    }
+  }
+
+  RemoveWebSocketClient(ClientSocketValue);
+#else
+  (void)ClientSocketValue;
+#endif
+}
+
+bool RemoteViewportServer::HandleWebSocketMessage(std::string_view Payload) {
+  std::string Error;
+  const auto Command = ParseRemoteViewportCommand(Payload, Error);
+  if (!Command.has_value()) {
+    return false;
+  }
+
+  switch (Command->Type) {
+  case HeadlessCommandType::SetViewMode:
+    m_Host.SetRemoteViewMode(Command->ViewMode);
+    return true;
+  case HeadlessCommandType::SetLookActive:
+  case HeadlessCommandType::UpdateViewportCamera:
+    m_Host.SubmitRemoteCommand(Command->EditorPayload);
+    return true;
+  case HeadlessCommandType::Quit:
+    m_StopRequested.store(true);
+    m_Host.RequestClose();
+    BroadcastTextMessage(SerializeShutdown());
+    return true;
+  case HeadlessCommandType::LoadStartupScene:
+  case HeadlessCommandType::RenderFrame:
+    return false;
+  }
+
+  return false;
+}
+
 void RemoteViewportServer::SetLatestFrame(const CapturedFrame &Frame) {
-  PngBuffer Buffer{};
-  if (stbi_write_png_to_func(WritePngToVector, &Buffer,
-                             static_cast<int>(Frame.Width),
+  EncodedImageBuffer Buffer{};
+  if (stbi_write_jpg_to_func(WriteImageBytes, &Buffer, static_cast<int>(Frame.Width),
                              static_cast<int>(Frame.Height), 4,
-                             Frame.Pixels.data(),
-                             static_cast<int>(Frame.Width * 4u)) == 0) {
-    BroadcastSse(SerializeError("Failed to encode a PNG frame."));
+                             Frame.Pixels.data(), m_Options.JpegQuality) == 0) {
+    BroadcastTextMessage(SerializeError("Failed to encode a JPEG frame."));
     return;
   }
 
-  std::scoped_lock Lock(m_FrameMutex);
-  m_LatestFrame.FrameIndex = Frame.FrameIndex;
-  m_LatestFrame.Width = Frame.Width;
-  m_LatestFrame.Height = Frame.Height;
-  m_LatestFrame.PngBytes = std::move(Buffer.Bytes);
+  LatestFrame Latest{};
+  Latest.FrameIndex = Frame.FrameIndex;
+  Latest.Width = Frame.Width;
+  Latest.Height = Frame.Height;
+  Latest.JpegBytes = std::move(Buffer.Bytes);
+  {
+    std::scoped_lock Lock(m_FrameMutex);
+    m_LatestFrame = Latest;
+  }
+
+  BroadcastTextMessage(SerializeFrameMetadata(Latest.FrameIndex, Latest.Width,
+                                              Latest.Height, "jpeg"));
+  BroadcastBinaryFrame(Latest);
 }
 
 bool RemoteViewportServer::TryGetLatestFrame(LatestFrame &Frame) const {
   std::scoped_lock Lock(m_FrameMutex);
-  if (m_LatestFrame.PngBytes.empty()) {
+  if (m_LatestFrame.JpegBytes.empty()) {
     return false;
   }
   Frame = m_LatestFrame;
@@ -678,6 +1041,17 @@ bool ParseRemoteViewportServerOptions(int argc, char **argv,
         return false;
       }
       Options.Height = Height;
+    } else if (Argument == "--jpeg-quality" && Index + 1 < argc) {
+      int Quality = 0;
+      const std::string_view Value(argv[++Index]);
+      const auto [Ptr, Ec] =
+          std::from_chars(Value.data(), Value.data() + Value.size(), Quality);
+      if (Ec != std::errc{} || Ptr != Value.data() + Value.size() ||
+          Quality < 1 || Quality > 100) {
+        Error = "Invalid --jpeg-quality value.";
+        return false;
+      }
+      Options.JpegQuality = Quality;
     } else {
       Error = "Unknown or incomplete argument: " + std::string(Argument);
       return false;

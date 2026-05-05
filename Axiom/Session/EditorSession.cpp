@@ -110,7 +110,7 @@ void EditorSession::HandleCommand(
 
   bool CameraChanged = false;
   if (!IsNearlyZero(Command.WorldMovement)) {
-    Viewport.Camera.MoveWorld(Command.WorldMovement);
+    Viewport.Camera.MoveLocal(Command.WorldMovement);
     CameraChanged = true;
   }
 

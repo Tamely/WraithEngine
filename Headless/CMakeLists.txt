@@ -39,4 +39,5 @@ if(WIN32)
 
   target_link_libraries(AxiomRemoteViewportServer PRIVATE AxiomCore)
   target_link_libraries(AxiomRemoteViewportServer PRIVATE ws2_32)
+  target_link_libraries(AxiomRemoteViewportServer PRIVATE advapi32)
 endif()
