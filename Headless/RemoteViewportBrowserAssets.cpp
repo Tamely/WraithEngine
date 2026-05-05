@@ -31,9 +31,9 @@ constexpr std::string_view HtmlPage = R"html(<!doctype html>
           <span class="meta">WASD to move, drag or pointer-lock to look</span>
         </div>
         <div id="viewport-shell" class="viewport-shell">
-          <img id="viewport-image" alt="Remote viewport frame" />
+          <video id="viewport-video" autoplay playsinline muted></video>
           <div id="viewport-overlay" class="viewport-overlay">
-            Waiting for stream...
+            Waiting for WebRTC session...
           </div>
         </div>
       </section>
@@ -183,10 +183,13 @@ button:hover {
   min-height: 360px;
 }
 
-#viewport-image {
+#viewport-video {
   display: block;
   width: 100%;
   max-width: 100%;
+  min-height: 360px;
+  object-fit: contain;
+  background: rgba(4, 8, 16, 0.92);
 }
 
 .viewport-overlay {
@@ -229,21 +232,24 @@ button:hover {
 })css";
 
 constexpr std::string_view BrowserScript = R"js(const state = {
-  socket: null,
-  socketUrl: `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`,
+  peerConnection: null,
+  reliableChannel: null,
+  unreliableChannel: null,
+  statusPollHandle: null,
+  icePollHandle: null,
   isLooking: false,
   keys: new Set(),
   pointerLocked: false,
   cursor: { x: 0, y: 0 },
   pendingLookDelta: { x: 0, y: 0 },
-  pendingFrameMeta: null,
-  currentFrameUrl: null,
-  lastFrameIndex: 0
+  lastFrameIndex: 0,
+  webrtcStatus: null,
+  signalingInFlight: false
 };
 
 const statusPill = document.getElementById('status-pill');
 const frameMeta = document.getElementById('frame-meta');
-const viewportImage = document.getElementById('viewport-image');
+const viewportVideo = document.getElementById('viewport-video');
 const viewportOverlay = document.getElementById('viewport-overlay');
 const eventLog = document.getElementById('event-log');
 const connectButton = document.getElementById('connect-button');
@@ -261,15 +267,72 @@ function setStatus(kind, text) {
   statusPill.textContent = text;
 }
 
-function canSend() {
-  return state.socket && state.socket.readyState === WebSocket.OPEN;
+function appendError(context, error) {
+  const message = error && typeof error === 'object' && 'message' in error
+    ? error.message
+    : String(error);
+  appendLog(`${context}: ${message}`);
 }
 
-function sendCommand(payload) {
-  if (!canSend()) {
-    return;
+function channelOpen(channel) {
+  return channel && channel.readyState === 'open';
+}
+
+function canSendReliably() {
+  return channelOpen(state.reliableChannel);
+}
+
+function canSendUnreliably() {
+  return channelOpen(state.unreliableChannel);
+}
+
+async function postJson(url, payload) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const text = await response.text();
+  let data = null;
+  if (text.length > 0) {
+    try {
+      data = JSON.parse(text);
+    } catch (error) {
+      data = { type: 'raw', body: text };
+    }
   }
-  state.socket.send(JSON.stringify(payload));
+
+  if (!response.ok) {
+    const detail = data && data.detail ? data.detail
+      : data && data.message ? data.message
+      : `${response.status} ${response.statusText}`;
+    throw new Error(detail);
+  }
+
+  return data;
+}
+
+async function sendCommand(payload, preferredChannel = 'reliable') {
+  const serialized = JSON.stringify(payload);
+  if (preferredChannel === 'unreliable' && canSendUnreliably()) {
+    state.unreliableChannel.send(serialized);
+    return true;
+  }
+  if (canSendReliably()) {
+    state.reliableChannel.send(serialized);
+    return true;
+  }
+
+  try {
+    await postJson('/command', payload);
+    return true;
+  } catch (error) {
+    appendError('command failed', error);
+    return false;
+  }
 }
 
 function updateLookButton() {
@@ -282,11 +345,11 @@ function setLookEnabled(nextValue) {
   }
   state.isLooking = nextValue;
   updateLookButton();
-  sendCommand({
+  void sendCommand({
     type: 'set_look_active',
     isLooking: state.isLooking,
     cursorPosition: [state.cursor.x, state.cursor.y]
-  });
+  }, 'reliable');
 }
 
 function movementVector() {
@@ -315,78 +378,248 @@ function applyPendingLook() {
   return true;
 }
 
-function connect() {
-  if (state.socket) {
-    state.socket.close();
+function updateFrameMetaFromStatus(status) {
+  if (!status || !status.video) {
+    frameMeta.textContent = 'No WebRTC status yet';
+    return;
   }
 
-  setStatus('idle', 'Connecting');
-  viewportOverlay.textContent = 'Connecting to remote viewport...';
+  const parts = [`Codec ${status.video.codec}`];
+  if (status.video.lastFrameIndex !== null && status.video.lastFrameIndex !== undefined) {
+    parts.push(`Frame ${status.video.lastFrameIndex}`);
+  }
+  if (status.video.pendingPacketCount !== undefined) {
+    parts.push(`Queued ${status.video.pendingPacketCount}`);
+  }
+  if (status.video.droppedPacketCount !== undefined && status.video.droppedPacketCount > 0) {
+    parts.push(`Dropped ${status.video.droppedPacketCount}`);
+  }
+  frameMeta.textContent = parts.join(' - ');
+}
+
+function updateStatusFromWebRtc(status) {
+  state.webrtcStatus = status;
+  updateFrameMetaFromStatus(status);
+
+  if (!status.enabled) {
+    setStatus('error', 'WebRTC Disabled');
+    viewportOverlay.textContent = status.detail || 'WebRTC support is disabled in this build.';
+    viewportOverlay.style.display = 'grid';
+    return;
+  }
+
+  if (!status.available) {
+    setStatus('idle', 'Awaiting Backend');
+    viewportOverlay.textContent = status.detail || 'Waiting for native WebRTC backend.';
+    viewportOverlay.style.display = 'grid';
+    return;
+  }
+
+  if (state.peerConnection && state.peerConnection.connectionState === 'connected') {
+    setStatus('connected', 'Streaming');
+    return;
+  }
+
+  setStatus('idle', 'Negotiating');
+  viewportOverlay.textContent = status.detail || 'Negotiating WebRTC session...';
   viewportOverlay.style.display = 'grid';
+}
 
-  const socket = new WebSocket(state.socketUrl);
-  socket.binaryType = 'blob';
-  state.socket = socket;
+function destroyPeerConnection() {
+  if (state.statusPollHandle) {
+    clearInterval(state.statusPollHandle);
+    state.statusPollHandle = null;
+  }
+  if (state.icePollHandle) {
+    clearInterval(state.icePollHandle);
+    state.icePollHandle = null;
+  }
+  if (state.reliableChannel) {
+    state.reliableChannel.close();
+    state.reliableChannel = null;
+  }
+  if (state.unreliableChannel) {
+    state.unreliableChannel.close();
+    state.unreliableChannel = null;
+  }
+  if (state.peerConnection) {
+    state.peerConnection.close();
+    state.peerConnection = null;
+  }
+  viewportVideo.srcObject = null;
+}
 
-  socket.addEventListener('open', () => {
-    setStatus('connected', 'Connected');
-  });
+async function pollWebRtcStatus() {
+  try {
+    const status = await fetch('/webrtc', { cache: 'no-store' }).then((response) => response.json());
+    appendLog(status);
+    updateStatusFromWebRtc(status);
+  } catch (error) {
+    appendError('status poll failed', error);
+    setStatus('error', 'Status Error');
+  }
+}
 
-  socket.addEventListener('message', async (event) => {
-    if (typeof event.data === 'string') {
-      const message = JSON.parse(event.data);
-      appendLog(message);
+async function pollIceCandidates() {
+  if (!state.peerConnection) {
+    return;
+  }
 
-      switch (message.type) {
-        case 'ready':
-          frameMeta.textContent = `${message.width} x ${message.height}`;
-          break;
-        case 'connected':
-          setStatus('connected', 'Connected');
-          viewportOverlay.textContent = 'Waiting for the next frame...';
-          break;
-        case 'frame':
-          state.pendingFrameMeta = message;
-          break;
-        case 'error':
-          setStatus('error', 'Server Error');
-          viewportOverlay.textContent = message.message;
-          viewportOverlay.style.display = 'grid';
-          break;
-        case 'shutdown':
-          setStatus('idle', 'Server Stopped');
-          viewportOverlay.textContent = 'Server shut down.';
-          viewportOverlay.style.display = 'grid';
-          break;
-        default:
-          break;
-      }
+  try {
+    const response = await fetch('/webrtc/ice-candidates', { cache: 'no-store' });
+    const payload = await response.json();
+    if (!payload.candidates || payload.candidates.length === 0) {
       return;
     }
 
-    if (state.currentFrameUrl) {
-      URL.revokeObjectURL(state.currentFrameUrl);
+    for (const candidate of payload.candidates) {
+      await state.peerConnection.addIceCandidate(candidate);
+      appendLog({ type: 'remote_ice_candidate', candidate });
     }
-    state.currentFrameUrl = URL.createObjectURL(event.data);
-    viewportImage.src = state.currentFrameUrl;
-    viewportOverlay.style.display = 'none';
+  } catch (error) {
+    appendError('ICE poll failed', error);
+  }
+}
 
-    if (state.pendingFrameMeta) {
-      state.lastFrameIndex = state.pendingFrameMeta.frameIndex;
-      frameMeta.textContent = `Frame ${state.pendingFrameMeta.frameIndex} - ${state.pendingFrameMeta.width} x ${state.pendingFrameMeta.height}`;
-      state.pendingFrameMeta = null;
+function wireDataChannel(channel, label) {
+  channel.addEventListener('open', () => {
+    appendLog({ type: 'data_channel_open', label });
+    if (label === 'editor-events') {
+      setStatus('connected', 'Control Ready');
+    }
+  });
+  channel.addEventListener('close', () => {
+    appendLog({ type: 'data_channel_closed', label });
+  });
+  channel.addEventListener('error', (event) => {
+    appendLog({ type: 'data_channel_error', label, detail: String(event.type || 'error') });
+  });
+  channel.addEventListener('message', (event) => {
+    try {
+      appendLog(JSON.parse(event.data));
+    } catch (error) {
+      appendLog({ type: 'data_channel_message', label, body: event.data });
+    }
+  });
+}
+
+async function connect() {
+  destroyPeerConnection();
+  state.signalingInFlight = true;
+
+  setStatus('idle', 'Connecting');
+  viewportOverlay.textContent = 'Creating browser WebRTC offer...';
+  viewportOverlay.style.display = 'grid';
+
+  if (!window.RTCPeerConnection) {
+    setStatus('error', 'Unsupported');
+    viewportOverlay.textContent = 'This browser does not support RTCPeerConnection.';
+    return;
+  }
+
+  const peer = new RTCPeerConnection({
+    bundlePolicy: 'max-bundle',
+    rtcpMuxPolicy: 'require'
+  });
+  state.peerConnection = peer;
+
+  peer.addEventListener('connectionstatechange', () => {
+    appendLog({ type: 'connection_state', state: peer.connectionState });
+    if (peer.connectionState === 'connected') {
+      setStatus('connected', 'Streaming');
+      viewportOverlay.style.display = 'none';
+    } else if (peer.connectionState === 'failed' || peer.connectionState === 'disconnected') {
+      setStatus('error', 'Peer Failed');
+      viewportOverlay.textContent = `Peer connection ${peer.connectionState}.`;
+      viewportOverlay.style.display = 'grid';
     }
   });
 
-  socket.addEventListener('close', () => {
-    setStatus('error', 'Disconnected');
-    viewportOverlay.textContent = 'Stream disconnected. Reconnect when the server is ready.';
+  peer.addEventListener('signalingstatechange', () => {
+    appendLog({ type: 'signaling_state', state: peer.signalingState });
+  });
+
+  peer.addEventListener('iceconnectionstatechange', () => {
+    appendLog({ type: 'ice_connection_state', state: peer.iceConnectionState });
+  });
+
+  peer.addEventListener('track', (event) => {
+    appendLog({ type: 'remote_track', kind: event.track.kind });
+    const [stream] = event.streams;
+    if (stream) {
+      viewportVideo.srcObject = stream;
+      viewportOverlay.style.display = 'none';
+    }
+  });
+
+  peer.addEventListener('icecandidate', async (event) => {
+    if (!event.candidate) {
+      appendLog({ type: 'ice_gathering_complete' });
+      return;
+    }
+
+    appendLog({ type: 'local_ice_candidate', candidate: event.candidate.candidate });
+    try {
+      await postJson('/webrtc/ice-candidate', {
+        candidate: event.candidate.candidate,
+        sdpMid: event.candidate.sdpMid,
+        sdpMLineIndex: event.candidate.sdpMLineIndex
+      });
+    } catch (error) {
+      appendError('local ICE upload failed', error);
+    }
+  });
+
+  state.reliableChannel = peer.createDataChannel('editor-events', {
+    ordered: true
+  });
+  wireDataChannel(state.reliableChannel, 'editor-events');
+
+  state.unreliableChannel = peer.createDataChannel('viewport-input', {
+    ordered: false,
+    maxRetransmits: 0
+  });
+  wireDataChannel(state.unreliableChannel, 'viewport-input');
+
+  try {
+    const offer = await peer.createOffer({
+      offerToReceiveAudio: false,
+      offerToReceiveVideo: true
+    });
+    await peer.setLocalDescription(offer);
+
+    const answer = await postJson('/webrtc/offer', {
+      type: offer.type,
+      sdp: offer.sdp
+    });
+    appendLog({ type: 'offer_response', body: answer });
+
+    if (!answer || answer.type !== 'answer' || !answer.sdp) {
+      throw new Error(answer && answer.detail
+        ? answer.detail
+        : 'Server did not return a valid WebRTC answer.');
+    }
+
+    await peer.setRemoteDescription(answer);
+    setStatus('idle', 'Awaiting Media');
+    viewportOverlay.textContent = 'Offer accepted. Waiting for remote media...';
+  } catch (error) {
+    appendError('WebRTC negotiation failed', error);
+    setStatus('error', 'Negotiation Failed');
+    viewportOverlay.textContent = String(error.message || error);
     viewportOverlay.style.display = 'grid';
-  });
+  } finally {
+    state.signalingInFlight = false;
+  }
 
-  socket.addEventListener('error', () => {
-    setStatus('error', 'Socket Error');
-  });
+  state.statusPollHandle = window.setInterval(() => {
+    void pollWebRtcStatus();
+  }, 1500);
+  state.icePollHandle = window.setInterval(() => {
+    void pollIceCandidates();
+  }, 1000);
+
+  void pollWebRtcStatus();
 }
 
 connectButton.addEventListener('click', connect);
@@ -447,21 +680,17 @@ document.addEventListener('keyup', (event) => {
 });
 
 setInterval(() => {
-  if (!canSend()) {
-    return;
-  }
-
   const lookChanged = applyPendingLook();
   const [x, y, z] = movementVector();
   if (!lookChanged && x === 0 && y === 0 && z === 0) {
     return;
   }
 
-  sendCommand({
+  void sendCommand({
     type: 'update_viewport_camera',
     worldMovement: [x, y, z],
     cursorPosition: [state.cursor.x, state.cursor.y]
-  });
+  }, 'unreliable');
 }, 16);
 
 updateLookButton();
