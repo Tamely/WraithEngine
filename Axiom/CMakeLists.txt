@@ -20,6 +20,7 @@ set(ENGINE_SOURCES
   Renderer/RenderCommand.cpp
   Renderer/Renderer.cpp
   Renderer/RenderScene.cpp
+  Renderer/VideoEncoderFactory.cpp
   Renderer/Vulkan/VulkanBuffer.cpp
   Renderer/Vulkan/VulkanCommandContext.cpp
   Renderer/Vulkan/VulkanContext.cpp
@@ -36,6 +37,12 @@ set(ENGINE_SOURCES
   Renderer/Vulkan/VulkanSceneRenderer.cpp
   Renderer/Vulkan/VulkanSwapchain.cpp
 )
+
+if(APPLE)
+  list(APPEND ENGINE_SOURCES
+    Renderer/MacOSVideoToolboxH264Encoder.mm
+  )
+endif()
 
 set(THIRDPARTY_SOURCES
   "${CMAKE_SOURCE_DIR}/ThirdParty/imgui/imgui.h"
@@ -98,6 +105,16 @@ endif()
 
 if(UNIX AND NOT APPLE)
   target_link_libraries(AxiomCore PUBLIC ${CMAKE_DL_LIBS})
+endif()
+
+if(APPLE)
+  target_link_libraries(AxiomCore PUBLIC
+    "-framework Foundation"
+    "-framework CoreFoundation"
+    "-framework CoreMedia"
+    "-framework CoreVideo"
+    "-framework VideoToolbox"
+  )
 endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")

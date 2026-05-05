@@ -5,6 +5,7 @@
 #include "Renderer/ViewportFrameOutput.h"
 #include "Session/EditorEvent.h"
 
+#include <memory>
 #include <vector>
 
 namespace Axiom {
@@ -25,9 +26,11 @@ public:
   void OnEditorEvent(const PublishedEditorEvent &Event) override;
   void OnViewportFrame(const ViewportFrame &Frame) override;
   void OnEncodedVideoPacket(const EncodedVideoPacket &Packet) override;
+  void SetVideoEncoder(std::unique_ptr<IVideoEncoder> Encoder);
 
 private:
   EditorSession &m_Session;
   std::vector<ISessionTransportSubscriber *> m_Subscribers;
+  std::unique_ptr<IVideoEncoder> m_VideoEncoder;
 };
 } // namespace Axiom

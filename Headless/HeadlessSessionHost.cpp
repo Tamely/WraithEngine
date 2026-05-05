@@ -1,5 +1,7 @@
 #include "HeadlessSessionHost.h"
 
+#include <Renderer/VideoEncoderFactory.h>
+
 namespace Axiom {
 HeadlessSessionHost::HeadlessSessionHost(const ApplicationArgs &Args,
                                          uint32_t Width, uint32_t Height)
@@ -11,6 +13,7 @@ HeadlessSessionHost::HeadlessSessionHost(const ApplicationArgs &Args,
   m_Layer = new HeadlessSessionLayer();
   PushLayer(m_Layer);
   m_Endpoint = std::make_unique<AxiomSessionEndpoint>(m_Layer->GetSession());
+  m_Endpoint->SetVideoEncoder(CreateDefaultVideoEncoder());
   SetViewportFrameOutput(m_Endpoint.get());
 }
 

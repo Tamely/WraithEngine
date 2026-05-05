@@ -1,10 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <Core/CursorMode.h>
+#include <Core/Platform.h>
 #include <Core/GlfwEditorInputSource.h>
 #include <Core/InputPlatform.h>
 #include <Remote/AxiomSessionEndpoint.h>
 #include <Renderer/OffscreenRenderSurface.h>
+#include <Renderer/VideoEncoderFactory.h>
 #include <Session/BufferedEditorInputSource.h>
 #include <Session/EditorSession.h>
 
@@ -120,6 +122,16 @@ public:
   std::vector<EncodedPacketRecord> EncodedPackets;
   std::vector<std::byte> LastFrameBytes;
   std::vector<std::byte> LastEncodedPacketBytes;
+};
+
+class RecordingEncodedPacketOutput final
+    : public Axiom::IEncodedVideoPacketOutput {
+public:
+  void OnEncodedVideoPacket(const Axiom::EncodedVideoPacket &Packet) override {
+    Packets.push_back(Packet);
+  }
+
+  std::vector<Axiom::EncodedVideoPacket> Packets;
 };
 
 Axiom::CommandContext MakeContext(uint64_t FrameIndex = 1) {
@@ -477,3 +489,39 @@ TEST(RemoteViewportTests, AxiomEndpointConnectIsIdempotentAndStopsAfterDisconnec
   Session.Tick();
   EXPECT_EQ(Subscriber.Events.size(), 1u);
 }
+
+#if AXIOM_PLATFORM_MACOS
+TEST(RemoteViewportTests, DefaultVideoEncoderProducesH264PacketsOnMacOS) {
+  auto Encoder = Axiom::CreateDefaultVideoEncoder();
+  ASSERT_NE(Encoder, nullptr);
+
+  RecordingEncodedPacketOutput Output;
+  Encoder->SetOutput(&Output);
+
+  std::vector<std::byte> Pixels(64u * 64u * 4u);
+  for (uint32_t Y = 0; Y < 64u; ++Y) {
+    for (uint32_t X = 0; X < 64u; ++X) {
+      const size_t Offset = (static_cast<size_t>(Y) * 64u + X) * 4u;
+      Pixels[Offset + 0u] = std::byte{static_cast<unsigned char>(X * 4u)};
+      Pixels[Offset + 1u] = std::byte{static_cast<unsigned char>(Y * 4u)};
+      Pixels[Offset + 2u] = std::byte{0x80};
+      Pixels[Offset + 3u] = std::byte{0xFF};
+    }
+  }
+
+  EXPECT_TRUE(Encoder->EncodeFrame({
+      .FrameIndex = 1,
+      .Width = 64,
+      .Height = 64,
+      .Format = Axiom::ViewportFrameFormat::R8G8B8A8Unorm,
+      .Pixels = std::span<const std::byte>(Pixels.data(), Pixels.size()),
+  }));
+
+  ASSERT_FALSE(Output.Packets.empty());
+  EXPECT_EQ(Output.Packets.front().Codec, Axiom::EncodedVideoCodec::H264);
+  EXPECT_EQ(Output.Packets.front().FrameIndex, 1u);
+  EXPECT_EQ(Output.Packets.front().Width, 64u);
+  EXPECT_EQ(Output.Packets.front().Height, 64u);
+  EXPECT_FALSE(Output.Packets.front().Bytes.empty());
+}
+#endif

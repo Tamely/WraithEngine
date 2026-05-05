@@ -54,12 +54,29 @@ void AxiomSessionEndpoint::OnViewportFrame(const ViewportFrame &Frame) {
   for (ISessionTransportSubscriber *Subscriber : m_Subscribers) {
     Subscriber->OnSessionTransportViewportFrame(Frame);
   }
+
+  if (m_VideoEncoder != nullptr) {
+    m_VideoEncoder->EncodeFrame({
+        .FrameIndex = Frame.FrameIndex,
+        .Width = Frame.Width,
+        .Height = Frame.Height,
+        .Format = Frame.Format,
+        .Pixels = Frame.Pixels,
+    });
+  }
 }
 
 void AxiomSessionEndpoint::OnEncodedVideoPacket(
     const EncodedVideoPacket &Packet) {
   for (ISessionTransportSubscriber *Subscriber : m_Subscribers) {
     Subscriber->OnSessionTransportEncodedVideoPacket(Packet);
+  }
+}
+
+void AxiomSessionEndpoint::SetVideoEncoder(std::unique_ptr<IVideoEncoder> Encoder) {
+  m_VideoEncoder = std::move(Encoder);
+  if (m_VideoEncoder != nullptr) {
+    m_VideoEncoder->SetOutput(this);
   }
 }
 } // namespace Axiom
