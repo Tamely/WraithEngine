@@ -859,6 +859,7 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
     m_Host.SetRemoteViewMode(Command->ViewMode);
     break;
   case HeadlessCommandType::SetLookActive:
+  case HeadlessCommandType::SetViewportCameraPose:
   case HeadlessCommandType::SelectObject:
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::UpdateViewportCamera:
@@ -1437,6 +1438,7 @@ bool RemoteViewportServer::HandleWebSocketMessage(std::string_view Payload) {
     m_Host.SetRemoteViewMode(Command->ViewMode);
     return true;
   case HeadlessCommandType::SetLookActive:
+  case HeadlessCommandType::SetViewportCameraPose:
   case HeadlessCommandType::SelectObject:
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::UpdateViewportCamera: {

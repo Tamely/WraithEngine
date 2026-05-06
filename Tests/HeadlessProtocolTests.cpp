@@ -79,6 +79,22 @@ TEST(HeadlessProtocolTests, RemoteViewportAcceptsCameraCommand) {
   EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::UpdateViewportCamera);
 }
 
+TEST(HeadlessProtocolTests, RemoteViewportAcceptsSetViewportCameraPoseCommand) {
+  std::string Error;
+  const auto Command = Axiom::ParseRemoteViewportCommand(
+      R"json({"type":"set_viewport_camera_pose","position":[1.0,2.0,3.0],"yawDegrees":45.0,"pitchDegrees":-10.0})json",
+      Error);
+
+  ASSERT_TRUE(Command.has_value()) << Error;
+  EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::SetViewportCameraPose);
+  const auto *Payload =
+      std::get_if<Axiom::SetViewportCameraPoseCommand>(&Command->EditorPayload.Payload);
+  ASSERT_NE(Payload, nullptr);
+  EXPECT_EQ(Payload->Position, glm::vec3(1.0f, 2.0f, 3.0f));
+  EXPECT_FLOAT_EQ(Payload->YawDegrees, 45.0f);
+  EXPECT_FLOAT_EQ(Payload->PitchDegrees, -10.0f);
+}
+
 TEST(HeadlessProtocolTests, RemoteViewportAcceptsSelectObjectCommand) {
   std::string Error;
   const auto Command = Axiom::ParseRemoteViewportCommand(

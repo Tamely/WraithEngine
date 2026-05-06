@@ -381,6 +381,12 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
       R"json("cursorPosition"\s*:\s*\[\s*([-+0-9.eE]+)\s*,\s*([-+0-9.eE]+)\s*\])json");
   static const std::regex MovementPattern(
       R"json("worldMovement"\s*:\s*\[\s*([-+0-9.eE]+)\s*,\s*([-+0-9.eE]+)\s*,\s*([-+0-9.eE]+)\s*\])json");
+  static const std::regex PositionPattern(
+      R"json("position"\s*:\s*\[\s*([-+0-9.eE]+)\s*,\s*([-+0-9.eE]+)\s*,\s*([-+0-9.eE]+)\s*\])json");
+  static const std::regex YawPattern(
+      R"json("yawDegrees"\s*:\s*([-+0-9.eE]+))json");
+  static const std::regex PitchPattern(
+      R"json("pitchDegrees"\s*:\s*([-+0-9.eE]+))json");
 
   const auto Type = MatchString(JsonLine, TypePattern);
   if (!Type.has_value()) {
@@ -437,6 +443,30 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
             {.Payload = SetLookActiveCommand{
                  .IsLooking = *BoolValue == "true",
                  .CursorPosition = Cursor,
+             }},
+    };
+  }
+  if (*Type == "set_viewport_camera_pose") {
+    const auto Position = MatchVec3(JsonLine, PositionPattern);
+    const auto Yaw = MatchString(JsonLine, YawPattern);
+    const auto Pitch = MatchString(JsonLine, PitchPattern);
+    if (!Position.has_value() || !Yaw.has_value() || !Pitch.has_value()) {
+      Error = "`set_viewport_camera_pose` requires `position`, `yawDegrees`, and `pitchDegrees`.";
+      return std::nullopt;
+    }
+    const auto ParsedYaw = ParseDouble(*Yaw);
+    const auto ParsedPitch = ParseDouble(*Pitch);
+    if (!ParsedYaw.has_value() || !ParsedPitch.has_value()) {
+      Error = "`set_viewport_camera_pose` requires numeric `yawDegrees` and `pitchDegrees`.";
+      return std::nullopt;
+    }
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::SetViewportCameraPose,
+        .EditorPayload =
+            {.Payload = SetViewportCameraPoseCommand{
+                 .Position = *Position,
+                 .YawDegrees = static_cast<float>(*ParsedYaw),
+                 .PitchDegrees = static_cast<float>(*ParsedPitch),
              }},
     };
   }
@@ -515,6 +545,7 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   switch (Command->Type) {
   case HeadlessCommandType::SetViewMode:
   case HeadlessCommandType::SetLookActive:
+  case HeadlessCommandType::SetViewportCameraPose:
   case HeadlessCommandType::SelectObject:
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::UpdateViewportCamera:

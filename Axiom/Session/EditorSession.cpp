@@ -41,6 +41,9 @@ std::string CommandTypeName(const EditorCommandPayload &Payload) {
   if (std::holds_alternative<UpdateViewportCameraCommand>(Payload)) {
     return "update_viewport_camera";
   }
+  if (std::holds_alternative<SetViewportCameraPoseCommand>(Payload)) {
+    return "set_viewport_camera_pose";
+  }
   if (std::holds_alternative<SetLookActiveCommand>(Payload)) {
     return "set_look_active";
   }
@@ -419,6 +422,20 @@ void EditorSession::HandleCommand(
                       .PitchDegrees = Viewport.Camera.GetPitchDegrees(),
                   }});
   }
+}
+
+void EditorSession::HandleCommand(
+    const QueuedEditorCommand &QueuedCommand,
+    const SetViewportCameraPoseCommand &Command) {
+  EditorViewportState &Viewport = EnsureViewport(QueuedCommand.Context.User);
+  Viewport.Camera.SetPosition(Command.Position);
+  Viewport.Camera.SetRotation(Command.YawDegrees, Command.PitchDegrees);
+  PublishEvent({.Payload = ViewportCameraUpdatedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .Position = Viewport.Camera.GetPosition(),
+                    .YawDegrees = Viewport.Camera.GetYawDegrees(),
+                    .PitchDegrees = Viewport.Camera.GetPitchDegrees(),
+                }});
 }
 
 void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,

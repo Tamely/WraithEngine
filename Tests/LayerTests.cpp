@@ -350,6 +350,37 @@ TEST(EditorSessionTests, LookStateEnablesAuthoritativeRotationFromCursorDeltas) 
       Subscriber.Events[2].Event.Payload));
 }
 
+TEST(EditorSessionTests, SetViewportCameraPoseJumpsAuthoritativeCameraState) {
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+  Session.EnsureViewportState(Axiom::SessionUserId{7});
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetViewportCameraPoseCommand{
+                      .Position = glm::vec3(4.0f, 5.0f, 6.0f),
+                      .YawDegrees = 35.0f,
+                      .PitchDegrees = -12.0f,
+                  }});
+  Session.Tick();
+
+  const Axiom::EditorViewportState *Viewport =
+      Session.FindViewport(Axiom::SessionUserId{7});
+  ASSERT_NE(Viewport, nullptr);
+  EXPECT_EQ(Viewport->Camera.GetPosition(), glm::vec3(4.0f, 5.0f, 6.0f));
+  EXPECT_FLOAT_EQ(Viewport->Camera.GetYawDegrees(), 35.0f);
+  EXPECT_FLOAT_EQ(Viewport->Camera.GetPitchDegrees(), -12.0f);
+
+  ASSERT_EQ(Subscriber.Events.size(), 2u);
+  EXPECT_TRUE(std::holds_alternative<Axiom::ViewportCameraUpdatedEvent>(
+      Subscriber.Events.front().Event.Payload));
+  EXPECT_TRUE(std::holds_alternative<Axiom::CommandAcknowledgedEvent>(
+      Subscriber.Events.back().Event.Payload));
+  const auto &Acknowledged = std::get<Axiom::CommandAcknowledgedEvent>(
+      Subscriber.Events.back().Event.Payload);
+  EXPECT_EQ(Acknowledged.CommandType, "set_viewport_camera_pose");
+}
+
 TEST(EditorSessionTests, SelectObjectPublishesAuthoritativeSelectionChangedEvent) {
   Axiom::EditorSession Session(Axiom::SessionId{1});
   RecordingSubscriber Subscriber;

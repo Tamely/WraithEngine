@@ -23,6 +23,12 @@ struct UpdateViewportCameraCommand {
   std::optional<glm::dvec2> CursorPosition;
 };
 
+struct SetViewportCameraPoseCommand {
+  glm::vec3 Position{0.0f};
+  float YawDegrees{0.0f};
+  float PitchDegrees{0.0f};
+};
+
 struct SetLookActiveCommand {
   bool IsLooking{false};
   std::optional<glm::dvec2> CursorPosition;
@@ -40,7 +46,8 @@ struct SetTransformCommand {
 };
 
 using EditorCommandPayload =
-    std::variant<UpdateViewportCameraCommand, SetLookActiveCommand,
+    std::variant<UpdateViewportCameraCommand, SetViewportCameraPoseCommand,
+                 SetLookActiveCommand,
                  SelectObjectCommand, SetTransformCommand>;
 
 struct EditorCommand {

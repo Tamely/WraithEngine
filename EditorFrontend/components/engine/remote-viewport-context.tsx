@@ -90,6 +90,7 @@ interface RemoteViewportActions {
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
   refreshSessionSnapshot: () => Promise<void>
   selectObject: (objectId: string) => Promise<boolean>
+  goToParticipantCamera: (userId: number) => Promise<boolean>
   updateTransform: (details: SessionObjectTransformUpdate) => Promise<boolean>
 }
 
@@ -144,6 +145,7 @@ interface RemoteViewportContextValue {
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
   refreshSessionSnapshot: () => Promise<void>
   selectObject: (objectId: string) => Promise<boolean>
+  goToParticipantCamera: (userId: number) => Promise<boolean>
   updateTransform: (details: SessionObjectTransformUpdate) => Promise<boolean>
 }
 
@@ -185,6 +187,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     setMode: async () => {},
     refreshSessionSnapshot: async () => {},
     selectObject: async () => false,
+    goToParticipantCamera: async () => false,
     updateTransform: async () => false,
   })
   const [connectionState, setConnectionState] =
@@ -281,6 +284,10 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     return actionsRef.current.selectObject(objectId)
   }, [])
 
+  const goToParticipantCamera = useCallback(async (userId: number) => {
+    return actionsRef.current.goToParticipantCamera(userId)
+  }, [])
+
   const updateTransform = useCallback(async (details: SessionObjectTransformUpdate) => {
     return actionsRef.current.updateTransform(details)
   }, [])
@@ -333,6 +340,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       setMode,
       refreshSessionSnapshot,
       selectObject,
+      goToParticipantCamera,
       updateTransform,
     }),
     [
@@ -356,6 +364,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       registerActions,
       sceneTree,
       selectObject,
+      goToParticipantCamera,
       selectedObject,
       selectedObjectDetails,
       selectedObjectId,

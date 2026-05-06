@@ -99,6 +99,12 @@ type RemoteViewportCommand =
       cursorPosition: [number, number]
     }
   | {
+      type: "set_viewport_camera_pose"
+      position: [number, number, number]
+      yawDegrees: number
+      pitchDegrees: number
+    }
+  | {
       type: "select_object"
       objectId: string
     }
@@ -130,6 +136,7 @@ export function Viewport() {
   const remoteDescriptionAppliedRef = useRef(false)
   const activeGenerationRef = useRef(0)
   const clientIdRef = useRef<string | null>(null)
+  const participantsRef = useRef<SessionParticipant[]>([])
   const sessionReadyRef = useRef(false)
   const reconnectingRef = useRef(false)
   const pointerLockedRef = useRef(false)
@@ -150,6 +157,7 @@ export function Viewport() {
     frameText,
     viewMode,
     isLooking,
+    participants,
     setConnectionState,
     setStatusText,
     setDetailText,
@@ -181,6 +189,10 @@ export function Viewport() {
   useEffect(() => {
     isLookingRef.current = isLooking
   }, [isLooking])
+
+  useEffect(() => {
+    participantsRef.current = participants
+  }, [participants])
 
   useEffect(() => {
     let disposed = false
@@ -1075,6 +1087,25 @@ export function Viewport() {
           {
             type: "select_object",
             objectId,
+          },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
+      goToParticipantCamera: async (userId) => {
+        const participant = participantsRef.current.find((entry) => entry.userId === userId)
+        if (!participant?.camera) {
+          return false
+        }
+        const accepted = await sendCommand(
+          {
+            type: "set_viewport_camera_pose",
+            position: participant.camera.position,
+            yawDegrees: participant.camera.yawDegrees,
+            pitchDegrees: participant.camera.pitchDegrees,
           },
           "reliable"
         )

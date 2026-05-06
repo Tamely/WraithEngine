@@ -157,6 +157,8 @@ private:
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const UpdateViewportCameraCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const SetViewportCameraPoseCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SetLookActiveCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SelectObjectCommand &Command);

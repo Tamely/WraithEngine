@@ -14,6 +14,12 @@ import {
   User,
   Layers,
 } from "lucide-react"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 import { useRemoteViewport, type SessionSceneItem, type SessionSceneItemKind } from "./remote-viewport-context"
 
 function matchesSearch(item: SessionSceneItem, query: string): boolean {
@@ -33,7 +39,7 @@ function matchesSearch(item: SessionSceneItem, query: string): boolean {
 }
 
 export function Outliner() {
-  const { sceneTree, selectedObjectId, selectObject, participants, sessionState } =
+  const { sceneTree, selectedObjectId, selectObject, goToParticipantCamera, participants, sessionState } =
     useRemoteViewport()
   const [searchQuery, setSearchQuery] = useState("")
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
@@ -100,53 +106,81 @@ export function Outliner() {
       return null
     }
 
-    return (
-      <div key={item.id}>
-        <div
-          className={`group flex cursor-pointer items-center gap-1 px-2 py-1 hover:bg-neutral-800 ${
-            isSelected ? "bg-neutral-700" : ""
-          }`}
-          style={{ paddingLeft: `${depth * 16 + 8}px` }}
-          onClick={() => void selectObject(item.id)}
-        >
-          {hasChildren ? (
-            <button
-              className="rounded p-0.5 hover:bg-neutral-700"
-              onClick={(event) => {
-                event.stopPropagation()
-                toggleFolder(item.id)
-              }}
-              type="button"
-            >
-              {isExpanded ? (
-                <ChevronDown className="h-3 w-3 text-neutral-400" />
-              ) : (
-                <ChevronRight className="h-3 w-3 text-neutral-400" />
-              )}
-            </button>
-          ) : (
-            <div className="w-4" />
-          )}
-          <Icon className="h-4 w-4 text-neutral-400" />
-          <span className="flex-1 truncate text-xs text-neutral-300">
-            {item.displayName}
-          </span>
-          {selectedBy.length > 0 && (
-            <span className="max-w-28 truncate text-[10px] text-amber-300/80">
-              {selectedBy.join(", ")}
-            </span>
-          )}
+    const participantCameraUserId = item.id.startsWith("participant-camera-")
+      ? Number(item.id.replace("participant-camera-", ""))
+      : null
+
+    const row = (
+      <div
+        className={`group flex cursor-pointer items-center gap-1 px-2 py-1 hover:bg-neutral-800 ${
+          isSelected ? "bg-neutral-700" : ""
+        }`}
+        style={{ paddingLeft: `${depth * 16 + 8}px` }}
+        onClick={() => {
+          if (participantCameraUserId !== null && Number.isFinite(participantCameraUserId)) {
+            return
+          }
+          void selectObject(item.id)
+        }}
+      >
+        {hasChildren ? (
           <button
-            className="rounded p-0.5 opacity-0 hover:bg-neutral-700 group-hover:opacity-100"
+            className="rounded p-0.5 hover:bg-neutral-700"
+            onClick={(event) => {
+              event.stopPropagation()
+              toggleFolder(item.id)
+            }}
             type="button"
           >
-            {item.visible ? (
-              <Eye className="h-3 w-3 text-neutral-500" />
+            {isExpanded ? (
+              <ChevronDown className="h-3 w-3 text-neutral-400" />
             ) : (
-              <EyeOff className="h-3 w-3 text-neutral-600" />
+              <ChevronRight className="h-3 w-3 text-neutral-400" />
             )}
           </button>
-        </div>
+        ) : (
+          <div className="w-4" />
+        )}
+        <Icon className="h-4 w-4 text-neutral-400" />
+        <span className="flex-1 truncate text-xs text-neutral-300">
+          {item.displayName}
+        </span>
+        {selectedBy.length > 0 && (
+          <span className="max-w-28 truncate text-[10px] text-amber-300/80">
+            {selectedBy.join(", ")}
+          </span>
+        )}
+        <button
+          className="rounded p-0.5 opacity-0 hover:bg-neutral-700 group-hover:opacity-100"
+          type="button"
+        >
+          {item.visible ? (
+            <Eye className="h-3 w-3 text-neutral-500" />
+          ) : (
+            <EyeOff className="h-3 w-3 text-neutral-600" />
+          )}
+        </button>
+      </div>
+    )
+
+    return (
+      <div key={item.id}>
+        {participantCameraUserId !== null && Number.isFinite(participantCameraUserId) ? (
+          <ContextMenu>
+            <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+            <ContextMenuContent className="border-neutral-800 bg-neutral-950 text-neutral-200">
+              <ContextMenuItem
+                onClick={() => {
+                  void goToParticipantCamera(participantCameraUserId)
+                }}
+              >
+                Go to Camera
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
+        ) : (
+          row
+        )}
         {hasChildren && isExpanded && item.children.map((child) => renderItem(child, depth + 1))}
       </div>
     )
