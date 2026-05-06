@@ -93,6 +93,10 @@ const RendererFrameStats &Renderer::GetFrameStats() const {
   return m_Backend->GetFrameStats();
 }
 
+std::shared_ptr<Mesh> Renderer::CreateMesh(const MeshData &MeshData) {
+  return m_Backend != nullptr ? m_Backend->CreateMesh(MeshData) : nullptr;
+}
+
 void Renderer::UpdateCpuRenderTime(float CpuRenderMs) {
   m_Backend->AccessFrameStats().CpuRenderMs = CpuRenderMs;
 }

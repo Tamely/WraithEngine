@@ -815,6 +815,7 @@ TEST(RemoteViewportTests, AxiomEndpointConnectIsIdempotentAndStopsAfterDisconnec
   EXPECT_EQ(Subscriber.Events.size(), 2u);
 }
 
+
 TEST(RemoteViewportTests, AxiomEndpointCanEncodeRawFramesThroughInstalledEncoder) {
   Axiom::EditorSession Session(Axiom::SessionId{1});
   Axiom::AxiomSessionEndpoint Endpoint(Session);
