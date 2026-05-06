@@ -128,7 +128,121 @@ std::string EventPayloadType(const EditorEventPayload &Payload) {
   if (std::holds_alternative<LookStateChangedEvent>(Payload)) {
     return "look_state_changed";
   }
-  return "command_rejected";
+  if (std::holds_alternative<CommandAcknowledgedEvent>(Payload)) {
+    return "command_acked";
+  }
+  if (std::holds_alternative<CommandRejectedEvent>(Payload)) {
+    return "command_rejected";
+  }
+  if (std::holds_alternative<SelectionChangedEvent>(Payload)) {
+    return "selection_changed";
+  }
+  return "object_transform_updated";
+}
+
+std::string SceneItemKindToString(EditorSceneItemKind Kind) {
+  switch (Kind) {
+  case EditorSceneItemKind::Folder:
+    return "folder";
+  case EditorSceneItemKind::Mesh:
+    return "mesh";
+  case EditorSceneItemKind::Light:
+    return "light";
+  case EditorSceneItemKind::Camera:
+    return "camera";
+  case EditorSceneItemKind::Actor:
+    return "actor";
+  }
+
+  return "mesh";
+}
+
+std::string PresenceStateToString(EditorUserPresenceState State) {
+  switch (State) {
+  case EditorUserPresenceState::Connected:
+    return "connected";
+  case EditorUserPresenceState::Away:
+    return "away";
+  case EditorUserPresenceState::Disconnected:
+    return "disconnected";
+  }
+
+  return "connected";
+}
+
+std::string LockStateToString(EditorObjectLockState State) {
+  switch (State) {
+  case EditorObjectLockState::Unlocked:
+    return "unlocked";
+  case EditorObjectLockState::Placeholder:
+    return "placeholder";
+  }
+
+  return "unlocked";
+}
+
+void SerializeSceneItem(std::ostringstream &Stream, const EditorSceneItem &Item) {
+  Stream << "{\"id\":\"" << EscapeJson(Item.Id) << "\",\"displayName\":\""
+         << EscapeJson(Item.DisplayName) << "\",\"kind\":\""
+         << SceneItemKindToString(Item.Kind) << "\",\"visible\":"
+         << (Item.Visible ? "true" : "false") << ",\"children\":[";
+  for (size_t Index = 0; Index < Item.Children.size(); ++Index) {
+    if (Index != 0) {
+      Stream << ",";
+    }
+    SerializeSceneItem(Stream, Item.Children[Index]);
+  }
+  Stream << "]}";
+}
+
+void SerializeObjectDetails(std::ostringstream &Stream,
+                            const EditorSessionState &State,
+                            const EditorObjectDetails &Details) {
+  Stream << "{\"objectId\":\"" << EscapeJson(Details.ObjectId)
+         << "\",\"displayName\":\"" << EscapeJson(Details.DisplayName)
+         << "\",\"kind\":\"" << SceneItemKindToString(Details.Kind)
+         << "\",\"visible\":" << (Details.Visible ? "true" : "false")
+         << ",\"capabilities\":{\"supportsTransform\":"
+         << (Details.SupportsTransform ? "true" : "false")
+         << ",\"transformReadOnly\":"
+         << (Details.TransformReadOnly ? "true" : "false") << "},\"transform\":";
+  if (Details.Transform.has_value()) {
+    Stream << "{\"location\":[" << Details.Transform->Location.x << ","
+           << Details.Transform->Location.y << "," << Details.Transform->Location.z
+           << "],\"rotationDegrees\":[" << Details.Transform->RotationDegrees.x
+           << "," << Details.Transform->RotationDegrees.y << ","
+           << Details.Transform->RotationDegrees.z << "],\"scale\":["
+           << Details.Transform->Scale.x << "," << Details.Transform->Scale.y
+           << "," << Details.Transform->Scale.z << "]}";
+  } else {
+    Stream << "null";
+  }
+  Stream << ",\"collaboration\":{\"selectedByUserIds\":[";
+  bool FirstSelectionOwner = true;
+  for (const auto &[User, ObjectId] : State.SelectedObjectIds) {
+    if (ObjectId != Details.ObjectId) {
+      continue;
+    }
+    if (!FirstSelectionOwner) {
+      Stream << ",";
+    }
+    FirstSelectionOwner = false;
+    Stream << User.Value;
+  }
+  Stream << "],\"lockState\":\"";
+  const auto CollaborationIt = State.CollaborationByObjectId.find(Details.ObjectId);
+  if (CollaborationIt != State.CollaborationByObjectId.end()) {
+    Stream << LockStateToString(CollaborationIt->second.LockState)
+           << "\",\"lockOwnerUserId\":";
+    if (CollaborationIt->second.LockOwner.has_value()) {
+      Stream << CollaborationIt->second.LockOwner->Value;
+    } else {
+      Stream << "null";
+    }
+  } else {
+    Stream << "unlocked\",\"lockOwnerUserId\":null";
+  }
+  Stream << "}}";
 }
 } // namespace
 
@@ -236,6 +350,50 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
              }},
     };
   }
+  if (*Type == "select_object") {
+    static const std::regex ObjectIdPattern(
+        R"json("objectId"\s*:\s*"((?:\\.|[^"])*)")json");
+    const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
+    if (!ObjectId.has_value()) {
+      Error = "`select_object` requires `objectId`.";
+      return std::nullopt;
+    }
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::SelectObject,
+        .EditorPayload =
+            {.Payload = SelectObjectCommand{.ObjectId = UnescapeJsonString(*ObjectId)}},
+    };
+  }
+  if (*Type == "set_transform") {
+    static const std::regex ObjectIdPattern(
+        R"json("objectId"\s*:\s*"((?:\\.|[^"])*)")json");
+    static const std::regex LocationPattern(
+        R"json("location"\s*:\s*\[\s*([-+0-9.eE]+)\s*,\s*([-+0-9.eE]+)\s*,\s*([-+0-9.eE]+)\s*\])json");
+    static const std::regex RotationPattern(
+        R"json("rotationDegrees"\s*:\s*\[\s*([-+0-9.eE]+)\s*,\s*([-+0-9.eE]+)\s*,\s*([-+0-9.eE]+)\s*\])json");
+    static const std::regex ScalePattern(
+        R"json("scale"\s*:\s*\[\s*([-+0-9.eE]+)\s*,\s*([-+0-9.eE]+)\s*,\s*([-+0-9.eE]+)\s*\])json");
+
+    const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
+    const auto Location = MatchVec3(JsonLine, LocationPattern);
+    const auto Rotation = MatchVec3(JsonLine, RotationPattern);
+    const auto Scale = MatchVec3(JsonLine, ScalePattern);
+    if (!ObjectId.has_value() || !Location.has_value() || !Rotation.has_value() ||
+        !Scale.has_value()) {
+      Error = "`set_transform` requires `objectId`, `location`, `rotationDegrees`, and `scale`.";
+      return std::nullopt;
+    }
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::SetTransform,
+        .EditorPayload =
+            {.Payload = SetTransformCommand{
+                 .ObjectId = UnescapeJsonString(*ObjectId),
+                 .Location = *Location,
+                 .RotationDegrees = *Rotation,
+                 .Scale = *Scale,
+             }},
+    };
+  }
   if (*Type == "update_viewport_camera") {
     const auto Movement = MatchVec3(JsonLine, MovementPattern);
     if (!Movement.has_value()) {
@@ -267,6 +425,8 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   switch (Command->Type) {
   case HeadlessCommandType::SetViewMode:
   case HeadlessCommandType::SetLookActive:
+  case HeadlessCommandType::SelectObject:
+  case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::UpdateViewportCamera:
   case HeadlessCommandType::Quit:
     return Command;
@@ -322,11 +482,37 @@ std::string SerializeEvent(const PublishedEditorEvent &Event) {
                  std::get_if<LookStateChangedEvent>(&Event.Event.Payload)) {
     Stream << ",\"user\":" << Look->User.Value << ",\"isLooking\":"
            << (Look->IsLooking ? "true" : "false");
+  } else if (const auto *Acknowledged =
+                 std::get_if<CommandAcknowledgedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"user\":" << Acknowledged->User.Value
+           << ",\"acknowledgedCommandId\":"
+           << Acknowledged->AcknowledgedCommand.Value
+           << ",\"commandType\":\"" << EscapeJson(Acknowledged->CommandType)
+           << "\"";
   } else if (const auto *Rejected =
                  std::get_if<CommandRejectedEvent>(&Event.Event.Payload)) {
     Stream << ",\"user\":" << Rejected->User.Value
            << ",\"rejectedCommandId\":" << Rejected->RejectedCommand.Value
            << ",\"reason\":\"" << EscapeJson(Rejected->Reason) << "\"";
+  } else if (const auto *Selection =
+                 std::get_if<SelectionChangedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"user\":" << Selection->User.Value << ",\"objectId\":";
+    if (Selection->ObjectId.has_value()) {
+      Stream << "\"" << EscapeJson(*Selection->ObjectId) << "\"";
+    } else {
+      Stream << "null";
+    }
+  } else if (const auto *Transform =
+                 std::get_if<ObjectTransformUpdatedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"user\":" << Transform->User.Value << ",\"objectId\":\""
+           << EscapeJson(Transform->ObjectId) << "\",\"location\":["
+           << Transform->Location.x << "," << Transform->Location.y << ","
+           << Transform->Location.z << "],\"rotationDegrees\":["
+           << Transform->RotationDegrees.x << ","
+           << Transform->RotationDegrees.y << ","
+           << Transform->RotationDegrees.z << "],\"scale\":["
+           << Transform->Scale.x << "," << Transform->Scale.y << ","
+           << Transform->Scale.z << "]";
   }
   Stream << "}";
   return Stream.str();
@@ -474,6 +660,71 @@ std::string SerializeWebRtcIceCandidateList(
     Stream << SerializeWebRtcIceCandidate(Candidates[Index]);
   }
   Stream << "]}";
+  return Stream.str();
+}
+
+std::string SerializeSessionSnapshot(const EditorSessionState &State,
+                                     SessionUserId CurrentUser,
+                                     bool TransportConnected,
+                                     std::string_view TransportState,
+                                     std::string_view WebRtcConnectionState) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"session_snapshot\",\"sessionId\":" << State.Session.Value
+         << ",\"currentUserId\":" << CurrentUser.Value
+         << ",\"transport\":{\"connected\":"
+         << (TransportConnected ? "true" : "false") << ",\"state\":\""
+         << EscapeJson(TransportState) << "\",\"webrtcConnectionState\":\""
+         << EscapeJson(WebRtcConnectionState) << "\"},\"presence\":[";
+
+  bool FirstPresence = true;
+  for (const auto &[User, Presence] : State.PresenceByUser) {
+    if (!FirstPresence) {
+      Stream << ",";
+    }
+    FirstPresence = false;
+    Stream << "{\"userId\":" << User.Value << ",\"displayName\":\""
+           << EscapeJson(Presence.DisplayName) << "\",\"state\":\""
+           << PresenceStateToString(Presence.State) << "\",\"isLocal\":"
+           << (Presence.IsLocal ? "true" : "false") << "}";
+  }
+
+  Stream << "],\"selections\":[";
+
+  bool FirstSelection = true;
+  for (const auto &[User, ObjectId] : State.SelectedObjectIds) {
+    if (!FirstSelection) {
+      Stream << ",";
+    }
+    FirstSelection = false;
+    Stream << "{\"userId\":" << User.Value << ",\"objectId\":\""
+           << EscapeJson(ObjectId) << "\"}";
+  }
+
+  Stream << "],\"sceneTree\":[";
+  for (size_t Index = 0; Index < State.SceneItems.size(); ++Index) {
+    if (Index != 0) {
+      Stream << ",";
+    }
+    SerializeSceneItem(Stream, State.SceneItems[Index]);
+  }
+  Stream << "],\"selectedObjectDetails\":";
+  if (const EditorObjectDetails *Details =
+          [&]() -> const EditorObjectDetails * {
+            const auto SelectionIt = State.SelectedObjectIds.find(CurrentUser);
+            if (SelectionIt == State.SelectedObjectIds.end()) {
+              return nullptr;
+            }
+            const auto DetailsIt =
+                State.ObjectDetailsById.find(SelectionIt->second);
+            return DetailsIt != State.ObjectDetailsById.end() ? &DetailsIt->second
+                                                              : nullptr;
+          }();
+      Details != nullptr) {
+    SerializeObjectDetails(Stream, State, *Details);
+  } else {
+    Stream << "null";
+  }
+  Stream << "}";
   return Stream.str();
 }
 

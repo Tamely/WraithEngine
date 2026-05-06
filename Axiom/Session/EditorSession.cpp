@@ -1,14 +1,50 @@
 #include "Session/EditorSession.h"
 
 #include <glm/common.hpp>
+#include <glm/ext/matrix_transform.hpp>
 #include <glm/geometric.hpp>
+#include <glm/trigonometric.hpp>
 
 #include <utility>
 
 namespace Axiom {
 namespace {
+std::string DefaultUserDisplayName(SessionUserId User) {
+  return "User " + std::to_string(User.Value);
+}
+
+std::string CommandTypeName(const EditorCommandPayload &Payload) {
+  if (std::holds_alternative<UpdateViewportCameraCommand>(Payload)) {
+    return "update_viewport_camera";
+  }
+  if (std::holds_alternative<SetLookActiveCommand>(Payload)) {
+    return "set_look_active";
+  }
+  if (std::holds_alternative<SelectObjectCommand>(Payload)) {
+    return "select_object";
+  }
+  return "set_transform";
+}
+
+bool ShouldPublishCommandAcknowledgedEvent(const EditorCommandPayload &Payload) {
+  return !std::holds_alternative<UpdateViewportCameraCommand>(Payload);
+}
+
 bool IsNearlyZero(const glm::vec3 &Value) {
   return glm::dot(Value, Value) <= 0.0f;
+}
+
+glm::mat4 BuildTransformMatrix(const EditorTransformDetails &Transform) {
+  glm::mat4 Matrix(1.0f);
+  Matrix = glm::translate(Matrix, Transform.Location);
+  Matrix = glm::rotate(Matrix, glm::radians(Transform.RotationDegrees.y),
+                       glm::vec3(0.0f, 1.0f, 0.0f));
+  Matrix = glm::rotate(Matrix, glm::radians(Transform.RotationDegrees.x),
+                       glm::vec3(1.0f, 0.0f, 0.0f));
+  Matrix = glm::rotate(Matrix, glm::radians(Transform.RotationDegrees.z),
+                       glm::vec3(0.0f, 0.0f, 1.0f));
+  Matrix = glm::scale(Matrix, Transform.Scale);
+  return Matrix;
 }
 } // namespace
 
@@ -44,12 +80,95 @@ void EditorSession::SetSceneSubmissions(
   m_State.SceneSubmissions = std::move(SceneSubmissions);
 }
 
+void EditorSession::SetSceneItems(std::vector<EditorSceneItem> SceneItems) {
+  m_State.SceneItems = std::move(SceneItems);
+}
+
+void EditorSession::SetObjectDetails(std::vector<EditorObjectDetails> ObjectDetails) {
+  m_State.ObjectDetailsById.clear();
+  for (EditorObjectDetails &Details : ObjectDetails) {
+    m_State.ObjectDetailsById.emplace(Details.ObjectId, std::move(Details));
+  }
+}
+
+void EditorSession::SetPresence(std::vector<EditorUserPresence> Presence) {
+  m_State.PresenceByUser.clear();
+  for (EditorUserPresence &Entry : Presence) {
+    m_State.PresenceByUser.emplace(Entry.User, std::move(Entry));
+  }
+}
+
+void EditorSession::SetObjectCollaborationStates(
+    std::vector<EditorObjectCollaborationState> CollaborationStates) {
+  m_State.CollaborationByObjectId.clear();
+  for (EditorObjectCollaborationState &Entry : CollaborationStates) {
+    m_State.CollaborationByObjectId.emplace(Entry.ObjectId, std::move(Entry));
+  }
+}
+
 const EditorViewportState *EditorSession::FindViewport(SessionUserId User) const {
   const auto It = m_State.Viewports.find(User);
   return It != m_State.Viewports.end() ? &It->second : nullptr;
 }
 
+const EditorSceneItem *EditorSession::FindSceneItem(std::string_view ObjectId) const {
+  return FindSceneItemRecursive(m_State.SceneItems, ObjectId);
+}
+
+const std::string *EditorSession::FindSelectedObjectId(SessionUserId User) const {
+  const auto It = m_State.SelectedObjectIds.find(User);
+  return It != m_State.SelectedObjectIds.end() ? &It->second : nullptr;
+}
+
+const EditorObjectDetails *EditorSession::FindObjectDetails(
+    std::string_view ObjectId) const {
+  const auto It = m_State.ObjectDetailsById.find(std::string(ObjectId));
+  return It != m_State.ObjectDetailsById.end() ? &It->second : nullptr;
+}
+
+const EditorObjectDetails *EditorSession::FindSelectedObjectDetails(
+    SessionUserId User) const {
+  const std::string *SelectedObjectId = FindSelectedObjectId(User);
+  return SelectedObjectId != nullptr ? FindObjectDetails(*SelectedObjectId) : nullptr;
+}
+
+const EditorUserPresence *EditorSession::FindPresence(SessionUserId User) const {
+  const auto It = m_State.PresenceByUser.find(User);
+  return It != m_State.PresenceByUser.end() ? &It->second : nullptr;
+}
+
+const EditorObjectCollaborationState *EditorSession::FindCollaborationState(
+    std::string_view ObjectId) const {
+  const auto It = m_State.CollaborationByObjectId.find(std::string(ObjectId));
+  return It != m_State.CollaborationByObjectId.end() ? &It->second : nullptr;
+}
+
+void EditorSession::UpdateSubmissionTransform(
+    std::string_view ObjectId, const EditorTransformDetails &Transform) {
+  const glm::mat4 Matrix = BuildTransformMatrix(Transform);
+  for (RenderMeshSubmission &Submission : m_State.SceneSubmissions) {
+    if (Submission.Name == ObjectId) {
+      Submission.Transform = Matrix;
+    }
+  }
+}
+
+EditorUserPresence &EditorSession::EnsurePresence(SessionUserId User) {
+  const auto [It, Inserted] = m_State.PresenceByUser.try_emplace(User);
+  if (Inserted) {
+    It->second.User = User;
+    It->second.DisplayName = DefaultUserDisplayName(User);
+    It->second.State = EditorUserPresenceState::Connected;
+    It->second.IsLocal = User.Value == 1;
+  } else {
+    It->second.State = EditorUserPresenceState::Connected;
+  }
+
+  return It->second;
+}
+
 EditorViewportState &EditorSession::EnsureViewport(SessionUserId User) {
+  EnsurePresence(User);
   const auto [It, Inserted] = m_State.Viewports.try_emplace(User);
   if (Inserted) {
     It->second.Camera.LookAt(m_Config.InitialCameraPosition,
@@ -60,6 +179,23 @@ EditorViewportState &EditorSession::EnsureViewport(SessionUserId User) {
   }
 
   return It->second;
+}
+
+const EditorSceneItem *EditorSession::FindSceneItemRecursive(
+    const std::vector<EditorSceneItem> &Items, std::string_view ObjectId) const {
+  for (const EditorSceneItem &Item : Items) {
+    if (Item.Id == ObjectId) {
+      return &Item;
+    }
+
+    if (const EditorSceneItem *Child =
+            FindSceneItemRecursive(Item.Children, ObjectId);
+        Child != nullptr) {
+      return Child;
+    }
+  }
+
+  return nullptr;
 }
 
 void EditorSession::ProcessCommand(const QueuedEditorCommand &QueuedCommand) {
@@ -79,6 +215,15 @@ void EditorSession::ProcessCommand(const QueuedEditorCommand &QueuedCommand) {
         HandleCommand(QueuedCommand, Command);
       },
       QueuedCommand.Command.Payload);
+
+  if (ShouldPublishCommandAcknowledgedEvent(QueuedCommand.Command.Payload)) {
+    PublishEvent({.Payload = CommandAcknowledgedEvent{
+                      .User = QueuedCommand.Context.User,
+                      .AcknowledgedCommand = QueuedCommand.Id,
+                      .CommandType =
+                          CommandTypeName(QueuedCommand.Command.Payload),
+                  }});
+  }
 }
 
 bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
@@ -96,6 +241,45 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
               &QueuedCommand.Command.Payload)) {
     if (Viewport.IsLooking && !CameraCommand->CursorPosition.has_value()) {
       FailureReason = "Look-enabled camera updates require cursor position.";
+      return false;
+    }
+  }
+
+  if (const auto *SelectionCommand =
+          std::get_if<SelectObjectCommand>(&QueuedCommand.Command.Payload)) {
+    if (SelectionCommand->ObjectId.empty()) {
+      FailureReason = "Selection commands require a non-empty object id.";
+      return false;
+    }
+    if (FindSceneItem(SelectionCommand->ObjectId) == nullptr) {
+      FailureReason = "Selection targeted an unknown object.";
+      return false;
+    }
+  }
+
+  if (const auto *TransformCommand =
+          std::get_if<SetTransformCommand>(&QueuedCommand.Command.Payload)) {
+    if (TransformCommand->ObjectId.empty()) {
+      FailureReason = "Transform commands require a non-empty object id.";
+      return false;
+    }
+
+    const EditorObjectDetails *Details = FindObjectDetails(TransformCommand->ObjectId);
+    if (Details == nullptr) {
+      FailureReason = "Transform targeted an unknown object.";
+      return false;
+    }
+    if (!Details->SupportsTransform || !Details->Transform.has_value()) {
+      FailureReason = "This object does not support transform edits.";
+      return false;
+    }
+    if (Details->TransformReadOnly) {
+      FailureReason = "This object is read-only.";
+      return false;
+    }
+    if (TransformCommand->Scale.x <= 0.0f || TransformCommand->Scale.y <= 0.0f ||
+        TransformCommand->Scale.z <= 0.0f) {
+      FailureReason = "Scale values must be greater than zero.";
       return false;
     }
   }
@@ -160,6 +344,46 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                       .IsLooking = Viewport.IsLooking,
                   }});
   }
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const SelectObjectCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
+  const auto Existing = m_State.SelectedObjectIds.find(QueuedCommand.Context.User);
+  if (Existing != m_State.SelectedObjectIds.end() &&
+      Existing->second == Command.ObjectId) {
+    return;
+  }
+
+  m_State.SelectedObjectIds[QueuedCommand.Context.User] = Command.ObjectId;
+  PublishEvent({.Payload = SelectionChangedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .ObjectId = Command.ObjectId,
+                }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const SetTransformCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
+  auto DetailsIt = m_State.ObjectDetailsById.find(Command.ObjectId);
+  if (DetailsIt == m_State.ObjectDetailsById.end()) {
+    return;
+  }
+
+  DetailsIt->second.Transform = EditorTransformDetails{
+      .Location = Command.Location,
+      .RotationDegrees = Command.RotationDegrees,
+      .Scale = Command.Scale,
+  };
+  UpdateSubmissionTransform(Command.ObjectId, *DetailsIt->second.Transform);
+
+  PublishEvent({.Payload = ObjectTransformUpdatedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .ObjectId = Command.ObjectId,
+                    .Location = Command.Location,
+                    .RotationDegrees = Command.RotationDegrees,
+                    .Scale = Command.Scale,
+                }});
 }
 
 void EditorSession::PublishEvent(const EditorEvent &Event) {

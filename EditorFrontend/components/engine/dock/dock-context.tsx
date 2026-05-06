@@ -107,7 +107,7 @@ function removePanel(node: DockNode, panelId: PanelId): { node: DockNode | null;
     }
     if (!removed) return { node, removed: false }
     if (children.length === 0) return { node: null, removed: true }
-    if (children.length === 1 && node.type !== "cell") {
+    if (children.length === 1) {
         // unwrap single-child containers
         return { node: children[0], removed: true }
     }

@@ -135,6 +135,8 @@ int main(int argc, char **argv) {
       App.SetRemoteViewMode(Command->ViewMode);
       break;
     case Axiom::HeadlessCommandType::SetLookActive:
+    case Axiom::HeadlessCommandType::SelectObject:
+    case Axiom::HeadlessCommandType::SetTransform:
     case Axiom::HeadlessCommandType::UpdateViewportCamera:
       App.SubmitRemoteCommand(Command->EditorPayload);
       App.Step();

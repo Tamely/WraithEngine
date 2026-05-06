@@ -4,6 +4,7 @@
 
 #include <glm/vec3.hpp>
 
+#include <optional>
 #include <string>
 #include <variant>
 
@@ -26,9 +27,31 @@ struct CommandRejectedEvent {
   std::string Reason;
 };
 
+struct CommandAcknowledgedEvent {
+  SessionUserId User;
+  CommandId AcknowledgedCommand;
+  std::string CommandType;
+};
+
+struct SelectionChangedEvent {
+  SessionUserId User;
+  std::optional<std::string> ObjectId;
+};
+
+struct ObjectTransformUpdatedEvent {
+  SessionUserId User;
+  std::string ObjectId;
+  glm::vec3 Location{0.0f};
+  glm::vec3 RotationDegrees{0.0f};
+  glm::vec3 Scale{1.0f};
+};
+
 using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         LookStateChangedEvent,
-                                        CommandRejectedEvent>;
+                                        CommandAcknowledgedEvent,
+                                        CommandRejectedEvent,
+                                        SelectionChangedEvent,
+                                        ObjectTransformUpdatedEvent>;
 
 struct EditorEvent {
   EditorEventPayload Payload;

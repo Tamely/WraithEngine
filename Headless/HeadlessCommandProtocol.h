@@ -4,6 +4,7 @@
 #include <Renderer/VideoEncoding.h>
 #include <Session/EditorCommand.h>
 #include <Session/EditorEvent.h>
+#include <Session/EditorSession.h>
 
 #include <filesystem>
 #include <cstdint>
@@ -18,6 +19,8 @@ enum class HeadlessCommandType {
   LoadStartupScene,
   SetViewMode,
   SetLookActive,
+  SelectObject,
+  SetTransform,
   UpdateViewportCamera,
   RenderFrame,
   Quit,
@@ -88,6 +91,11 @@ std::string SerializeWebRtcSessionDescription(
 std::string SerializeWebRtcIceCandidate(const WebRtcIceCandidate &Candidate);
 std::string SerializeWebRtcIceCandidateList(
     std::span<const WebRtcIceCandidate> Candidates);
+std::string SerializeSessionSnapshot(const EditorSessionState &State,
+                                     SessionUserId CurrentUser,
+                                     bool TransportConnected,
+                                     std::string_view TransportState,
+                                     std::string_view WebRtcConnectionState);
 std::string SerializeWebRtcStatus(bool Enabled, bool Available,
                                   std::string_view SignalingState,
                                   std::string_view ConnectionState,

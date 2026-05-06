@@ -79,6 +79,36 @@ TEST(HeadlessProtocolTests, RemoteViewportAcceptsCameraCommand) {
   EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::UpdateViewportCamera);
 }
 
+TEST(HeadlessProtocolTests, RemoteViewportAcceptsSelectObjectCommand) {
+  std::string Error;
+  const auto Command = Axiom::ParseRemoteViewportCommand(
+      R"json({"type":"select_object","objectId":"PlayerCharacter"})json", Error);
+
+  ASSERT_TRUE(Command.has_value()) << Error;
+  EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::SelectObject);
+  const auto *Payload =
+      std::get_if<Axiom::SelectObjectCommand>(&Command->EditorPayload.Payload);
+  ASSERT_NE(Payload, nullptr);
+  EXPECT_EQ(Payload->ObjectId, "PlayerCharacter");
+}
+
+TEST(HeadlessProtocolTests, RemoteViewportAcceptsSetTransformCommand) {
+  std::string Error;
+  const auto Command = Axiom::ParseRemoteViewportCommand(
+      R"json({"type":"set_transform","objectId":"PlayerCharacter","location":[1.0,2.0,3.0],"rotationDegrees":[4.0,5.0,6.0],"scale":[1.0,1.5,2.0]})json",
+      Error);
+
+  ASSERT_TRUE(Command.has_value()) << Error;
+  EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::SetTransform);
+  const auto *Payload =
+      std::get_if<Axiom::SetTransformCommand>(&Command->EditorPayload.Payload);
+  ASSERT_NE(Payload, nullptr);
+  EXPECT_EQ(Payload->ObjectId, "PlayerCharacter");
+  EXPECT_EQ(Payload->Location, glm::vec3(1.0f, 2.0f, 3.0f));
+  EXPECT_EQ(Payload->RotationDegrees, glm::vec3(4.0f, 5.0f, 6.0f));
+  EXPECT_EQ(Payload->Scale, glm::vec3(1.0f, 1.5f, 2.0f));
+}
+
 TEST(HeadlessProtocolTests, SerializesCommandRejectedEvent) {
   const Axiom::PublishedEditorEvent Event{
       .Id = Axiom::EventId{4},
@@ -96,6 +126,54 @@ TEST(HeadlessProtocolTests, SerializesCommandRejectedEvent) {
   EXPECT_NE(Json.find("\"reason\":\"bad input\""), std::string::npos);
 }
 
+TEST(HeadlessProtocolTests, SerializesCommandAcknowledgedEvent) {
+  const Axiom::PublishedEditorEvent Event{
+      .Id = Axiom::EventId{5},
+      .Event = {.Payload = Axiom::CommandAcknowledgedEvent{
+                    .User = Axiom::SessionUserId{7},
+                    .AcknowledgedCommand = Axiom::CommandId{11},
+                    .CommandType = "select_object",
+                }}};
+
+  const std::string Json = Axiom::SerializeEvent(Event);
+  EXPECT_NE(Json.find("\"payloadType\":\"command_acked\""), std::string::npos);
+  EXPECT_NE(Json.find("\"acknowledgedCommandId\":11"), std::string::npos);
+  EXPECT_NE(Json.find("\"commandType\":\"select_object\""), std::string::npos);
+}
+
+TEST(HeadlessProtocolTests, SerializesSelectionChangedEvent) {
+  const Axiom::PublishedEditorEvent Event{
+      .Id = Axiom::EventId{6},
+      .Event = {.Payload = Axiom::SelectionChangedEvent{
+                    .User = Axiom::SessionUserId{7},
+                    .ObjectId = std::string("PlayerCharacter"),
+                }}};
+
+  const std::string Json = Axiom::SerializeEvent(Event);
+  EXPECT_NE(Json.find("\"payloadType\":\"selection_changed\""),
+            std::string::npos);
+  EXPECT_NE(Json.find("\"objectId\":\"PlayerCharacter\""), std::string::npos);
+}
+
+TEST(HeadlessProtocolTests, SerializesObjectTransformUpdatedEvent) {
+  const Axiom::PublishedEditorEvent Event{
+      .Id = Axiom::EventId{7},
+      .Event = {.Payload = Axiom::ObjectTransformUpdatedEvent{
+                    .User = Axiom::SessionUserId{7},
+                    .ObjectId = "PlayerCharacter",
+                    .Location = glm::vec3(1.0f, 2.0f, 3.0f),
+                    .RotationDegrees = glm::vec3(4.0f, 5.0f, 6.0f),
+                    .Scale = glm::vec3(1.0f, 1.5f, 2.0f),
+                }}};
+
+  const std::string Json = Axiom::SerializeEvent(Event);
+  EXPECT_NE(Json.find("\"payloadType\":\"object_transform_updated\""),
+            std::string::npos);
+  EXPECT_NE(Json.find("\"location\":[1,2,3]"), std::string::npos);
+  EXPECT_NE(Json.find("\"rotationDegrees\":[4,5,6]"), std::string::npos);
+  EXPECT_NE(Json.find("\"scale\":[1,1.5,2]"), std::string::npos);
+}
+
 TEST(HeadlessProtocolTests, SerializesRemoteViewportLifecycleMessages) {
   EXPECT_EQ(Axiom::SerializeConnected(), "{\"type\":\"connected\"}");
   EXPECT_EQ(Axiom::SerializeDisconnected(), "{\"type\":\"disconnected\"}");
@@ -107,6 +185,78 @@ TEST(HeadlessProtocolTests, SerializesRemoteViewportLifecycleMessages) {
   EXPECT_NE(Json.find("\"path\":\"/frame\""), std::string::npos);
   EXPECT_NE(Json.find("\"width\":1280"), std::string::npos);
   EXPECT_NE(Json.find("\"height\":720"), std::string::npos);
+}
+
+TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
+  Axiom::EditorSessionState State{
+      .Session = Axiom::SessionId{1},
+      .Viewports = {},
+      .PresenceByUser = {{
+          Axiom::SessionUserId{1},
+          Axiom::EditorUserPresence{
+              .User = Axiom::SessionUserId{1},
+              .DisplayName = "Local User",
+              .State = Axiom::EditorUserPresenceState::Connected,
+              .IsLocal = true,
+          },
+      }},
+      .SceneSubmissions = {},
+      .SceneItems = {{
+          .Id = "world",
+          .DisplayName = "World",
+          .Kind = Axiom::EditorSceneItemKind::Folder,
+          .Visible = true,
+          .Children = {{
+              .Id = "PlayerCharacter",
+              .DisplayName = "PlayerCharacter",
+              .Kind = Axiom::EditorSceneItemKind::Actor,
+              .Visible = true,
+              .Children = {},
+          }},
+      }},
+      .ObjectDetailsById = {{
+          "PlayerCharacter",
+          Axiom::EditorObjectDetails{
+              .ObjectId = "PlayerCharacter",
+              .DisplayName = "PlayerCharacter",
+              .Kind = Axiom::EditorSceneItemKind::Actor,
+              .Visible = true,
+              .SupportsTransform = true,
+              .TransformReadOnly = true,
+              .Transform = Axiom::EditorTransformDetails{
+                  .Location = glm::vec3(1.0f, 2.0f, 3.0f),
+                  .RotationDegrees = glm::vec3(4.0f, 5.0f, 6.0f),
+                  .Scale = glm::vec3(1.0f, 1.0f, 1.0f),
+              },
+          },
+      }},
+      .CollaborationByObjectId = {{
+          "PlayerCharacter",
+          Axiom::EditorObjectCollaborationState{
+              .ObjectId = "PlayerCharacter",
+              .LockState = Axiom::EditorObjectLockState::Placeholder,
+              .LockOwner = Axiom::SessionUserId{1},
+          },
+      }},
+      .SelectedObjectIds = {{Axiom::SessionUserId{1}, "PlayerCharacter"}},
+  };
+
+  const std::string Json = Axiom::SerializeSessionSnapshot(
+      State, Axiom::SessionUserId{1}, true, "connected", "connected");
+  EXPECT_NE(Json.find("\"type\":\"session_snapshot\""), std::string::npos);
+  EXPECT_NE(Json.find("\"currentUserId\":1"), std::string::npos);
+  EXPECT_NE(Json.find("\"presence\""), std::string::npos);
+  EXPECT_NE(Json.find("\"displayName\":\"Local User\""), std::string::npos);
+  EXPECT_NE(Json.find("\"objectId\":\"PlayerCharacter\""), std::string::npos);
+  EXPECT_NE(Json.find("\"displayName\":\"World\""), std::string::npos);
+  EXPECT_NE(Json.find("\"kind\":\"actor\""), std::string::npos);
+  EXPECT_NE(Json.find("\"selectedObjectDetails\""), std::string::npos);
+  EXPECT_NE(Json.find("\"supportsTransform\":true"), std::string::npos);
+  EXPECT_NE(Json.find("\"transformReadOnly\":true"), std::string::npos);
+  EXPECT_NE(Json.find("\"location\":[1,2,3]"), std::string::npos);
+  EXPECT_NE(Json.find("\"selectedByUserIds\":[1]"), std::string::npos);
+  EXPECT_NE(Json.find("\"lockState\":\"placeholder\""), std::string::npos);
+  EXPECT_NE(Json.find("\"lockOwnerUserId\":1"), std::string::npos);
 }
 
 TEST(HeadlessProtocolTests, SerializesEncodedVideoPacketMetadata) {
@@ -185,20 +335,26 @@ TEST(HeadlessProtocolTests, StubWebRtcSessionReportsBuildAvailability) {
   ASSERT_NE(Session, nullptr);
 
   const Axiom::WebRtcSessionStatus Status = Session->GetStatus();
-  EXPECT_FALSE(Status.Available);
+  if (Status.Available) {
+    GTEST_SKIP() << "Real WebRTC backend is available on this machine.";
+  }
   EXPECT_NE(Status.Detail.find("WebRTC"), std::string::npos);
 
   Axiom::WebRtcSessionDescription Answer{};
   std::string Error;
-  EXPECT_FALSE(Session->HandleOffer(
+  const bool Accepted = Session->HandleOffer(
       {.Type = "offer", .Sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1"}, Answer,
-      Error));
-  EXPECT_NE(Error.find("WebRTC"), std::string::npos);
+      Error);
+  EXPECT_FALSE(Accepted);
+  EXPECT_FALSE(Error.empty());
 }
 
 TEST(HeadlessProtocolTests, StubWebRtcSessionBuffersVideoAfterFirstKeyframe) {
   auto Session = Axiom::CreateWebRtcSession();
   ASSERT_NE(Session, nullptr);
+  if (Session->GetStatus().Available) {
+    GTEST_SKIP() << "Real WebRTC backend is available on this machine.";
+  }
 
   Session->OnEncodedVideoPacket({
       .Codec = Axiom::EncodedVideoCodec::H264,

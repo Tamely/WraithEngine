@@ -17,8 +17,13 @@ import {
 } from "@/components/ui/dropdown-menu"
 import {
   useRemoteViewport,
+  type SessionObjectTransformUpdate,
+  type SessionObjectDetails,
   type RemoteViewportConnectionState,
   type RemoteViewportViewMode,
+  type SessionPresence,
+  type SessionSceneItem,
+  type SessionSelection,
 } from "./remote-viewport-context"
 
 const DEFAULT_AXIOM_SERVER_ORIGIN = "http://127.0.0.1:8080"
@@ -57,6 +62,20 @@ interface IceCandidateListResponse {
   candidates?: RTCIceCandidateInit[]
 }
 
+interface SessionSnapshotResponse {
+  sessionId: number
+  currentUserId: number
+  transport?: {
+    connected: boolean
+    state?: string
+    webrtcConnectionState?: string
+  }
+  presence: SessionPresence[]
+  sceneTree: SessionSceneItem[]
+  selections: SessionSelection[]
+  selectedObjectDetails: SessionObjectDetails | null
+}
+
 type RemoteViewportCommand =
   | {
       type: "set_view_mode"
@@ -72,6 +91,13 @@ type RemoteViewportCommand =
       worldMovement: [number, number, number]
       cursorPosition: [number, number]
     }
+  | {
+      type: "select_object"
+      objectId: string
+    }
+  | ({
+      type: "set_transform"
+    } & SessionObjectTransformUpdate)
 
 function getServerOrigin() {
   const configuredOrigin = process.env.NEXT_PUBLIC_AXIOM_SERVER_ORIGIN?.trim()
@@ -96,6 +122,8 @@ export function Viewport() {
   const localIceQueueRef = useRef<IceCandidatePayload[]>([])
   const remoteDescriptionAppliedRef = useRef(false)
   const activeGenerationRef = useRef(0)
+  const sessionReadyRef = useRef(false)
+  const reconnectingRef = useRef(false)
   const pointerLockedRef = useRef(false)
   const keysRef = useRef(new Set<string>())
   const cursorRef = useRef({ x: 0, y: 0 })
@@ -124,6 +152,13 @@ export function Viewport() {
     appendEventLog,
     clearEventLog,
     registerActions,
+    setSessionSnapshot,
+    clearSessionSnapshot,
+    applySelectionChanged,
+    setSessionState,
+    sessionStatusText,
+    setSessionStatusText,
+    setSessionDetailText,
   } = useRemoteViewport()
   const [serverOrigin] = useState(getServerOrigin)
 
@@ -155,6 +190,34 @@ export function Viewport() {
       setConnectionState(nextStatus)
       setStatusText(title)
       setDetailText(detail)
+    }
+
+    function setSessionUi(
+      nextState:
+        | "idle"
+        | "connecting"
+        | "snapshot-loading"
+        | "session-ready"
+        | "reconnecting"
+        | "degraded-transport"
+        | "command-rejected"
+        | "error",
+      title: string,
+      detail: string
+    ) {
+      if (disposed) {
+        return
+      }
+      setSessionState(nextState)
+      setSessionStatusText(title)
+      setSessionDetailText(detail)
+    }
+
+    function markTransportDegraded(detail: string) {
+      if (!sessionReadyRef.current) {
+        return
+      }
+      setSessionUi("degraded-transport", "Transport degraded", detail)
     }
 
     function clearPolling() {
@@ -225,6 +288,102 @@ export function Viewport() {
         },
         body,
       })
+    }
+
+    async function refreshSessionSnapshot(reason: "connect" | "reconnect" | "resync" | "command" | "event" | "manual" = "manual") {
+      const snapshot = await fetchJson<SessionSnapshotResponse>("/session", {
+        cache: "no-store",
+      })
+      if (disposed) {
+        return
+      }
+
+      setSessionSnapshot({
+        currentUserId: snapshot.currentUserId,
+        presence: snapshot.presence ?? [],
+        sceneTree: snapshot.sceneTree ?? [],
+        selections: snapshot.selections ?? [],
+        selectedObjectDetails: snapshot.selectedObjectDetails ?? null,
+      })
+      sessionReadyRef.current = true
+      setSessionUi(
+        "session-ready",
+        "Session ready",
+        `Authoritative state synced from session ${snapshot.sessionId}.`
+      )
+      appendLog({
+        type: "session_snapshot_received",
+        sessionId: snapshot.sessionId,
+        sceneItemCount: snapshot.sceneTree?.length ?? 0,
+        presenceCount: snapshot.presence?.length ?? 0,
+        selectionCount: snapshot.selections?.length ?? 0,
+        transportState: snapshot.transport?.state ?? "unknown",
+        webrtcConnectionState: snapshot.transport?.webrtcConnectionState ?? "unknown",
+      })
+      if (reconnectingRef.current || reason === "reconnect") {
+        reconnectingRef.current = false
+        appendLog({
+          type: "reconnect_resync_completed",
+          sessionId: snapshot.sessionId,
+        })
+      }
+    }
+
+    async function refreshSessionSnapshotSafely(
+      reason: "connect" | "reconnect" | "resync" | "command" | "event" | "manual" = "manual"
+    ) {
+      try {
+        await refreshSessionSnapshot(reason)
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error)
+        appendLog({
+          type: "session_snapshot_failed",
+          reason,
+          detail,
+        })
+        setSessionUi("error", "Session sync failed", detail)
+      }
+    }
+
+    function handleEditorEventMessage(message: Record<string, unknown>) {
+      if (message.payloadType === "command_acked") {
+        const commandType =
+          typeof message.commandType === "string" ? message.commandType : "unknown"
+        setSessionUi("session-ready", "Session ready", `Command acknowledged: ${commandType}`)
+        return
+      }
+
+      if (message.payloadType === "selection_changed") {
+        const userId =
+          typeof message.user === "number" ? message.user : Number(message.user)
+        const objectId = typeof message.objectId === "string" ? message.objectId : null
+        if (Number.isFinite(userId)) {
+          applySelectionChanged(userId, objectId)
+          setSessionUi(
+            "session-ready",
+            "Session ready",
+            objectId ? `Selection changed to ${objectId}.` : "Selection cleared."
+          )
+          void refreshSessionSnapshotSafely("event")
+        }
+        return
+      }
+
+      if (message.payloadType === "object_transform_updated") {
+        setSessionUi("session-ready", "Session ready", "Transform update applied.")
+        void refreshSessionSnapshotSafely("event")
+        return
+      }
+
+      if (message.payloadType === "command_rejected") {
+        const reason =
+          typeof message.reason === "string"
+            ? message.reason
+            : "The remote session rejected the command."
+        setDetailText(reason)
+        setSessionUi("command-rejected", "Command rejected", reason)
+        void refreshSessionSnapshotSafely("event")
+      }
     }
 
     function updateFrameText(status: WebRtcStatusResponse) {
@@ -426,6 +585,7 @@ export function Viewport() {
             "Awaiting backend",
             status.detail ?? "Waiting for native WebRTC backend."
           )
+          markTransportDegraded(status.detail ?? "Waiting for native WebRTC backend.")
           return
         }
 
@@ -439,16 +599,25 @@ export function Viewport() {
             setStatusText("Streaming")
           }
           setDetailText(status.detail ?? "Receiving live WebRTC viewport stream")
+          if (sessionReadyRef.current) {
+            setSessionUi(
+              "session-ready",
+              "Session ready",
+              "Viewport transport and authoritative session are both healthy."
+            )
+          }
           return
         }
 
         setConnectionState("awaiting-media")
         setStatusText("Negotiating")
         setDetailText(status.detail ?? "Offer accepted. Waiting for remote media...")
+        markTransportDegraded(status.detail ?? "Offer accepted. Waiting for remote media...")
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Failed to reach remote viewport server."
         setDisconnectedUi("error", "Status error", message)
+        markTransportDegraded(message)
       }
     }
 
@@ -474,19 +643,29 @@ export function Viewport() {
         const message =
           error instanceof Error ? error.message : "Failed to poll remote ICE candidates."
         setDisconnectedUi("error", "ICE error", message)
+        markTransportDegraded(message)
       }
     }
 
     function wireDataChannel(channel: RTCDataChannel, label: string) {
       channel.addEventListener("open", () => {
         appendLog({ type: "data_channel_open", label })
+        void refreshSessionSnapshotSafely("resync")
         if (label === "editor-events") {
           setConnectionState("control-ready")
           setStatusText("Control ready")
+          if (sessionReadyRef.current) {
+            setSessionUi(
+              "session-ready",
+              "Session ready",
+              "Reliable editor channel is open."
+            )
+          }
         }
       })
       channel.addEventListener("close", () => {
         appendLog({ type: "data_channel_closed", label })
+        markTransportDegraded(`${label} channel closed.`)
       })
       channel.addEventListener("error", (event) => {
         appendLog({
@@ -494,10 +673,13 @@ export function Viewport() {
           label,
           detail: String(event.type || "error"),
         })
+        markTransportDegraded(`${label} channel reported an error.`)
       })
       channel.addEventListener("message", (event) => {
         try {
-          appendLog(JSON.parse(event.data))
+          const parsed = JSON.parse(event.data) as Record<string, unknown>
+          appendLog(parsed)
+          handleEditorEventMessage(parsed)
         } catch {
           appendLog({ type: "data_channel_message", label, body: event.data })
         }
@@ -554,6 +736,7 @@ export function Viewport() {
       const nextGeneration = activeGenerationRef.current + 1
       activeGenerationRef.current = nextGeneration
 
+      reconnectingRef.current = sessionReadyRef.current
       await destroyPeerConnection("reconnect")
       if (disposed) {
         return
@@ -568,12 +751,22 @@ export function Viewport() {
         return
       }
 
+      sessionReadyRef.current = false
+      clearSessionSnapshot()
+      if (reconnectingRef.current) {
+        setSessionUi("reconnecting", "Reconnecting", "Rehydrating authoritative session state...")
+        appendLog({ type: "reconnect_started" })
+      } else {
+        setSessionUi("connecting", "Connecting", "Preparing authoritative session bootstrap...")
+      }
       setConnectionState("connecting")
       setStatusText("Connecting")
       setDetailText("Creating browser WebRTC offer...")
       setFrameText("No stream metadata yet")
       clearEventLog()
       startViewportInputPump()
+      setSessionUi("snapshot-loading", "Snapshot loading", "Fetching authoritative session snapshot...")
+      await refreshSessionSnapshotSafely(reconnectingRef.current ? "reconnect" : "connect")
 
       const peer = new window.RTCPeerConnection({
         bundlePolicy: "max-bundle",
@@ -587,6 +780,7 @@ export function Viewport() {
         }
         appendLog({ type: "connection_state", state: peer.connectionState })
         if (peer.connectionState === "connected") {
+          void refreshSessionSnapshotSafely("resync")
           if (canSendReliably()) {
             setConnectionState("control-ready")
             setStatusText("Control ready")
@@ -599,10 +793,12 @@ export function Viewport() {
         }
         if (peer.connectionState === "failed" || peer.connectionState === "disconnected") {
           setDisconnectedUi("error", "Peer failed", `Peer connection ${peer.connectionState}.`)
+          markTransportDegraded(`Peer connection ${peer.connectionState}.`)
           return
         }
         if (peer.connectionState === "closed") {
           setDisconnectedUi("idle", "Disconnected", "Peer connection closed.")
+          markTransportDegraded("Peer connection closed.")
         }
       })
 
@@ -620,6 +816,7 @@ export function Viewport() {
         appendLog({ type: "ice_connection_state", state: peer.iceConnectionState })
         if (peer.iceConnectionState === "failed") {
           setDetailText("ICE failed. Reconnect after the server is ready.")
+          markTransportDegraded("ICE failed. Reconnect after the server is ready.")
         }
       })
 
@@ -641,6 +838,13 @@ export function Viewport() {
             setStatusText("Streaming")
           }
           setDetailText("Receiving live WebRTC viewport stream")
+          if (sessionReadyRef.current) {
+            setSessionUi(
+              "session-ready",
+              "Session ready",
+              "Viewport media resumed after reconnect."
+            )
+          }
         }
       })
 
@@ -730,6 +934,7 @@ export function Viewport() {
           signalingState: peer.signalingState,
         })
         await flushLocalIceCandidates(nextGeneration)
+        await refreshSessionSnapshotSafely(reconnectingRef.current ? "reconnect" : "resync")
 
         setConnectionState("awaiting-media")
         setStatusText("Awaiting media")
@@ -767,6 +972,33 @@ export function Viewport() {
           },
           "reliable"
         )
+      },
+      refreshSessionSnapshot,
+      selectObject: async (objectId) => {
+        const accepted = await sendCommand(
+          {
+            type: "select_object",
+            objectId,
+          },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
+      updateTransform: async (details) => {
+        const accepted = await sendCommand(
+          {
+            type: "set_transform",
+            ...details,
+          },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
       },
       setMode: async (nextMode) => {
         if (viewModeRef.current === nextMode) {
@@ -1001,6 +1233,8 @@ export function Viewport() {
           <span>{frameText}</span>
           <span>|</span>
           <span>{statusText}</span>
+          <span>|</span>
+          <span>{sessionStatusText}</span>
         </div>
       </div>
     </div>

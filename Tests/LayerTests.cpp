@@ -14,6 +14,7 @@
 #include <GLFW/glfw3.h>
 
 #include <glm/common.hpp>
+#include <glm/ext/matrix_transform.hpp>
 #include <glm/geometric.hpp>
 
 #include <algorithm>
@@ -189,7 +190,7 @@ TEST(EditorSessionTests, SetLookActiveTogglesAuthoritativeStateAndPublishesEvent
       Session.FindViewport(Axiom::SessionUserId{7});
   ASSERT_NE(Viewport, nullptr);
   EXPECT_TRUE(Viewport->IsLooking);
-  ASSERT_EQ(Subscriber.Events.size(), 1u);
+  ASSERT_EQ(Subscriber.Events.size(), 2u);
   EXPECT_TRUE(std::holds_alternative<Axiom::LookStateChangedEvent>(
       Subscriber.Events.front().Event.Payload));
 
@@ -197,6 +198,8 @@ TEST(EditorSessionTests, SetLookActiveTogglesAuthoritativeStateAndPublishesEvent
       Subscriber.Events.front().Event.Payload);
   EXPECT_EQ(Event.User, Axiom::SessionUserId{7});
   EXPECT_TRUE(Event.IsLooking);
+  EXPECT_TRUE(std::holds_alternative<Axiom::CommandAcknowledgedEvent>(
+      Subscriber.Events.back().Event.Payload));
 }
 
 TEST(EditorSessionTests, CameraMovementUpdatesOnlySessionOwnedState) {
@@ -205,8 +208,10 @@ TEST(EditorSessionTests, CameraMovementUpdatesOnlySessionOwnedState) {
   Session.Subscribe(&Subscriber);
   Session.EnsureViewportState(Axiom::SessionUserId{7});
 
-  const glm::vec3 InitialPosition =
-      Session.FindViewport(Axiom::SessionUserId{7})->Camera.GetPosition();
+  const Axiom::Camera ExpectedBefore =
+      Session.FindViewport(Axiom::SessionUserId{7})->Camera;
+  Axiom::Camera Expected = ExpectedBefore;
+  Expected.MoveLocal(glm::vec3(1.5f, -0.25f, 0.75f));
 
   Session.Submit(MakeContext(),
                  {.Payload = Axiom::UpdateViewportCameraCommand{
@@ -218,8 +223,7 @@ TEST(EditorSessionTests, CameraMovementUpdatesOnlySessionOwnedState) {
   const Axiom::EditorViewportState *Viewport =
       Session.FindViewport(Axiom::SessionUserId{7});
   ASSERT_NE(Viewport, nullptr);
-  EXPECT_EQ(Viewport->Camera.GetPosition(),
-            InitialPosition + glm::vec3(1.5f, -0.25f, 0.75f));
+  EXPECT_EQ(Viewport->Camera.GetPosition(), Expected.GetPosition());
   ASSERT_EQ(Subscriber.Events.size(), 1u);
   EXPECT_TRUE(std::holds_alternative<Axiom::ViewportCameraUpdatedEvent>(
       Subscriber.Events.front().Event.Payload));
@@ -272,6 +276,9 @@ TEST(EditorSessionTests, CommandsDrainInFifoOrder) {
   RecordingSubscriber Subscriber;
   Session.Subscribe(&Subscriber);
   Session.EnsureViewportState(Axiom::SessionUserId{7});
+  Axiom::Camera Expected = Session.FindViewport(Axiom::SessionUserId{7})->Camera;
+  Expected.MoveLocal(glm::vec3(1.0f, 0.0f, 0.0f));
+  Expected.MoveLocal(glm::vec3(0.0f, 2.0f, 0.0f));
 
   Session.Submit(MakeContext(1),
                  {.Payload = Axiom::UpdateViewportCameraCommand{
@@ -288,8 +295,7 @@ TEST(EditorSessionTests, CommandsDrainInFifoOrder) {
   const Axiom::EditorViewportState *Viewport =
       Session.FindViewport(Axiom::SessionUserId{7});
   ASSERT_NE(Viewport, nullptr);
-  EXPECT_EQ(Viewport->Camera.GetPosition(),
-            glm::vec3(1.0f, 2.8f, 3.5f));
+  EXPECT_EQ(Viewport->Camera.GetPosition(), Expected.GetPosition());
   ASSERT_EQ(Subscriber.Events.size(), 2u);
   EXPECT_EQ(Subscriber.Events[0].Id, Axiom::EventId{1});
   EXPECT_EQ(Subscriber.Events[1].Id, Axiom::EventId{2});
@@ -325,11 +331,219 @@ TEST(EditorSessionTests, LookStateEnablesAuthoritativeRotationFromCursorDeltas) 
   EXPECT_NEAR(Viewport->Camera.GetPitchDegrees(), InitialPitch + 0.72f,
               0.0001f);
 
-  ASSERT_EQ(Subscriber.Events.size(), 2u);
+  ASSERT_EQ(Subscriber.Events.size(), 3u);
   EXPECT_TRUE(std::holds_alternative<Axiom::LookStateChangedEvent>(
       Subscriber.Events[0].Event.Payload));
-  EXPECT_TRUE(std::holds_alternative<Axiom::ViewportCameraUpdatedEvent>(
+  EXPECT_TRUE(std::holds_alternative<Axiom::CommandAcknowledgedEvent>(
       Subscriber.Events[1].Event.Payload));
+  EXPECT_TRUE(std::holds_alternative<Axiom::ViewportCameraUpdatedEvent>(
+      Subscriber.Events[2].Event.Payload));
+}
+
+TEST(EditorSessionTests, SelectObjectPublishesAuthoritativeSelectionChangedEvent) {
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+  Session.SetSceneItems({{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {{
+          .Id = "PlayerCharacter",
+          .DisplayName = "PlayerCharacter",
+          .Kind = Axiom::EditorSceneItemKind::Actor,
+          .Visible = true,
+          .Children = {},
+      }},
+  }});
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SelectObjectCommand{
+                      .ObjectId = "PlayerCharacter",
+                  }});
+  Session.Tick();
+
+  const std::string *Selected = Session.FindSelectedObjectId(Axiom::SessionUserId{7});
+  ASSERT_NE(Selected, nullptr);
+  EXPECT_EQ(*Selected, "PlayerCharacter");
+  const Axiom::EditorUserPresence *Presence =
+      Session.FindPresence(Axiom::SessionUserId{7});
+  ASSERT_NE(Presence, nullptr);
+  EXPECT_EQ(Presence->DisplayName, "User 7");
+  ASSERT_EQ(Subscriber.Events.size(), 2u);
+  ASSERT_TRUE(std::holds_alternative<Axiom::SelectionChangedEvent>(
+      Subscriber.Events.front().Event.Payload));
+  const auto &Event = std::get<Axiom::SelectionChangedEvent>(
+      Subscriber.Events.front().Event.Payload);
+  EXPECT_EQ(Event.User, Axiom::SessionUserId{7});
+  ASSERT_TRUE(Event.ObjectId.has_value());
+  EXPECT_EQ(*Event.ObjectId, "PlayerCharacter");
+  ASSERT_TRUE(std::holds_alternative<Axiom::CommandAcknowledgedEvent>(
+      Subscriber.Events.back().Event.Payload));
+  const auto &Acknowledged = std::get<Axiom::CommandAcknowledgedEvent>(
+      Subscriber.Events.back().Event.Payload);
+  EXPECT_EQ(Acknowledged.User, Axiom::SessionUserId{7});
+  EXPECT_EQ(Acknowledged.CommandType, "select_object");
+}
+
+TEST(EditorSessionTests, SelectingUnknownObjectPublishesRejection) {
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+  Session.SetSceneItems({{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {},
+  }});
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SelectObjectCommand{
+                      .ObjectId = "does-not-exist",
+                  }});
+  Session.Tick();
+
+  EXPECT_EQ(Session.FindSelectedObjectId(Axiom::SessionUserId{7}), nullptr);
+  ASSERT_EQ(Subscriber.Events.size(), 1u);
+  ASSERT_TRUE(std::holds_alternative<Axiom::CommandRejectedEvent>(
+      Subscriber.Events.front().Event.Payload));
+}
+
+TEST(EditorSessionTests, SelectedObjectDetailsMatchAuthoritativeState) {
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  Session.SetSceneItems({{
+      .Id = "PlayerCharacter",
+      .DisplayName = "PlayerCharacter",
+      .Kind = Axiom::EditorSceneItemKind::Actor,
+      .Visible = true,
+      .Children = {},
+  }});
+  Session.SetObjectDetails({{
+      .ObjectId = "PlayerCharacter",
+      .DisplayName = "PlayerCharacter",
+      .Kind = Axiom::EditorSceneItemKind::Actor,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = true,
+      .Transform = Axiom::EditorTransformDetails{
+          .Location = glm::vec3(1.0f, 2.0f, 3.0f),
+          .RotationDegrees = glm::vec3(4.0f, 5.0f, 6.0f),
+          .Scale = glm::vec3(1.0f, 1.5f, 2.0f),
+      },
+  }});
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SelectObjectCommand{
+                      .ObjectId = "PlayerCharacter",
+                  }});
+  Session.Tick();
+
+  const Axiom::EditorObjectDetails *Details =
+      Session.FindSelectedObjectDetails(Axiom::SessionUserId{7});
+  ASSERT_NE(Details, nullptr);
+  EXPECT_EQ(Details->ObjectId, "PlayerCharacter");
+  EXPECT_TRUE(Details->SupportsTransform);
+  EXPECT_TRUE(Details->TransformReadOnly);
+  ASSERT_TRUE(Details->Transform.has_value());
+  EXPECT_EQ(Details->Transform->Location, glm::vec3(1.0f, 2.0f, 3.0f));
+  EXPECT_EQ(Details->Transform->RotationDegrees, glm::vec3(4.0f, 5.0f, 6.0f));
+  EXPECT_EQ(Details->Transform->Scale, glm::vec3(1.0f, 1.5f, 2.0f));
+}
+
+TEST(EditorSessionTests, SetTransformUpdatesAuthoritativeDetailsAndSubmission) {
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+  Session.SetSceneItems({{
+      .Id = "PlayerCharacter",
+      .DisplayName = "PlayerCharacter",
+      .Kind = Axiom::EditorSceneItemKind::Actor,
+      .Visible = true,
+      .Children = {},
+  }});
+  Session.SetObjectDetails({{
+      .ObjectId = "PlayerCharacter",
+      .DisplayName = "PlayerCharacter",
+      .Kind = Axiom::EditorSceneItemKind::Actor,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      .Transform = Axiom::EditorTransformDetails{},
+  }});
+  Session.SetSceneSubmissions({{
+      .Mesh = nullptr,
+      .Material = nullptr,
+      .Name = "PlayerCharacter",
+      .RenderPath = Axiom::MeshRenderPath::Graphics,
+      .Transform = glm::mat4(1.0f),
+  }});
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetTransformCommand{
+                      .ObjectId = "PlayerCharacter",
+                      .Location = glm::vec3(1.0f, 2.0f, 3.0f),
+                      .RotationDegrees = glm::vec3(0.0f, 90.0f, 0.0f),
+                      .Scale = glm::vec3(2.0f, 2.0f, 2.0f),
+                  }});
+  Session.Tick();
+
+  const Axiom::EditorObjectDetails *Details =
+      Session.FindObjectDetails("PlayerCharacter");
+  ASSERT_NE(Details, nullptr);
+  ASSERT_TRUE(Details->Transform.has_value());
+  EXPECT_EQ(Details->Transform->Location, glm::vec3(1.0f, 2.0f, 3.0f));
+  EXPECT_EQ(Details->Transform->RotationDegrees, glm::vec3(0.0f, 90.0f, 0.0f));
+  EXPECT_EQ(Details->Transform->Scale, glm::vec3(2.0f, 2.0f, 2.0f));
+
+  ASSERT_EQ(Session.GetState().SceneSubmissions.size(), 1u);
+  const glm::vec4 TranslationColumn = Session.GetState().SceneSubmissions[0].Transform[3];
+  EXPECT_EQ(glm::vec3(TranslationColumn), glm::vec3(1.0f, 2.0f, 3.0f));
+
+  ASSERT_EQ(Subscriber.Events.size(), 2u);
+  ASSERT_TRUE(std::holds_alternative<Axiom::ObjectTransformUpdatedEvent>(
+      Subscriber.Events.front().Event.Payload));
+  ASSERT_TRUE(std::holds_alternative<Axiom::CommandAcknowledgedEvent>(
+      Subscriber.Events.back().Event.Payload));
+  const auto &Acknowledged = std::get<Axiom::CommandAcknowledgedEvent>(
+      Subscriber.Events.back().Event.Payload);
+  EXPECT_EQ(Acknowledged.CommandType, "set_transform");
+}
+
+TEST(EditorSessionTests, SetTransformRejectsReadOnlyTarget) {
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+  Session.SetSceneItems({{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {},
+  }});
+  Session.SetObjectDetails({{
+      .ObjectId = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .SupportsTransform = false,
+      .TransformReadOnly = true,
+      .Transform = std::nullopt,
+  }});
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetTransformCommand{
+                      .ObjectId = "world",
+                      .Location = glm::vec3(1.0f),
+                      .RotationDegrees = glm::vec3(2.0f),
+                      .Scale = glm::vec3(1.0f),
+                  }});
+  Session.Tick();
+
+  ASSERT_EQ(Subscriber.Events.size(), 1u);
+  ASSERT_TRUE(std::holds_alternative<Axiom::CommandRejectedEvent>(
+      Subscriber.Events.front().Event.Payload));
 }
 
 TEST(EditorInputSourceTests, GlfwInputSourceTranslatesPlatformStateIntoCommands) {
@@ -420,7 +634,7 @@ TEST(EditorInputSourceTests, BufferedInputSourceCanDriveAuthorityWithoutWindow) 
   const auto *Viewport = Session.FindViewport(Axiom::SessionUserId{7});
   ASSERT_NE(Viewport, nullptr);
   EXPECT_TRUE(Viewport->IsLooking);
-  EXPECT_EQ(Subscriber.Events.size(), 2u);
+  EXPECT_EQ(Subscriber.Events.size(), 3u);
 }
 
 TEST(RemoteViewportTests, OffscreenSurfaceExposesHeadlessContract) {
@@ -448,7 +662,7 @@ TEST(RemoteViewportTests, AxiomEndpointForwardsEventsAndFrames) {
                    }});
   Session.Tick();
 
-  ASSERT_EQ(Subscriber.Events.size(), 1u);
+  ASSERT_EQ(Subscriber.Events.size(), 2u);
   EXPECT_TRUE(std::holds_alternative<Axiom::LookStateChangedEvent>(
       Subscriber.Events.front().Event.Payload));
 
@@ -504,7 +718,7 @@ TEST(RemoteViewportTests, AxiomEndpointConnectIsIdempotentAndStopsAfterDisconnec
                        .CursorPosition = glm::dvec2(3.0, 4.0),
                    }});
   Session.Tick();
-  ASSERT_EQ(Subscriber.Events.size(), 1u);
+  ASSERT_EQ(Subscriber.Events.size(), 2u);
 
   Endpoint.Disconnect(&Subscriber);
   Endpoint.Disconnect(&Subscriber);
@@ -516,7 +730,7 @@ TEST(RemoteViewportTests, AxiomEndpointConnectIsIdempotentAndStopsAfterDisconnec
                        .CursorPosition = glm::dvec2(5.0, 6.0),
                    }});
   Session.Tick();
-  EXPECT_EQ(Subscriber.Events.size(), 1u);
+  EXPECT_EQ(Subscriber.Events.size(), 2u);
 }
 
 TEST(RemoteViewportTests, AxiomEndpointCanEncodeRawFramesThroughInstalledEncoder) {
