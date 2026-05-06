@@ -30,6 +30,7 @@ const DEFAULT_AXIOM_SERVER_ORIGIN = "http://127.0.0.1:8080"
 const CLIENT_ID_STORAGE_KEY = "axiom-remote-client-id"
 const STATUS_POLL_INTERVAL_MS = 1500
 const ICE_POLL_INTERVAL_MS = 1000
+const SESSION_POLL_INTERVAL_MS = 1500
 type ConnectionState = RemoteViewportConnectionState
 type ViewMode = RemoteViewportViewMode
 type ChannelPreference = "reliable" | "unreliable"
@@ -131,6 +132,7 @@ export function Viewport() {
   const unreliableChannelRef = useRef<RTCDataChannel | null>(null)
   const statusPollHandleRef = useRef<number | null>(null)
   const icePollHandleRef = useRef<number | null>(null)
+  const sessionPollHandleRef = useRef<number | null>(null)
   const inputFrameHandleRef = useRef<number | null>(null)
   const localIceQueueRef = useRef<IceCandidatePayload[]>([])
   const remoteDescriptionAppliedRef = useRef(false)
@@ -249,6 +251,10 @@ export function Viewport() {
       if (icePollHandleRef.current !== null) {
         window.clearInterval(icePollHandleRef.current)
         icePollHandleRef.current = null
+      }
+      if (sessionPollHandleRef.current !== null) {
+        window.clearInterval(sessionPollHandleRef.current)
+        sessionPollHandleRef.current = null
       }
     }
 
@@ -1060,9 +1066,15 @@ export function Viewport() {
       icePollHandleRef.current = window.setInterval(() => {
         void pollIceCandidates(nextGeneration)
       }, ICE_POLL_INTERVAL_MS)
+      sessionPollHandleRef.current = window.setInterval(() => {
+        if (sessionReadyRef.current) {
+          void refreshSessionSnapshotSafely("resync")
+        }
+      }, SESSION_POLL_INTERVAL_MS)
 
       void pollStatus(nextGeneration)
       void pollIceCandidates(nextGeneration)
+      void refreshSessionSnapshotSafely("resync")
     }
 
     connectRef.current = connect

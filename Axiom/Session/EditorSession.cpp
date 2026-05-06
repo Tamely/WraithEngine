@@ -111,7 +111,7 @@ void EditorSession::SetPresenceState(SessionUserId User,
     Presence.DisplayName = DefaultUserDisplayName(User);
     Presence.IsLocal = User.Value == 1;
   }
-  if (Presence.State == State) {
+  if (!Inserted && Presence.State == State) {
     return;
   }
 
