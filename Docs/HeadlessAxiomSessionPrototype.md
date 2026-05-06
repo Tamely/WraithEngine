@@ -32,7 +32,9 @@ The current slice includes a macOS-first H.264 path that is now wired into the n
 - the native WebRTC sender now prefers the freshest available H.264 packet instead of rewinding to older packets during normal latest-only delivery
 - the browser client now pumps camera/input updates on `requestAnimationFrame` and flushes pointer-lock look input immediately instead of batching on a fixed timer
 - the current stream no longer has the severe FPS collapse seen in the older prototype, but there is still roughly half a second of residual input latency to investigate later
-- the long-lived browser editor UI should move into a root-level `EditorFrontend` workspace using React, Next.js, and Tailwind CSS instead of continuing to grow the inline server-served prototype
+- a root-level `EditorFrontend` workspace already exists as the longer-lived browser editor shell using Next.js, React, and Tailwind CSS
+- `EditorFrontend` already includes a docked editor layout, menu bar, toolbar, outliner, details panel, content browser, and a viewport component stub that is ready to host the real WebRTC stream client
+- the temporary localhost:8080 browser page should now be treated as bring-up-only glue that needs to be retired by moving its WebRTC/data-channel client logic into `EditorFrontend`
 - sandboxed validation on macOS can hide the availability of VideoToolbox H.264 encoders; authoritative H.264 validation should be done outside the sandbox on a Vulkan/MoltenVK-capable machine
 
 ## CLI
@@ -158,8 +160,8 @@ This prototype proves that:
 This prototype does not yet provide:
 
 - the low-latency input response expected from the final remote editor target
-- a dedicated `EditorFrontend` application workspace at the repository root
-- a full browser editor shell beyond the viewport-focused prototype
+- the WebRTC/input client logic migrated into the existing `EditorFrontend` viewport component
+- removal of the temporary inline localhost:8080 browser UI from `AxiomRemoteViewportServer`
 - a production-ready remote viewer/editor client
 - a replacement for the current local windowed editor executable
 
@@ -168,6 +170,7 @@ This prototype does not yet provide:
 The next remote-viewport milestone should prioritize:
 
 - deeper WebRTC sender and browser playout-delay tuning to reduce the remaining input latency
-- migration of the browser UI from the current inline server-served prototype into a root-level `EditorFrontend` folder
+- migration of the current inline localhost:8080 browser client into `EditorFrontend/components/engine/viewport.tsx` so the existing Next.js editor shell becomes the primary browser UI
+- removal of the temporary inline browser assets from `AxiomRemoteViewportServer` once `EditorFrontend` owns the viewport/client glue
 
-The current localhost:8080 page should be treated as a temporary bring-up client. It remains useful for validating the engine/session boundary, but it should not become the final home of the editor UI.
+The current localhost:8080 page should be treated as a temporary bring-up client. It remains useful for validating the engine/session boundary, but the intended next cleanup step is to retire that inline UI in favor of the existing `EditorFrontend` application.
