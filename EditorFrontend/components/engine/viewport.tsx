@@ -163,6 +163,7 @@ export function Viewport() {
     setSessionSnapshot,
     clearSessionSnapshot,
     applySelectionChanged,
+    applyParticipantCameraUpdate,
     setSessionState,
     sessionStatusText,
     setSessionStatusText,
@@ -413,6 +414,36 @@ export function Viewport() {
             objectId ? `Selection changed to ${objectId}.` : "Selection cleared."
           )
           void refreshSessionSnapshotSafely("event")
+        }
+        return
+      }
+
+      if (message.payloadType === "viewport_camera_updated") {
+        const userId =
+          typeof message.user === "number" ? message.user : Number(message.user)
+        const position = Array.isArray(message.position) ? message.position : null
+        const yawDegrees =
+          typeof message.yawDegrees === "number"
+            ? message.yawDegrees
+            : Number(message.yawDegrees)
+        const pitchDegrees =
+          typeof message.pitchDegrees === "number"
+            ? message.pitchDegrees
+            : Number(message.pitchDegrees)
+        if (
+          Number.isFinite(userId) &&
+          position !== null &&
+          position.length === 3 &&
+          position.every((component) => typeof component === "number") &&
+          Number.isFinite(yawDegrees) &&
+          Number.isFinite(pitchDegrees)
+        ) {
+          applyParticipantCameraUpdate(userId, {
+            position: [position[0], position[1], position[2]],
+            yawDegrees,
+            pitchDegrees,
+          })
+          setSessionUi("session-ready", "Session ready", "Camera presence updated.")
         }
         return
       }

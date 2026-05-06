@@ -54,6 +54,11 @@ export interface SessionParticipant {
   selectionObjectId: string | null
   currentTool: string
   presentationColor: string
+  camera: {
+    position: [number, number, number]
+    yawDegrees: number
+    pitchDegrees: number
+  } | null
 }
 
 export interface SessionTransformDetails {
@@ -130,6 +135,10 @@ interface RemoteViewportContextValue {
   setSessionSnapshot: (snapshot: SessionSnapshot) => void
   clearSessionSnapshot: () => void
   applySelectionChanged: (userId: number, objectId: string | null) => void
+  applyParticipantCameraUpdate: (
+    userId: number,
+    camera: SessionParticipant["camera"]
+  ) => void
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
@@ -241,6 +250,17 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
+  const applyParticipantCameraUpdate = useCallback(
+    (userId: number, camera: SessionParticipant["camera"]) => {
+      setParticipants((current) =>
+        current.map((participant) =>
+          participant.userId === userId ? { ...participant, camera } : participant
+        )
+      )
+    },
+    []
+  )
+
   const reconnect = useCallback(async () => {
     await actionsRef.current.reconnect()
   }, [])
@@ -307,6 +327,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       setSessionSnapshot,
       clearSessionSnapshot,
       applySelectionChanged,
+      applyParticipantCameraUpdate,
       reconnect,
       toggleLook,
       setMode,
@@ -317,6 +338,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     [
       appendEventLog,
       applySelectionChanged,
+      applyParticipantCameraUpdate,
       clearEventLog,
       connectionState,
       clearSessionSnapshot,

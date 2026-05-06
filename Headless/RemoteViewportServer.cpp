@@ -1089,6 +1089,7 @@ bool RemoteViewportServer::HandleWebRtcOfferRequest(uintptr_t ClientSocketValue,
 
   if (ClientId.has_value()) {
     m_WebRtcOwnerClientId = *ClientId;
+    m_Host.SetActiveRenderUser(*User);
   }
 
   const std::string Response =
@@ -1219,6 +1220,8 @@ bool RemoteViewportServer::HandleWebRtcCloseRequest(
     }
   }
   m_WebRtcOwnerClientId.clear();
+  m_Host.SetActiveRenderUser(
+      m_Host.GetHeadlessLayer().GetLocalUserId());
   const WebRtcSessionStatus Status = m_WebRtcSession->GetStatus();
   const std::string Payload = SerializeWebRtcStatus(
       Status.Enabled, Status.Available, Status.SignalingState,

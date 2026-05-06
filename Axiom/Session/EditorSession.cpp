@@ -195,6 +195,15 @@ EditorParticipant EditorSession::BuildParticipant(SessionUserId User) const {
     Participant.SelectedObjectId = *SelectedObjectId;
   }
 
+  if (const EditorViewportState *Viewport = FindViewport(User);
+      Viewport != nullptr) {
+    Participant.Camera = EditorParticipant::CameraState{
+        .Position = Viewport->Camera.GetPosition(),
+        .YawDegrees = Viewport->Camera.GetYawDegrees(),
+        .PitchDegrees = Viewport->Camera.GetPitchDegrees(),
+    };
+  }
+
   return Participant;
 }
 
@@ -206,7 +215,7 @@ std::vector<EditorParticipant> EditorSession::BuildParticipants(
   for (const auto &[User, Presence] : m_State.PresenceByUser) {
     (void)Presence;
     EditorParticipant Participant = BuildParticipant(User);
-  Participant.IsLocal = User.Value == CurrentUser.Value;
+    Participant.IsLocal = User.Value == CurrentUser.Value;
     Participants.push_back(std::move(Participant));
   }
 

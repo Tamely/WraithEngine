@@ -227,6 +227,16 @@ TEST(EditorSessionTests, CameraMovementUpdatesOnlySessionOwnedState) {
   ASSERT_EQ(Subscriber.Events.size(), 1u);
   EXPECT_TRUE(std::holds_alternative<Axiom::ViewportCameraUpdatedEvent>(
       Subscriber.Events.front().Event.Payload));
+
+  const std::vector<Axiom::EditorParticipant> Participants =
+      Session.BuildParticipants(Axiom::SessionUserId{7});
+  ASSERT_EQ(Participants.size(), 1u);
+  ASSERT_TRUE(Participants.front().Camera.has_value());
+  EXPECT_EQ(Participants.front().Camera->Position, Expected.GetPosition());
+  EXPECT_FLOAT_EQ(Participants.front().Camera->YawDegrees,
+                  Expected.GetYawDegrees());
+  EXPECT_FLOAT_EQ(Participants.front().Camera->PitchDegrees,
+                  Expected.GetPitchDegrees());
 }
 
 TEST(EditorSessionTests, InvalidCommandPublishesRejectionWithoutPartialMutation) {
@@ -370,7 +380,7 @@ TEST(EditorSessionTests, SelectObjectPublishesAuthoritativeSelectionChangedEvent
   const Axiom::EditorUserPresence *Presence =
       Session.FindPresence(Axiom::SessionUserId{7});
   ASSERT_NE(Presence, nullptr);
-  EXPECT_EQ(Presence->DisplayName, "User 7");
+  EXPECT_EQ(Presence->DisplayName, "User 6");
   ASSERT_EQ(Subscriber.Events.size(), 2u);
   ASSERT_TRUE(std::holds_alternative<Axiom::SelectionChangedEvent>(
       Subscriber.Events.front().Event.Payload));

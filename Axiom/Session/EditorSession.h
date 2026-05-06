@@ -70,6 +70,12 @@ struct EditorUserPresence {
 };
 
 struct EditorParticipant {
+  struct CameraState {
+    glm::vec3 Position{0.0f};
+    float YawDegrees{0.0f};
+    float PitchDegrees{0.0f};
+  };
+
   SessionUserId User;
   std::string DisplayName;
   EditorUserPresenceState State{EditorUserPresenceState::Connected};
@@ -77,6 +83,7 @@ struct EditorParticipant {
   std::optional<std::string> SelectedObjectId;
   std::string CurrentTool{"viewport"};
   std::string PresentationColor{"#94A3B8"};
+  std::optional<CameraState> Camera;
 };
 
 enum class EditorObjectLockState { Unlocked, Placeholder };

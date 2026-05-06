@@ -20,6 +20,7 @@ public:
                          const EditorCommand &Command);
   void SubmitToTransport(ISessionTransport &Transport, SessionUserId User,
                          const EditorCommand &Command);
+  void SetActiveRenderUser(SessionUserId User) { m_ActiveRenderUserId = User; }
   EditorSession &GetSession() { return m_Session; }
   SessionUserId GetLocalUserId() const { return m_LocalUserId; }
 
@@ -29,6 +30,7 @@ private:
 
   SessionId m_SessionId{1};
   SessionUserId m_LocalUserId{1};
+  SessionUserId m_ActiveRenderUserId{1};
   EditorSession m_Session;
 };
 } // namespace Axiom

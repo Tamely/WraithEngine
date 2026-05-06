@@ -37,4 +37,8 @@ void HeadlessSessionHost::SubmitRemoteCommand(SessionUserId User,
 void HeadlessSessionHost::SetRemoteViewMode(RendererViewMode ViewMode) {
   SetRendererViewMode(ViewMode);
 }
+
+void HeadlessSessionHost::SetActiveRenderUser(SessionUserId User) {
+  m_Layer->SetActiveRenderUser(User);
+}
 } // namespace Axiom

@@ -29,6 +29,21 @@ export function RemoteViewportPanel() {
     toggleLook,
   } = useRemoteViewport()
 
+  function formatCameraPose(
+    camera: {
+      position: [number, number, number]
+      yawDegrees: number
+      pitchDegrees: number
+    } | null
+  ) {
+    if (!camera) {
+      return "Camera pending"
+    }
+
+    const [x, y, z] = camera.position
+    return `Pos ${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)} | Yaw ${camera.yawDegrees.toFixed(1)} | Pitch ${camera.pitchDegrees.toFixed(1)}`
+  }
+
   return (
     <div className="h-full overflow-auto bg-neutral-950 p-3 text-xs text-neutral-300">
       <div className="rounded-lg border border-neutral-800 bg-black/65 p-3 backdrop-blur-sm">
@@ -93,11 +108,16 @@ export function RemoteViewportPanel() {
                   className="flex items-center justify-between rounded border border-neutral-900 bg-neutral-950/60 px-2 py-1"
                   style={{ borderLeftColor: entry.presentationColor, borderLeftWidth: "3px" }}
                 >
-                  <span className="truncate">
-                    {entry.displayName}
-                    {entry.isLocal ? " (you)" : ""}
-                  </span>
-                  <span className="text-neutral-500">{entry.presenceState}</span>
+                  <div className="min-w-0">
+                    <span className="block truncate">
+                      {entry.displayName}
+                      {entry.isLocal ? " (you)" : ""}
+                    </span>
+                    <span className="block truncate text-neutral-500">
+                      {formatCameraPose(entry.camera)}
+                    </span>
+                  </div>
+                  <span className="ml-2 shrink-0 text-neutral-500">{entry.presenceState}</span>
                 </div>
               ))
             )}

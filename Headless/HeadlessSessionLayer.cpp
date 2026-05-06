@@ -11,12 +11,16 @@ HeadlessSessionLayer::HeadlessSessionLayer()
 
 void HeadlessSessionLayer::OnAttach() {
   m_Session.EnsureViewportState(m_LocalUserId);
+  m_ActiveRenderUserId = m_LocalUserId;
 }
 
 void HeadlessSessionLayer::OnUpdate() { m_Session.Tick(); }
 
 void HeadlessSessionLayer::OnRender() {
-  const EditorViewportState *Viewport = m_Session.FindViewport(m_LocalUserId);
+  const EditorViewportState *Viewport = m_Session.FindViewport(m_ActiveRenderUserId);
+  if (Viewport == nullptr && m_ActiveRenderUserId.Value != m_LocalUserId.Value) {
+    Viewport = m_Session.FindViewport(m_LocalUserId);
+  }
   if (Viewport == nullptr) {
     return;
   }

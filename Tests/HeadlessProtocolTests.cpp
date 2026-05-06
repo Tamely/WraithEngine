@@ -207,9 +207,17 @@ TEST(HeadlessProtocolTests, SerializesRemoteViewportLifecycleMessages) {
 }
 
 TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
+  Axiom::Camera Camera;
+  Camera.LookAt(glm::vec3(1.0f, 2.0f, 3.0f), glm::vec3(1.0f, 2.0f, 2.0f));
+
   Axiom::EditorSessionState State{
       .Session = Axiom::SessionId{1},
-      .Viewports = {},
+      .Viewports = {{
+          Axiom::SessionUserId{1},
+          Axiom::EditorViewportState{
+              .Camera = Camera,
+          },
+      }},
       .PresenceByUser = {{
           Axiom::SessionUserId{1},
           Axiom::EditorUserPresence{
@@ -269,6 +277,9 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
   EXPECT_NE(Json.find("\"presenceState\":\"connected\""), std::string::npos);
   EXPECT_NE(Json.find("\"selectionObjectId\":\"PlayerCharacter\""),
             std::string::npos);
+  EXPECT_NE(Json.find("\"camera\":{\"position\":[1,2,3],\"yawDegrees\":-90"),
+            std::string::npos);
+  EXPECT_NE(Json.find("\"pitchDegrees\":0"), std::string::npos);
   EXPECT_NE(Json.find("\"objectId\":\"PlayerCharacter\""), std::string::npos);
   EXPECT_NE(Json.find("\"displayName\":\"World\""), std::string::npos);
   EXPECT_NE(Json.find("\"kind\":\"actor\""), std::string::npos);

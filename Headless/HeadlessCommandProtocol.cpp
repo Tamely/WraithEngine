@@ -220,6 +220,15 @@ EditorParticipant BuildParticipant(const EditorSessionState &State,
     Participant.SelectedObjectId = SelectionIt->second;
   }
 
+  if (const auto ViewportIt = State.Viewports.find(User);
+      ViewportIt != State.Viewports.end()) {
+    Participant.Camera = EditorParticipant::CameraState{
+        .Position = ViewportIt->second.Camera.GetPosition(),
+        .YawDegrees = ViewportIt->second.Camera.GetYawDegrees(),
+        .PitchDegrees = ViewportIt->second.Camera.GetPitchDegrees(),
+    };
+  }
+
   return Participant;
 }
 
@@ -310,6 +319,16 @@ void SerializeParticipant(std::ostringstream &Stream,
          << "\",\"selectionObjectId\":";
   if (Participant.SelectedObjectId.has_value()) {
     Stream << "\"" << EscapeJson(*Participant.SelectedObjectId) << "\"";
+  } else {
+    Stream << "null";
+  }
+  Stream << ",\"camera\":";
+  if (Participant.Camera.has_value()) {
+    Stream << "{\"position\":[" << Participant.Camera->Position.x << ","
+           << Participant.Camera->Position.y << ","
+           << Participant.Camera->Position.z << "],\"yawDegrees\":"
+           << Participant.Camera->YawDegrees << ",\"pitchDegrees\":"
+           << Participant.Camera->PitchDegrees << "}";
   } else {
     Stream << "null";
   }
