@@ -367,6 +367,10 @@ TEST(EditorSessionTests, SelectObjectPublishesAuthoritativeSelectionChangedEvent
   const std::string *Selected = Session.FindSelectedObjectId(Axiom::SessionUserId{7});
   ASSERT_NE(Selected, nullptr);
   EXPECT_EQ(*Selected, "PlayerCharacter");
+  const Axiom::EditorUserPresence *Presence =
+      Session.FindPresence(Axiom::SessionUserId{7});
+  ASSERT_NE(Presence, nullptr);
+  EXPECT_EQ(Presence->DisplayName, "User 7");
   ASSERT_EQ(Subscriber.Events.size(), 2u);
   ASSERT_TRUE(std::holds_alternative<Axiom::SelectionChangedEvent>(
       Subscriber.Events.front().Event.Payload));

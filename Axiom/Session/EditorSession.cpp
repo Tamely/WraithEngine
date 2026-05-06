@@ -9,6 +9,10 @@
 
 namespace Axiom {
 namespace {
+std::string DefaultUserDisplayName(SessionUserId User) {
+  return "User " + std::to_string(User.Value);
+}
+
 std::string CommandTypeName(const EditorCommandPayload &Payload) {
   if (std::holds_alternative<UpdateViewportCameraCommand>(Payload)) {
     return "update_viewport_camera";
@@ -87,6 +91,21 @@ void EditorSession::SetObjectDetails(std::vector<EditorObjectDetails> ObjectDeta
   }
 }
 
+void EditorSession::SetPresence(std::vector<EditorUserPresence> Presence) {
+  m_State.PresenceByUser.clear();
+  for (EditorUserPresence &Entry : Presence) {
+    m_State.PresenceByUser.emplace(Entry.User, std::move(Entry));
+  }
+}
+
+void EditorSession::SetObjectCollaborationStates(
+    std::vector<EditorObjectCollaborationState> CollaborationStates) {
+  m_State.CollaborationByObjectId.clear();
+  for (EditorObjectCollaborationState &Entry : CollaborationStates) {
+    m_State.CollaborationByObjectId.emplace(Entry.ObjectId, std::move(Entry));
+  }
+}
+
 const EditorViewportState *EditorSession::FindViewport(SessionUserId User) const {
   const auto It = m_State.Viewports.find(User);
   return It != m_State.Viewports.end() ? &It->second : nullptr;
@@ -113,6 +132,17 @@ const EditorObjectDetails *EditorSession::FindSelectedObjectDetails(
   return SelectedObjectId != nullptr ? FindObjectDetails(*SelectedObjectId) : nullptr;
 }
 
+const EditorUserPresence *EditorSession::FindPresence(SessionUserId User) const {
+  const auto It = m_State.PresenceByUser.find(User);
+  return It != m_State.PresenceByUser.end() ? &It->second : nullptr;
+}
+
+const EditorObjectCollaborationState *EditorSession::FindCollaborationState(
+    std::string_view ObjectId) const {
+  const auto It = m_State.CollaborationByObjectId.find(std::string(ObjectId));
+  return It != m_State.CollaborationByObjectId.end() ? &It->second : nullptr;
+}
+
 void EditorSession::UpdateSubmissionTransform(
     std::string_view ObjectId, const EditorTransformDetails &Transform) {
   const glm::mat4 Matrix = BuildTransformMatrix(Transform);
@@ -123,7 +153,22 @@ void EditorSession::UpdateSubmissionTransform(
   }
 }
 
+EditorUserPresence &EditorSession::EnsurePresence(SessionUserId User) {
+  const auto [It, Inserted] = m_State.PresenceByUser.try_emplace(User);
+  if (Inserted) {
+    It->second.User = User;
+    It->second.DisplayName = DefaultUserDisplayName(User);
+    It->second.State = EditorUserPresenceState::Connected;
+    It->second.IsLocal = User.Value == 1;
+  } else {
+    It->second.State = EditorUserPresenceState::Connected;
+  }
+
+  return It->second;
+}
+
 EditorViewportState &EditorSession::EnsureViewport(SessionUserId User) {
+  EnsurePresence(User);
   const auto [It, Inserted] = m_State.Viewports.try_emplace(User);
   if (Inserted) {
     It->second.Camera.LookAt(m_Config.InitialCameraPosition,
@@ -303,6 +348,7 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
 
 void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                   const SelectObjectCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
   const auto Existing = m_State.SelectedObjectIds.find(QueuedCommand.Context.User);
   if (Existing != m_State.SelectedObjectIds.end() &&
       Existing->second == Command.ObjectId) {
@@ -318,6 +364,7 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
 
 void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                   const SetTransformCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
   auto DetailsIt = m_State.ObjectDetailsById.find(Command.ObjectId);
   if (DetailsIt == m_State.ObjectDetailsById.end()) {
     return;

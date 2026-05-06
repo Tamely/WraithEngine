@@ -46,6 +46,13 @@ export interface SessionSelection {
   objectId: string
 }
 
+export interface SessionPresence {
+  userId: number
+  displayName: string
+  state: "connected" | "away" | "disconnected"
+  isLocal: boolean
+}
+
 export interface SessionTransformDetails {
   location: [number, number, number]
   rotationDegrees: [number, number, number]
@@ -62,6 +69,11 @@ export interface SessionObjectDetails {
     transformReadOnly: boolean
   }
   transform: SessionTransformDetails | null
+  collaboration: {
+    selectedByUserIds: number[]
+    lockState: "unlocked" | "placeholder"
+    lockOwnerUserId: number | null
+  }
 }
 
 interface RemoteViewportActions {
@@ -93,6 +105,7 @@ interface RemoteViewportContextValue {
   eventLog: string[]
   serverOrigin: string
   currentUserId: number | null
+  presence: SessionPresence[]
   sceneTree: SessionSceneItem[]
   selectedObjectId: string | null
   selectedObject: SessionSceneItem | null
@@ -124,6 +137,7 @@ interface RemoteViewportContextValue {
 
 interface SessionSnapshot {
   currentUserId: number
+  presence: SessionPresence[]
   sceneTree: SessionSceneItem[]
   selections: SessionSelection[]
   selectedObjectDetails: SessionObjectDetails | null
@@ -176,6 +190,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
   const [eventLog, setEventLog] = useState<string[]>([])
   const [serverOrigin, setServerOrigin] = useState("")
   const [currentUserId, setCurrentUserId] = useState<number | null>(null)
+  const [presence, setPresence] = useState<SessionPresence[]>([])
   const [sceneTree, setSceneTree] = useState<SessionSceneItem[]>([])
   const [selections, setSelections] = useState<SessionSelection[]>([])
   const [selectedObjectDetails, setSelectedObjectDetails] =
@@ -195,6 +210,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
 
   const setSessionSnapshot = useCallback((snapshot: SessionSnapshot) => {
     setCurrentUserId(snapshot.currentUserId)
+    setPresence(snapshot.presence)
     setSceneTree(snapshot.sceneTree)
     setSelections(snapshot.selections)
     setSelectedObjectDetails(snapshot.selectedObjectDetails)
@@ -202,6 +218,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
 
   const clearSessionSnapshot = useCallback(() => {
     setCurrentUserId(null)
+    setPresence([])
     setSceneTree([])
     setSelections([])
     setSelectedObjectDetails(null)
@@ -258,6 +275,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       eventLog,
       serverOrigin,
       currentUserId,
+      presence,
       sceneTree,
       selectedObjectId,
       selectedObject,
@@ -297,6 +315,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       eventLog,
       frameText,
       isLooking,
+      presence,
       sessionDetailText,
       sessionState,
       sessionStatusText,

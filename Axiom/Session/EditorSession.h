@@ -60,13 +60,34 @@ struct EditorObjectDetails {
   std::optional<EditorTransformDetails> Transform;
 };
 
+enum class EditorUserPresenceState { Connected, Away, Disconnected };
+
+struct EditorUserPresence {
+  SessionUserId User;
+  std::string DisplayName;
+  EditorUserPresenceState State{EditorUserPresenceState::Connected};
+  bool IsLocal{false};
+};
+
+enum class EditorObjectLockState { Unlocked, Placeholder };
+
+struct EditorObjectCollaborationState {
+  std::string ObjectId;
+  EditorObjectLockState LockState{EditorObjectLockState::Unlocked};
+  std::optional<SessionUserId> LockOwner;
+};
+
 struct EditorSessionState {
   SessionId Session;
   std::unordered_map<SessionUserId, EditorViewportState, SessionUserIdHash>
       Viewports;
+  std::unordered_map<SessionUserId, EditorUserPresence, SessionUserIdHash>
+      PresenceByUser;
   std::vector<RenderMeshSubmission> SceneSubmissions;
   std::vector<EditorSceneItem> SceneItems;
   std::unordered_map<std::string, EditorObjectDetails> ObjectDetailsById;
+  std::unordered_map<std::string, EditorObjectCollaborationState>
+      CollaborationByObjectId;
   std::unordered_map<SessionUserId, std::string, SessionUserIdHash>
       SelectedObjectIds;
 };
@@ -87,6 +108,9 @@ public:
   void SetSceneSubmissions(std::vector<RenderMeshSubmission> SceneSubmissions);
   void SetSceneItems(std::vector<EditorSceneItem> SceneItems);
   void SetObjectDetails(std::vector<EditorObjectDetails> ObjectDetails);
+  void SetPresence(std::vector<EditorUserPresence> Presence);
+  void SetObjectCollaborationStates(
+      std::vector<EditorObjectCollaborationState> CollaborationStates);
 
   const EditorSessionState &GetState() const { return m_State; }
   const EditorSessionConfig &GetConfig() const { return m_Config; }
@@ -95,10 +119,14 @@ public:
   const std::string *FindSelectedObjectId(SessionUserId User) const;
   const EditorObjectDetails *FindObjectDetails(std::string_view ObjectId) const;
   const EditorObjectDetails *FindSelectedObjectDetails(SessionUserId User) const;
+  const EditorUserPresence *FindPresence(SessionUserId User) const;
+  const EditorObjectCollaborationState *FindCollaborationState(
+      std::string_view ObjectId) const;
 
 private:
   void UpdateSubmissionTransform(std::string_view ObjectId,
                                  const EditorTransformDetails &Transform);
+  EditorUserPresence &EnsurePresence(SessionUserId User);
   EditorViewportState &EnsureViewport(SessionUserId User);
   const EditorSceneItem *FindSceneItemRecursive(
       const std::vector<EditorSceneItem> &Items, std::string_view ObjectId) const;

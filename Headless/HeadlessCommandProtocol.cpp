@@ -157,6 +157,30 @@ std::string SceneItemKindToString(EditorSceneItemKind Kind) {
   return "mesh";
 }
 
+std::string PresenceStateToString(EditorUserPresenceState State) {
+  switch (State) {
+  case EditorUserPresenceState::Connected:
+    return "connected";
+  case EditorUserPresenceState::Away:
+    return "away";
+  case EditorUserPresenceState::Disconnected:
+    return "disconnected";
+  }
+
+  return "connected";
+}
+
+std::string LockStateToString(EditorObjectLockState State) {
+  switch (State) {
+  case EditorObjectLockState::Unlocked:
+    return "unlocked";
+  case EditorObjectLockState::Placeholder:
+    return "placeholder";
+  }
+
+  return "unlocked";
+}
+
 void SerializeSceneItem(std::ostringstream &Stream, const EditorSceneItem &Item) {
   Stream << "{\"id\":\"" << EscapeJson(Item.Id) << "\",\"displayName\":\""
          << EscapeJson(Item.DisplayName) << "\",\"kind\":\""
@@ -172,6 +196,7 @@ void SerializeSceneItem(std::ostringstream &Stream, const EditorSceneItem &Item)
 }
 
 void SerializeObjectDetails(std::ostringstream &Stream,
+                            const EditorSessionState &State,
                             const EditorObjectDetails &Details) {
   Stream << "{\"objectId\":\"" << EscapeJson(Details.ObjectId)
          << "\",\"displayName\":\"" << EscapeJson(Details.DisplayName)
@@ -192,7 +217,32 @@ void SerializeObjectDetails(std::ostringstream &Stream,
   } else {
     Stream << "null";
   }
-  Stream << "}";
+  Stream << ",\"collaboration\":{\"selectedByUserIds\":[";
+  bool FirstSelectionOwner = true;
+  for (const auto &[User, ObjectId] : State.SelectedObjectIds) {
+    if (ObjectId != Details.ObjectId) {
+      continue;
+    }
+    if (!FirstSelectionOwner) {
+      Stream << ",";
+    }
+    FirstSelectionOwner = false;
+    Stream << User.Value;
+  }
+  Stream << "],\"lockState\":\"";
+  const auto CollaborationIt = State.CollaborationByObjectId.find(Details.ObjectId);
+  if (CollaborationIt != State.CollaborationByObjectId.end()) {
+    Stream << LockStateToString(CollaborationIt->second.LockState)
+           << "\",\"lockOwnerUserId\":";
+    if (CollaborationIt->second.LockOwner.has_value()) {
+      Stream << CollaborationIt->second.LockOwner->Value;
+    } else {
+      Stream << "null";
+    }
+  } else {
+    Stream << "unlocked\",\"lockOwnerUserId\":null";
+  }
+  Stream << "}}";
 }
 } // namespace
 
@@ -624,7 +674,21 @@ std::string SerializeSessionSnapshot(const EditorSessionState &State,
          << ",\"transport\":{\"connected\":"
          << (TransportConnected ? "true" : "false") << ",\"state\":\""
          << EscapeJson(TransportState) << "\",\"webrtcConnectionState\":\""
-         << EscapeJson(WebRtcConnectionState) << "\"},\"selections\":[";
+         << EscapeJson(WebRtcConnectionState) << "\"},\"presence\":[";
+
+  bool FirstPresence = true;
+  for (const auto &[User, Presence] : State.PresenceByUser) {
+    if (!FirstPresence) {
+      Stream << ",";
+    }
+    FirstPresence = false;
+    Stream << "{\"userId\":" << User.Value << ",\"displayName\":\""
+           << EscapeJson(Presence.DisplayName) << "\",\"state\":\""
+           << PresenceStateToString(Presence.State) << "\",\"isLocal\":"
+           << (Presence.IsLocal ? "true" : "false") << "}";
+  }
+
+  Stream << "],\"selections\":[";
 
   bool FirstSelection = true;
   for (const auto &[User, ObjectId] : State.SelectedObjectIds) {
@@ -656,7 +720,7 @@ std::string SerializeSessionSnapshot(const EditorSessionState &State,
                                                               : nullptr;
           }();
       Details != nullptr) {
-    SerializeObjectDetails(Stream, *Details);
+    SerializeObjectDetails(Stream, State, *Details);
   } else {
     Stream << "null";
   }

@@ -51,7 +51,7 @@ export function Details() {
 }
 
 function DetailsContent({ details }: { details: SessionObjectDetails }) {
-  const { updateTransform } = useRemoteViewport()
+  const { presence, updateTransform } = useRemoteViewport()
   const [draft, setDraft] = useState<DraftTransform>(() => toDraft(details))
   const [isSaving, setIsSaving] = useState(false)
 
@@ -60,6 +60,15 @@ function DetailsContent({ details }: { details: SessionObjectDetails }) {
   }, [details])
 
   const canEdit = details.capabilities.supportsTransform && !details.capabilities.transformReadOnly
+  const selectedByNames = details.collaboration.selectedByUserIds.map((userId) => {
+    const collaborator = presence.find((entry) => entry.userId === userId)
+    return collaborator?.displayName ?? `User ${userId}`
+  })
+  const lockOwnerName =
+    details.collaboration.lockOwnerUserId !== null
+      ? presence.find((entry) => entry.userId === details.collaboration.lockOwnerUserId)
+          ?.displayName ?? `User ${details.collaboration.lockOwnerUserId}`
+      : "None"
 
   async function applyTransform() {
     const parsed = parseDraft(details.objectId, draft)
@@ -84,6 +93,12 @@ function DetailsContent({ details }: { details: SessionObjectDetails }) {
           <DetailRow label="Object ID" value={details.objectId} />
           <DetailRow label="Type" value={details.kind} />
           <DetailRow label="Visible" value={details.visible ? "true" : "false"} />
+          <DetailRow
+            label="Selected By"
+            value={selectedByNames.length > 0 ? selectedByNames.join(", ") : "Nobody"}
+          />
+          <DetailRow label="Lock State" value={details.collaboration.lockState} />
+          <DetailRow label="Lock Owner" value={lockOwnerName} />
         </div>
       </section>
 

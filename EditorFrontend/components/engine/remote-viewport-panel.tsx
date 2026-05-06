@@ -16,6 +16,7 @@ export function RemoteViewportPanel() {
     eventLog,
     frameText,
     isLooking,
+    presence,
     sessionDetailText,
     sessionState,
     sessionStatusText,
@@ -73,6 +74,32 @@ export function RemoteViewportPanel() {
           <div className="rounded border border-neutral-800 bg-neutral-950/70 px-2 py-1.5">
             <span className="block text-neutral-500">Server</span>
             <span className="mt-1 block truncate text-neutral-200">{serverOrigin || "Not set"}</span>
+          </div>
+        </div>
+        <div className="mt-3 rounded border border-neutral-800 bg-neutral-950/70 p-2">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">
+              Collaborators
+            </p>
+            <span className="text-[11px] text-neutral-500">{presence.length}</span>
+          </div>
+          <div className="space-y-1 text-[11px] text-neutral-300">
+            {presence.length === 0 ? (
+              <p className="text-neutral-500">No presence data yet</p>
+            ) : (
+              presence.map((entry) => (
+                <div
+                  key={entry.userId}
+                  className="flex items-center justify-between rounded border border-neutral-900 bg-neutral-950/60 px-2 py-1"
+                >
+                  <span className="truncate">
+                    {entry.displayName}
+                    {entry.isLocal ? " (you)" : ""}
+                  </span>
+                  <span className="text-neutral-500">{entry.state}</span>
+                </div>
+              ))
+            )}
           </div>
         </div>
         <div className="mt-3 rounded border border-neutral-800 bg-neutral-950/70 p-2">

@@ -191,6 +191,15 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
   Axiom::EditorSessionState State{
       .Session = Axiom::SessionId{1},
       .Viewports = {},
+      .PresenceByUser = {{
+          Axiom::SessionUserId{1},
+          Axiom::EditorUserPresence{
+              .User = Axiom::SessionUserId{1},
+              .DisplayName = "Local User",
+              .State = Axiom::EditorUserPresenceState::Connected,
+              .IsLocal = true,
+          },
+      }},
       .SceneSubmissions = {},
       .SceneItems = {{
           .Id = "world",
@@ -221,6 +230,14 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
               },
           },
       }},
+      .CollaborationByObjectId = {{
+          "PlayerCharacter",
+          Axiom::EditorObjectCollaborationState{
+              .ObjectId = "PlayerCharacter",
+              .LockState = Axiom::EditorObjectLockState::Placeholder,
+              .LockOwner = Axiom::SessionUserId{1},
+          },
+      }},
       .SelectedObjectIds = {{Axiom::SessionUserId{1}, "PlayerCharacter"}},
   };
 
@@ -228,6 +245,8 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
       State, Axiom::SessionUserId{1}, true, "connected", "connected");
   EXPECT_NE(Json.find("\"type\":\"session_snapshot\""), std::string::npos);
   EXPECT_NE(Json.find("\"currentUserId\":1"), std::string::npos);
+  EXPECT_NE(Json.find("\"presence\""), std::string::npos);
+  EXPECT_NE(Json.find("\"displayName\":\"Local User\""), std::string::npos);
   EXPECT_NE(Json.find("\"objectId\":\"PlayerCharacter\""), std::string::npos);
   EXPECT_NE(Json.find("\"displayName\":\"World\""), std::string::npos);
   EXPECT_NE(Json.find("\"kind\":\"actor\""), std::string::npos);
@@ -235,6 +254,9 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
   EXPECT_NE(Json.find("\"supportsTransform\":true"), std::string::npos);
   EXPECT_NE(Json.find("\"transformReadOnly\":true"), std::string::npos);
   EXPECT_NE(Json.find("\"location\":[1,2,3]"), std::string::npos);
+  EXPECT_NE(Json.find("\"selectedByUserIds\":[1]"), std::string::npos);
+  EXPECT_NE(Json.find("\"lockState\":\"placeholder\""), std::string::npos);
+  EXPECT_NE(Json.find("\"lockOwnerUserId\":1"), std::string::npos);
 }
 
 TEST(HeadlessProtocolTests, SerializesEncodedVideoPacketMetadata) {
