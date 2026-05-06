@@ -4,7 +4,7 @@
 
 `AxiomRemoteViewportDevClient` is a companion dev executable that exercises the same authoritative session through the new transport seam and writes the frames it receives as a transport subscriber.
 
-`AxiomRemoteViewportServer` is now the primary remote viewport prototype. It runs the authoritative headless session, serves a browser client over HTTP, negotiates a native macOS WebRTC session with the browser, and keeps a JPEG `/frame` path available only as a diagnostics and fallback surface.
+`AxiomRemoteViewportServer` is now the primary remote viewport prototype backend. It runs the authoritative headless session, exposes HTTP/WebRTC endpoints for the browser editor, and keeps a JPEG `/frame` path available only as a diagnostics and fallback surface.
 
 The current slice includes a macOS-first H.264 path that is now wired into the native WebRTC sender. Encoded packets are still exposed through diagnostics endpoints, but the browser viewport now consumes the WebRTC video track rather than the older JPEG push path during normal use.
 
@@ -20,7 +20,7 @@ The current slice includes a macOS-first H.264 path that is now wired into the n
 - `ISessionTransport` now exists as the engine-facing remote boundary
 - `AxiomSessionEndpoint` is the first in-process transport implementation
 - `AxiomRemoteViewportDevClient` is a dev harness for transport-delivered frames/events, not a browser client
-- `AxiomRemoteViewportServer` is the current browser-facing demo path for remote viewport work
+- `AxiomRemoteViewportServer` is the current browser-facing backend for remote viewport work
 - the current server/browser slice has moved from SSE plus HTTP image polling to WebRTC video plus data channels, with JPEG retained only for diagnostics and fallback access
 - encoded video packet delivery now exists as an additive transport seam beside raw viewport frame delivery
 - `IVideoEncoder` now exists as the engine-owned video encode boundary
@@ -32,9 +32,9 @@ The current slice includes a macOS-first H.264 path that is now wired into the n
 - the native WebRTC sender now prefers the freshest available H.264 packet instead of rewinding to older packets during normal latest-only delivery
 - the browser client now pumps camera/input updates on `requestAnimationFrame` and flushes pointer-lock look input immediately instead of batching on a fixed timer
 - the current stream no longer has the severe FPS collapse seen in the older prototype, but there is still roughly half a second of residual input latency to investigate later
-- a root-level `EditorFrontend` workspace already exists as the longer-lived browser editor shell using Next.js, React, and Tailwind CSS
-- `EditorFrontend` already includes a docked editor layout, menu bar, toolbar, outliner, details panel, content browser, and a viewport component stub that is ready to host the real WebRTC stream client
-- the temporary localhost:8080 browser page should now be treated as bring-up-only glue that needs to be retired by moving its WebRTC/data-channel client logic into `EditorFrontend`
+- a root-level `EditorFrontend` workspace now hosts the primary browser editor shell using Next.js, React, and Tailwind CSS
+- `EditorFrontend` includes the docked editor layout, menu bar, toolbar, outliner, details panel, content browser, and the active WebRTC viewport client in `components/engine/viewport.tsx`
+- the old inline localhost:8080 page has been retired; the server now focuses on backend/session and diagnostics endpoints
 - sandboxed validation on macOS can hide the availability of VideoToolbox H.264 encoders; authoritative H.264 validation should be done outside the sandbox on a Vulkan/MoltenVK-capable machine
 
 ## CLI
@@ -66,7 +66,14 @@ Remote viewport server example:
 ./AxiomRemoteViewportServer --host 127.0.0.1 --port 8080 --width 1280 --height 720 --jpeg-quality 75
 ```
 
-Then open [http://127.0.0.1:8080](http://127.0.0.1:8080) in a browser on the same machine.
+Then start the browser editor:
+
+```sh
+cd EditorFrontend
+NEXT_PUBLIC_AXIOM_SERVER_ORIGIN=http://127.0.0.1:8080 pnpm dev
+```
+
+Then open the local Next.js URL shown by the dev server, typically [http://127.0.0.1:3000](http://127.0.0.1:3000).
 
 Tested one-shot example:
 
@@ -160,8 +167,6 @@ This prototype proves that:
 This prototype does not yet provide:
 
 - the low-latency input response expected from the final remote editor target
-- the WebRTC/input client logic migrated into the existing `EditorFrontend` viewport component
-- removal of the temporary inline localhost:8080 browser UI from `AxiomRemoteViewportServer`
 - a production-ready remote viewer/editor client
 - a replacement for the current local windowed editor executable
 
@@ -170,7 +175,5 @@ This prototype does not yet provide:
 The next remote-viewport milestone should prioritize:
 
 - deeper WebRTC sender and browser playout-delay tuning to reduce the remaining input latency
-- migration of the current inline localhost:8080 browser client into `EditorFrontend/components/engine/viewport.tsx` so the existing Next.js editor shell becomes the primary browser UI
-- removal of the temporary inline browser assets from `AxiomRemoteViewportServer` once `EditorFrontend` owns the viewport/client glue
-
-The current localhost:8080 page should be treated as a temporary bring-up client. It remains useful for validating the engine/session boundary, but the intended next cleanup step is to retire that inline UI in favor of the existing `EditorFrontend` application.
+- continued hardening of the `EditorFrontend/components/engine/viewport.tsx` client as the primary browser UI
+- better editor-shell integration around session lifecycle, transport health, and future collaboration surfaces

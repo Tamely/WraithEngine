@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useCallback, useState, useRef } from "react"
 
-export type PanelId = "viewport" | "outliner" | "details" | "content-browser"
+export type PanelId = "viewport" | "outliner" | "details" | "content-browser" | "remote-viewport"
 
 export type DockZone = "left" | "right" | "top" | "bottom" | "center" | "tab"
 
@@ -209,7 +209,11 @@ const initialLayout: DockState = {
                         id: "content-cell",
                         type: "cell",
                         weight: 1,
-                        tabGroup: { id: "tg-content", panels: ["content-browser"], activePanel: "content-browser" },
+                        tabGroup: {
+                            id: "tg-content",
+                            panels: ["content-browser", "remote-viewport"],
+                            activePanel: "content-browser",
+                        },
                     },
                 ],
             } as DockColumn,

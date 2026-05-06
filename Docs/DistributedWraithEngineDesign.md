@@ -21,9 +21,9 @@
 - Added H.264 diagnostics to `AxiomRemoteViewportServer` through `/h264` and `/h264/metadata` while keeping `/frame` as a fallback/diagnostics path
 - Removed the largest remote-viewport performance bottlenecks by unthrottling the headless server loop, skipping duplicate JPEG work while WebRTC is connected, and tuning the encoder/input path for latency
 - The remote viewport now runs at acceptable frame rate, but still has noticeable residual input latency that likely requires deeper WebRTC sender/playout tuning
-- A root-level `EditorFrontend` workspace already exists as the longer-lived browser editor shell using Next.js, React, and Tailwind CSS
-- `EditorFrontend` already contains a docked editor UI with a menu bar, toolbar, outliner, details panel, content browser, and viewport component stub
-- The next browser-facing cleanup step should move the temporary localhost viewport/WebRTC client logic into `EditorFrontend` and retire the inline server-hosted UI
+- A root-level `EditorFrontend` workspace now serves as the longer-lived browser editor shell using Next.js, React, and Tailwind CSS
+- `EditorFrontend` contains a docked editor UI with a menu bar, toolbar, outliner, details panel, content browser, and the active WebRTC viewport client
+- The next browser-facing step after the migration is transport-quality tuning and broader editor-shell integration, not more work on a server-hosted prototype page
 
 ## 1. Executive Summary
 WraithEngine will evolve from a single-process native editor into a distributed platform with one shared C++ engine runtime that supports two execution styles:
@@ -140,8 +140,8 @@ The distributed platform is made of three primary roles:
 Current implementation direction:
 
 - use the existing root-level `EditorFrontend` folder as the home for the browser editor shell
-- migrate the current localhost viewport page served by `AxiomRemoteViewportServer` into `EditorFrontend/components/engine/viewport.tsx`
-- retire the inline server-hosted browser assets once `EditorFrontend` owns the viewport/client glue
+- keep `EditorFrontend/components/engine/viewport.tsx` as the canonical browser WebRTC client
+- keep `AxiomRemoteViewportServer` focused on session, signaling, command, and diagnostics endpoints
 
 ### 6.2 Conceptual Topology
 ```text
@@ -881,8 +881,8 @@ Progress update:
 - `AxiomRemoteViewportServer` now proves browser-driven remote viewport control against the same authoritative session seam over a native macOS WebRTC plus H.264 path
 - the temporary JPEG path now exists primarily for diagnostics and fallback access rather than as the primary streamed viewport path
 - encoded video packet publication and macOS H.264 encode now exist as part of the active browser viewport path rather than only as additive diagnostics seams
-- `EditorFrontend` now exists as the real browser editor shell, but its viewport is still a stub rather than the live WebRTC client
-- WebRTC sender/playout latency tuning plus migration from the temporary inline localhost client into `EditorFrontend` are now the highest-priority remaining items in the remote viewport slice
+- `EditorFrontend` now exists as the real browser editor shell and owns the live WebRTC viewport client
+- WebRTC sender/playout latency tuning is now the highest-priority remaining item in the remote viewport slice
 
 ### Phase 1: Remote Viewport Foundation
 - support headless or offscreen rendering
@@ -903,8 +903,8 @@ Subphase status update:
 - the current slice has replaced the dev harness as the main demo path
 - encoded H.264 diagnostics are now exposed through the current server even though the browser viewport now uses the native WebRTC path
 - validation on macOS should treat sandboxed media capability checks with caution because the sandbox can hide VideoToolbox encoder availability even when the machine supports H.264 encode
-- the current localhost:8080 browser client is still a temporary prototype and should be migrated into the existing `EditorFrontend` application, specifically its viewport component and related browser-shell plumbing
-- the next slice should prioritize deeper WebRTC transport-quality tuning rather than continuing to invest heavily in the temporary JPEG fallback path
+- the browser client now lives in the existing `EditorFrontend` application, specifically its viewport component and related browser-shell plumbing
+- the next slice should prioritize deeper WebRTC transport-quality tuning rather than investing in retired server-hosted UI or the temporary JPEG fallback path
 
 The first implementation step inside that phase is the `GLFW split`:
 
@@ -923,7 +923,7 @@ The first implementation step inside that phase is the `GLFW split`:
 Current implementation note:
 
 - this phase should start in a new root-level `EditorFrontend` folder
-- `EditorFrontend` should be the home for the React/Next.js/Tailwind editor shell and should eventually absorb or replace the temporary browser UI currently served by `AxiomRemoteViewportServer`
+- `EditorFrontend` is the home for the React/Next.js/Tailwind editor shell and has replaced the temporary browser UI that used to be served by `AxiomRemoteViewportServer`
 
 ### Phase 3: Authoritative Editing
 - introduce command/event model
@@ -1020,7 +1020,7 @@ Progress update:
 
 - item 6 is now implemented locally
 - the next slice should focus on items 1 through 5 in a way that reuses the new local session authority seam instead of bypassing it
-- the immediate priority inside items 3 through 5 is now WebRTC latency-quality tuning and moving the live viewport client into `EditorFrontend`, not further iteration on the temporary JPEG-streaming localhost page
+- the immediate priority inside items 3 through 5 is now WebRTC latency-quality tuning and browser-editor integration, not further iteration on retired server-hosted UI or the temporary JPEG-streaming localhost page
 
 That slice proves the core thesis:
 

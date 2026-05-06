@@ -6,6 +6,7 @@ import { Viewport } from "../viewport"
 import { Outliner } from "../outliner"
 import { Details } from "../details"
 import { ContentBrowser } from "../content-browser"
+import { RemoteViewportPanel } from "../remote-viewport-panel"
 
 // Shared selection state lives here so Outliner → Details stays in sync
 // even when they're in different dock positions.
@@ -40,6 +41,8 @@ export function PanelContent({ panelId }: PanelContentProps) {
             return <Details selectedItem={selected} />
         case "content-browser":
             return <ContentBrowser />
+        case "remote-viewport":
+            return <RemoteViewportPanel />
         default:
             return null
     }
