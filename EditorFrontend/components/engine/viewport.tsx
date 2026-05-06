@@ -27,6 +27,7 @@ import {
 } from "./remote-viewport-context"
 
 const DEFAULT_AXIOM_SERVER_ORIGIN = "http://127.0.0.1:8080"
+const CLIENT_ID_STORAGE_KEY = "axiom-remote-client-id"
 const STATUS_POLL_INTERVAL_MS = 1500
 const ICE_POLL_INTERVAL_MS = 1000
 type ConnectionState = RemoteViewportConnectionState
@@ -76,6 +77,12 @@ interface SessionSnapshotResponse {
   selectedObjectDetails: SessionObjectDetails | null
 }
 
+interface SessionConnectResponse {
+  type: "session_connect"
+  clientId: string
+  snapshot: SessionSnapshotResponse
+}
+
 type RemoteViewportCommand =
   | {
       type: "set_view_mode"
@@ -122,6 +129,7 @@ export function Viewport() {
   const localIceQueueRef = useRef<IceCandidatePayload[]>([])
   const remoteDescriptionAppliedRef = useRef(false)
   const activeGenerationRef = useRef(0)
+  const clientIdRef = useRef<string | null>(null)
   const sessionReadyRef = useRef(false)
   const reconnectingRef = useRef(false)
   const pointerLockedRef = useRef(false)
@@ -265,7 +273,14 @@ export function Viewport() {
     }
 
     async function fetchJson<T>(path: string, init?: RequestInit) {
-      const response = await fetch(`${serverOrigin}${path}`, init)
+      const headers = new Headers(init?.headers)
+      if (clientIdRef.current) {
+        headers.set("X-Axiom-Client-Id", clientIdRef.current)
+      }
+      const response = await fetch(`${serverOrigin}${path}`, {
+        ...init,
+        headers,
+      })
       const payload = await parseResponse(response)
 
       if (!response.ok) {
@@ -290,10 +305,7 @@ export function Viewport() {
       })
     }
 
-    async function refreshSessionSnapshot(reason: "connect" | "reconnect" | "resync" | "command" | "event" | "manual" = "manual") {
-      const snapshot = await fetchJson<SessionSnapshotResponse>("/session", {
-        cache: "no-store",
-      })
+    function applySessionSnapshot(snapshot: SessionSnapshotResponse, reason: string) {
       if (disposed) {
         return
       }
@@ -313,13 +325,49 @@ export function Viewport() {
       )
       appendLog({
         type: "session_snapshot_received",
+        reason,
         sessionId: snapshot.sessionId,
+        currentUserId: snapshot.currentUserId,
         sceneItemCount: snapshot.sceneTree?.length ?? 0,
         presenceCount: snapshot.presence?.length ?? 0,
         selectionCount: snapshot.selections?.length ?? 0,
         transportState: snapshot.transport?.state ?? "unknown",
         webrtcConnectionState: snapshot.transport?.webrtcConnectionState ?? "unknown",
       })
+    }
+
+    async function bootstrapClientSession() {
+      const storedClientId =
+        typeof window !== "undefined"
+          ? window.sessionStorage.getItem(CLIENT_ID_STORAGE_KEY)
+          : null
+      clientIdRef.current = storedClientId
+
+      const bootstrap = await fetchJson<SessionConnectResponse>("/session/connect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      })
+      clientIdRef.current = bootstrap.clientId
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(CLIENT_ID_STORAGE_KEY, bootstrap.clientId)
+      }
+
+      applySessionSnapshot(bootstrap.snapshot, "bootstrap")
+      appendLog({
+        type: "session_client_connected",
+        clientId: bootstrap.clientId,
+        currentUserId: bootstrap.snapshot.currentUserId,
+      })
+    }
+
+    async function refreshSessionSnapshot(reason: "connect" | "reconnect" | "resync" | "command" | "event" | "manual" = "manual") {
+      const snapshot = await fetchJson<SessionSnapshotResponse>("/session", {
+        cache: "no-store",
+      })
+      applySessionSnapshot(snapshot, reason)
       if (reconnectingRef.current || reason === "reconnect") {
         reconnectingRef.current = false
         appendLog({
@@ -765,8 +813,19 @@ export function Viewport() {
       setFrameText("No stream metadata yet")
       clearEventLog()
       startViewportInputPump()
-      setSessionUi("snapshot-loading", "Snapshot loading", "Fetching authoritative session snapshot...")
-      await refreshSessionSnapshotSafely(reconnectingRef.current ? "reconnect" : "connect")
+      setSessionUi("snapshot-loading", "Snapshot loading", "Connecting to authoritative session...")
+      try {
+        await bootstrapClientSession()
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Failed to connect to authoritative session."
+        setDisconnectedUi("error", "Session bootstrap failed", message)
+        setSessionUi("error", "Session bootstrap failed", message)
+        return
+      }
+      if (reconnectingRef.current) {
+        appendLog({ type: "session_client_resumed", clientId: clientIdRef.current })
+      }
 
       const peer = new window.RTCPeerConnection({
         bundlePolicy: "max-bundle",

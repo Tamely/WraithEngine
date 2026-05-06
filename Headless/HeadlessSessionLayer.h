@@ -18,11 +18,14 @@ public:
   void Submit(const EditorCommand &Command);
   void SubmitToTransport(ISessionTransport &Transport,
                          const EditorCommand &Command);
+  void SubmitToTransport(ISessionTransport &Transport, SessionUserId User,
+                         const EditorCommand &Command);
   EditorSession &GetSession() { return m_Session; }
   SessionUserId GetLocalUserId() const { return m_LocalUserId; }
 
 private:
   CommandContext MakeContext() const;
+  CommandContext MakeContext(SessionUserId User) const;
 
   SessionId m_SessionId{1};
   SessionUserId m_LocalUserId{1};

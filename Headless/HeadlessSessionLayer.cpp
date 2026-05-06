@@ -40,10 +40,20 @@ void HeadlessSessionLayer::SubmitToTransport(ISessionTransport &Transport,
   Transport.Submit(MakeContext(), Command);
 }
 
+void HeadlessSessionLayer::SubmitToTransport(ISessionTransport &Transport,
+                                             SessionUserId User,
+                                             const EditorCommand &Command) {
+  Transport.Submit(MakeContext(User), Command);
+}
+
 CommandContext HeadlessSessionLayer::MakeContext() const {
+  return MakeContext(m_LocalUserId);
+}
+
+CommandContext HeadlessSessionLayer::MakeContext(SessionUserId User) const {
   return {
       .Session = m_SessionId,
-      .User = m_LocalUserId,
+      .User = User,
       .FrameIndex = Application::Get().GetFrameIndex(),
       .DeltaTimeSeconds = Application::Get().GetDeltaTime(),
   };

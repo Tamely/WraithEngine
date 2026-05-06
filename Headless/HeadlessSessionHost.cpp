@@ -29,6 +29,11 @@ void HeadlessSessionHost::SubmitRemoteCommand(const EditorCommand &Command) {
   m_Layer->SubmitToTransport(*m_Endpoint, Command);
 }
 
+void HeadlessSessionHost::SubmitRemoteCommand(SessionUserId User,
+                                              const EditorCommand &Command) {
+  m_Layer->SubmitToTransport(*m_Endpoint, User, Command);
+}
+
 void HeadlessSessionHost::SetRemoteViewMode(RendererViewMode ViewMode) {
   SetRendererViewMode(ViewMode);
 }

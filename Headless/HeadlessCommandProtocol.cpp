@@ -728,6 +728,20 @@ std::string SerializeSessionSnapshot(const EditorSessionState &State,
   return Stream.str();
 }
 
+std::string SerializeSessionConnectResponse(
+    std::string_view ClientId, const EditorSessionState &State,
+    SessionUserId CurrentUser, bool TransportConnected,
+    std::string_view TransportState,
+    std::string_view WebRtcConnectionState) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"session_connect\",\"clientId\":\""
+         << EscapeJson(ClientId) << "\",\"snapshot\":"
+         << SerializeSessionSnapshot(State, CurrentUser, TransportConnected,
+                                     TransportState, WebRtcConnectionState)
+         << "}";
+  return Stream.str();
+}
+
 std::string SerializeWebRtcStatus(bool Enabled, bool Available,
                                   std::string_view SignalingState,
                                   std::string_view ConnectionState,

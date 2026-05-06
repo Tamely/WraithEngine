@@ -96,6 +96,12 @@ std::string SerializeSessionSnapshot(const EditorSessionState &State,
                                      bool TransportConnected,
                                      std::string_view TransportState,
                                      std::string_view WebRtcConnectionState);
+std::string SerializeSessionConnectResponse(std::string_view ClientId,
+                                            const EditorSessionState &State,
+                                            SessionUserId CurrentUser,
+                                            bool TransportConnected,
+                                            std::string_view TransportState,
+                                            std::string_view WebRtcConnectionState);
 std::string SerializeWebRtcStatus(bool Enabled, bool Available,
                                   std::string_view SignalingState,
                                   std::string_view ConnectionState,

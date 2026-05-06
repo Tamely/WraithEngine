@@ -259,6 +259,27 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
   EXPECT_NE(Json.find("\"lockOwnerUserId\":1"), std::string::npos);
 }
 
+TEST(HeadlessProtocolTests, SerializesSessionConnectResponse) {
+  Axiom::EditorSessionState State{
+      .Session = Axiom::SessionId{1},
+      .Viewports = {},
+      .PresenceByUser = {},
+      .SceneSubmissions = {},
+      .SceneItems = {},
+      .ObjectDetailsById = {},
+      .CollaborationByObjectId = {},
+      .SelectedObjectIds = {},
+  };
+
+  const std::string Json = Axiom::SerializeSessionConnectResponse(
+      "client-7", State, Axiom::SessionUserId{7}, true, "connected",
+      "new");
+  EXPECT_NE(Json.find("\"type\":\"session_connect\""), std::string::npos);
+  EXPECT_NE(Json.find("\"clientId\":\"client-7\""), std::string::npos);
+  EXPECT_NE(Json.find("\"snapshot\""), std::string::npos);
+  EXPECT_NE(Json.find("\"currentUserId\":7"), std::string::npos);
+}
+
 TEST(HeadlessProtocolTests, SerializesEncodedVideoPacketMetadata) {
   const Axiom::EncodedVideoPacket Packet{
       .Codec = Axiom::EncodedVideoCodec::H264,

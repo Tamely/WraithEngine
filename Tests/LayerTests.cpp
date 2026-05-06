@@ -411,6 +411,47 @@ TEST(EditorSessionTests, SelectingUnknownObjectPublishesRejection) {
       Subscriber.Events.front().Event.Payload));
 }
 
+TEST(EditorSessionTests, SelectionRemainsScopedPerAuthoritativeUser) {
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  Session.SetSceneItems({{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {{
+          .Id = "PlayerCharacter",
+          .DisplayName = "PlayerCharacter",
+          .Kind = Axiom::EditorSceneItemKind::Actor,
+          .Visible = true,
+          .Children = {},
+      }},
+  }});
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SelectObjectCommand{
+                      .ObjectId = "world",
+                  }});
+  Session.Submit({
+                     .Session = Axiom::SessionId{1},
+                     .User = Axiom::SessionUserId{8},
+                     .FrameIndex = 2,
+                     .DeltaTimeSeconds = 1.0f / 60.0f,
+                 },
+                 {.Payload = Axiom::SelectObjectCommand{
+                      .ObjectId = "PlayerCharacter",
+                  }});
+  Session.Tick();
+
+  const std::string *FirstUserSelection =
+      Session.FindSelectedObjectId(Axiom::SessionUserId{7});
+  const std::string *SecondUserSelection =
+      Session.FindSelectedObjectId(Axiom::SessionUserId{8});
+  ASSERT_NE(FirstUserSelection, nullptr);
+  ASSERT_NE(SecondUserSelection, nullptr);
+  EXPECT_EQ(*FirstUserSelection, "world");
+  EXPECT_EQ(*SecondUserSelection, "PlayerCharacter");
+}
+
 TEST(EditorSessionTests, SelectedObjectDetailsMatchAuthoritativeState) {
   Axiom::EditorSession Session(Axiom::SessionId{1});
   Session.SetSceneItems({{

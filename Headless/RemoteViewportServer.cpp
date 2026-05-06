@@ -37,6 +37,7 @@ namespace Axiom {
 namespace {
 constexpr std::string_view WebSocketGuid =
     "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+constexpr std::string_view ClientIdHeaderName = "X-Axiom-Client-Id";
 
 #if AXIOM_PLATFORM_WINDOWS
 using SocketHandle = SOCKET;
@@ -497,6 +498,14 @@ std::vector<unsigned char> BuildWebSocketFrame(uint8_t Opcode, const void *Data,
   Frame.insert(Frame.end(), Bytes, Bytes + Size);
   return Frame;
 }
+
+std::string GenerateClientId() {
+  static std::atomic<uint64_t> Counter{1};
+  const uint64_t Value = Counter.fetch_add(1);
+  std::ostringstream Stream;
+  Stream << "client-" << Value;
+  return Stream.str();
+}
 } // namespace
 
 RemoteViewportServer::RemoteViewportServer(
@@ -775,16 +784,17 @@ bool RemoteViewportServer::HandleHttpRequest(uintptr_t ClientSocketValue) {
     return true;
   }
   if (Request.Method == "GET") {
-    return HandleGetRequest(ClientSocketValue, Request.Path);
+    return HandleGetRequest(ClientSocketValue, Request.Path, Request.HeaderBlock);
   }
   if (Request.Method == "POST") {
-    return HandlePostRequest(ClientSocketValue, Request.Path, Request.Body);
+    return HandlePostRequest(ClientSocketValue, Request.Path, Request.HeaderBlock,
+                             Request.Body);
   }
   if (Request.Method == "OPTIONS") {
     const std::string Response = BuildHttpResponse(
         "204 No Content", "text/plain; charset=utf-8", "",
         "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
-        "Access-Control-Allow-Headers: Content-Type\r\n");
+        "Access-Control-Allow-Headers: Content-Type, X-Axiom-Client-Id\r\n");
     SendAll(ClientSocket, Response.data(), Response.size());
     return false;
   }
@@ -796,8 +806,105 @@ bool RemoteViewportServer::HandleHttpRequest(uintptr_t ClientSocketValue) {
   return false;
 }
 
+bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
+                                             std::string_view Path,
+                                             std::string_view HeaderBlock,
+                                             std::string_view Body) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  const std::string_view Route = StripQuery(Path);
+  if (Route == "/session/connect") {
+    return HandleSessionConnectRequest(ClientSocketValue, HeaderBlock, Body);
+  }
+  if (Route == "/webrtc/offer") {
+    return HandleWebRtcOfferRequest(ClientSocketValue, HeaderBlock, Body);
+  }
+  if (Route == "/webrtc/ice-candidate") {
+    return HandleWebRtcIceCandidateRequest(ClientSocketValue, HeaderBlock, Body);
+  }
+  if (Route == "/webrtc/close") {
+    return HandleWebRtcCloseRequest(ClientSocketValue, HeaderBlock, Body);
+  }
+  if (Route != "/command") {
+    const std::string Response =
+        JsonResponse("404 Not Found", SerializeError("Unknown POST endpoint."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const auto User = ResolveClientUser(HeaderBlock);
+  if (!User.has_value()) {
+    const std::string Response =
+        JsonResponse("400 Bad Request",
+                     SerializeError("Missing or unknown X-Axiom-Client-Id."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  if (const auto ClientId = FindHeaderValue(HeaderBlock, ClientIdHeaderName);
+      ClientId.has_value()) {
+    TouchClientSession(*ClientId);
+  }
+
+  std::string Error;
+  const auto Command = ParseRemoteViewportCommand(Body, Error);
+  if (!Command.has_value()) {
+    const std::string Response =
+        JsonResponse("400 Bad Request", SerializeError(Error));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  switch (Command->Type) {
+  case HeadlessCommandType::SetViewMode:
+    m_Host.SetRemoteViewMode(Command->ViewMode);
+    break;
+  case HeadlessCommandType::SetLookActive:
+  case HeadlessCommandType::SelectObject:
+  case HeadlessCommandType::SetTransform:
+  case HeadlessCommandType::UpdateViewportCamera:
+    m_Host.SubmitRemoteCommand(*User, Command->EditorPayload);
+    break;
+  case HeadlessCommandType::Quit:
+    m_StopRequested.store(true);
+    m_Host.RequestClose();
+    BroadcastTextMessage(SerializeShutdown());
+    break;
+  case HeadlessCommandType::LoadStartupScene:
+  case HeadlessCommandType::RenderFrame:
+    break;
+  }
+
+  const std::string Response =
+      JsonResponse("202 Accepted", "{\"type\":\"accepted\"}");
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
+bool RemoteViewportServer::HandleSessionConnectRequest(
+    uintptr_t ClientSocketValue, std::string_view HeaderBlock,
+    std::string_view Body) {
+  (void)Body;
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  const auto ClientIdHint = FindHeaderValue(HeaderBlock, ClientIdHeaderName);
+  RemoteClientSession &Client = CreateOrResumeClientSession(ClientIdHint);
+  TouchClientSession(Client.ClientId);
+
+  const WebRtcSessionStatus Status =
+      m_WebRtcSession != nullptr ? m_WebRtcSession->GetStatus()
+                                 : WebRtcSessionStatus{};
+  const std::string Payload = SerializeSessionConnectResponse(
+      Client.ClientId, m_Host.GetHeadlessLayer().GetSession().GetState(),
+      Client.User, m_TransportConnected.load(),
+      m_TransportConnected.load() ? "connected" : "disconnected",
+      Status.ConnectionState);
+  const std::string Response = JsonResponse("200 OK", Payload);
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
 bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
-                                            std::string_view Path) {
+                                            std::string_view Path,
+                                            std::string_view HeaderBlock) {
   const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
   const std::string_view Route = StripQuery(Path);
   if (Route == "/health") {
@@ -830,12 +937,23 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
     return false;
   }
   if (Route == "/session") {
+    const auto User = ResolveClientUser(HeaderBlock);
+    if (!User.has_value()) {
+      const std::string Response = JsonResponse(
+          "400 Bad Request",
+          SerializeError("Missing or unknown X-Axiom-Client-Id."));
+      SendAll(ClientSocket, Response.data(), Response.size());
+      return false;
+    }
+    if (const auto ClientId = FindHeaderValue(HeaderBlock, ClientIdHeaderName);
+        ClientId.has_value()) {
+      TouchClientSession(*ClientId);
+    }
     const WebRtcSessionStatus Status =
         m_WebRtcSession != nullptr ? m_WebRtcSession->GetStatus()
                                    : WebRtcSessionStatus{};
     const std::string Body = SerializeSessionSnapshot(
-        m_Host.GetHeadlessLayer().GetSession().GetState(),
-        m_Host.GetHeadlessLayer().GetLocalUserId(),
+        m_Host.GetHeadlessLayer().GetSession().GetState(), *User,
         m_TransportConnected.load(),
         m_TransportConnected.load() ? "connected" : "disconnected",
         Status.ConnectionState);
@@ -901,65 +1019,23 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
   return false;
 }
 
-bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
-                                             std::string_view Path,
-                                             std::string_view Body) {
-  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
-  const std::string_view Route = StripQuery(Path);
-  if (Route == "/webrtc/offer") {
-    return HandleWebRtcOfferRequest(ClientSocketValue, Body);
-  }
-  if (Route == "/webrtc/ice-candidate") {
-    return HandleWebRtcIceCandidateRequest(ClientSocketValue, Body);
-  }
-  if (Route == "/webrtc/close") {
-    return HandleWebRtcCloseRequest(ClientSocketValue, Body);
-  }
-  if (Route != "/command") {
-    const std::string Response =
-        JsonResponse("404 Not Found", SerializeError("Unknown POST endpoint."));
-    SendAll(ClientSocket, Response.data(), Response.size());
-    return false;
-  }
-
-  std::string Error;
-  const auto Command = ParseRemoteViewportCommand(Body, Error);
-  if (!Command.has_value()) {
-    const std::string Response =
-        JsonResponse("400 Bad Request", SerializeError(Error));
-    SendAll(ClientSocket, Response.data(), Response.size());
-    return false;
-  }
-
-  switch (Command->Type) {
-  case HeadlessCommandType::SetViewMode:
-    m_Host.SetRemoteViewMode(Command->ViewMode);
-    break;
-  case HeadlessCommandType::SetLookActive:
-  case HeadlessCommandType::SelectObject:
-  case HeadlessCommandType::SetTransform:
-  case HeadlessCommandType::UpdateViewportCamera:
-    m_Host.SubmitRemoteCommand(Command->EditorPayload);
-    break;
-  case HeadlessCommandType::Quit:
-    m_StopRequested.store(true);
-    m_Host.RequestClose();
-    BroadcastTextMessage(SerializeShutdown());
-    break;
-  case HeadlessCommandType::LoadStartupScene:
-  case HeadlessCommandType::RenderFrame:
-    break;
-  }
-
-  const std::string Response =
-      JsonResponse("202 Accepted", "{\"type\":\"accepted\"}");
-  SendAll(ClientSocket, Response.data(), Response.size());
-  return false;
-}
-
 bool RemoteViewportServer::HandleWebRtcOfferRequest(uintptr_t ClientSocketValue,
+                                                    std::string_view HeaderBlock,
                                                     std::string_view Body) {
   const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  const auto User = ResolveClientUser(HeaderBlock);
+  if (!User.has_value()) {
+    const std::string Response =
+        JsonResponse("400 Bad Request",
+                     SerializeError("Missing or unknown X-Axiom-Client-Id."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+  if (const auto ClientId = FindHeaderValue(HeaderBlock, ClientIdHeaderName);
+      ClientId.has_value()) {
+    TouchClientSession(*ClientId);
+  }
+
   std::string Error;
   const auto Offer = ParseWebRtcSessionDescription(Body, Error);
   if (!Offer.has_value()) {
@@ -1007,8 +1083,22 @@ bool RemoteViewportServer::HandleWebRtcOfferRequest(uintptr_t ClientSocketValue,
 }
 
 bool RemoteViewportServer::HandleWebRtcIceCandidateRequest(
-    uintptr_t ClientSocketValue, std::string_view Body) {
+    uintptr_t ClientSocketValue, std::string_view HeaderBlock,
+    std::string_view Body) {
   const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  const auto User = ResolveClientUser(HeaderBlock);
+  if (!User.has_value()) {
+    const std::string Response =
+        JsonResponse("400 Bad Request",
+                     SerializeError("Missing or unknown X-Axiom-Client-Id."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+  if (const auto ClientId = FindHeaderValue(HeaderBlock, ClientIdHeaderName);
+      ClientId.has_value()) {
+    TouchClientSession(*ClientId);
+  }
+
   std::string Error;
   const auto Candidate = ParseWebRtcIceCandidate(Body, Error);
   if (!Candidate.has_value()) {
@@ -1046,11 +1136,25 @@ bool RemoteViewportServer::HandleWebRtcIceCandidateRequest(
 }
 
 bool RemoteViewportServer::HandleWebRtcCloseRequest(
-    uintptr_t ClientSocketValue, std::string_view Body) {
+    uintptr_t ClientSocketValue, std::string_view HeaderBlock,
+    std::string_view Body) {
   const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  const auto User = ResolveClientUser(HeaderBlock);
+  if (!User.has_value()) {
+    const std::string Response =
+        JsonResponse("400 Bad Request",
+                     SerializeError("Missing or unknown X-Axiom-Client-Id."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+  if (const auto ClientId = FindHeaderValue(HeaderBlock, ClientIdHeaderName);
+      ClientId.has_value()) {
+    TouchClientSession(*ClientId);
+  }
+
   std::string Reason = "browser_requested_close";
   if (!Body.empty()) {
-    Reason = Body;
+    Reason = std::string(Body);
   }
 
   if (m_WebRtcSession == nullptr) {
@@ -1080,6 +1184,52 @@ bool RemoteViewportServer::HandleWebRtcCloseRequest(
   const std::string Response = JsonResponse("200 OK", Payload);
   SendAll(ClientSocket, Response.data(), Response.size());
   return false;
+}
+
+std::optional<SessionUserId> RemoteViewportServer::ResolveClientUser(
+    std::string_view HeaderBlock) const {
+  const auto ClientId = FindHeaderValue(HeaderBlock, ClientIdHeaderName);
+  if (!ClientId.has_value()) {
+    return std::nullopt;
+  }
+
+  std::scoped_lock Lock(m_ClientMutex);
+  const auto It = m_RemoteClientsById.find(*ClientId);
+  if (It == m_RemoteClientsById.end()) {
+    return std::nullopt;
+  }
+  return It->second.User;
+}
+
+RemoteViewportServer::RemoteClientSession &
+RemoteViewportServer::CreateOrResumeClientSession(
+    const std::optional<std::string> &ClientIdHint) {
+  std::scoped_lock Lock(m_ClientMutex);
+  if (ClientIdHint.has_value()) {
+    const auto Existing = m_RemoteClientsById.find(*ClientIdHint);
+    if (Existing != m_RemoteClientsById.end()) {
+      Existing->second.LastActivity = std::chrono::steady_clock::now();
+      return Existing->second;
+    }
+  }
+
+  RemoteClientSession Session{};
+  Session.ClientId = GenerateClientId();
+  Session.User = SessionUserId{m_NextRemoteUserId++};
+  Session.LastActivity = std::chrono::steady_clock::now();
+  auto [It, Inserted] =
+      m_RemoteClientsById.emplace(Session.ClientId, std::move(Session));
+  (void)Inserted;
+  m_Host.GetHeadlessLayer().GetSession().EnsureViewportState(It->second.User);
+  return It->second;
+}
+
+void RemoteViewportServer::TouchClientSession(const std::string &ClientId) {
+  std::scoped_lock Lock(m_ClientMutex);
+  const auto It = m_RemoteClientsById.find(ClientId);
+  if (It != m_RemoteClientsById.end()) {
+    It->second.LastActivity = std::chrono::steady_clock::now();
+  }
 }
 
 bool RemoteViewportServer::HandleWebSocketUpgrade(uintptr_t ClientSocketValue,

@@ -7,11 +7,13 @@
 #include <Renderer/RendererBackend.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace Axiom {
@@ -61,6 +63,12 @@ private:
     bool IsOpen{true};
   };
 
+  struct RemoteClientSession {
+    std::string ClientId;
+    SessionUserId User;
+    std::chrono::steady_clock::time_point LastActivity;
+  };
+
 private:
   void AcceptLoop();
   void HandleClient(uintptr_t ClientSocketValue);
@@ -72,14 +80,22 @@ private:
   bool SendBinaryMessage(uintptr_t ClientSocketValue, const void *Data,
                          size_t Size);
   bool HandleHttpRequest(uintptr_t ClientSocketValue);
-  bool HandleGetRequest(uintptr_t ClientSocketValue, std::string_view Path);
+  bool HandleGetRequest(uintptr_t ClientSocketValue, std::string_view Path,
+                        std::string_view HeaderBlock);
   bool HandlePostRequest(uintptr_t ClientSocketValue, std::string_view Path,
+                         std::string_view HeaderBlock,
                          std::string_view Body);
+  bool HandleSessionConnectRequest(uintptr_t ClientSocketValue,
+                                   std::string_view HeaderBlock,
+                                   std::string_view Body);
   bool HandleWebRtcOfferRequest(uintptr_t ClientSocketValue,
+                                std::string_view HeaderBlock,
                                 std::string_view Body);
   bool HandleWebRtcIceCandidateRequest(uintptr_t ClientSocketValue,
+                                       std::string_view HeaderBlock,
                                        std::string_view Body);
   bool HandleWebRtcCloseRequest(uintptr_t ClientSocketValue,
+                                std::string_view HeaderBlock,
                                 std::string_view Body);
   bool HandleWebSocketUpgrade(uintptr_t ClientSocketValue,
                               std::string_view HeaderBlock,
@@ -92,6 +108,11 @@ private:
   bool TryGetLatestFrame(LatestFrame &Frame) const;
   void SetLatestEncodedPacket(const EncodedVideoPacket &Packet);
   bool TryGetLatestEncodedPacket(LatestEncodedPacket &Packet) const;
+  std::optional<SessionUserId> ResolveClientUser(
+      std::string_view HeaderBlock) const;
+  RemoteClientSession &CreateOrResumeClientSession(
+      const std::optional<std::string> &ClientIdHint);
+  void TouchClientSession(const std::string &ClientId);
 
 private:
   HeadlessSessionHost &m_Host;
@@ -107,6 +128,8 @@ private:
 
   mutable std::mutex m_ClientMutex;
   std::vector<WebSocketClient> m_WebSocketClients;
+  std::unordered_map<std::string, RemoteClientSession> m_RemoteClientsById;
+  uint64_t m_NextRemoteUserId{2};
   mutable std::mutex m_SendMutex;
   std::unique_ptr<IWebRtcSession> m_WebRtcSession;
 };
