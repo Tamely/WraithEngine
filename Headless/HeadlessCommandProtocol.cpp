@@ -128,6 +128,9 @@ std::string EventPayloadType(const EditorEventPayload &Payload) {
   if (std::holds_alternative<LookStateChangedEvent>(Payload)) {
     return "look_state_changed";
   }
+  if (std::holds_alternative<CommandAcknowledgedEvent>(Payload)) {
+    return "command_acked";
+  }
   if (std::holds_alternative<CommandRejectedEvent>(Payload)) {
     return "command_rejected";
   }
@@ -429,6 +432,13 @@ std::string SerializeEvent(const PublishedEditorEvent &Event) {
                  std::get_if<LookStateChangedEvent>(&Event.Event.Payload)) {
     Stream << ",\"user\":" << Look->User.Value << ",\"isLooking\":"
            << (Look->IsLooking ? "true" : "false");
+  } else if (const auto *Acknowledged =
+                 std::get_if<CommandAcknowledgedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"user\":" << Acknowledged->User.Value
+           << ",\"acknowledgedCommandId\":"
+           << Acknowledged->AcknowledgedCommand.Value
+           << ",\"commandType\":\"" << EscapeJson(Acknowledged->CommandType)
+           << "\"";
   } else if (const auto *Rejected =
                  std::get_if<CommandRejectedEvent>(&Event.Event.Payload)) {
     Stream << ",\"user\":" << Rejected->User.Value

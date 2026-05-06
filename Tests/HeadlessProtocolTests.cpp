@@ -126,6 +126,21 @@ TEST(HeadlessProtocolTests, SerializesCommandRejectedEvent) {
   EXPECT_NE(Json.find("\"reason\":\"bad input\""), std::string::npos);
 }
 
+TEST(HeadlessProtocolTests, SerializesCommandAcknowledgedEvent) {
+  const Axiom::PublishedEditorEvent Event{
+      .Id = Axiom::EventId{5},
+      .Event = {.Payload = Axiom::CommandAcknowledgedEvent{
+                    .User = Axiom::SessionUserId{7},
+                    .AcknowledgedCommand = Axiom::CommandId{11},
+                    .CommandType = "select_object",
+                }}};
+
+  const std::string Json = Axiom::SerializeEvent(Event);
+  EXPECT_NE(Json.find("\"payloadType\":\"command_acked\""), std::string::npos);
+  EXPECT_NE(Json.find("\"acknowledgedCommandId\":11"), std::string::npos);
+  EXPECT_NE(Json.find("\"commandType\":\"select_object\""), std::string::npos);
+}
+
 TEST(HeadlessProtocolTests, SerializesSelectionChangedEvent) {
   const Axiom::PublishedEditorEvent Event{
       .Id = Axiom::EventId{6},

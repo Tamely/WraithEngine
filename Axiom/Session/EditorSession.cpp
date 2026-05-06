@@ -9,6 +9,23 @@
 
 namespace Axiom {
 namespace {
+std::string CommandTypeName(const EditorCommandPayload &Payload) {
+  if (std::holds_alternative<UpdateViewportCameraCommand>(Payload)) {
+    return "update_viewport_camera";
+  }
+  if (std::holds_alternative<SetLookActiveCommand>(Payload)) {
+    return "set_look_active";
+  }
+  if (std::holds_alternative<SelectObjectCommand>(Payload)) {
+    return "select_object";
+  }
+  return "set_transform";
+}
+
+bool ShouldPublishCommandAcknowledgedEvent(const EditorCommandPayload &Payload) {
+  return !std::holds_alternative<UpdateViewportCameraCommand>(Payload);
+}
+
 bool IsNearlyZero(const glm::vec3 &Value) {
   return glm::dot(Value, Value) <= 0.0f;
 }
@@ -153,6 +170,15 @@ void EditorSession::ProcessCommand(const QueuedEditorCommand &QueuedCommand) {
         HandleCommand(QueuedCommand, Command);
       },
       QueuedCommand.Command.Payload);
+
+  if (ShouldPublishCommandAcknowledgedEvent(QueuedCommand.Command.Payload)) {
+    PublishEvent({.Payload = CommandAcknowledgedEvent{
+                      .User = QueuedCommand.Context.User,
+                      .AcknowledgedCommand = QueuedCommand.Id,
+                      .CommandType =
+                          CommandTypeName(QueuedCommand.Command.Payload),
+                  }});
+  }
 }
 
 bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,

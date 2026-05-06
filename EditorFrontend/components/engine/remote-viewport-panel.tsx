@@ -16,6 +16,9 @@ export function RemoteViewportPanel() {
     eventLog,
     frameText,
     isLooking,
+    sessionDetailText,
+    sessionState,
+    sessionStatusText,
     serverOrigin,
     statusText,
     viewMode,
@@ -46,6 +49,15 @@ export function RemoteViewportPanel() {
         </div>
         <p className="mt-2 text-neutral-400">{detailText}</p>
         <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-neutral-400">
+          <div className="rounded border border-neutral-800 bg-neutral-950/70 px-2 py-1.5">
+            <span className="block text-neutral-500">Session</span>
+            <span className="mt-1 block text-neutral-200">{sessionStatusText}</span>
+            <span className="mt-1 block text-neutral-500">{sessionDetailText}</span>
+          </div>
+          <div className="rounded border border-neutral-800 bg-neutral-950/70 px-2 py-1.5">
+            <span className="block text-neutral-500">Session State</span>
+            <span className="mt-1 block text-neutral-200">{sessionState}</span>
+          </div>
           <div className="rounded border border-neutral-800 bg-neutral-950/70 px-2 py-1.5">
             <span className="block text-neutral-500">View Mode</span>
             <ViewModeDropdown viewMode={viewMode} onChange={setMode} />

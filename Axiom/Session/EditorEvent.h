@@ -27,6 +27,12 @@ struct CommandRejectedEvent {
   std::string Reason;
 };
 
+struct CommandAcknowledgedEvent {
+  SessionUserId User;
+  CommandId AcknowledgedCommand;
+  std::string CommandType;
+};
+
 struct SelectionChangedEvent {
   SessionUserId User;
   std::optional<std::string> ObjectId;
@@ -42,6 +48,7 @@ struct ObjectTransformUpdatedEvent {
 
 using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         LookStateChangedEvent,
+                                        CommandAcknowledgedEvent,
                                         CommandRejectedEvent,
                                         SelectionChangedEvent,
                                         ObjectTransformUpdatedEvent>;

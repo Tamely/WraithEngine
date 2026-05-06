@@ -33,7 +33,7 @@ function matchesSearch(item: SessionSceneItem, query: string): boolean {
 }
 
 export function Outliner() {
-  const { sceneTree, selectedObjectId, selectObject } = useRemoteViewport()
+  const { sceneTree, selectedObjectId, selectObject, sessionState } = useRemoteViewport()
   const [searchQuery, setSearchQuery] = useState("")
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
     new Set(["world", "lighting", "geometry"])
@@ -152,7 +152,13 @@ export function Outliner() {
       </div>
       <div className="flex-1 overflow-y-auto">
         {visibleTree.length === 0 ? (
-          <div className="px-3 py-2 text-xs text-neutral-600">No session scene data yet</div>
+          <div className="px-3 py-2 text-xs text-neutral-600">
+            {sessionState === "snapshot-loading" || sessionState === "connecting"
+              ? "Loading authoritative scene data..."
+              : sessionState === "reconnecting"
+                ? "Reconnecting to authoritative session..."
+                : "No session scene data yet"}
+          </div>
         ) : (
           visibleTree.map((item) => renderItem(item))
         )}

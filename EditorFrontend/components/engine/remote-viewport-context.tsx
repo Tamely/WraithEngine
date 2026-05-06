@@ -20,6 +20,16 @@ export type RemoteViewportConnectionState =
   | "unsupported"
   | "error"
 
+export type RemoteSessionState =
+  | "idle"
+  | "connecting"
+  | "snapshot-loading"
+  | "session-ready"
+  | "reconnecting"
+  | "degraded-transport"
+  | "command-rejected"
+  | "error"
+
 export type RemoteViewportViewMode = "lit" | "unlit" | "wireframe"
 export type SessionSceneItemKind = "folder" | "mesh" | "light" | "camera" | "actor"
 
@@ -72,9 +82,12 @@ export interface SessionObjectTransformUpdate {
 
 interface RemoteViewportContextValue {
   connectionState: RemoteViewportConnectionState
+  sessionState: RemoteSessionState
   statusText: string
   detailText: string
   frameText: string
+  sessionStatusText: string
+  sessionDetailText: string
   viewMode: RemoteViewportViewMode
   isLooking: boolean
   eventLog: string[]
@@ -86,9 +99,12 @@ interface RemoteViewportContextValue {
   selectedObjectDetails: SessionObjectDetails | null
   selections: SessionSelection[]
   setConnectionState: (value: RemoteViewportConnectionState) => void
+  setSessionState: (value: RemoteSessionState) => void
   setStatusText: (value: string) => void
   setDetailText: (value: string) => void
   setFrameText: (value: string) => void
+  setSessionStatusText: (value: string) => void
+  setSessionDetailText: (value: string) => void
   setViewMode: (value: RemoteViewportViewMode) => void
   setIsLooking: (value: boolean) => void
   setServerOrigin: (value: string) => void
@@ -96,6 +112,7 @@ interface RemoteViewportContextValue {
   clearEventLog: () => void
   registerActions: (actions: RemoteViewportActions) => void
   setSessionSnapshot: (snapshot: SessionSnapshot) => void
+  clearSessionSnapshot: () => void
   applySelectionChanged: (userId: number, objectId: string | null) => void
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
@@ -146,9 +163,14 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
   })
   const [connectionState, setConnectionState] =
     useState<RemoteViewportConnectionState>("idle")
+  const [sessionState, setSessionState] = useState<RemoteSessionState>("idle")
   const [statusText, setStatusText] = useState("Ready to connect")
   const [detailText, setDetailText] = useState("Waiting for remote viewport stream")
   const [frameText, setFrameText] = useState("No stream metadata yet")
+  const [sessionStatusText, setSessionStatusText] = useState("Session idle")
+  const [sessionDetailText, setSessionDetailText] = useState(
+    "Waiting for authoritative session state"
+  )
   const [viewMode, setViewMode] = useState<RemoteViewportViewMode>("lit")
   const [isLooking, setIsLooking] = useState(false)
   const [eventLog, setEventLog] = useState<string[]>([])
@@ -176,6 +198,13 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     setSceneTree(snapshot.sceneTree)
     setSelections(snapshot.selections)
     setSelectedObjectDetails(snapshot.selectedObjectDetails)
+  }, [])
+
+  const clearSessionSnapshot = useCallback(() => {
+    setCurrentUserId(null)
+    setSceneTree([])
+    setSelections([])
+    setSelectedObjectDetails(null)
   }, [])
 
   const applySelectionChanged = useCallback((userId: number, objectId: string | null) => {
@@ -218,9 +247,12 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       connectionState,
+      sessionState,
       statusText,
       detailText,
       frameText,
+      sessionStatusText,
+      sessionDetailText,
       viewMode,
       isLooking,
       eventLog,
@@ -232,9 +264,12 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       selectedObjectDetails,
       selections,
       setConnectionState,
+      setSessionState,
       setStatusText,
       setDetailText,
       setFrameText,
+      setSessionStatusText,
+      setSessionDetailText,
       setViewMode,
       setIsLooking,
       setServerOrigin,
@@ -242,6 +277,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       clearEventLog,
       registerActions,
       setSessionSnapshot,
+      clearSessionSnapshot,
       applySelectionChanged,
       reconnect,
       toggleLook,
@@ -255,11 +291,15 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       applySelectionChanged,
       clearEventLog,
       connectionState,
+      clearSessionSnapshot,
       currentUserId,
       detailText,
       eventLog,
       frameText,
       isLooking,
+      sessionDetailText,
+      sessionState,
+      sessionStatusText,
       reconnect,
       refreshSessionSnapshot,
       registerActions,
@@ -271,7 +311,10 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       selections,
       serverOrigin,
       setMode,
+      setSessionDetailText,
+      setSessionState,
       setSessionSnapshot,
+      setSessionStatusText,
       statusText,
       toggleLook,
       updateTransform,
