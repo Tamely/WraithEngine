@@ -1,7 +1,9 @@
 #include "Session/EditorSession.h"
 
 #include <glm/common.hpp>
+#include <glm/ext/matrix_transform.hpp>
 #include <glm/geometric.hpp>
+#include <glm/trigonometric.hpp>
 
 #include <utility>
 
@@ -9,6 +11,19 @@ namespace Axiom {
 namespace {
 bool IsNearlyZero(const glm::vec3 &Value) {
   return glm::dot(Value, Value) <= 0.0f;
+}
+
+glm::mat4 BuildTransformMatrix(const EditorTransformDetails &Transform) {
+  glm::mat4 Matrix(1.0f);
+  Matrix = glm::translate(Matrix, Transform.Location);
+  Matrix = glm::rotate(Matrix, glm::radians(Transform.RotationDegrees.y),
+                       glm::vec3(0.0f, 1.0f, 0.0f));
+  Matrix = glm::rotate(Matrix, glm::radians(Transform.RotationDegrees.x),
+                       glm::vec3(1.0f, 0.0f, 0.0f));
+  Matrix = glm::rotate(Matrix, glm::radians(Transform.RotationDegrees.z),
+                       glm::vec3(0.0f, 0.0f, 1.0f));
+  Matrix = glm::scale(Matrix, Transform.Scale);
+  return Matrix;
 }
 } // namespace
 
@@ -79,6 +94,16 @@ const EditorObjectDetails *EditorSession::FindSelectedObjectDetails(
     SessionUserId User) const {
   const std::string *SelectedObjectId = FindSelectedObjectId(User);
   return SelectedObjectId != nullptr ? FindObjectDetails(*SelectedObjectId) : nullptr;
+}
+
+void EditorSession::UpdateSubmissionTransform(
+    std::string_view ObjectId, const EditorTransformDetails &Transform) {
+  const glm::mat4 Matrix = BuildTransformMatrix(Transform);
+  for (RenderMeshSubmission &Submission : m_State.SceneSubmissions) {
+    if (Submission.Name == ObjectId) {
+      Submission.Transform = Matrix;
+    }
+  }
 }
 
 EditorViewportState &EditorSession::EnsureViewport(SessionUserId User) {
@@ -161,6 +186,33 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
     }
   }
 
+  if (const auto *TransformCommand =
+          std::get_if<SetTransformCommand>(&QueuedCommand.Command.Payload)) {
+    if (TransformCommand->ObjectId.empty()) {
+      FailureReason = "Transform commands require a non-empty object id.";
+      return false;
+    }
+
+    const EditorObjectDetails *Details = FindObjectDetails(TransformCommand->ObjectId);
+    if (Details == nullptr) {
+      FailureReason = "Transform targeted an unknown object.";
+      return false;
+    }
+    if (!Details->SupportsTransform || !Details->Transform.has_value()) {
+      FailureReason = "This object does not support transform edits.";
+      return false;
+    }
+    if (Details->TransformReadOnly) {
+      FailureReason = "This object is read-only.";
+      return false;
+    }
+    if (TransformCommand->Scale.x <= 0.0f || TransformCommand->Scale.y <= 0.0f ||
+        TransformCommand->Scale.z <= 0.0f) {
+      FailureReason = "Scale values must be greater than zero.";
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -235,6 +287,29 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
   PublishEvent({.Payload = SelectionChangedEvent{
                     .User = QueuedCommand.Context.User,
                     .ObjectId = Command.ObjectId,
+                }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const SetTransformCommand &Command) {
+  auto DetailsIt = m_State.ObjectDetailsById.find(Command.ObjectId);
+  if (DetailsIt == m_State.ObjectDetailsById.end()) {
+    return;
+  }
+
+  DetailsIt->second.Transform = EditorTransformDetails{
+      .Location = Command.Location,
+      .RotationDegrees = Command.RotationDegrees,
+      .Scale = Command.Scale,
+  };
+  UpdateSubmissionTransform(Command.ObjectId, *DetailsIt->second.Transform);
+
+  PublishEvent({.Payload = ObjectTransformUpdatedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .ObjectId = Command.ObjectId,
+                    .Location = Command.Location,
+                    .RotationDegrees = Command.RotationDegrees,
+                    .Scale = Command.Scale,
                 }});
 }
 

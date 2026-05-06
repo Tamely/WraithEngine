@@ -92,6 +92,23 @@ TEST(HeadlessProtocolTests, RemoteViewportAcceptsSelectObjectCommand) {
   EXPECT_EQ(Payload->ObjectId, "PlayerCharacter");
 }
 
+TEST(HeadlessProtocolTests, RemoteViewportAcceptsSetTransformCommand) {
+  std::string Error;
+  const auto Command = Axiom::ParseRemoteViewportCommand(
+      R"json({"type":"set_transform","objectId":"PlayerCharacter","location":[1.0,2.0,3.0],"rotationDegrees":[4.0,5.0,6.0],"scale":[1.0,1.5,2.0]})json",
+      Error);
+
+  ASSERT_TRUE(Command.has_value()) << Error;
+  EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::SetTransform);
+  const auto *Payload =
+      std::get_if<Axiom::SetTransformCommand>(&Command->EditorPayload.Payload);
+  ASSERT_NE(Payload, nullptr);
+  EXPECT_EQ(Payload->ObjectId, "PlayerCharacter");
+  EXPECT_EQ(Payload->Location, glm::vec3(1.0f, 2.0f, 3.0f));
+  EXPECT_EQ(Payload->RotationDegrees, glm::vec3(4.0f, 5.0f, 6.0f));
+  EXPECT_EQ(Payload->Scale, glm::vec3(1.0f, 1.5f, 2.0f));
+}
+
 TEST(HeadlessProtocolTests, SerializesCommandRejectedEvent) {
   const Axiom::PublishedEditorEvent Event{
       .Id = Axiom::EventId{4},
@@ -121,6 +138,25 @@ TEST(HeadlessProtocolTests, SerializesSelectionChangedEvent) {
   EXPECT_NE(Json.find("\"payloadType\":\"selection_changed\""),
             std::string::npos);
   EXPECT_NE(Json.find("\"objectId\":\"PlayerCharacter\""), std::string::npos);
+}
+
+TEST(HeadlessProtocolTests, SerializesObjectTransformUpdatedEvent) {
+  const Axiom::PublishedEditorEvent Event{
+      .Id = Axiom::EventId{7},
+      .Event = {.Payload = Axiom::ObjectTransformUpdatedEvent{
+                    .User = Axiom::SessionUserId{7},
+                    .ObjectId = "PlayerCharacter",
+                    .Location = glm::vec3(1.0f, 2.0f, 3.0f),
+                    .RotationDegrees = glm::vec3(4.0f, 5.0f, 6.0f),
+                    .Scale = glm::vec3(1.0f, 1.5f, 2.0f),
+                }}};
+
+  const std::string Json = Axiom::SerializeEvent(Event);
+  EXPECT_NE(Json.find("\"payloadType\":\"object_transform_updated\""),
+            std::string::npos);
+  EXPECT_NE(Json.find("\"location\":[1,2,3]"), std::string::npos);
+  EXPECT_NE(Json.find("\"rotationDegrees\":[4,5,6]"), std::string::npos);
+  EXPECT_NE(Json.find("\"scale\":[1,1.5,2]"), std::string::npos);
 }
 
 TEST(HeadlessProtocolTests, SerializesRemoteViewportLifecycleMessages) {

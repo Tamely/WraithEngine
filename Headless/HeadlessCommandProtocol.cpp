@@ -131,7 +131,10 @@ std::string EventPayloadType(const EditorEventPayload &Payload) {
   if (std::holds_alternative<CommandRejectedEvent>(Payload)) {
     return "command_rejected";
   }
-  return "selection_changed";
+  if (std::holds_alternative<SelectionChangedEvent>(Payload)) {
+    return "selection_changed";
+  }
+  return "object_transform_updated";
 }
 
 std::string SceneItemKindToString(EditorSceneItemKind Kind) {
@@ -308,6 +311,36 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
             {.Payload = SelectObjectCommand{.ObjectId = UnescapeJsonString(*ObjectId)}},
     };
   }
+  if (*Type == "set_transform") {
+    static const std::regex ObjectIdPattern(
+        R"json("objectId"\s*:\s*"((?:\\.|[^"])*)")json");
+    static const std::regex LocationPattern(
+        R"json("location"\s*:\s*\[\s*([-+0-9.eE]+)\s*,\s*([-+0-9.eE]+)\s*,\s*([-+0-9.eE]+)\s*\])json");
+    static const std::regex RotationPattern(
+        R"json("rotationDegrees"\s*:\s*\[\s*([-+0-9.eE]+)\s*,\s*([-+0-9.eE]+)\s*,\s*([-+0-9.eE]+)\s*\])json");
+    static const std::regex ScalePattern(
+        R"json("scale"\s*:\s*\[\s*([-+0-9.eE]+)\s*,\s*([-+0-9.eE]+)\s*,\s*([-+0-9.eE]+)\s*\])json");
+
+    const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
+    const auto Location = MatchVec3(JsonLine, LocationPattern);
+    const auto Rotation = MatchVec3(JsonLine, RotationPattern);
+    const auto Scale = MatchVec3(JsonLine, ScalePattern);
+    if (!ObjectId.has_value() || !Location.has_value() || !Rotation.has_value() ||
+        !Scale.has_value()) {
+      Error = "`set_transform` requires `objectId`, `location`, `rotationDegrees`, and `scale`.";
+      return std::nullopt;
+    }
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::SetTransform,
+        .EditorPayload =
+            {.Payload = SetTransformCommand{
+                 .ObjectId = UnescapeJsonString(*ObjectId),
+                 .Location = *Location,
+                 .RotationDegrees = *Rotation,
+                 .Scale = *Scale,
+             }},
+    };
+  }
   if (*Type == "update_viewport_camera") {
     const auto Movement = MatchVec3(JsonLine, MovementPattern);
     if (!Movement.has_value()) {
@@ -340,6 +373,7 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::SetViewMode:
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SelectObject:
+  case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::UpdateViewportCamera:
   case HeadlessCommandType::Quit:
     return Command;
@@ -408,6 +442,17 @@ std::string SerializeEvent(const PublishedEditorEvent &Event) {
     } else {
       Stream << "null";
     }
+  } else if (const auto *Transform =
+                 std::get_if<ObjectTransformUpdatedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"user\":" << Transform->User.Value << ",\"objectId\":\""
+           << EscapeJson(Transform->ObjectId) << "\",\"location\":["
+           << Transform->Location.x << "," << Transform->Location.y << ","
+           << Transform->Location.z << "],\"rotationDegrees\":["
+           << Transform->RotationDegrees.x << ","
+           << Transform->RotationDegrees.y << ","
+           << Transform->RotationDegrees.z << "],\"scale\":["
+           << Transform->Scale.x << "," << Transform->Scale.y << ","
+           << Transform->Scale.z << "]";
   }
   Stream << "}";
   return Stream.str();

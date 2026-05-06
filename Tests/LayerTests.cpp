@@ -14,6 +14,7 @@
 #include <GLFW/glfw3.h>
 
 #include <glm/common.hpp>
+#include <glm/ext/matrix_transform.hpp>
 #include <glm/geometric.hpp>
 
 #include <algorithm>
@@ -435,6 +436,95 @@ TEST(EditorSessionTests, SelectedObjectDetailsMatchAuthoritativeState) {
   EXPECT_EQ(Details->Transform->Location, glm::vec3(1.0f, 2.0f, 3.0f));
   EXPECT_EQ(Details->Transform->RotationDegrees, glm::vec3(4.0f, 5.0f, 6.0f));
   EXPECT_EQ(Details->Transform->Scale, glm::vec3(1.0f, 1.5f, 2.0f));
+}
+
+TEST(EditorSessionTests, SetTransformUpdatesAuthoritativeDetailsAndSubmission) {
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+  Session.SetSceneItems({{
+      .Id = "PlayerCharacter",
+      .DisplayName = "PlayerCharacter",
+      .Kind = Axiom::EditorSceneItemKind::Actor,
+      .Visible = true,
+      .Children = {},
+  }});
+  Session.SetObjectDetails({{
+      .ObjectId = "PlayerCharacter",
+      .DisplayName = "PlayerCharacter",
+      .Kind = Axiom::EditorSceneItemKind::Actor,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      .Transform = Axiom::EditorTransformDetails{},
+  }});
+  Session.SetSceneSubmissions({{
+      .Mesh = nullptr,
+      .Material = nullptr,
+      .Name = "PlayerCharacter",
+      .RenderPath = Axiom::MeshRenderPath::Graphics,
+      .Transform = glm::mat4(1.0f),
+  }});
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetTransformCommand{
+                      .ObjectId = "PlayerCharacter",
+                      .Location = glm::vec3(1.0f, 2.0f, 3.0f),
+                      .RotationDegrees = glm::vec3(0.0f, 90.0f, 0.0f),
+                      .Scale = glm::vec3(2.0f, 2.0f, 2.0f),
+                  }});
+  Session.Tick();
+
+  const Axiom::EditorObjectDetails *Details =
+      Session.FindObjectDetails("PlayerCharacter");
+  ASSERT_NE(Details, nullptr);
+  ASSERT_TRUE(Details->Transform.has_value());
+  EXPECT_EQ(Details->Transform->Location, glm::vec3(1.0f, 2.0f, 3.0f));
+  EXPECT_EQ(Details->Transform->RotationDegrees, glm::vec3(0.0f, 90.0f, 0.0f));
+  EXPECT_EQ(Details->Transform->Scale, glm::vec3(2.0f, 2.0f, 2.0f));
+
+  ASSERT_EQ(Session.GetState().SceneSubmissions.size(), 1u);
+  const glm::vec4 TranslationColumn = Session.GetState().SceneSubmissions[0].Transform[3];
+  EXPECT_EQ(glm::vec3(TranslationColumn), glm::vec3(1.0f, 2.0f, 3.0f));
+
+  ASSERT_EQ(Subscriber.Events.size(), 1u);
+  ASSERT_TRUE(std::holds_alternative<Axiom::ObjectTransformUpdatedEvent>(
+      Subscriber.Events.front().Event.Payload));
+}
+
+TEST(EditorSessionTests, SetTransformRejectsReadOnlyTarget) {
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+  Session.SetSceneItems({{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {},
+  }});
+  Session.SetObjectDetails({{
+      .ObjectId = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .SupportsTransform = false,
+      .TransformReadOnly = true,
+      .Transform = std::nullopt,
+  }});
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetTransformCommand{
+                      .ObjectId = "world",
+                      .Location = glm::vec3(1.0f),
+                      .RotationDegrees = glm::vec3(2.0f),
+                      .Scale = glm::vec3(1.0f),
+                  }});
+  Session.Tick();
+
+  ASSERT_EQ(Subscriber.Events.size(), 1u);
+  ASSERT_TRUE(std::holds_alternative<Axiom::CommandRejectedEvent>(
+      Subscriber.Events.front().Event.Payload));
 }
 
 TEST(EditorInputSourceTests, GlfwInputSourceTranslatesPlatformStateIntoCommands) {

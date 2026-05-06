@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import {
   useRemoteViewport,
+  type SessionObjectTransformUpdate,
   type SessionObjectDetails,
   type RemoteViewportConnectionState,
   type RemoteViewportViewMode,
@@ -86,6 +87,9 @@ type RemoteViewportCommand =
       type: "select_object"
       objectId: string
     }
+  | ({
+      type: "set_transform"
+    } & SessionObjectTransformUpdate)
 
 function getServerOrigin() {
   const configuredOrigin = process.env.NEXT_PUBLIC_AXIOM_SERVER_ORIGIN?.trim()
@@ -264,6 +268,17 @@ export function Viewport() {
       })
     }
 
+    async function refreshSessionSnapshotSafely() {
+      try {
+        await refreshSessionSnapshot()
+      } catch (error) {
+        appendLog({
+          type: "session_snapshot_failed",
+          detail: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
+
     function handleEditorEventMessage(message: Record<string, unknown>) {
       if (message.payloadType === "selection_changed") {
         const userId =
@@ -271,13 +286,13 @@ export function Viewport() {
         const objectId = typeof message.objectId === "string" ? message.objectId : null
         if (Number.isFinite(userId)) {
           applySelectionChanged(userId, objectId)
-          void refreshSessionSnapshot().catch((error) => {
-            appendLog({
-              type: "session_snapshot_failed",
-              detail: error instanceof Error ? error.message : String(error),
-            })
-          })
+          void refreshSessionSnapshotSafely()
         }
+        return
+      }
+
+      if (message.payloadType === "object_transform_updated") {
+        void refreshSessionSnapshotSafely()
         return
       }
 
@@ -287,6 +302,7 @@ export function Viewport() {
             ? message.reason
             : "The remote session rejected the command."
         setDetailText(reason)
+        void refreshSessionSnapshotSafely()
       }
     }
 
@@ -543,6 +559,7 @@ export function Viewport() {
     function wireDataChannel(channel: RTCDataChannel, label: string) {
       channel.addEventListener("open", () => {
         appendLog({ type: "data_channel_open", label })
+        void refreshSessionSnapshotSafely()
         if (label === "editor-events") {
           setConnectionState("control-ready")
           setStatusText("Control ready")
@@ -639,14 +656,7 @@ export function Viewport() {
       setFrameText("No stream metadata yet")
       clearEventLog()
       startViewportInputPump()
-      try {
-        await refreshSessionSnapshot()
-      } catch (error) {
-        appendLog({
-          type: "session_snapshot_failed",
-          detail: error instanceof Error ? error.message : String(error),
-        })
-      }
+      await refreshSessionSnapshotSafely()
 
       const peer = new window.RTCPeerConnection({
         bundlePolicy: "max-bundle",
@@ -660,6 +670,7 @@ export function Viewport() {
         }
         appendLog({ type: "connection_state", state: peer.connectionState })
         if (peer.connectionState === "connected") {
+          void refreshSessionSnapshotSafely()
           if (canSendReliably()) {
             setConnectionState("control-ready")
             setStatusText("Control ready")
@@ -803,6 +814,7 @@ export function Viewport() {
           signalingState: peer.signalingState,
         })
         await flushLocalIceCandidates(nextGeneration)
+        await refreshSessionSnapshotSafely()
 
         setConnectionState("awaiting-media")
         setStatusText("Awaiting media")
@@ -851,14 +863,20 @@ export function Viewport() {
           "reliable"
         )
         if (accepted) {
-          try {
-            await refreshSessionSnapshot()
-          } catch (error) {
-            appendLog({
-              type: "session_snapshot_failed",
-              detail: error instanceof Error ? error.message : String(error),
-            })
-          }
+          await refreshSessionSnapshotSafely()
+        }
+        return accepted
+      },
+      updateTransform: async (details) => {
+        const accepted = await sendCommand(
+          {
+            type: "set_transform",
+            ...details,
+          },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely()
         }
         return accepted
       },

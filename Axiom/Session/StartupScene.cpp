@@ -115,7 +115,7 @@ std::vector<EditorObjectDetails> BuildStartupObjectDetails() {
       .Kind = EditorSceneItemKind::Light,
       .Visible = true,
       .SupportsTransform = true,
-      .TransformReadOnly = true,
+      .TransformReadOnly = false,
       .Transform = EditorTransformDetails{
           .Location = glm::vec3(4.0f, 6.0f, 2.0f),
           .RotationDegrees = glm::vec3(-45.0f, 30.0f, 0.0f),
@@ -128,7 +128,7 @@ std::vector<EditorObjectDetails> BuildStartupObjectDetails() {
       .Kind = EditorSceneItemKind::Light,
       .Visible = true,
       .SupportsTransform = true,
-      .TransformReadOnly = true,
+      .TransformReadOnly = false,
       .Transform = EditorTransformDetails{
           .Location = glm::vec3(0.0f, 8.0f, 0.0f),
           .RotationDegrees = glm::vec3(0.0f),
@@ -141,7 +141,7 @@ std::vector<EditorObjectDetails> BuildStartupObjectDetails() {
       .Kind = EditorSceneItemKind::Mesh,
       .Visible = true,
       .SupportsTransform = true,
-      .TransformReadOnly = true,
+      .TransformReadOnly = false,
       .Transform = EditorTransformDetails{
           .Location = glm::vec3(0.0f, -0.5f, 0.0f),
           .RotationDegrees = glm::vec3(0.0f),
@@ -154,7 +154,7 @@ std::vector<EditorObjectDetails> BuildStartupObjectDetails() {
       .Kind = EditorSceneItemKind::Mesh,
       .Visible = true,
       .SupportsTransform = true,
-      .TransformReadOnly = true,
+      .TransformReadOnly = false,
       .Transform = EditorTransformDetails{
           .Location = glm::vec3(-1.25f, 0.0f, -0.75f),
           .RotationDegrees = glm::vec3(0.0f, 18.0f, 0.0f),
@@ -167,7 +167,7 @@ std::vector<EditorObjectDetails> BuildStartupObjectDetails() {
       .Kind = EditorSceneItemKind::Mesh,
       .Visible = true,
       .SupportsTransform = true,
-      .TransformReadOnly = true,
+      .TransformReadOnly = false,
       .Transform = EditorTransformDetails{
           .Location = glm::vec3(1.1f, 0.0f, 0.85f),
           .RotationDegrees = glm::vec3(0.0f, -22.0f, 0.0f),
@@ -180,7 +180,7 @@ std::vector<EditorObjectDetails> BuildStartupObjectDetails() {
       .Kind = EditorSceneItemKind::Mesh,
       .Visible = true,
       .SupportsTransform = true,
-      .TransformReadOnly = true,
+      .TransformReadOnly = false,
       .Transform = EditorTransformDetails{
           .Location = glm::vec3(0.0f, 1.0f, -3.0f),
           .RotationDegrees = glm::vec3(0.0f),
@@ -193,7 +193,7 @@ std::vector<EditorObjectDetails> BuildStartupObjectDetails() {
       .Kind = EditorSceneItemKind::Actor,
       .Visible = true,
       .SupportsTransform = true,
-      .TransformReadOnly = true,
+      .TransformReadOnly = false,
       .Transform = EditorTransformDetails{
           .Location = glm::vec3(0.0f, 0.0f, 1.25f),
           .RotationDegrees = glm::vec3(0.0f, 180.0f, 0.0f),
@@ -206,7 +206,7 @@ std::vector<EditorObjectDetails> BuildStartupObjectDetails() {
       .Kind = EditorSceneItemKind::Camera,
       .Visible = true,
       .SupportsTransform = true,
-      .TransformReadOnly = true,
+      .TransformReadOnly = false,
       .Transform = EditorTransformDetails{
           .Location = glm::vec3(0.0f, 1.8f, 4.5f),
           .RotationDegrees = glm::vec3(-10.0f, 180.0f, 0.0f),

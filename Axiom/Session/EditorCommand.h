@@ -32,9 +32,16 @@ struct SelectObjectCommand {
   std::string ObjectId;
 };
 
+struct SetTransformCommand {
+  std::string ObjectId;
+  glm::vec3 Location{0.0f};
+  glm::vec3 RotationDegrees{0.0f};
+  glm::vec3 Scale{1.0f};
+};
+
 using EditorCommandPayload =
     std::variant<UpdateViewportCameraCommand, SetLookActiveCommand,
-                 SelectObjectCommand>;
+                 SelectObjectCommand, SetTransformCommand>;
 
 struct EditorCommand {
   EditorCommandPayload Payload;

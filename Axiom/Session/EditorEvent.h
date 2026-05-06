@@ -32,10 +32,19 @@ struct SelectionChangedEvent {
   std::optional<std::string> ObjectId;
 };
 
+struct ObjectTransformUpdatedEvent {
+  SessionUserId User;
+  std::string ObjectId;
+  glm::vec3 Location{0.0f};
+  glm::vec3 RotationDegrees{0.0f};
+  glm::vec3 Scale{1.0f};
+};
+
 using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         LookStateChangedEvent,
                                         CommandRejectedEvent,
-                                        SelectionChangedEvent>;
+                                        SelectionChangedEvent,
+                                        ObjectTransformUpdatedEvent>;
 
 struct EditorEvent {
   EditorEventPayload Payload;

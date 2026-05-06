@@ -97,6 +97,8 @@ public:
   const EditorObjectDetails *FindSelectedObjectDetails(SessionUserId User) const;
 
 private:
+  void UpdateSubmissionTransform(std::string_view ObjectId,
+                                 const EditorTransformDetails &Transform);
   EditorViewportState &EnsureViewport(SessionUserId User);
   const EditorSceneItem *FindSceneItemRecursive(
       const std::vector<EditorSceneItem> &Items, std::string_view ObjectId) const;
@@ -109,6 +111,8 @@ private:
                      const SetLookActiveCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SelectObjectCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const SetTransformCommand &Command);
   void PublishEvent(const EditorEvent &Event);
 
 private:

@@ -1,8 +1,18 @@
 "use client"
 
 import { Lock, Settings, Unlock } from "lucide-react"
-import { useState } from "react"
-import { useRemoteViewport, type SessionObjectDetails } from "./remote-viewport-context"
+import { useEffect, useState } from "react"
+import {
+  useRemoteViewport,
+  type SessionObjectDetails,
+  type SessionObjectTransformUpdate,
+} from "./remote-viewport-context"
+
+type DraftTransform = {
+  location: [string, string, string]
+  rotationDegrees: [string, string, string]
+  scale: [string, string, string]
+}
 
 export function Details() {
   const { selectedObjectDetails, selectedObjectId } = useRemoteViewport()
@@ -41,6 +51,30 @@ export function Details() {
 }
 
 function DetailsContent({ details }: { details: SessionObjectDetails }) {
+  const { updateTransform } = useRemoteViewport()
+  const [draft, setDraft] = useState<DraftTransform>(() => toDraft(details))
+  const [isSaving, setIsSaving] = useState(false)
+
+  useEffect(() => {
+    setDraft(toDraft(details))
+  }, [details])
+
+  const canEdit = details.capabilities.supportsTransform && !details.capabilities.transformReadOnly
+
+  async function applyTransform() {
+    const parsed = parseDraft(details.objectId, draft)
+    if (!parsed) {
+      return
+    }
+
+    setIsSaving(true)
+    try {
+      await updateTransform(parsed)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   return (
     <div className="space-y-4 p-3">
       <section className="rounded border border-neutral-800 bg-neutral-950/60 p-3">
@@ -56,20 +90,40 @@ function DetailsContent({ details }: { details: SessionObjectDetails }) {
       <section className="rounded border border-neutral-800 bg-neutral-950/60 p-3">
         <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">Transform</p>
         {details.capabilities.supportsTransform && details.transform ? (
-          <div className="mt-3 space-y-2">
-            <DetailRow
+          <div className="mt-3 space-y-3">
+            <VectorEditor
+              disabled={!canEdit || isSaving}
               label="Location"
-              value={formatVec3(details.transform.location)}
+              value={draft.location}
+              onChange={(value) => setDraft((current) => ({ ...current, location: value }))}
             />
-            <DetailRow
+            <VectorEditor
+              disabled={!canEdit || isSaving}
               label="Rotation"
-              value={formatVec3(details.transform.rotationDegrees)}
+              value={draft.rotationDegrees}
+              onChange={(value) =>
+                setDraft((current) => ({ ...current, rotationDegrees: value }))
+              }
             />
-            <DetailRow label="Scale" value={formatVec3(details.transform.scale)} />
-            <DetailRow
-              label="Editability"
-              value={details.capabilities.transformReadOnly ? "Read-only" : "Editable"}
+            <VectorEditor
+              disabled={!canEdit || isSaving}
+              label="Scale"
+              value={draft.scale}
+              onChange={(value) => setDraft((current) => ({ ...current, scale: value }))}
             />
+            <DetailRow label="Editability" value={canEdit ? "Editable" : "Read-only"} />
+            {canEdit && (
+              <div className="flex justify-end">
+                <button
+                  className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={isSaving}
+                  onClick={() => void applyTransform()}
+                  type="button"
+                >
+                  {isSaving ? "Applying..." : "Apply Transform"}
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <p className="mt-3 text-xs text-neutral-500">
@@ -92,10 +146,88 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-function EmptyState({ text }: { text: string }) {
-  return <div className="flex h-full items-center justify-center px-4 text-center text-xs text-neutral-600">{text}</div>
+function VectorEditor({
+  disabled,
+  label,
+  onChange,
+  value,
+}: {
+  disabled: boolean
+  label: string
+  onChange: (value: [string, string, string]) => void
+  value: [string, string, string]
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <span className="w-20 shrink-0 pt-2 text-xs text-neutral-500">{label}</span>
+      <div className="grid min-w-0 flex-1 grid-cols-3 gap-2">
+        {(["X", "Y", "Z"] as const).map((axis, index) => (
+          <label key={axis} className="space-y-1">
+            <span className="block text-[10px] uppercase tracking-[0.14em] text-neutral-600">
+              {axis}
+            </span>
+            <input
+              className="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 outline-none focus:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={disabled}
+              onChange={(event) => {
+                const next: [string, string, string] = [...value] as [string, string, string]
+                next[index] = event.target.value
+                onChange(next)
+              }}
+              type="number"
+              value={value[index]}
+            />
+          </label>
+        ))}
+      </div>
+    </div>
+  )
 }
 
-function formatVec3(value: [number, number, number]) {
-  return `X: ${value[0].toFixed(2)}, Y: ${value[1].toFixed(2)}, Z: ${value[2].toFixed(2)}`
+function EmptyState({ text }: { text: string }) {
+  return (
+    <div className="flex h-full items-center justify-center px-4 text-center text-xs text-neutral-600">
+      {text}
+    </div>
+  )
+}
+
+function toDraft(details: SessionObjectDetails): DraftTransform {
+  return {
+    location: toStringVec3(details.transform?.location ?? [0, 0, 0]),
+    rotationDegrees: toStringVec3(details.transform?.rotationDegrees ?? [0, 0, 0]),
+    scale: toStringVec3(details.transform?.scale ?? [1, 1, 1]),
+  }
+}
+
+function toStringVec3(value: [number, number, number]): [string, string, string] {
+  return [String(value[0]), String(value[1]), String(value[2])]
+}
+
+function parseDraft(
+  objectId: string,
+  draft: DraftTransform
+): SessionObjectTransformUpdate | null {
+  const location = parseVec3(draft.location)
+  const rotationDegrees = parseVec3(draft.rotationDegrees)
+  const scale = parseVec3(draft.scale)
+  if (!location || !rotationDegrees || !scale) {
+    return null
+  }
+
+  return {
+    objectId,
+    location,
+    rotationDegrees,
+    scale,
+  }
+}
+
+function parseVec3(value: [string, string, string]): [number, number, number] | null {
+  const parsed = value.map((entry) => Number(entry.trim()))
+  if (parsed.some((entry) => Number.isNaN(entry) || !Number.isFinite(entry))) {
+    return null
+  }
+
+  return [parsed[0], parsed[1], parsed[2]]
 }

@@ -60,6 +60,14 @@ interface RemoteViewportActions {
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
   refreshSessionSnapshot: () => Promise<void>
   selectObject: (objectId: string) => Promise<boolean>
+  updateTransform: (details: SessionObjectTransformUpdate) => Promise<boolean>
+}
+
+export interface SessionObjectTransformUpdate {
+  objectId: string
+  location: [number, number, number]
+  rotationDegrees: [number, number, number]
+  scale: [number, number, number]
 }
 
 interface RemoteViewportContextValue {
@@ -94,6 +102,7 @@ interface RemoteViewportContextValue {
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
   refreshSessionSnapshot: () => Promise<void>
   selectObject: (objectId: string) => Promise<boolean>
+  updateTransform: (details: SessionObjectTransformUpdate) => Promise<boolean>
 }
 
 interface SessionSnapshot {
@@ -133,6 +142,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     setMode: async () => {},
     refreshSessionSnapshot: async () => {},
     selectObject: async () => false,
+    updateTransform: async () => false,
   })
   const [connectionState, setConnectionState] =
     useState<RemoteViewportConnectionState>("idle")
@@ -195,6 +205,10 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     return actionsRef.current.selectObject(objectId)
   }, [])
 
+  const updateTransform = useCallback(async (details: SessionObjectTransformUpdate) => {
+    return actionsRef.current.updateTransform(details)
+  }, [])
+
   const selectedObjectId =
     currentUserId !== null
       ? selections.find((selection) => selection.userId === currentUserId)?.objectId ?? null
@@ -234,6 +248,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       setMode,
       refreshSessionSnapshot,
       selectObject,
+      updateTransform,
     }),
     [
       appendEventLog,
@@ -259,6 +274,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       setSessionSnapshot,
       statusText,
       toggleLook,
+      updateTransform,
       viewMode,
     ]
   )
