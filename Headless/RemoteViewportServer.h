@@ -67,6 +67,7 @@ private:
     std::string ClientId;
     SessionUserId User;
     std::chrono::steady_clock::time_point LastActivity;
+    std::unique_ptr<IWebRtcSession> WebRtcSession;
   };
 
   struct ClientSessionResolution {
@@ -107,6 +108,8 @@ private:
                               std::string_view Path);
   void RunWebSocketSession(uintptr_t ClientSocketValue);
   bool HandleWebSocketMessage(std::string_view Payload);
+  bool HandleClientWebRtcMessage(std::string_view ClientId,
+                                 std::string_view Payload);
 
   bool ShouldPublishJpegFrames() const;
   void SetLatestFrame(const CapturedFrame &Frame);
@@ -115,6 +118,10 @@ private:
   bool TryGetLatestEncodedPacket(LatestEncodedPacket &Packet) const;
   std::optional<SessionUserId> ResolveClientUser(
       std::string_view HeaderBlock) const;
+  RemoteClientSession *FindClientSession(std::string_view ClientId);
+  const RemoteClientSession *FindClientSession(std::string_view ClientId) const;
+  WebRtcSessionStatus GetClientWebRtcStatus(std::string_view ClientId) const;
+  std::vector<IWebRtcSession *> CollectClientWebRtcSessions() const;
   ClientSessionResolution CreateOrResumeClientSession(
       const std::optional<std::string> &ClientIdHint);
   void TouchClientSession(const std::string &ClientId);
@@ -135,9 +142,7 @@ private:
   std::vector<WebSocketClient> m_WebSocketClients;
   std::unordered_map<std::string, RemoteClientSession> m_RemoteClientsById;
   uint64_t m_NextRemoteUserId{2};
-  std::string m_WebRtcOwnerClientId;
   mutable std::mutex m_SendMutex;
-  std::unique_ptr<IWebRtcSession> m_WebRtcSession;
 };
 
 bool ParseRemoteViewportServerOptions(int argc, char **argv,

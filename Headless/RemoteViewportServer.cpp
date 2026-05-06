@@ -510,14 +510,7 @@ std::string GenerateClientId() {
 
 RemoteViewportServer::RemoteViewportServer(
     HeadlessSessionHost &Host, const RemoteViewportServerOptions &Options)
-    : m_Host(Host), m_Options(Options), m_WebRtcSession(CreateWebRtcSession()) {
-  if (m_WebRtcSession != nullptr) {
-    m_WebRtcSession->SetCommandMessageHandler(
-        [this](std::string_view Payload) {
-          HandleWebSocketMessage(Payload);
-        });
-  }
-}
+    : m_Host(Host), m_Options(Options) {}
 
 RemoteViewportServer::~RemoteViewportServer() { Stop(); }
 
@@ -590,8 +583,8 @@ void RemoteViewportServer::Stop() {
   }
 
   m_Host.GetTransport().Disconnect(this);
-  if (m_WebRtcSession != nullptr) {
-    m_WebRtcSession->ResetPeer("server_stopped");
+  for (IWebRtcSession *Session : CollectClientWebRtcSessions()) {
+    Session->ResetPeer("server_stopped");
   }
 }
 
@@ -609,15 +602,15 @@ void RemoteViewportServer::OnSessionTransportEditorEvent(
     const PublishedEditorEvent &Event) {
   const std::string Message = SerializeEvent(Event);
   BroadcastTextMessage(Message);
-  if (m_WebRtcSession != nullptr) {
-    m_WebRtcSession->SendReliableMessage(Message);
+  for (IWebRtcSession *Session : CollectClientWebRtcSessions()) {
+    Session->SendReliableMessage(Message);
   }
 }
 
 void RemoteViewportServer::OnSessionTransportViewportFrame(
     const ViewportFrame &Frame) {
-  if (m_WebRtcSession != nullptr) {
-    m_WebRtcSession->OnViewportFrame(Frame);
+  for (IWebRtcSession *Session : CollectClientWebRtcSessions()) {
+    Session->OnViewportFrame(Frame);
   }
 
   if (!ShouldPublishJpegFrames()) {
@@ -636,8 +629,8 @@ void RemoteViewportServer::OnSessionTransportViewportFrame(
 void RemoteViewportServer::OnSessionTransportEncodedVideoPacket(
     const EncodedVideoPacket &Packet) {
   SetLatestEncodedPacket(Packet);
-  if (m_WebRtcSession != nullptr) {
-    m_WebRtcSession->OnEncodedVideoPacket(Packet);
+  for (IWebRtcSession *Session : CollectClientWebRtcSessions()) {
+    Session->OnEncodedVideoPacket(Packet);
   }
 }
 
@@ -860,9 +853,11 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
     break;
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
+  case HeadlessCommandType::UpdateViewportCamera:
+    m_Host.SetActiveRenderUser(*User);
+    [[fallthrough]];
   case HeadlessCommandType::SelectObject:
   case HeadlessCommandType::SetTransform:
-  case HeadlessCommandType::UpdateViewportCamera:
     m_Host.SubmitRemoteCommand(*User, Command->EditorPayload);
     break;
   case HeadlessCommandType::Quit:
@@ -892,19 +887,17 @@ bool RemoteViewportServer::HandleSessionConnectRequest(
   RemoteClientSession &Client = *Resolution.Session;
   TouchClientSession(Client.ClientId);
 
-  if (Resolution.ResumedExisting && m_WebRtcSession != nullptr) {
-    const WebRtcSessionStatus CurrentStatus = m_WebRtcSession->GetStatus();
-    if (m_WebRtcOwnerClientId == Client.ClientId &&
-        CurrentStatus.ConnectionState != "new" &&
+  if (Resolution.ResumedExisting && Client.WebRtcSession != nullptr) {
+    const WebRtcSessionStatus CurrentStatus = Client.WebRtcSession->GetStatus();
+    if (CurrentStatus.ConnectionState != "new" &&
         CurrentStatus.ConnectionState != "closed") {
-      m_WebRtcSession->ResetPeer("client_session_resumed");
-      m_WebRtcOwnerClientId.clear();
+      Client.WebRtcSession->ResetPeer("client_session_resumed");
     }
   }
 
   const WebRtcSessionStatus Status =
-      m_WebRtcSession != nullptr ? m_WebRtcSession->GetStatus()
-                                 : WebRtcSessionStatus{};
+      Client.WebRtcSession != nullptr ? Client.WebRtcSession->GetStatus()
+                                      : WebRtcSessionStatus{};
   const std::string Payload = SerializeSessionConnectResponse(
       Client.ClientId, m_Host.GetHeadlessLayer().GetSession().GetState(),
       Client.User, m_TransportConnected.load(),
@@ -927,9 +920,10 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
     return false;
   }
   if (Route == "/webrtc") {
+    const auto ClientId = FindHeaderValue(HeaderBlock, ClientIdHeaderName);
     const WebRtcSessionStatus Status =
-        m_WebRtcSession != nullptr ? m_WebRtcSession->GetStatus()
-                                   : WebRtcSessionStatus{};
+        ClientId.has_value() ? GetClientWebRtcStatus(*ClientId)
+                             : WebRtcSessionStatus{};
     const std::string Body =
         SerializeWebRtcStatus(Status.Enabled, Status.Available,
                               Status.SignalingState, Status.ConnectionState,
@@ -941,9 +935,14 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
     return false;
   }
   if (Route == "/webrtc/ice-candidates") {
-    const std::vector<WebRtcIceCandidate> Candidates =
-        m_WebRtcSession != nullptr ? m_WebRtcSession->TakePendingLocalIceCandidates()
-                                   : std::vector<WebRtcIceCandidate>{};
+    const auto ClientId = FindHeaderValue(HeaderBlock, ClientIdHeaderName);
+    std::vector<WebRtcIceCandidate> Candidates;
+    if (ClientId.has_value()) {
+      if (RemoteClientSession *Client = FindClientSession(*ClientId);
+          Client != nullptr && Client->WebRtcSession != nullptr) {
+        Candidates = Client->WebRtcSession->TakePendingLocalIceCandidates();
+      }
+    }
     const std::string Body = SerializeWebRtcIceCandidateList(Candidates);
     const std::string Response = JsonResponse("200 OK", Body);
     SendAll(ClientSocket, Response.data(), Response.size());
@@ -951,6 +950,7 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
   }
   if (Route == "/session") {
     const auto User = ResolveClientUser(HeaderBlock);
+    const auto ClientId = FindHeaderValue(HeaderBlock, ClientIdHeaderName);
     if (!User.has_value()) {
       const std::string Response = JsonResponse(
           "400 Bad Request",
@@ -958,13 +958,12 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
       SendAll(ClientSocket, Response.data(), Response.size());
       return false;
     }
-    if (const auto ClientId = FindHeaderValue(HeaderBlock, ClientIdHeaderName);
-        ClientId.has_value()) {
+    if (ClientId.has_value()) {
       TouchClientSession(*ClientId);
     }
     const WebRtcSessionStatus Status =
-        m_WebRtcSession != nullptr ? m_WebRtcSession->GetStatus()
-                                   : WebRtcSessionStatus{};
+        ClientId.has_value() ? GetClientWebRtcStatus(*ClientId)
+                             : WebRtcSessionStatus{};
     const std::string Body = SerializeSessionSnapshot(
         m_Host.GetHeadlessLayer().GetSession().GetState(), *User,
         m_TransportConnected.load(),
@@ -1066,7 +1065,15 @@ bool RemoteViewportServer::HandleWebRtcOfferRequest(uintptr_t ClientSocketValue,
     return false;
   }
 
-  if (m_WebRtcSession == nullptr) {
+  if (!ClientId.has_value()) {
+    const std::string Response = JsonResponse(
+        "503 Service Unavailable",
+        SerializeError("Missing X-Axiom-Client-Id for WebRTC session."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+  RemoteClientSession *Client = FindClientSession(*ClientId);
+  if (Client == nullptr || Client->WebRtcSession == nullptr) {
     const std::string Response = JsonResponse(
         "503 Service Unavailable",
         SerializeError("WebRTC session support is unavailable."));
@@ -1075,8 +1082,8 @@ bool RemoteViewportServer::HandleWebRtcOfferRequest(uintptr_t ClientSocketValue,
   }
 
   WebRtcSessionDescription Answer{};
-  if (!m_WebRtcSession->HandleOffer(*Offer, Answer, Error)) {
-    const WebRtcSessionStatus Status = m_WebRtcSession->GetStatus();
+  if (!Client->WebRtcSession->HandleOffer(*Offer, Answer, Error)) {
+    const WebRtcSessionStatus Status = Client->WebRtcSession->GetStatus();
     const std::string Payload = SerializeWebRtcStatus(
         Status.Enabled, Status.Available, Status.SignalingState,
         Status.ConnectionState, Error.empty() ? Status.Detail : Error,
@@ -1088,14 +1095,11 @@ bool RemoteViewportServer::HandleWebRtcOfferRequest(uintptr_t ClientSocketValue,
     return false;
   }
 
-  if (ClientId.has_value()) {
-    m_WebRtcOwnerClientId = *ClientId;
-    m_Host.SetActiveRenderUser(*User);
-  }
+  m_Host.SetActiveRenderUser(*User);
 
   const std::string Response =
       JsonResponse("200 OK", SerializeWebRtcSessionDescription(
-                                 Answer, m_WebRtcSession->GetStatus().SessionId));
+                                 Answer, Client->WebRtcSession->GetStatus().SessionId));
   SendAll(ClientSocket, Response.data(), Response.size());
   return false;
 }
@@ -1126,7 +1130,16 @@ bool RemoteViewportServer::HandleWebRtcIceCandidateRequest(
     return false;
   }
 
-  if (m_WebRtcSession == nullptr) {
+  const auto ClientId = FindHeaderValue(HeaderBlock, ClientIdHeaderName);
+  if (!ClientId.has_value()) {
+    const std::string Response = JsonResponse(
+        "503 Service Unavailable",
+        SerializeError("Missing X-Axiom-Client-Id for WebRTC session."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+  RemoteClientSession *Client = FindClientSession(*ClientId);
+  if (Client == nullptr || Client->WebRtcSession == nullptr) {
     const std::string Response = JsonResponse(
         "503 Service Unavailable",
         SerializeError("WebRTC session support is unavailable."));
@@ -1134,8 +1147,8 @@ bool RemoteViewportServer::HandleWebRtcIceCandidateRequest(
     return false;
   }
 
-  if (!m_WebRtcSession->AddRemoteIceCandidate(*Candidate, Error)) {
-    const WebRtcSessionStatus Status = m_WebRtcSession->GetStatus();
+  if (!Client->WebRtcSession->AddRemoteIceCandidate(*Candidate, Error)) {
+    const WebRtcSessionStatus Status = Client->WebRtcSession->GetStatus();
     const std::string Payload = SerializeWebRtcStatus(
         Status.Enabled, Status.Available, Status.SignalingState,
         Status.ConnectionState, Error.empty() ? Status.Detail : Error,
@@ -1175,7 +1188,15 @@ bool RemoteViewportServer::HandleWebRtcCloseRequest(
     Reason = std::string(Body);
   }
 
-  if (m_WebRtcSession == nullptr) {
+  if (!ClientId.has_value()) {
+    const std::string Response = JsonResponse(
+        "503 Service Unavailable",
+        SerializeError("Missing X-Axiom-Client-Id for WebRTC session."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+  RemoteClientSession *Client = FindClientSession(*ClientId);
+  if (Client == nullptr || Client->WebRtcSession == nullptr) {
     const std::string Response = JsonResponse(
         "503 Service Unavailable",
         SerializeError("WebRTC session support is unavailable."));
@@ -1183,20 +1204,8 @@ bool RemoteViewportServer::HandleWebRtcCloseRequest(
     return false;
   }
 
-  if (ClientId.has_value() && !m_WebRtcOwnerClientId.empty() &&
-      m_WebRtcOwnerClientId != *ClientId) {
-    const WebRtcSessionStatus Status = m_WebRtcSession->GetStatus();
-    const std::string Payload = SerializeWebRtcStatus(
-        Status.Enabled, Status.Available, Status.SignalingState,
-        Status.ConnectionState, Status.Detail, Status.SessionId,
-        Status.PendingLocalIceCandidateCount, Status.Video);
-    const std::string Response = JsonResponse("202 Accepted", Payload);
-    SendAll(ClientSocket, Response.data(), Response.size());
-    return false;
-  }
-
   std::string Error;
-  if (!m_WebRtcSession->CloseSession(Reason, Error)) {
+  if (!Client->WebRtcSession->CloseSession(Reason, Error)) {
     const std::string Response =
         JsonResponse("500 Internal Server Error",
                      SerializeError(Error.empty()
@@ -1220,10 +1229,9 @@ bool RemoteViewportServer::HandleWebRtcCloseRequest(
           *DisconnectedUser, EditorUserPresenceState::Disconnected);
     }
   }
-  m_WebRtcOwnerClientId.clear();
   m_Host.SetActiveRenderUser(
       m_Host.GetHeadlessLayer().GetLocalUserId());
-  const WebRtcSessionStatus Status = m_WebRtcSession->GetStatus();
+  const WebRtcSessionStatus Status = Client->WebRtcSession->GetStatus();
   const std::string Payload = SerializeWebRtcStatus(
       Status.Enabled, Status.Available, Status.SignalingState,
       Status.ConnectionState, Status.Detail, Status.SessionId,
@@ -1248,6 +1256,43 @@ std::optional<SessionUserId> RemoteViewportServer::ResolveClientUser(
   return It->second.User;
 }
 
+RemoteViewportServer::RemoteClientSession *
+RemoteViewportServer::FindClientSession(std::string_view ClientId) {
+  std::scoped_lock Lock(m_ClientMutex);
+  const auto It = m_RemoteClientsById.find(std::string(ClientId));
+  return It != m_RemoteClientsById.end() ? &It->second : nullptr;
+}
+
+const RemoteViewportServer::RemoteClientSession *
+RemoteViewportServer::FindClientSession(std::string_view ClientId) const {
+  std::scoped_lock Lock(m_ClientMutex);
+  const auto It = m_RemoteClientsById.find(std::string(ClientId));
+  return It != m_RemoteClientsById.end() ? &It->second : nullptr;
+}
+
+WebRtcSessionStatus
+RemoteViewportServer::GetClientWebRtcStatus(std::string_view ClientId) const {
+  std::scoped_lock Lock(m_ClientMutex);
+  const auto It = m_RemoteClientsById.find(std::string(ClientId));
+  if (It == m_RemoteClientsById.end() || It->second.WebRtcSession == nullptr) {
+    return {};
+  }
+  return It->second.WebRtcSession->GetStatus();
+}
+
+std::vector<IWebRtcSession *> RemoteViewportServer::CollectClientWebRtcSessions() const {
+  std::vector<IWebRtcSession *> Sessions;
+  std::scoped_lock Lock(m_ClientMutex);
+  Sessions.reserve(m_RemoteClientsById.size());
+  for (const auto &[ClientId, Session] : m_RemoteClientsById) {
+    (void)ClientId;
+    if (Session.WebRtcSession != nullptr) {
+      Sessions.push_back(Session.WebRtcSession.get());
+    }
+  }
+  return Sessions;
+}
+
 RemoteViewportServer::ClientSessionResolution
 RemoteViewportServer::CreateOrResumeClientSession(
     const std::optional<std::string> &ClientIdHint) {
@@ -1268,6 +1313,14 @@ RemoteViewportServer::CreateOrResumeClientSession(
       Session.ClientId = GenerateClientId();
       Session.User = SessionUserId{m_NextRemoteUserId++};
       Session.LastActivity = std::chrono::steady_clock::now();
+      Session.WebRtcSession = CreateWebRtcSession();
+      if (Session.WebRtcSession != nullptr) {
+        const std::string ClientId = Session.ClientId;
+        Session.WebRtcSession->SetCommandMessageHandler(
+            [this, ClientId](std::string_view Payload) {
+              HandleClientWebRtcMessage(ClientId, Payload);
+            });
+      }
       auto [It, Inserted] =
           m_RemoteClientsById.emplace(Session.ClientId, std::move(Session));
       (void)Inserted;
@@ -1441,23 +1494,48 @@ bool RemoteViewportServer::HandleWebSocketMessage(std::string_view Payload) {
   case HeadlessCommandType::SetViewportCameraPose:
   case HeadlessCommandType::SelectObject:
   case HeadlessCommandType::SetTransform:
-  case HeadlessCommandType::UpdateViewportCamera: {
-    std::optional<SessionUserId> User;
-    {
-      std::scoped_lock Lock(m_ClientMutex);
-      if (!m_WebRtcOwnerClientId.empty()) {
-        const auto It = m_RemoteClientsById.find(m_WebRtcOwnerClientId);
-        if (It != m_RemoteClientsById.end()) {
-          User = It->second.User;
-        }
-      }
-    }
-    if (!User.has_value()) {
-      return false;
-    }
-    m_Host.SubmitRemoteCommand(*User, Command->EditorPayload);
+  case HeadlessCommandType::UpdateViewportCamera:
+    return false;
+  case HeadlessCommandType::Quit:
+    m_StopRequested.store(true);
+    m_Host.RequestClose();
+    BroadcastTextMessage(SerializeShutdown());
     return true;
+  case HeadlessCommandType::LoadStartupScene:
+  case HeadlessCommandType::RenderFrame:
+    return false;
   }
+
+  return false;
+}
+
+bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
+                                                     std::string_view Payload) {
+  std::string Error;
+  const auto Command = ParseRemoteViewportCommand(Payload, Error);
+  if (!Command.has_value()) {
+    return false;
+  }
+
+  RemoteClientSession *Client = FindClientSession(ClientId);
+  if (Client == nullptr) {
+    return false;
+  }
+  TouchClientSession(Client->ClientId);
+
+  switch (Command->Type) {
+  case HeadlessCommandType::SetViewMode:
+    m_Host.SetRemoteViewMode(Command->ViewMode);
+    return true;
+  case HeadlessCommandType::SetLookActive:
+  case HeadlessCommandType::SetViewportCameraPose:
+  case HeadlessCommandType::UpdateViewportCamera:
+    m_Host.SetActiveRenderUser(Client->User);
+    [[fallthrough]];
+  case HeadlessCommandType::SelectObject:
+  case HeadlessCommandType::SetTransform:
+    m_Host.SubmitRemoteCommand(Client->User, Command->EditorPayload);
+    return true;
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
     m_Host.RequestClose();
@@ -1472,13 +1550,14 @@ bool RemoteViewportServer::HandleWebSocketMessage(std::string_view Payload) {
 }
 
 bool RemoteViewportServer::ShouldPublishJpegFrames() const {
-  if (m_WebRtcSession == nullptr) {
-    return true;
+  for (IWebRtcSession *Session : CollectClientWebRtcSessions()) {
+    const WebRtcSessionStatus Status = Session->GetStatus();
+    if (Status.Enabled && Status.Available &&
+        Status.ConnectionState == "connected") {
+      return false;
+    }
   }
-
-  const WebRtcSessionStatus Status = m_WebRtcSession->GetStatus();
-  return !(Status.Enabled && Status.Available &&
-           Status.ConnectionState == "connected");
+  return true;
 }
 
 void RemoteViewportServer::SetLatestFrame(const CapturedFrame &Frame) {
