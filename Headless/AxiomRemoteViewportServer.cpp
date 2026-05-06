@@ -2,9 +2,7 @@
 
 #include "HeadlessCommandProtocol.h"
 
-#include <chrono>
 #include <iostream>
-#include <thread>
 
 int main(int argc, char **argv) {
   std::string Error;
@@ -30,7 +28,6 @@ int main(int argc, char **argv) {
   std::cout << Axiom::SerializeReady(Options.Width, Options.Height)
             << std::endl;
   while (!Server.ShouldStop() && Host.Step()) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(16));
   }
 
   Server.Stop();
