@@ -87,6 +87,7 @@ private:
   void RunWebSocketSession(uintptr_t ClientSocketValue);
   bool HandleWebSocketMessage(std::string_view Payload);
 
+  bool ShouldPublishJpegFrames() const;
   void SetLatestFrame(const CapturedFrame &Frame);
   bool TryGetLatestFrame(LatestFrame &Frame) const;
   void SetLatestEncodedPacket(const EncodedVideoPacket &Packet);

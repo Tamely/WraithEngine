@@ -607,6 +607,14 @@ void RemoteViewportServer::OnSessionTransportEditorEvent(
 
 void RemoteViewportServer::OnSessionTransportViewportFrame(
     const ViewportFrame &Frame) {
+  if (m_WebRtcSession != nullptr) {
+    m_WebRtcSession->OnViewportFrame(Frame);
+  }
+
+  if (!ShouldPublishJpegFrames()) {
+    return;
+  }
+
   const auto Captured = ConvertFrame(Frame);
   if (!Captured.has_value()) {
     BroadcastTextMessage(SerializeError("Unsupported viewport frame format."));
@@ -614,9 +622,6 @@ void RemoteViewportServer::OnSessionTransportViewportFrame(
   }
 
   SetLatestFrame(*Captured);
-  if (m_WebRtcSession != nullptr) {
-    m_WebRtcSession->OnViewportFrame(Frame);
-  }
 }
 
 void RemoteViewportServer::OnSessionTransportEncodedVideoPacket(
@@ -1232,6 +1237,16 @@ bool RemoteViewportServer::HandleWebSocketMessage(std::string_view Payload) {
   }
 
   return false;
+}
+
+bool RemoteViewportServer::ShouldPublishJpegFrames() const {
+  if (m_WebRtcSession == nullptr) {
+    return true;
+  }
+
+  const WebRtcSessionStatus Status = m_WebRtcSession->GetStatus();
+  return !(Status.Enabled && Status.Available &&
+           Status.ConnectionState == "connected");
 }
 
 void RemoteViewportServer::SetLatestFrame(const CapturedFrame &Frame) {
