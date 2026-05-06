@@ -19,6 +19,8 @@ import {
   useRemoteViewport,
   type RemoteViewportConnectionState,
   type RemoteViewportViewMode,
+  type SessionSceneItem,
+  type SessionSelection,
 } from "./remote-viewport-context"
 
 const DEFAULT_AXIOM_SERVER_ORIGIN = "http://127.0.0.1:8080"
@@ -57,6 +59,12 @@ interface IceCandidateListResponse {
   candidates?: RTCIceCandidateInit[]
 }
 
+interface SessionSnapshotResponse {
+  currentUserId: number
+  sceneTree: SessionSceneItem[]
+  selections: SessionSelection[]
+}
+
 type RemoteViewportCommand =
   | {
       type: "set_view_mode"
@@ -71,6 +79,10 @@ type RemoteViewportCommand =
       type: "update_viewport_camera"
       worldMovement: [number, number, number]
       cursorPosition: [number, number]
+    }
+  | {
+      type: "select_object"
+      objectId: string
     }
 
 function getServerOrigin() {
@@ -124,6 +136,8 @@ export function Viewport() {
     appendEventLog,
     clearEventLog,
     registerActions,
+    setSessionSnapshot,
+    applySelectionChanged,
   } = useRemoteViewport()
   const [serverOrigin] = useState(getServerOrigin)
 
@@ -225,6 +239,46 @@ export function Viewport() {
         },
         body,
       })
+    }
+
+    async function refreshSessionSnapshot() {
+      const snapshot = await fetchJson<SessionSnapshotResponse>("/session", {
+        cache: "no-store",
+      })
+      if (disposed) {
+        return
+      }
+
+      setSessionSnapshot({
+        currentUserId: snapshot.currentUserId,
+        sceneTree: snapshot.sceneTree ?? [],
+        selections: snapshot.selections ?? [],
+      })
+      appendLog({
+        type: "session_snapshot_received",
+        sceneItemCount: snapshot.sceneTree?.length ?? 0,
+        selectionCount: snapshot.selections?.length ?? 0,
+      })
+    }
+
+    function handleEditorEventMessage(message: Record<string, unknown>) {
+      if (message.payloadType === "selection_changed") {
+        const userId =
+          typeof message.user === "number" ? message.user : Number(message.user)
+        const objectId = typeof message.objectId === "string" ? message.objectId : null
+        if (Number.isFinite(userId)) {
+          applySelectionChanged(userId, objectId)
+        }
+        return
+      }
+
+      if (message.payloadType === "command_rejected") {
+        const reason =
+          typeof message.reason === "string"
+            ? message.reason
+            : "The remote session rejected the command."
+        setDetailText(reason)
+      }
     }
 
     function updateFrameText(status: WebRtcStatusResponse) {
@@ -497,7 +551,9 @@ export function Viewport() {
       })
       channel.addEventListener("message", (event) => {
         try {
-          appendLog(JSON.parse(event.data))
+          const parsed = JSON.parse(event.data) as Record<string, unknown>
+          appendLog(parsed)
+          handleEditorEventMessage(parsed)
         } catch {
           appendLog({ type: "data_channel_message", label, body: event.data })
         }
@@ -574,6 +630,14 @@ export function Viewport() {
       setFrameText("No stream metadata yet")
       clearEventLog()
       startViewportInputPump()
+      try {
+        await refreshSessionSnapshot()
+      } catch (error) {
+        appendLog({
+          type: "session_snapshot_failed",
+          detail: error instanceof Error ? error.message : String(error),
+        })
+      }
 
       const peer = new window.RTCPeerConnection({
         bundlePolicy: "max-bundle",
@@ -767,6 +831,27 @@ export function Viewport() {
           },
           "reliable"
         )
+      },
+      refreshSessionSnapshot,
+      selectObject: async (objectId) => {
+        const accepted = await sendCommand(
+          {
+            type: "select_object",
+            objectId,
+          },
+          "reliable"
+        )
+        if (accepted) {
+          try {
+            await refreshSessionSnapshot()
+          } catch (error) {
+            appendLog({
+              type: "session_snapshot_failed",
+              detail: error instanceof Error ? error.message : String(error),
+            })
+          }
+        }
+        return accepted
       },
       setMode: async (nextMode) => {
         if (viewModeRef.current === nextMode) {

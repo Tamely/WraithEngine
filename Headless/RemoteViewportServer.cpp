@@ -587,10 +587,12 @@ void RemoteViewportServer::Stop() {
 }
 
 void RemoteViewportServer::OnSessionTransportConnected() {
+  m_TransportConnected.store(true);
   std::cout << SerializeConnected() << std::endl;
 }
 
 void RemoteViewportServer::OnSessionTransportDisconnected() {
+  m_TransportConnected.store(false);
   std::cout << SerializeDisconnected() << std::endl;
 }
 
@@ -827,6 +829,20 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
     SendAll(ClientSocket, Response.data(), Response.size());
     return false;
   }
+  if (Route == "/session") {
+    const WebRtcSessionStatus Status =
+        m_WebRtcSession != nullptr ? m_WebRtcSession->GetStatus()
+                                   : WebRtcSessionStatus{};
+    const std::string Body = SerializeSessionSnapshot(
+        m_Host.GetHeadlessLayer().GetSession().GetState(),
+        m_Host.GetHeadlessLayer().GetLocalUserId(),
+        m_TransportConnected.load(),
+        m_TransportConnected.load() ? "connected" : "disconnected",
+        Status.ConnectionState);
+    const std::string Response = JsonResponse("200 OK", Body);
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
   if (Route == "/frame") {
     LatestFrame Frame{};
     if (!TryGetLatestFrame(Frame)) {
@@ -920,6 +936,7 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
     m_Host.SetRemoteViewMode(Command->ViewMode);
     break;
   case HeadlessCommandType::SetLookActive:
+  case HeadlessCommandType::SelectObject:
   case HeadlessCommandType::UpdateViewportCamera:
     m_Host.SubmitRemoteCommand(Command->EditorPayload);
     break;
@@ -1213,6 +1230,7 @@ bool RemoteViewportServer::HandleWebSocketMessage(std::string_view Payload) {
     m_Host.SetRemoteViewMode(Command->ViewMode);
     return true;
   case HeadlessCommandType::SetLookActive:
+  case HeadlessCommandType::SelectObject:
   case HeadlessCommandType::UpdateViewportCamera:
     m_Host.SubmitRemoteCommand(Command->EditorPayload);
     return true;

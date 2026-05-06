@@ -128,7 +128,41 @@ std::string EventPayloadType(const EditorEventPayload &Payload) {
   if (std::holds_alternative<LookStateChangedEvent>(Payload)) {
     return "look_state_changed";
   }
-  return "command_rejected";
+  if (std::holds_alternative<CommandRejectedEvent>(Payload)) {
+    return "command_rejected";
+  }
+  return "selection_changed";
+}
+
+std::string SceneItemKindToString(EditorSceneItemKind Kind) {
+  switch (Kind) {
+  case EditorSceneItemKind::Folder:
+    return "folder";
+  case EditorSceneItemKind::Mesh:
+    return "mesh";
+  case EditorSceneItemKind::Light:
+    return "light";
+  case EditorSceneItemKind::Camera:
+    return "camera";
+  case EditorSceneItemKind::Actor:
+    return "actor";
+  }
+
+  return "mesh";
+}
+
+void SerializeSceneItem(std::ostringstream &Stream, const EditorSceneItem &Item) {
+  Stream << "{\"id\":\"" << EscapeJson(Item.Id) << "\",\"displayName\":\""
+         << EscapeJson(Item.DisplayName) << "\",\"kind\":\""
+         << SceneItemKindToString(Item.Kind) << "\",\"visible\":"
+         << (Item.Visible ? "true" : "false") << ",\"children\":[";
+  for (size_t Index = 0; Index < Item.Children.size(); ++Index) {
+    if (Index != 0) {
+      Stream << ",";
+    }
+    SerializeSceneItem(Stream, Item.Children[Index]);
+  }
+  Stream << "]}";
 }
 } // namespace
 
@@ -236,6 +270,20 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
              }},
     };
   }
+  if (*Type == "select_object") {
+    static const std::regex ObjectIdPattern(
+        R"json("objectId"\s*:\s*"((?:\\.|[^"])*)")json");
+    const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
+    if (!ObjectId.has_value()) {
+      Error = "`select_object` requires `objectId`.";
+      return std::nullopt;
+    }
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::SelectObject,
+        .EditorPayload =
+            {.Payload = SelectObjectCommand{.ObjectId = UnescapeJsonString(*ObjectId)}},
+    };
+  }
   if (*Type == "update_viewport_camera") {
     const auto Movement = MatchVec3(JsonLine, MovementPattern);
     if (!Movement.has_value()) {
@@ -267,6 +315,7 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   switch (Command->Type) {
   case HeadlessCommandType::SetViewMode:
   case HeadlessCommandType::SetLookActive:
+  case HeadlessCommandType::SelectObject:
   case HeadlessCommandType::UpdateViewportCamera:
   case HeadlessCommandType::Quit:
     return Command;
@@ -327,6 +376,14 @@ std::string SerializeEvent(const PublishedEditorEvent &Event) {
     Stream << ",\"user\":" << Rejected->User.Value
            << ",\"rejectedCommandId\":" << Rejected->RejectedCommand.Value
            << ",\"reason\":\"" << EscapeJson(Rejected->Reason) << "\"";
+  } else if (const auto *Selection =
+                 std::get_if<SelectionChangedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"user\":" << Selection->User.Value << ",\"objectId\":";
+    if (Selection->ObjectId.has_value()) {
+      Stream << "\"" << EscapeJson(*Selection->ObjectId) << "\"";
+    } else {
+      Stream << "null";
+    }
   }
   Stream << "}";
   return Stream.str();
@@ -472,6 +529,40 @@ std::string SerializeWebRtcIceCandidateList(
       Stream << ",";
     }
     Stream << SerializeWebRtcIceCandidate(Candidates[Index]);
+  }
+  Stream << "]}";
+  return Stream.str();
+}
+
+std::string SerializeSessionSnapshot(const EditorSessionState &State,
+                                     SessionUserId CurrentUser,
+                                     bool TransportConnected,
+                                     std::string_view TransportState,
+                                     std::string_view WebRtcConnectionState) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"session_snapshot\",\"sessionId\":" << State.Session.Value
+         << ",\"currentUserId\":" << CurrentUser.Value
+         << ",\"transport\":{\"connected\":"
+         << (TransportConnected ? "true" : "false") << ",\"state\":\""
+         << EscapeJson(TransportState) << "\",\"webrtcConnectionState\":\""
+         << EscapeJson(WebRtcConnectionState) << "\"},\"selections\":[";
+
+  bool FirstSelection = true;
+  for (const auto &[User, ObjectId] : State.SelectedObjectIds) {
+    if (!FirstSelection) {
+      Stream << ",";
+    }
+    FirstSelection = false;
+    Stream << "{\"userId\":" << User.Value << ",\"objectId\":\""
+           << EscapeJson(ObjectId) << "\"}";
+  }
+
+  Stream << "],\"sceneTree\":[";
+  for (size_t Index = 0; Index < State.SceneItems.size(); ++Index) {
+    if (Index != 0) {
+      Stream << ",";
+    }
+    SerializeSceneItem(Stream, State.SceneItems[Index]);
   }
   Stream << "]}";
   return Stream.str();

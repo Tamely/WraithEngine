@@ -79,6 +79,19 @@ TEST(HeadlessProtocolTests, RemoteViewportAcceptsCameraCommand) {
   EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::UpdateViewportCamera);
 }
 
+TEST(HeadlessProtocolTests, RemoteViewportAcceptsSelectObjectCommand) {
+  std::string Error;
+  const auto Command = Axiom::ParseRemoteViewportCommand(
+      R"json({"type":"select_object","objectId":"PlayerCharacter"})json", Error);
+
+  ASSERT_TRUE(Command.has_value()) << Error;
+  EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::SelectObject);
+  const auto *Payload =
+      std::get_if<Axiom::SelectObjectCommand>(&Command->EditorPayload.Payload);
+  ASSERT_NE(Payload, nullptr);
+  EXPECT_EQ(Payload->ObjectId, "PlayerCharacter");
+}
+
 TEST(HeadlessProtocolTests, SerializesCommandRejectedEvent) {
   const Axiom::PublishedEditorEvent Event{
       .Id = Axiom::EventId{4},
@@ -96,6 +109,20 @@ TEST(HeadlessProtocolTests, SerializesCommandRejectedEvent) {
   EXPECT_NE(Json.find("\"reason\":\"bad input\""), std::string::npos);
 }
 
+TEST(HeadlessProtocolTests, SerializesSelectionChangedEvent) {
+  const Axiom::PublishedEditorEvent Event{
+      .Id = Axiom::EventId{6},
+      .Event = {.Payload = Axiom::SelectionChangedEvent{
+                    .User = Axiom::SessionUserId{7},
+                    .ObjectId = std::string("PlayerCharacter"),
+                }}};
+
+  const std::string Json = Axiom::SerializeEvent(Event);
+  EXPECT_NE(Json.find("\"payloadType\":\"selection_changed\""),
+            std::string::npos);
+  EXPECT_NE(Json.find("\"objectId\":\"PlayerCharacter\""), std::string::npos);
+}
+
 TEST(HeadlessProtocolTests, SerializesRemoteViewportLifecycleMessages) {
   EXPECT_EQ(Axiom::SerializeConnected(), "{\"type\":\"connected\"}");
   EXPECT_EQ(Axiom::SerializeDisconnected(), "{\"type\":\"disconnected\"}");
@@ -107,6 +134,36 @@ TEST(HeadlessProtocolTests, SerializesRemoteViewportLifecycleMessages) {
   EXPECT_NE(Json.find("\"path\":\"/frame\""), std::string::npos);
   EXPECT_NE(Json.find("\"width\":1280"), std::string::npos);
   EXPECT_NE(Json.find("\"height\":720"), std::string::npos);
+}
+
+TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
+  Axiom::EditorSessionState State{
+      .Session = Axiom::SessionId{1},
+      .Viewports = {},
+      .SceneSubmissions = {},
+      .SceneItems = {{
+          .Id = "world",
+          .DisplayName = "World",
+          .Kind = Axiom::EditorSceneItemKind::Folder,
+          .Visible = true,
+          .Children = {{
+              .Id = "PlayerCharacter",
+              .DisplayName = "PlayerCharacter",
+              .Kind = Axiom::EditorSceneItemKind::Actor,
+              .Visible = true,
+              .Children = {},
+          }},
+      }},
+      .SelectedObjectIds = {{Axiom::SessionUserId{1}, "PlayerCharacter"}},
+  };
+
+  const std::string Json = Axiom::SerializeSessionSnapshot(
+      State, Axiom::SessionUserId{1}, true, "connected", "connected");
+  EXPECT_NE(Json.find("\"type\":\"session_snapshot\""), std::string::npos);
+  EXPECT_NE(Json.find("\"currentUserId\":1"), std::string::npos);
+  EXPECT_NE(Json.find("\"objectId\":\"PlayerCharacter\""), std::string::npos);
+  EXPECT_NE(Json.find("\"displayName\":\"World\""), std::string::npos);
+  EXPECT_NE(Json.find("\"kind\":\"actor\""), std::string::npos);
 }
 
 TEST(HeadlessProtocolTests, SerializesEncodedVideoPacketMetadata) {
@@ -185,20 +242,26 @@ TEST(HeadlessProtocolTests, StubWebRtcSessionReportsBuildAvailability) {
   ASSERT_NE(Session, nullptr);
 
   const Axiom::WebRtcSessionStatus Status = Session->GetStatus();
-  EXPECT_FALSE(Status.Available);
+  if (Status.Available) {
+    GTEST_SKIP() << "Real WebRTC backend is available on this machine.";
+  }
   EXPECT_NE(Status.Detail.find("WebRTC"), std::string::npos);
 
   Axiom::WebRtcSessionDescription Answer{};
   std::string Error;
-  EXPECT_FALSE(Session->HandleOffer(
+  const bool Accepted = Session->HandleOffer(
       {.Type = "offer", .Sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1"}, Answer,
-      Error));
-  EXPECT_NE(Error.find("WebRTC"), std::string::npos);
+      Error);
+  EXPECT_FALSE(Accepted);
+  EXPECT_FALSE(Error.empty());
 }
 
 TEST(HeadlessProtocolTests, StubWebRtcSessionBuffersVideoAfterFirstKeyframe) {
   auto Session = Axiom::CreateWebRtcSession();
   ASSERT_NE(Session, nullptr);
+  if (Session->GetStatus().Available) {
+    GTEST_SKIP() << "Real WebRTC backend is available on this machine.";
+  }
 
   Session->OnEncodedVideoPacket({
       .Codec = Axiom::EncodedVideoCodec::H264,

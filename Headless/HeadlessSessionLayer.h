@@ -19,6 +19,7 @@ public:
   void SubmitToTransport(ISessionTransport &Transport,
                          const EditorCommand &Command);
   EditorSession &GetSession() { return m_Session; }
+  SessionUserId GetLocalUserId() const { return m_LocalUserId; }
 
 private:
   CommandContext MakeContext() const;

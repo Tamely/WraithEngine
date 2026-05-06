@@ -11,6 +11,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -33,11 +34,24 @@ struct EditorViewportState {
   bool HasLastCursorPosition{false};
 };
 
+enum class EditorSceneItemKind { Folder, Mesh, Light, Camera, Actor };
+
+struct EditorSceneItem {
+  std::string Id;
+  std::string DisplayName;
+  EditorSceneItemKind Kind{EditorSceneItemKind::Mesh};
+  bool Visible{true};
+  std::vector<EditorSceneItem> Children;
+};
+
 struct EditorSessionState {
   SessionId Session;
   std::unordered_map<SessionUserId, EditorViewportState, SessionUserIdHash>
       Viewports;
   std::vector<RenderMeshSubmission> SceneSubmissions;
+  std::vector<EditorSceneItem> SceneItems;
+  std::unordered_map<SessionUserId, std::string, SessionUserIdHash>
+      SelectedObjectIds;
 };
 
 class EditorSession final : public IEditorCommandSink {
@@ -54,13 +68,18 @@ public:
 
   void EnsureViewportState(SessionUserId User);
   void SetSceneSubmissions(std::vector<RenderMeshSubmission> SceneSubmissions);
+  void SetSceneItems(std::vector<EditorSceneItem> SceneItems);
 
   const EditorSessionState &GetState() const { return m_State; }
   const EditorSessionConfig &GetConfig() const { return m_Config; }
   const EditorViewportState *FindViewport(SessionUserId User) const;
+  const EditorSceneItem *FindSceneItem(std::string_view ObjectId) const;
+  const std::string *FindSelectedObjectId(SessionUserId User) const;
 
 private:
   EditorViewportState &EnsureViewport(SessionUserId User);
+  const EditorSceneItem *FindSceneItemRecursive(
+      const std::vector<EditorSceneItem> &Items, std::string_view ObjectId) const;
   void ProcessCommand(const QueuedEditorCommand &QueuedCommand);
   bool ValidateCommand(const QueuedEditorCommand &QueuedCommand,
                        std::string &FailureReason);
@@ -68,6 +87,8 @@ private:
                      const UpdateViewportCameraCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SetLookActiveCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const SelectObjectCommand &Command);
   void PublishEvent(const EditorEvent &Event);
 
 private:

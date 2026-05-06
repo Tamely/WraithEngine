@@ -97,6 +97,7 @@ private:
   HeadlessSessionHost &m_Host;
   RemoteViewportServerOptions m_Options;
   std::atomic<bool> m_StopRequested{false};
+  std::atomic<bool> m_TransportConnected{false};
   uintptr_t m_ListenSocket{static_cast<uintptr_t>(~0ull)};
   std::thread m_AcceptThread;
 

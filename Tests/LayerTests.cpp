@@ -205,8 +205,10 @@ TEST(EditorSessionTests, CameraMovementUpdatesOnlySessionOwnedState) {
   Session.Subscribe(&Subscriber);
   Session.EnsureViewportState(Axiom::SessionUserId{7});
 
-  const glm::vec3 InitialPosition =
-      Session.FindViewport(Axiom::SessionUserId{7})->Camera.GetPosition();
+  const Axiom::Camera ExpectedBefore =
+      Session.FindViewport(Axiom::SessionUserId{7})->Camera;
+  Axiom::Camera Expected = ExpectedBefore;
+  Expected.MoveLocal(glm::vec3(1.5f, -0.25f, 0.75f));
 
   Session.Submit(MakeContext(),
                  {.Payload = Axiom::UpdateViewportCameraCommand{
@@ -218,8 +220,7 @@ TEST(EditorSessionTests, CameraMovementUpdatesOnlySessionOwnedState) {
   const Axiom::EditorViewportState *Viewport =
       Session.FindViewport(Axiom::SessionUserId{7});
   ASSERT_NE(Viewport, nullptr);
-  EXPECT_EQ(Viewport->Camera.GetPosition(),
-            InitialPosition + glm::vec3(1.5f, -0.25f, 0.75f));
+  EXPECT_EQ(Viewport->Camera.GetPosition(), Expected.GetPosition());
   ASSERT_EQ(Subscriber.Events.size(), 1u);
   EXPECT_TRUE(std::holds_alternative<Axiom::ViewportCameraUpdatedEvent>(
       Subscriber.Events.front().Event.Payload));
@@ -272,6 +273,9 @@ TEST(EditorSessionTests, CommandsDrainInFifoOrder) {
   RecordingSubscriber Subscriber;
   Session.Subscribe(&Subscriber);
   Session.EnsureViewportState(Axiom::SessionUserId{7});
+  Axiom::Camera Expected = Session.FindViewport(Axiom::SessionUserId{7})->Camera;
+  Expected.MoveLocal(glm::vec3(1.0f, 0.0f, 0.0f));
+  Expected.MoveLocal(glm::vec3(0.0f, 2.0f, 0.0f));
 
   Session.Submit(MakeContext(1),
                  {.Payload = Axiom::UpdateViewportCameraCommand{
@@ -288,8 +292,7 @@ TEST(EditorSessionTests, CommandsDrainInFifoOrder) {
   const Axiom::EditorViewportState *Viewport =
       Session.FindViewport(Axiom::SessionUserId{7});
   ASSERT_NE(Viewport, nullptr);
-  EXPECT_EQ(Viewport->Camera.GetPosition(),
-            glm::vec3(1.0f, 2.8f, 3.5f));
+  EXPECT_EQ(Viewport->Camera.GetPosition(), Expected.GetPosition());
   ASSERT_EQ(Subscriber.Events.size(), 2u);
   EXPECT_EQ(Subscriber.Events[0].Id, Axiom::EventId{1});
   EXPECT_EQ(Subscriber.Events[1].Id, Axiom::EventId{2});
@@ -330,6 +333,67 @@ TEST(EditorSessionTests, LookStateEnablesAuthoritativeRotationFromCursorDeltas) 
       Subscriber.Events[0].Event.Payload));
   EXPECT_TRUE(std::holds_alternative<Axiom::ViewportCameraUpdatedEvent>(
       Subscriber.Events[1].Event.Payload));
+}
+
+TEST(EditorSessionTests, SelectObjectPublishesAuthoritativeSelectionChangedEvent) {
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+  Session.SetSceneItems({{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {{
+          .Id = "PlayerCharacter",
+          .DisplayName = "PlayerCharacter",
+          .Kind = Axiom::EditorSceneItemKind::Actor,
+          .Visible = true,
+          .Children = {},
+      }},
+  }});
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SelectObjectCommand{
+                      .ObjectId = "PlayerCharacter",
+                  }});
+  Session.Tick();
+
+  const std::string *Selected = Session.FindSelectedObjectId(Axiom::SessionUserId{7});
+  ASSERT_NE(Selected, nullptr);
+  EXPECT_EQ(*Selected, "PlayerCharacter");
+  ASSERT_EQ(Subscriber.Events.size(), 1u);
+  ASSERT_TRUE(std::holds_alternative<Axiom::SelectionChangedEvent>(
+      Subscriber.Events.front().Event.Payload));
+  const auto &Event = std::get<Axiom::SelectionChangedEvent>(
+      Subscriber.Events.front().Event.Payload);
+  EXPECT_EQ(Event.User, Axiom::SessionUserId{7});
+  ASSERT_TRUE(Event.ObjectId.has_value());
+  EXPECT_EQ(*Event.ObjectId, "PlayerCharacter");
+}
+
+TEST(EditorSessionTests, SelectingUnknownObjectPublishesRejection) {
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+  Session.SetSceneItems({{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {},
+  }});
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SelectObjectCommand{
+                      .ObjectId = "does-not-exist",
+                  }});
+  Session.Tick();
+
+  EXPECT_EQ(Session.FindSelectedObjectId(Axiom::SessionUserId{7}), nullptr);
+  ASSERT_EQ(Subscriber.Events.size(), 1u);
+  ASSERT_TRUE(std::holds_alternative<Axiom::CommandRejectedEvent>(
+      Subscriber.Events.front().Event.Payload));
 }
 
 TEST(EditorInputSourceTests, GlfwInputSourceTranslatesPlatformStateIntoCommands) {

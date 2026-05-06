@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <variant>
 
 namespace Axiom {
@@ -27,8 +28,13 @@ struct SetLookActiveCommand {
   std::optional<glm::dvec2> CursorPosition;
 };
 
+struct SelectObjectCommand {
+  std::string ObjectId;
+};
+
 using EditorCommandPayload =
-    std::variant<UpdateViewportCameraCommand, SetLookActiveCommand>;
+    std::variant<UpdateViewportCameraCommand, SetLookActiveCommand,
+                 SelectObjectCommand>;
 
 struct EditorCommand {
   EditorCommandPayload Payload;

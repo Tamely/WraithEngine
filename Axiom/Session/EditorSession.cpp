@@ -44,9 +44,22 @@ void EditorSession::SetSceneSubmissions(
   m_State.SceneSubmissions = std::move(SceneSubmissions);
 }
 
+void EditorSession::SetSceneItems(std::vector<EditorSceneItem> SceneItems) {
+  m_State.SceneItems = std::move(SceneItems);
+}
+
 const EditorViewportState *EditorSession::FindViewport(SessionUserId User) const {
   const auto It = m_State.Viewports.find(User);
   return It != m_State.Viewports.end() ? &It->second : nullptr;
+}
+
+const EditorSceneItem *EditorSession::FindSceneItem(std::string_view ObjectId) const {
+  return FindSceneItemRecursive(m_State.SceneItems, ObjectId);
+}
+
+const std::string *EditorSession::FindSelectedObjectId(SessionUserId User) const {
+  const auto It = m_State.SelectedObjectIds.find(User);
+  return It != m_State.SelectedObjectIds.end() ? &It->second : nullptr;
 }
 
 EditorViewportState &EditorSession::EnsureViewport(SessionUserId User) {
@@ -60,6 +73,23 @@ EditorViewportState &EditorSession::EnsureViewport(SessionUserId User) {
   }
 
   return It->second;
+}
+
+const EditorSceneItem *EditorSession::FindSceneItemRecursive(
+    const std::vector<EditorSceneItem> &Items, std::string_view ObjectId) const {
+  for (const EditorSceneItem &Item : Items) {
+    if (Item.Id == ObjectId) {
+      return &Item;
+    }
+
+    if (const EditorSceneItem *Child =
+            FindSceneItemRecursive(Item.Children, ObjectId);
+        Child != nullptr) {
+      return Child;
+    }
+  }
+
+  return nullptr;
 }
 
 void EditorSession::ProcessCommand(const QueuedEditorCommand &QueuedCommand) {
@@ -96,6 +126,18 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
               &QueuedCommand.Command.Payload)) {
     if (Viewport.IsLooking && !CameraCommand->CursorPosition.has_value()) {
       FailureReason = "Look-enabled camera updates require cursor position.";
+      return false;
+    }
+  }
+
+  if (const auto *SelectionCommand =
+          std::get_if<SelectObjectCommand>(&QueuedCommand.Command.Payload)) {
+    if (SelectionCommand->ObjectId.empty()) {
+      FailureReason = "Selection commands require a non-empty object id.";
+      return false;
+    }
+    if (FindSceneItem(SelectionCommand->ObjectId) == nullptr) {
+      FailureReason = "Selection targeted an unknown object.";
       return false;
     }
   }
@@ -160,6 +202,21 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                       .IsLooking = Viewport.IsLooking,
                   }});
   }
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const SelectObjectCommand &Command) {
+  const auto Existing = m_State.SelectedObjectIds.find(QueuedCommand.Context.User);
+  if (Existing != m_State.SelectedObjectIds.end() &&
+      Existing->second == Command.ObjectId) {
+    return;
+  }
+
+  m_State.SelectedObjectIds[QueuedCommand.Context.User] = Command.ObjectId;
+  PublishEvent({.Payload = SelectionChangedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .ObjectId = Command.ObjectId,
+                }});
 }
 
 void EditorSession::PublishEvent(const EditorEvent &Event) {

@@ -1,156 +1,63 @@
 "use client"
 
+import { Settings, Lock, Unlock } from "lucide-react"
 import { useState } from "react"
-import { ChevronRight, ChevronDown, Settings, Lock, Unlock } from "lucide-react"
+import { useRemoteViewport } from "./remote-viewport-context"
 
-interface DetailsProps {
-  selectedItem: string | null
-}
-
-interface PropertySection {
-  name: string
-  expanded: boolean
-  properties: Property[]
-}
-
-interface Property {
-  name: string
-  value: string | number | boolean
-  type: "text" | "number" | "vector" | "bool" | "color"
-}
-
-const mockDetails: Record<string, PropertySection[]> = {
-  PlayerCharacter: [
-    {
-      name: "Transform",
-      expanded: true,
-      properties: [
-        { name: "Location", value: "X: 0.0, Y: 0.0, Z: 50.0", type: "vector" },
-        { name: "Rotation", value: "X: 0.0, Y: 0.0, Z: 0.0", type: "vector" },
-        { name: "Scale", value: "X: 1.0, Y: 1.0, Z: 1.0", type: "vector" },
-      ],
-    },
-    {
-      name: "Character",
-      expanded: true,
-      properties: [
-        { name: "Health", value: 100, type: "number" },
-        { name: "Speed", value: 600, type: "number" },
-        { name: "Jump Height", value: 420, type: "number" },
-        { name: "Can Jump", value: true, type: "bool" },
-      ],
-    },
-    {
-      name: "Rendering",
-      expanded: false,
-      properties: [
-        { name: "Visible", value: true, type: "bool" },
-        { name: "Cast Shadow", value: true, type: "bool" },
-      ],
-    },
-  ],
-}
-
-export function Details({ selectedItem }: DetailsProps) {
-  const [sections, setSections] = useState<PropertySection[]>(
-    selectedItem && mockDetails[selectedItem] ? mockDetails[selectedItem] : []
-  )
+export function Details() {
+  const { selectedObject } = useRemoteViewport()
   const [isLocked, setIsLocked] = useState(false)
 
-  const toggleSection = (sectionName: string) => {
-    setSections((prev) =>
-      prev.map((section) =>
-        section.name === sectionName ? { ...section, expanded: !section.expanded } : section
-      )
-    )
-  }
-
-  const displayedSections =
-    selectedItem && mockDetails[selectedItem] ? mockDetails[selectedItem] : sections
-
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex items-center justify-between h-8 bg-neutral-950 border-b border-neutral-800 px-2">
+    <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex h-8 items-center justify-between border-b border-neutral-800 bg-neutral-950 px-2">
         <div className="flex items-center gap-1">
-          <Settings className="w-4 h-4 text-neutral-400" />
+          <Settings className="h-4 w-4 text-neutral-400" />
           <span className="text-xs font-medium text-neutral-300">Details</span>
         </div>
         <button
+          className="rounded p-1 hover:bg-neutral-800"
           onClick={() => setIsLocked(!isLocked)}
-          className="p-1 hover:bg-neutral-800 rounded"
+          type="button"
         >
           {isLocked ? (
-            <Lock className="w-3.5 h-3.5 text-neutral-400" />
+            <Lock className="h-3.5 w-3.5 text-neutral-400" />
           ) : (
-            <Unlock className="w-3.5 h-3.5 text-neutral-500" />
+            <Unlock className="h-3.5 w-3.5 text-neutral-500" />
           )}
         </button>
       </div>
       <div className="flex-1 overflow-y-auto">
-        {selectedItem ? (
-          <>
-            <div className="p-2 border-b border-neutral-800">
-              <span className="text-xs text-neutral-400">Selected: </span>
-              <span className="text-xs text-white font-medium">{selectedItem}</span>
-            </div>
-            {displayedSections.map((section) => (
-              <div key={section.name} className="border-b border-neutral-800">
-                <button
-                  onClick={() => toggleSection(section.name)}
-                  className="flex items-center gap-1 w-full px-2 py-1.5 hover:bg-neutral-800"
-                >
-                  {section.expanded ? (
-                    <ChevronDown className="w-3 h-3 text-neutral-400" />
-                  ) : (
-                    <ChevronRight className="w-3 h-3 text-neutral-400" />
-                  )}
-                  <span className="text-xs font-medium text-neutral-300">{section.name}</span>
-                </button>
-                {section.expanded && (
-                  <div className="pb-2">
-                    {section.properties.map((prop) => (
-                      <div
-                        key={prop.name}
-                        className="flex items-center gap-2 px-4 py-1 hover:bg-neutral-800/50"
-                      >
-                        <span className="text-xs text-neutral-500 w-24 truncate">{prop.name}</span>
-                        <div className="flex-1">
-                          {prop.type === "bool" ? (
-                            <input
-                              type="checkbox"
-                              checked={prop.value as boolean}
-                              readOnly
-                              className="w-4 h-4 rounded bg-neutral-800 border-neutral-600"
-                            />
-                          ) : prop.type === "color" ? (
-                            <div className="flex items-center gap-2">
-                              <div
-                                className="w-6 h-6 rounded border border-neutral-600"
-                                style={{ backgroundColor: prop.value as string }}
-                              />
-                              <span className="text-xs text-neutral-300">{prop.value}</span>
-                            </div>
-                          ) : (
-                            <input
-                              type="text"
-                              value={String(prop.value)}
-                              readOnly
-                              className="w-full px-2 py-0.5 text-xs bg-neutral-900 border border-neutral-700 rounded text-neutral-300 outline-none focus:border-neutral-500"
-                            />
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+        {selectedObject ? (
+          <div className="space-y-4 p-3">
+            <section className="rounded border border-neutral-800 bg-neutral-950/60 p-3">
+              <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">
+                Identity
+              </p>
+              <div className="mt-3 space-y-2">
+                <DetailRow label="Name" value={selectedObject.displayName} />
+                <DetailRow label="Object ID" value={selectedObject.id} />
+                <DetailRow label="Type" value={selectedObject.kind} />
+                <DetailRow label="Visible" value={selectedObject.visible ? "true" : "false"} />
               </div>
-            ))}
-          </>
+            </section>
+          </div>
         ) : (
-          <div className="flex items-center justify-center h-full text-neutral-600 text-xs">
+          <div className="flex h-full items-center justify-center text-xs text-neutral-600">
             Select an object to view details
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="w-20 shrink-0 text-xs text-neutral-500">{label}</span>
+      <div className="min-w-0 flex-1 rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-300">
+        {value}
       </div>
     </div>
   )

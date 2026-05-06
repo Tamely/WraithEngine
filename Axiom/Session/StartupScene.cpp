@@ -11,6 +11,80 @@
 #endif
 
 namespace Axiom {
+namespace {
+std::vector<EditorSceneItem> BuildStartupSceneItems() {
+  return {{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children =
+          {{
+               .Id = "lighting",
+               .DisplayName = "Lighting",
+               .Kind = EditorSceneItemKind::Folder,
+               .Visible = true,
+               .Children =
+                   {{
+                        .Id = "directional-light",
+                        .DisplayName = "DirectionalLight",
+                        .Kind = EditorSceneItemKind::Light,
+                        .Visible = true,
+                    },
+                    {
+                        .Id = "sky-light",
+                        .DisplayName = "SkyLight",
+                        .Kind = EditorSceneItemKind::Light,
+                        .Visible = true,
+                    }},
+           },
+           {
+               .Id = "geometry",
+               .DisplayName = "Geometry",
+               .Kind = EditorSceneItemKind::Folder,
+               .Visible = true,
+               .Children =
+                   {{
+                        .Id = "floor",
+                        .DisplayName = "Floor_Platform",
+                        .Kind = EditorSceneItemKind::Mesh,
+                        .Visible = true,
+                    },
+                    {
+                        .Id = "crate-1",
+                        .DisplayName = "Crate_01",
+                        .Kind = EditorSceneItemKind::Mesh,
+                        .Visible = true,
+                    },
+                    {
+                        .Id = "crate-2",
+                        .DisplayName = "Crate_02",
+                        .Kind = EditorSceneItemKind::Mesh,
+                        .Visible = true,
+                    },
+                    {
+                        .Id = "wall-panel",
+                        .DisplayName = "WallPanel_SciFi",
+                        .Kind = EditorSceneItemKind::Mesh,
+                        .Visible = true,
+                    }},
+           },
+           {
+               .Id = "PlayerCharacter",
+               .DisplayName = "PlayerCharacter",
+               .Kind = EditorSceneItemKind::Actor,
+               .Visible = true,
+           },
+           {
+               .Id = "main-camera",
+               .DisplayName = "MainCamera",
+               .Kind = EditorSceneItemKind::Camera,
+               .Visible = true,
+           }},
+  }};
+}
+} // namespace
+
 bool LoadStartupScene(EditorSession &Session) {
   const auto MeshPath =
       std::filesystem::path(AXIOM_CONTENT_DIR) / "basicmesh.glb";
@@ -22,6 +96,7 @@ bool LoadStartupScene(EditorSession &Session) {
   }
 
   Session.SetSceneSubmissions(std::move(Submissions));
+  Session.SetSceneItems(BuildStartupSceneItems());
   return true;
 }
 } // namespace Axiom
