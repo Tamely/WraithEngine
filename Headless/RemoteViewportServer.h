@@ -1,12 +1,14 @@
 #pragma once
 
 #include "HeadlessSessionHost.h"
+#include "WebRtcSession.h"
 
 #include <Remote/SessionTransport.h>
 #include <Renderer/RendererBackend.h>
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -38,6 +40,8 @@ public:
   void OnSessionTransportEditorEvent(
       const PublishedEditorEvent &Event) override;
   void OnSessionTransportViewportFrame(const ViewportFrame &Frame) override;
+  void OnSessionTransportEncodedVideoPacket(
+      const EncodedVideoPacket &Packet) override;
 
 private:
   struct LatestFrame {
@@ -45,6 +49,11 @@ private:
     uint32_t Width{0};
     uint32_t Height{0};
     std::vector<unsigned char> JpegBytes;
+  };
+
+  struct LatestEncodedPacket {
+    EncodedVideoPacket Packet;
+    bool HasPacket{false};
   };
 
   struct WebSocketClient {
@@ -66,14 +75,23 @@ private:
   bool HandleGetRequest(uintptr_t ClientSocketValue, std::string_view Path);
   bool HandlePostRequest(uintptr_t ClientSocketValue, std::string_view Path,
                          std::string_view Body);
+  bool HandleWebRtcOfferRequest(uintptr_t ClientSocketValue,
+                                std::string_view Body);
+  bool HandleWebRtcIceCandidateRequest(uintptr_t ClientSocketValue,
+                                       std::string_view Body);
+  bool HandleWebRtcCloseRequest(uintptr_t ClientSocketValue,
+                                std::string_view Body);
   bool HandleWebSocketUpgrade(uintptr_t ClientSocketValue,
                               std::string_view HeaderBlock,
                               std::string_view Path);
   void RunWebSocketSession(uintptr_t ClientSocketValue);
   bool HandleWebSocketMessage(std::string_view Payload);
 
+  bool ShouldPublishJpegFrames() const;
   void SetLatestFrame(const CapturedFrame &Frame);
   bool TryGetLatestFrame(LatestFrame &Frame) const;
+  void SetLatestEncodedPacket(const EncodedVideoPacket &Packet);
+  bool TryGetLatestEncodedPacket(LatestEncodedPacket &Packet) const;
 
 private:
   HeadlessSessionHost &m_Host;
@@ -84,10 +102,12 @@ private:
 
   mutable std::mutex m_FrameMutex;
   LatestFrame m_LatestFrame;
+  LatestEncodedPacket m_LatestEncodedPacket;
 
   mutable std::mutex m_ClientMutex;
   std::vector<WebSocketClient> m_WebSocketClients;
   mutable std::mutex m_SendMutex;
+  std::unique_ptr<IWebRtcSession> m_WebRtcSession;
 };
 
 bool ParseRemoteViewportServerOptions(int argc, char **argv,

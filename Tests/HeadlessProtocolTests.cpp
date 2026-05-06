@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "../Headless/HeadlessCommandProtocol.h"
+#include "../Headless/WebRtcSession.h"
 
 #include <string>
 
@@ -106,4 +107,140 @@ TEST(HeadlessProtocolTests, SerializesRemoteViewportLifecycleMessages) {
   EXPECT_NE(Json.find("\"path\":\"/frame\""), std::string::npos);
   EXPECT_NE(Json.find("\"width\":1280"), std::string::npos);
   EXPECT_NE(Json.find("\"height\":720"), std::string::npos);
+}
+
+TEST(HeadlessProtocolTests, SerializesEncodedVideoPacketMetadata) {
+  const Axiom::EncodedVideoPacket Packet{
+      .Codec = Axiom::EncodedVideoCodec::H264,
+      .FrameIndex = 12,
+      .Width = 1920,
+      .Height = 1080,
+      .IsKeyframe = true,
+      .Bytes = {std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
+                std::byte{0x01}, std::byte{0x67}},
+  };
+
+  const std::string Json =
+      Axiom::SerializeEncodedVideoPacketMetadata(Packet, "/h264");
+  EXPECT_NE(Json.find("\"type\":\"encoded_video\""), std::string::npos);
+  EXPECT_NE(Json.find("\"codec\":\"h264\""), std::string::npos);
+  EXPECT_NE(Json.find("\"frameIndex\":12"), std::string::npos);
+  EXPECT_NE(Json.find("\"path\":\"/h264\""), std::string::npos);
+  EXPECT_NE(Json.find("\"width\":1920"), std::string::npos);
+  EXPECT_NE(Json.find("\"height\":1080"), std::string::npos);
+  EXPECT_NE(Json.find("\"isKeyframe\":true"), std::string::npos);
+  EXPECT_NE(Json.find("\"byteLength\":5"), std::string::npos);
+}
+
+TEST(HeadlessProtocolTests, ParsesWebRtcOfferDescription) {
+  std::string Error;
+  const auto Description = Axiom::ParseWebRtcSessionDescription(
+      R"json({"type":"offer","sdp":"v=0\r\no=- 0 0 IN IP4 127.0.0.1"})json",
+      Error);
+
+  ASSERT_TRUE(Description.has_value()) << Error;
+  EXPECT_EQ(Description->Type, "offer");
+  EXPECT_NE(Description->Sdp.find("v=0"), std::string::npos);
+}
+
+TEST(HeadlessProtocolTests, RejectsWebRtcDescriptionWithoutSdp) {
+  std::string Error;
+  const auto Description = Axiom::ParseWebRtcSessionDescription(
+      R"json({"type":"offer"})json", Error);
+
+  EXPECT_FALSE(Description.has_value());
+  EXPECT_NE(Error.find("sdp"), std::string::npos);
+}
+
+TEST(HeadlessProtocolTests, ParsesWebRtcIceCandidate) {
+  std::string Error;
+  const auto Candidate = Axiom::ParseWebRtcIceCandidate(
+      R"json({"candidate":"candidate:1 1 UDP 2122252543 10.0.0.1 54000 typ host","sdpMid":"video","sdpMLineIndex":0})json",
+      Error);
+
+  ASSERT_TRUE(Candidate.has_value()) << Error;
+  EXPECT_NE(Candidate->Candidate.find("candidate:"), std::string::npos);
+  ASSERT_TRUE(Candidate->SdpMid.has_value());
+  EXPECT_EQ(*Candidate->SdpMid, "video");
+  ASSERT_TRUE(Candidate->SdpMLineIndex.has_value());
+  EXPECT_EQ(*Candidate->SdpMLineIndex, 0);
+}
+
+TEST(HeadlessProtocolTests, SerializesWebRtcStatus) {
+  Axiom::WebRtcVideoStatus VideoStatus{};
+  const std::string Json = Axiom::SerializeWebRtcStatus(
+      false, false, "new", "new", "disabled", "", 0, VideoStatus);
+
+  EXPECT_NE(Json.find("\"type\":\"webrtc_status\""), std::string::npos);
+  EXPECT_NE(Json.find("\"enabled\":false"), std::string::npos);
+  EXPECT_NE(Json.find("\"available\":false"), std::string::npos);
+  EXPECT_NE(Json.find("\"video\":{\"codec\":\"h264\""), std::string::npos);
+  EXPECT_NE(Json.find("\"waitingForKeyframe\":true"), std::string::npos);
+  EXPECT_NE(Json.find("\"label\":\"editor-events\""), std::string::npos);
+  EXPECT_NE(Json.find("\"label\":\"viewport-input\""), std::string::npos);
+}
+
+TEST(HeadlessProtocolTests, StubWebRtcSessionReportsBuildAvailability) {
+  auto Session = Axiom::CreateWebRtcSession();
+  ASSERT_NE(Session, nullptr);
+
+  const Axiom::WebRtcSessionStatus Status = Session->GetStatus();
+  EXPECT_FALSE(Status.Available);
+  EXPECT_NE(Status.Detail.find("WebRTC"), std::string::npos);
+
+  Axiom::WebRtcSessionDescription Answer{};
+  std::string Error;
+  EXPECT_FALSE(Session->HandleOffer(
+      {.Type = "offer", .Sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1"}, Answer,
+      Error));
+  EXPECT_NE(Error.find("WebRTC"), std::string::npos);
+}
+
+TEST(HeadlessProtocolTests, StubWebRtcSessionBuffersVideoAfterFirstKeyframe) {
+  auto Session = Axiom::CreateWebRtcSession();
+  ASSERT_NE(Session, nullptr);
+
+  Session->OnEncodedVideoPacket({
+      .Codec = Axiom::EncodedVideoCodec::H264,
+      .FrameIndex = 10,
+      .Width = 1280,
+      .Height = 720,
+      .IsKeyframe = false,
+      .Bytes = {std::byte{0x01}},
+  });
+
+  auto Status = Session->GetStatus();
+  EXPECT_EQ(Status.Video.PendingPacketCount, 0u);
+  EXPECT_EQ(Status.Video.DroppedPacketCount, 1u);
+  EXPECT_TRUE(Status.Video.WaitingForKeyframe);
+
+  Session->OnEncodedVideoPacket({
+      .Codec = Axiom::EncodedVideoCodec::H264,
+      .FrameIndex = 11,
+      .Width = 1280,
+      .Height = 720,
+      .IsKeyframe = true,
+      .Bytes = {std::byte{0x02}},
+  });
+  Session->OnEncodedVideoPacket({
+      .Codec = Axiom::EncodedVideoCodec::H264,
+      .FrameIndex = 12,
+      .Width = 1280,
+      .Height = 720,
+      .IsKeyframe = false,
+      .Bytes = {std::byte{0x03}},
+  });
+
+  Status = Session->GetStatus();
+  EXPECT_EQ(Status.Video.PendingPacketCount, 2u);
+  ASSERT_TRUE(Status.Video.LastFrameIndex.has_value());
+  EXPECT_EQ(*Status.Video.LastFrameIndex, 12u);
+  ASSERT_TRUE(Status.Video.LastKeyframeFrameIndex.has_value());
+  EXPECT_EQ(*Status.Video.LastKeyframeFrameIndex, 11u);
+
+  const auto Packets = Session->TakePendingEncodedVideoPackets();
+  ASSERT_EQ(Packets.size(), 2u);
+  EXPECT_TRUE(Packets.front().IsKeyframe);
+  EXPECT_EQ(Packets.front().FrameIndex, 11u);
+  EXPECT_EQ(Packets.back().FrameIndex, 12u);
 }

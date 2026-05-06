@@ -30,6 +30,60 @@ std::optional<double> ParseDouble(std::string_view Value) {
   return Result;
 }
 
+std::string UnescapeJsonString(std::string_view Value) {
+  std::string Unescaped;
+  Unescaped.reserve(Value.size());
+  for (size_t Index = 0; Index < Value.size(); ++Index) {
+    const char Character = Value[Index];
+    if (Character != '\\' || Index + 1 >= Value.size()) {
+      Unescaped.push_back(Character);
+      continue;
+    }
+
+    const char Escape = Value[++Index];
+    switch (Escape) {
+    case '\\':
+      Unescaped.push_back('\\');
+      break;
+    case '"':
+      Unescaped.push_back('"');
+      break;
+    case '/':
+      Unescaped.push_back('/');
+      break;
+    case 'b':
+      Unescaped.push_back('\b');
+      break;
+    case 'f':
+      Unescaped.push_back('\f');
+      break;
+    case 'n':
+      Unescaped.push_back('\n');
+      break;
+    case 'r':
+      Unescaped.push_back('\r');
+      break;
+    case 't':
+      Unescaped.push_back('\t');
+      break;
+    default:
+      Unescaped.push_back(Escape);
+      break;
+    }
+  }
+  return Unescaped;
+}
+
+std::optional<uint16_t> ParseUnsigned16(std::string_view Value) {
+  uint16_t Result = 0;
+  const auto [Ptr, Ec] =
+      std::from_chars(Value.data(), Value.data() + Value.size(), Result);
+  if (Ec != std::errc{} || Ptr != Value.data() + Value.size()) {
+    return std::nullopt;
+  }
+  return Result;
+}
+
 template <typename MatchType>
 std::string_view MatchView(const MatchType &Match, size_t Index) {
   return std::string_view(&*Match[Index].first, Match[Index].length());
@@ -305,6 +359,181 @@ std::string SerializeFrameMetadata(uint64_t FrameIndex, uint32_t Width,
   Stream << "{\"type\":\"frame\",\"frameIndex\":" << FrameIndex
          << ",\"path\":\"" << EscapeJson(FrameUrl) << "\",\"width\":" << Width
          << ",\"height\":" << Height << "}";
+  return Stream.str();
+}
+
+std::string SerializeEncodedVideoPacketMetadata(
+    const EncodedVideoPacket &Packet, std::string_view PacketUrl) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"encoded_video\",\"codec\":\"";
+  switch (Packet.Codec) {
+  case EncodedVideoCodec::H264:
+    Stream << "h264";
+    break;
+  }
+  Stream << "\",\"frameIndex\":" << Packet.FrameIndex
+         << ",\"path\":\"" << EscapeJson(PacketUrl) << "\",\"width\":"
+         << Packet.Width << ",\"height\":" << Packet.Height
+         << ",\"isKeyframe\":"
+         << (Packet.IsKeyframe ? "true" : "false")
+         << ",\"byteLength\":" << Packet.Bytes.size() << "}";
+  return Stream.str();
+}
+
+std::optional<WebRtcSessionDescription>
+ParseWebRtcSessionDescription(std::string_view JsonLine, std::string &Error) {
+  static const std::regex TypePattern(R"json("type"\s*:\s*"([^"]+)")json");
+  static const std::regex SdpPattern(R"json("sdp"\s*:\s*"((?:\\.|[^"])*)")json");
+
+  const auto Type = MatchString(JsonLine, TypePattern);
+  if (!Type.has_value()) {
+    Error = "WebRTC session description is missing a string `type` field.";
+    return std::nullopt;
+  }
+
+  const auto Sdp = MatchString(JsonLine, SdpPattern);
+  if (!Sdp.has_value()) {
+    Error = "WebRTC session description is missing a string `sdp` field.";
+    return std::nullopt;
+  }
+
+  if (*Type != "offer" && *Type != "answer") {
+    Error = "Unsupported WebRTC session description type: " + *Type;
+    return std::nullopt;
+  }
+
+  return WebRtcSessionDescription{.Type = *Type,
+                                  .Sdp = UnescapeJsonString(*Sdp)};
+}
+
+std::optional<WebRtcIceCandidate>
+ParseWebRtcIceCandidate(std::string_view JsonLine, std::string &Error) {
+  static const std::regex CandidatePattern(
+      R"json("candidate"\s*:\s*"((?:\\.|[^"])*)")json");
+  static const std::regex MidPattern(R"json("sdpMid"\s*:\s*"([^"]+)")json");
+  static const std::regex MLinePattern(
+      R"json("sdpMLineIndex"\s*:\s*([0-9]+))json");
+
+  const auto Candidate = MatchString(JsonLine, CandidatePattern);
+  if (!Candidate.has_value()) {
+    Error = "WebRTC ICE candidate is missing a string `candidate` field.";
+    return std::nullopt;
+  }
+
+  WebRtcIceCandidate Parsed{.Candidate = UnescapeJsonString(*Candidate)};
+  if (const auto Mid = MatchString(JsonLine, MidPattern); Mid.has_value()) {
+    Parsed.SdpMid = UnescapeJsonString(*Mid);
+  }
+
+  const auto MLineValue = MatchString(JsonLine, MLinePattern);
+  if (MLineValue.has_value()) {
+    const auto ParsedIndex = ParseUnsigned16(*MLineValue);
+    if (!ParsedIndex.has_value()) {
+      Error = "WebRTC ICE candidate `sdpMLineIndex` must be an unsigned integer.";
+      return std::nullopt;
+    }
+    Parsed.SdpMLineIndex = *ParsedIndex;
+  }
+
+  return Parsed;
+}
+
+std::string SerializeWebRtcSessionDescription(
+    const WebRtcSessionDescription &Description, std::string_view SessionId) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"" << EscapeJson(Description.Type) << "\",\"sdp\":\""
+         << EscapeJson(Description.Sdp) << "\"";
+  if (!SessionId.empty()) {
+    Stream << ",\"sessionId\":\"" << EscapeJson(SessionId) << "\"";
+  }
+  Stream << "}";
+  return Stream.str();
+}
+
+std::string SerializeWebRtcIceCandidate(const WebRtcIceCandidate &Candidate) {
+  std::ostringstream Stream;
+  Stream << "{\"candidate\":\"" << EscapeJson(Candidate.Candidate) << "\"";
+  if (Candidate.SdpMid.has_value()) {
+    Stream << ",\"sdpMid\":\"" << EscapeJson(*Candidate.SdpMid) << "\"";
+  }
+  if (Candidate.SdpMLineIndex.has_value()) {
+    Stream << ",\"sdpMLineIndex\":" << *Candidate.SdpMLineIndex;
+  }
+  Stream << "}";
+  return Stream.str();
+}
+
+std::string SerializeWebRtcIceCandidateList(
+    std::span<const WebRtcIceCandidate> Candidates) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"ice_candidates\",\"candidates\":[";
+  for (size_t Index = 0; Index < Candidates.size(); ++Index) {
+    if (Index != 0) {
+      Stream << ",";
+    }
+    Stream << SerializeWebRtcIceCandidate(Candidates[Index]);
+  }
+  Stream << "]}";
+  return Stream.str();
+}
+
+std::string SerializeWebRtcStatus(bool Enabled, bool Available,
+                                  std::string_view SignalingState,
+                                  std::string_view ConnectionState,
+                                  std::string_view Detail,
+                                  std::string_view SessionId,
+                                  size_t PendingLocalIceCandidateCount,
+                                  const WebRtcVideoStatus &VideoStatus) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"webrtc_status\",\"enabled\":"
+         << (Enabled ? "true" : "false") << ",\"available\":"
+         << (Available ? "true" : "false") << ",\"signalingState\":\""
+         << EscapeJson(SignalingState) << "\",\"connectionState\":\""
+         << EscapeJson(ConnectionState) << "\",\"detail\":\""
+         << EscapeJson(Detail) << "\",\"sessionId\":\""
+         << EscapeJson(SessionId) << "\",\"pendingLocalIceCandidateCount\":"
+         << PendingLocalIceCandidateCount << ",\"video\":{\"codec\":\""
+         << EscapeJson(VideoStatus.Codec) << "\",\"senderBound\":"
+         << (VideoStatus.SenderBound ? "true" : "false")
+         << ",\"waitingForKeyframe\":"
+         << (VideoStatus.WaitingForKeyframe ? "true" : "false")
+         << ",\"hasOutstandingSendRequest\":"
+         << (VideoStatus.HasOutstandingSendRequest ? "true" : "false")
+         << ",\"pendingPacketCount\":" << VideoStatus.PendingPacketCount
+         << ",\"droppedPacketCount\":" << VideoStatus.DroppedPacketCount
+         << ",\"droppedStaleRequestCount\":"
+         << VideoStatus.DroppedStaleRequestCount
+         << ",\"droppedStalePacketCount\":"
+         << VideoStatus.DroppedStalePacketCount
+         << ",\"lastFrameIndex\":";
+  if (VideoStatus.LastFrameIndex.has_value()) {
+    Stream << *VideoStatus.LastFrameIndex;
+  } else {
+    Stream << "null";
+  }
+  Stream << ",\"latestRequestedFrameIndex\":";
+  if (VideoStatus.LatestRequestedFrameIndex.has_value()) {
+    Stream << *VideoStatus.LatestRequestedFrameIndex;
+  } else {
+    Stream << "null";
+  }
+  Stream << ",\"latestEncodedFrameIndex\":";
+  if (VideoStatus.LatestEncodedFrameIndex.has_value()) {
+    Stream << *VideoStatus.LatestEncodedFrameIndex;
+  } else {
+    Stream << "null";
+  }
+  Stream << ",\"lastKeyframeFrameIndex\":";
+  if (VideoStatus.LastKeyframeFrameIndex.has_value()) {
+    Stream << *VideoStatus.LastKeyframeFrameIndex;
+  } else {
+    Stream << "null";
+  }
+  Stream << "},\"dataChannels\":["
+         << "{\"label\":\"editor-events\",\"ordered\":true,"
+            "\"maxRetransmits\":null},"
+         << "{\"label\":\"viewport-input\",\"ordered\":false,"
+            "\"maxRetransmits\":0}]}";
   return Stream.str();
 }
 

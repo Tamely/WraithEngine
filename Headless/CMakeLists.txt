@@ -3,6 +3,7 @@ add_executable(AxiomHeadless
   HeadlessCommandProtocol.cpp
   HeadlessSessionHost.cpp
   HeadlessSessionLayer.cpp
+  WebRtcSession.cpp
 )
 
 add_executable(AxiomRemoteViewportDevClient
@@ -10,6 +11,7 @@ add_executable(AxiomRemoteViewportDevClient
   HeadlessCommandProtocol.cpp
   HeadlessSessionHost.cpp
   HeadlessSessionLayer.cpp
+  WebRtcSession.cpp
 )
 
 target_include_directories(AxiomHeadless PRIVATE
@@ -30,7 +32,20 @@ add_executable(AxiomRemoteViewportServer
   HeadlessCommandProtocol.cpp
   HeadlessSessionHost.cpp
   HeadlessSessionLayer.cpp
+  WebRtcSession.cpp
 )
+
+if(APPLE)
+  target_sources(AxiomHeadless PRIVATE
+    MacOSWebRtcSession.mm
+  )
+  target_sources(AxiomRemoteViewportDevClient PRIVATE
+    MacOSWebRtcSession.mm
+  )
+  target_sources(AxiomRemoteViewportServer PRIVATE
+    MacOSWebRtcSession.mm
+  )
+endif()
 
 target_include_directories(AxiomRemoteViewportServer PRIVATE
   "${CMAKE_SOURCE_DIR}/ThirdParty/glfw/deps"

@@ -503,7 +503,14 @@ std::vector<unsigned char> BuildWebSocketFrame(uint8_t Opcode, const void *Data,
 
 RemoteViewportServer::RemoteViewportServer(
     HeadlessSessionHost &Host, const RemoteViewportServerOptions &Options)
-    : m_Host(Host), m_Options(Options) {}
+    : m_Host(Host), m_Options(Options), m_WebRtcSession(CreateWebRtcSession()) {
+  if (m_WebRtcSession != nullptr) {
+    m_WebRtcSession->SetCommandMessageHandler(
+        [this](std::string_view Payload) {
+          HandleWebSocketMessage(Payload);
+        });
+  }
+}
 
 RemoteViewportServer::~RemoteViewportServer() { Stop(); }
 
@@ -576,6 +583,9 @@ void RemoteViewportServer::Stop() {
   }
 
   m_Host.GetTransport().Disconnect(this);
+  if (m_WebRtcSession != nullptr) {
+    m_WebRtcSession->ResetPeer("server_stopped");
+  }
 }
 
 void RemoteViewportServer::OnSessionTransportConnected() {
@@ -588,11 +598,23 @@ void RemoteViewportServer::OnSessionTransportDisconnected() {
 
 void RemoteViewportServer::OnSessionTransportEditorEvent(
     const PublishedEditorEvent &Event) {
-  BroadcastTextMessage(SerializeEvent(Event));
+  const std::string Message = SerializeEvent(Event);
+  BroadcastTextMessage(Message);
+  if (m_WebRtcSession != nullptr) {
+    m_WebRtcSession->SendReliableMessage(Message);
+  }
 }
 
 void RemoteViewportServer::OnSessionTransportViewportFrame(
     const ViewportFrame &Frame) {
+  if (m_WebRtcSession != nullptr) {
+    m_WebRtcSession->OnViewportFrame(Frame);
+  }
+
+  if (!ShouldPublishJpegFrames()) {
+    return;
+  }
+
   const auto Captured = ConvertFrame(Frame);
   if (!Captured.has_value()) {
     BroadcastTextMessage(SerializeError("Unsupported viewport frame format."));
@@ -600,6 +622,14 @@ void RemoteViewportServer::OnSessionTransportViewportFrame(
   }
 
   SetLatestFrame(*Captured);
+}
+
+void RemoteViewportServer::OnSessionTransportEncodedVideoPacket(
+    const EncodedVideoPacket &Packet) {
+  SetLatestEncodedPacket(Packet);
+  if (m_WebRtcSession != nullptr) {
+    m_WebRtcSession->OnEncodedVideoPacket(Packet);
+  }
 }
 
 void RemoteViewportServer::AcceptLoop() {
@@ -784,6 +814,29 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
     SendAll(ClientSocket, Response.data(), Response.size());
     return false;
   }
+  if (Route == "/webrtc") {
+    const WebRtcSessionStatus Status =
+        m_WebRtcSession != nullptr ? m_WebRtcSession->GetStatus()
+                                   : WebRtcSessionStatus{};
+    const std::string Body =
+        SerializeWebRtcStatus(Status.Enabled, Status.Available,
+                              Status.SignalingState, Status.ConnectionState,
+                              Status.Detail, Status.SessionId,
+                              Status.PendingLocalIceCandidateCount,
+                              Status.Video);
+    const std::string Response = JsonResponse("200 OK", Body);
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+  if (Route == "/webrtc/ice-candidates") {
+    const std::vector<WebRtcIceCandidate> Candidates =
+        m_WebRtcSession != nullptr ? m_WebRtcSession->TakePendingLocalIceCandidates()
+                                   : std::vector<WebRtcIceCandidate>{};
+    const std::string Body = SerializeWebRtcIceCandidateList(Candidates);
+    const std::string Response = JsonResponse("200 OK", Body);
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
   if (Route == "/frame") {
     LatestFrame Frame{};
     if (!TryGetLatestFrame(Frame)) {
@@ -801,6 +854,40 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
     SendAll(ClientSocket, Frame.JpegBytes.data(), Frame.JpegBytes.size());
     return false;
   }
+  if (Route == "/h264/metadata") {
+    LatestEncodedPacket Packet{};
+    if (!TryGetLatestEncodedPacket(Packet)) {
+      const std::string Response = JsonResponse(
+          "404 Not Found",
+          SerializeError("No encoded H.264 packet is available yet."));
+      SendAll(ClientSocket, Response.data(), Response.size());
+      return false;
+    }
+
+    const std::string Body =
+        SerializeEncodedVideoPacketMetadata(Packet.Packet, "/h264");
+    const std::string Response = JsonResponse("200 OK", Body);
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+  if (Route == "/h264") {
+    LatestEncodedPacket Packet{};
+    if (!TryGetLatestEncodedPacket(Packet)) {
+      const std::string Response = JsonResponse(
+          "404 Not Found",
+          SerializeError("No encoded H.264 packet is available yet."));
+      SendAll(ClientSocket, Response.data(), Response.size());
+      return false;
+    }
+
+    const std::string Headers =
+        BuildBinaryResponse("200 OK", "video/h264", Packet.Packet.Bytes.size());
+    if (!SendAll(ClientSocket, Headers.data(), Headers.size())) {
+      return false;
+    }
+    SendAll(ClientSocket, Packet.Packet.Bytes.data(), Packet.Packet.Bytes.size());
+    return false;
+  }
 
   const std::string Response =
       JsonResponse("404 Not Found", SerializeError("Unknown GET endpoint."));
@@ -813,6 +900,15 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
                                              std::string_view Body) {
   const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
   const std::string_view Route = StripQuery(Path);
+  if (Route == "/webrtc/offer") {
+    return HandleWebRtcOfferRequest(ClientSocketValue, Body);
+  }
+  if (Route == "/webrtc/ice-candidate") {
+    return HandleWebRtcIceCandidateRequest(ClientSocketValue, Body);
+  }
+  if (Route == "/webrtc/close") {
+    return HandleWebRtcCloseRequest(ClientSocketValue, Body);
+  }
   if (Route != "/command") {
     const std::string Response =
         JsonResponse("404 Not Found", SerializeError("Unknown POST endpoint."));
@@ -849,6 +945,131 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
 
   const std::string Response =
       JsonResponse("202 Accepted", "{\"type\":\"accepted\"}");
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
+bool RemoteViewportServer::HandleWebRtcOfferRequest(uintptr_t ClientSocketValue,
+                                                    std::string_view Body) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  std::string Error;
+  const auto Offer = ParseWebRtcSessionDescription(Body, Error);
+  if (!Offer.has_value()) {
+    const std::string Response =
+        JsonResponse("400 Bad Request", SerializeError(Error));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  if (Offer->Type != "offer") {
+    const std::string Response = JsonResponse(
+        "400 Bad Request",
+        SerializeError("WebRTC offer endpoint requires `type` to be `offer`."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  if (m_WebRtcSession == nullptr) {
+    const std::string Response = JsonResponse(
+        "503 Service Unavailable",
+        SerializeError("WebRTC session support is unavailable."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  WebRtcSessionDescription Answer{};
+  if (!m_WebRtcSession->HandleOffer(*Offer, Answer, Error)) {
+    const WebRtcSessionStatus Status = m_WebRtcSession->GetStatus();
+    const std::string Payload = SerializeWebRtcStatus(
+        Status.Enabled, Status.Available, Status.SignalingState,
+        Status.ConnectionState, Error.empty() ? Status.Detail : Error,
+        Status.SessionId, Status.PendingLocalIceCandidateCount,
+        Status.Video);
+    const std::string Response =
+        JsonResponse("503 Service Unavailable", Payload);
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const std::string Response =
+      JsonResponse("200 OK", SerializeWebRtcSessionDescription(
+                                 Answer, m_WebRtcSession->GetStatus().SessionId));
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
+bool RemoteViewportServer::HandleWebRtcIceCandidateRequest(
+    uintptr_t ClientSocketValue, std::string_view Body) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  std::string Error;
+  const auto Candidate = ParseWebRtcIceCandidate(Body, Error);
+  if (!Candidate.has_value()) {
+    const std::string Response =
+        JsonResponse("400 Bad Request", SerializeError(Error));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  if (m_WebRtcSession == nullptr) {
+    const std::string Response = JsonResponse(
+        "503 Service Unavailable",
+        SerializeError("WebRTC session support is unavailable."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  if (!m_WebRtcSession->AddRemoteIceCandidate(*Candidate, Error)) {
+    const WebRtcSessionStatus Status = m_WebRtcSession->GetStatus();
+    const std::string Payload = SerializeWebRtcStatus(
+        Status.Enabled, Status.Available, Status.SignalingState,
+        Status.ConnectionState, Error.empty() ? Status.Detail : Error,
+        Status.SessionId, Status.PendingLocalIceCandidateCount,
+        Status.Video);
+    const std::string Response =
+        JsonResponse("503 Service Unavailable", Payload);
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const std::string Response =
+      JsonResponse("202 Accepted", "{\"type\":\"accepted\"}");
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
+bool RemoteViewportServer::HandleWebRtcCloseRequest(
+    uintptr_t ClientSocketValue, std::string_view Body) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  std::string Reason = "browser_requested_close";
+  if (!Body.empty()) {
+    Reason = Body;
+  }
+
+  if (m_WebRtcSession == nullptr) {
+    const std::string Response = JsonResponse(
+        "503 Service Unavailable",
+        SerializeError("WebRTC session support is unavailable."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  std::string Error;
+  if (!m_WebRtcSession->CloseSession(Reason, Error)) {
+    const std::string Response =
+        JsonResponse("500 Internal Server Error",
+                     SerializeError(Error.empty()
+                                        ? "Failed to close WebRTC session."
+                                        : Error));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const WebRtcSessionStatus Status = m_WebRtcSession->GetStatus();
+  const std::string Payload = SerializeWebRtcStatus(
+      Status.Enabled, Status.Available, Status.SignalingState,
+      Status.ConnectionState, Status.Detail, Status.SessionId,
+      Status.PendingLocalIceCandidateCount, Status.Video);
+  const std::string Response = JsonResponse("200 OK", Payload);
   SendAll(ClientSocket, Response.data(), Response.size());
   return false;
 }
@@ -1018,6 +1239,16 @@ bool RemoteViewportServer::HandleWebSocketMessage(std::string_view Payload) {
   return false;
 }
 
+bool RemoteViewportServer::ShouldPublishJpegFrames() const {
+  if (m_WebRtcSession == nullptr) {
+    return true;
+  }
+
+  const WebRtcSessionStatus Status = m_WebRtcSession->GetStatus();
+  return !(Status.Enabled && Status.Available &&
+           Status.ConnectionState == "connected");
+}
+
 void RemoteViewportServer::SetLatestFrame(const CapturedFrame &Frame) {
   EncodedImageBuffer Buffer{};
   if (stbi_write_jpg_to_func(WriteImageBytes, &Buffer, static_cast<int>(Frame.Width),
@@ -1048,6 +1279,29 @@ bool RemoteViewportServer::TryGetLatestFrame(LatestFrame &Frame) const {
     return false;
   }
   Frame = m_LatestFrame;
+  return true;
+}
+
+void RemoteViewportServer::SetLatestEncodedPacket(
+    const EncodedVideoPacket &Packet) {
+  {
+    std::scoped_lock Lock(m_FrameMutex);
+    m_LatestEncodedPacket.Packet = Packet;
+    m_LatestEncodedPacket.HasPacket = true;
+  }
+
+  std::cout << SerializeEncodedVideoPacketMetadata(Packet, "/h264")
+            << std::endl;
+}
+
+bool RemoteViewportServer::TryGetLatestEncodedPacket(
+    LatestEncodedPacket &Packet) const {
+  std::scoped_lock Lock(m_FrameMutex);
+  if (!m_LatestEncodedPacket.HasPacket) {
+    return false;
+  }
+
+  Packet = m_LatestEncodedPacket;
   return true;
 }
 
