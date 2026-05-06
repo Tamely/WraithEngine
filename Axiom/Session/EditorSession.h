@@ -44,12 +44,29 @@ struct EditorSceneItem {
   std::vector<EditorSceneItem> Children;
 };
 
+struct EditorTransformDetails {
+  glm::vec3 Location{0.0f};
+  glm::vec3 RotationDegrees{0.0f};
+  glm::vec3 Scale{1.0f};
+};
+
+struct EditorObjectDetails {
+  std::string ObjectId;
+  std::string DisplayName;
+  EditorSceneItemKind Kind{EditorSceneItemKind::Mesh};
+  bool Visible{true};
+  bool SupportsTransform{false};
+  bool TransformReadOnly{true};
+  std::optional<EditorTransformDetails> Transform;
+};
+
 struct EditorSessionState {
   SessionId Session;
   std::unordered_map<SessionUserId, EditorViewportState, SessionUserIdHash>
       Viewports;
   std::vector<RenderMeshSubmission> SceneSubmissions;
   std::vector<EditorSceneItem> SceneItems;
+  std::unordered_map<std::string, EditorObjectDetails> ObjectDetailsById;
   std::unordered_map<SessionUserId, std::string, SessionUserIdHash>
       SelectedObjectIds;
 };
@@ -69,12 +86,15 @@ public:
   void EnsureViewportState(SessionUserId User);
   void SetSceneSubmissions(std::vector<RenderMeshSubmission> SceneSubmissions);
   void SetSceneItems(std::vector<EditorSceneItem> SceneItems);
+  void SetObjectDetails(std::vector<EditorObjectDetails> ObjectDetails);
 
   const EditorSessionState &GetState() const { return m_State; }
   const EditorSessionConfig &GetConfig() const { return m_Config; }
   const EditorViewportState *FindViewport(SessionUserId User) const;
   const EditorSceneItem *FindSceneItem(std::string_view ObjectId) const;
   const std::string *FindSelectedObjectId(SessionUserId User) const;
+  const EditorObjectDetails *FindObjectDetails(std::string_view ObjectId) const;
+  const EditorObjectDetails *FindSelectedObjectDetails(SessionUserId User) const;
 
 private:
   EditorViewportState &EnsureViewport(SessionUserId User);

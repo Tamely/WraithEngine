@@ -164,6 +164,30 @@ void SerializeSceneItem(std::ostringstream &Stream, const EditorSceneItem &Item)
   }
   Stream << "]}";
 }
+
+void SerializeObjectDetails(std::ostringstream &Stream,
+                            const EditorObjectDetails &Details) {
+  Stream << "{\"objectId\":\"" << EscapeJson(Details.ObjectId)
+         << "\",\"displayName\":\"" << EscapeJson(Details.DisplayName)
+         << "\",\"kind\":\"" << SceneItemKindToString(Details.Kind)
+         << "\",\"visible\":" << (Details.Visible ? "true" : "false")
+         << ",\"capabilities\":{\"supportsTransform\":"
+         << (Details.SupportsTransform ? "true" : "false")
+         << ",\"transformReadOnly\":"
+         << (Details.TransformReadOnly ? "true" : "false") << "},\"transform\":";
+  if (Details.Transform.has_value()) {
+    Stream << "{\"location\":[" << Details.Transform->Location.x << ","
+           << Details.Transform->Location.y << "," << Details.Transform->Location.z
+           << "],\"rotationDegrees\":[" << Details.Transform->RotationDegrees.x
+           << "," << Details.Transform->RotationDegrees.y << ","
+           << Details.Transform->RotationDegrees.z << "],\"scale\":["
+           << Details.Transform->Scale.x << "," << Details.Transform->Scale.y
+           << "," << Details.Transform->Scale.z << "]}";
+  } else {
+    Stream << "null";
+  }
+  Stream << "}";
+}
 } // namespace
 
 std::optional<HeadlessAppOptions> ParseHeadlessOptions(int argc, char **argv,
@@ -564,7 +588,24 @@ std::string SerializeSessionSnapshot(const EditorSessionState &State,
     }
     SerializeSceneItem(Stream, State.SceneItems[Index]);
   }
-  Stream << "]}";
+  Stream << "],\"selectedObjectDetails\":";
+  if (const EditorObjectDetails *Details =
+          [&]() -> const EditorObjectDetails * {
+            const auto SelectionIt = State.SelectedObjectIds.find(CurrentUser);
+            if (SelectionIt == State.SelectedObjectIds.end()) {
+              return nullptr;
+            }
+            const auto DetailsIt =
+                State.ObjectDetailsById.find(SelectionIt->second);
+            return DetailsIt != State.ObjectDetailsById.end() ? &DetailsIt->second
+                                                              : nullptr;
+          }();
+      Details != nullptr) {
+    SerializeObjectDetails(Stream, *Details);
+  } else {
+    Stream << "null";
+  }
+  Stream << "}";
   return Stream.str();
 }
 

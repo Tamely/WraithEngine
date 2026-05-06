@@ -1,11 +1,11 @@
 "use client"
 
-import { Settings, Lock, Unlock } from "lucide-react"
+import { Lock, Settings, Unlock } from "lucide-react"
 import { useState } from "react"
-import { useRemoteViewport } from "./remote-viewport-context"
+import { useRemoteViewport, type SessionObjectDetails } from "./remote-viewport-context"
 
 export function Details() {
-  const { selectedObject } = useRemoteViewport()
+  const { selectedObjectDetails, selectedObjectId } = useRemoteViewport()
   const [isLocked, setIsLocked] = useState(false)
 
   return (
@@ -28,26 +28,55 @@ export function Details() {
         </button>
       </div>
       <div className="flex-1 overflow-y-auto">
-        {selectedObject ? (
-          <div className="space-y-4 p-3">
-            <section className="rounded border border-neutral-800 bg-neutral-950/60 p-3">
-              <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">
-                Identity
-              </p>
-              <div className="mt-3 space-y-2">
-                <DetailRow label="Name" value={selectedObject.displayName} />
-                <DetailRow label="Object ID" value={selectedObject.id} />
-                <DetailRow label="Type" value={selectedObject.kind} />
-                <DetailRow label="Visible" value={selectedObject.visible ? "true" : "false"} />
-              </div>
-            </section>
-          </div>
+        {!selectedObjectId ? (
+          <EmptyState text="Select an object to view details" />
+        ) : !selectedObjectDetails ? (
+          <EmptyState text="No authoritative details are available for this object yet" />
         ) : (
-          <div className="flex h-full items-center justify-center text-xs text-neutral-600">
-            Select an object to view details
-          </div>
+          <DetailsContent details={selectedObjectDetails} />
         )}
       </div>
+    </div>
+  )
+}
+
+function DetailsContent({ details }: { details: SessionObjectDetails }) {
+  return (
+    <div className="space-y-4 p-3">
+      <section className="rounded border border-neutral-800 bg-neutral-950/60 p-3">
+        <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">Identity</p>
+        <div className="mt-3 space-y-2">
+          <DetailRow label="Name" value={details.displayName} />
+          <DetailRow label="Object ID" value={details.objectId} />
+          <DetailRow label="Type" value={details.kind} />
+          <DetailRow label="Visible" value={details.visible ? "true" : "false"} />
+        </div>
+      </section>
+
+      <section className="rounded border border-neutral-800 bg-neutral-950/60 p-3">
+        <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">Transform</p>
+        {details.capabilities.supportsTransform && details.transform ? (
+          <div className="mt-3 space-y-2">
+            <DetailRow
+              label="Location"
+              value={formatVec3(details.transform.location)}
+            />
+            <DetailRow
+              label="Rotation"
+              value={formatVec3(details.transform.rotationDegrees)}
+            />
+            <DetailRow label="Scale" value={formatVec3(details.transform.scale)} />
+            <DetailRow
+              label="Editability"
+              value={details.capabilities.transformReadOnly ? "Read-only" : "Editable"}
+            />
+          </div>
+        ) : (
+          <p className="mt-3 text-xs text-neutral-500">
+            This object does not expose authoritative transform details yet.
+          </p>
+        )}
+      </section>
     </div>
   )
 }
@@ -61,4 +90,12 @@ function DetailRow({ label, value }: { label: string; value: string }) {
       </div>
     </div>
   )
+}
+
+function EmptyState({ text }: { text: string }) {
+  return <div className="flex h-full items-center justify-center px-4 text-center text-xs text-neutral-600">{text}</div>
+}
+
+function formatVec3(value: [number, number, number]) {
+  return `X: ${value[0].toFixed(2)}, Y: ${value[1].toFixed(2)}, Z: ${value[2].toFixed(2)}`
 }

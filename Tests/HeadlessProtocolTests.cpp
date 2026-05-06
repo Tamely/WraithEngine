@@ -154,6 +154,22 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
               .Children = {},
           }},
       }},
+      .ObjectDetailsById = {{
+          "PlayerCharacter",
+          Axiom::EditorObjectDetails{
+              .ObjectId = "PlayerCharacter",
+              .DisplayName = "PlayerCharacter",
+              .Kind = Axiom::EditorSceneItemKind::Actor,
+              .Visible = true,
+              .SupportsTransform = true,
+              .TransformReadOnly = true,
+              .Transform = Axiom::EditorTransformDetails{
+                  .Location = glm::vec3(1.0f, 2.0f, 3.0f),
+                  .RotationDegrees = glm::vec3(4.0f, 5.0f, 6.0f),
+                  .Scale = glm::vec3(1.0f, 1.0f, 1.0f),
+              },
+          },
+      }},
       .SelectedObjectIds = {{Axiom::SessionUserId{1}, "PlayerCharacter"}},
   };
 
@@ -164,6 +180,10 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
   EXPECT_NE(Json.find("\"objectId\":\"PlayerCharacter\""), std::string::npos);
   EXPECT_NE(Json.find("\"displayName\":\"World\""), std::string::npos);
   EXPECT_NE(Json.find("\"kind\":\"actor\""), std::string::npos);
+  EXPECT_NE(Json.find("\"selectedObjectDetails\""), std::string::npos);
+  EXPECT_NE(Json.find("\"supportsTransform\":true"), std::string::npos);
+  EXPECT_NE(Json.find("\"transformReadOnly\":true"), std::string::npos);
+  EXPECT_NE(Json.find("\"location\":[1,2,3]"), std::string::npos);
 }
 
 TEST(HeadlessProtocolTests, SerializesEncodedVideoPacketMetadata) {

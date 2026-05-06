@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import {
   useRemoteViewport,
+  type SessionObjectDetails,
   type RemoteViewportConnectionState,
   type RemoteViewportViewMode,
   type SessionSceneItem,
@@ -63,6 +64,7 @@ interface SessionSnapshotResponse {
   currentUserId: number
   sceneTree: SessionSceneItem[]
   selections: SessionSelection[]
+  selectedObjectDetails: SessionObjectDetails | null
 }
 
 type RemoteViewportCommand =
@@ -253,6 +255,7 @@ export function Viewport() {
         currentUserId: snapshot.currentUserId,
         sceneTree: snapshot.sceneTree ?? [],
         selections: snapshot.selections ?? [],
+        selectedObjectDetails: snapshot.selectedObjectDetails ?? null,
       })
       appendLog({
         type: "session_snapshot_received",
@@ -268,6 +271,12 @@ export function Viewport() {
         const objectId = typeof message.objectId === "string" ? message.objectId : null
         if (Number.isFinite(userId)) {
           applySelectionChanged(userId, objectId)
+          void refreshSessionSnapshot().catch((error) => {
+            appendLog({
+              type: "session_snapshot_failed",
+              detail: error instanceof Error ? error.message : String(error),
+            })
+          })
         }
         return
       }

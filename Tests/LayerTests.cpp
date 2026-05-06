@@ -396,6 +396,47 @@ TEST(EditorSessionTests, SelectingUnknownObjectPublishesRejection) {
       Subscriber.Events.front().Event.Payload));
 }
 
+TEST(EditorSessionTests, SelectedObjectDetailsMatchAuthoritativeState) {
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  Session.SetSceneItems({{
+      .Id = "PlayerCharacter",
+      .DisplayName = "PlayerCharacter",
+      .Kind = Axiom::EditorSceneItemKind::Actor,
+      .Visible = true,
+      .Children = {},
+  }});
+  Session.SetObjectDetails({{
+      .ObjectId = "PlayerCharacter",
+      .DisplayName = "PlayerCharacter",
+      .Kind = Axiom::EditorSceneItemKind::Actor,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = true,
+      .Transform = Axiom::EditorTransformDetails{
+          .Location = glm::vec3(1.0f, 2.0f, 3.0f),
+          .RotationDegrees = glm::vec3(4.0f, 5.0f, 6.0f),
+          .Scale = glm::vec3(1.0f, 1.5f, 2.0f),
+      },
+  }});
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SelectObjectCommand{
+                      .ObjectId = "PlayerCharacter",
+                  }});
+  Session.Tick();
+
+  const Axiom::EditorObjectDetails *Details =
+      Session.FindSelectedObjectDetails(Axiom::SessionUserId{7});
+  ASSERT_NE(Details, nullptr);
+  EXPECT_EQ(Details->ObjectId, "PlayerCharacter");
+  EXPECT_TRUE(Details->SupportsTransform);
+  EXPECT_TRUE(Details->TransformReadOnly);
+  ASSERT_TRUE(Details->Transform.has_value());
+  EXPECT_EQ(Details->Transform->Location, glm::vec3(1.0f, 2.0f, 3.0f));
+  EXPECT_EQ(Details->Transform->RotationDegrees, glm::vec3(4.0f, 5.0f, 6.0f));
+  EXPECT_EQ(Details->Transform->Scale, glm::vec3(1.0f, 1.5f, 2.0f));
+}
+
 TEST(EditorInputSourceTests, GlfwInputSourceTranslatesPlatformStateIntoCommands) {
   Axiom::EditorSession Session(Axiom::SessionId{1});
   Session.EnsureViewportState(Axiom::SessionUserId{7});

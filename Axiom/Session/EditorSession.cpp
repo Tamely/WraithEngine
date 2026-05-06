@@ -48,6 +48,13 @@ void EditorSession::SetSceneItems(std::vector<EditorSceneItem> SceneItems) {
   m_State.SceneItems = std::move(SceneItems);
 }
 
+void EditorSession::SetObjectDetails(std::vector<EditorObjectDetails> ObjectDetails) {
+  m_State.ObjectDetailsById.clear();
+  for (EditorObjectDetails &Details : ObjectDetails) {
+    m_State.ObjectDetailsById.emplace(Details.ObjectId, std::move(Details));
+  }
+}
+
 const EditorViewportState *EditorSession::FindViewport(SessionUserId User) const {
   const auto It = m_State.Viewports.find(User);
   return It != m_State.Viewports.end() ? &It->second : nullptr;
@@ -60,6 +67,18 @@ const EditorSceneItem *EditorSession::FindSceneItem(std::string_view ObjectId) c
 const std::string *EditorSession::FindSelectedObjectId(SessionUserId User) const {
   const auto It = m_State.SelectedObjectIds.find(User);
   return It != m_State.SelectedObjectIds.end() ? &It->second : nullptr;
+}
+
+const EditorObjectDetails *EditorSession::FindObjectDetails(
+    std::string_view ObjectId) const {
+  const auto It = m_State.ObjectDetailsById.find(std::string(ObjectId));
+  return It != m_State.ObjectDetailsById.end() ? &It->second : nullptr;
+}
+
+const EditorObjectDetails *EditorSession::FindSelectedObjectDetails(
+    SessionUserId User) const {
+  const std::string *SelectedObjectId = FindSelectedObjectId(User);
+  return SelectedObjectId != nullptr ? FindObjectDetails(*SelectedObjectId) : nullptr;
 }
 
 EditorViewportState &EditorSession::EnsureViewport(SessionUserId User) {

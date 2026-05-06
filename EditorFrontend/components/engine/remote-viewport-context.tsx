@@ -36,6 +36,24 @@ export interface SessionSelection {
   objectId: string
 }
 
+export interface SessionTransformDetails {
+  location: [number, number, number]
+  rotationDegrees: [number, number, number]
+  scale: [number, number, number]
+}
+
+export interface SessionObjectDetails {
+  objectId: string
+  displayName: string
+  kind: SessionSceneItemKind
+  visible: boolean
+  capabilities: {
+    supportsTransform: boolean
+    transformReadOnly: boolean
+  }
+  transform: SessionTransformDetails | null
+}
+
 interface RemoteViewportActions {
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
@@ -57,6 +75,7 @@ interface RemoteViewportContextValue {
   sceneTree: SessionSceneItem[]
   selectedObjectId: string | null
   selectedObject: SessionSceneItem | null
+  selectedObjectDetails: SessionObjectDetails | null
   selections: SessionSelection[]
   setConnectionState: (value: RemoteViewportConnectionState) => void
   setStatusText: (value: string) => void
@@ -81,6 +100,7 @@ interface SessionSnapshot {
   currentUserId: number
   sceneTree: SessionSceneItem[]
   selections: SessionSelection[]
+  selectedObjectDetails: SessionObjectDetails | null
 }
 
 const MAX_LOG_LINES = 10
@@ -126,6 +146,8 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
   const [currentUserId, setCurrentUserId] = useState<number | null>(null)
   const [sceneTree, setSceneTree] = useState<SessionSceneItem[]>([])
   const [selections, setSelections] = useState<SessionSelection[]>([])
+  const [selectedObjectDetails, setSelectedObjectDetails] =
+    useState<SessionObjectDetails | null>(null)
 
   const appendEventLog = useCallback((value: string) => {
     setEventLog((current) => [value, ...current].slice(0, MAX_LOG_LINES))
@@ -143,6 +165,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     setCurrentUserId(snapshot.currentUserId)
     setSceneTree(snapshot.sceneTree)
     setSelections(snapshot.selections)
+    setSelectedObjectDetails(snapshot.selectedObjectDetails)
   }, [])
 
   const applySelectionChanged = useCallback((userId: number, objectId: string | null) => {
@@ -192,6 +215,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       sceneTree,
       selectedObjectId,
       selectedObject,
+      selectedObjectDetails,
       selections,
       setConnectionState,
       setStatusText,
@@ -227,6 +251,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       sceneTree,
       selectObject,
       selectedObject,
+      selectedObjectDetails,
       selectedObjectId,
       selections,
       serverOrigin,
