@@ -181,13 +181,17 @@ button:hover {
     linear-gradient(135deg, rgba(78, 205, 196, 0.08), transparent 40%),
     rgba(6, 10, 18, 0.9);
   min-height: 360px;
+  max-height: 70vh;
+  aspect-ratio: 16 / 9;
 }
 
 #viewport-video {
   display: block;
   width: 100%;
+  height: 100%;
   max-width: 100%;
-  min-height: 360px;
+  min-height: 0;
+  max-height: 70vh;
   object-fit: contain;
   background: rgba(4, 8, 16, 0.92);
 }
@@ -269,6 +273,16 @@ function appendLog(value) {
 function setStatus(kind, text) {
   statusPill.className = `pill ${kind}`;
   statusPill.textContent = text;
+}
+
+function updateViewportMetrics() {
+  const width = viewportVideo.videoWidth;
+  const height = viewportVideo.videoHeight;
+  if (!width || !height) {
+    return;
+  }
+  frameMeta.textContent = `${width}x${height}`;
+  viewportShell.style.aspectRatio = `${width} / ${height}`;
 }
 
 function appendError(context, error) {
@@ -585,6 +599,16 @@ function wireDataChannel(channel, label) {
     }
   });
 }
+
+viewportVideo.addEventListener('loadedmetadata', () => {
+  updateViewportMetrics();
+  appendLog({ type: 'video_loadedmetadata', width: viewportVideo.videoWidth, height: viewportVideo.videoHeight });
+});
+
+viewportVideo.addEventListener('resize', () => {
+  updateViewportMetrics();
+  appendLog({ type: 'video_resize', width: viewportVideo.videoWidth, height: viewportVideo.videoHeight });
+});
 
 async function connect() {
   const generation = currentGeneration() + 1;

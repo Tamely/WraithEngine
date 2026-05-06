@@ -497,11 +497,29 @@ std::string SerializeWebRtcStatus(bool Enabled, bool Available,
          << (VideoStatus.SenderBound ? "true" : "false")
          << ",\"waitingForKeyframe\":"
          << (VideoStatus.WaitingForKeyframe ? "true" : "false")
+         << ",\"hasOutstandingSendRequest\":"
+         << (VideoStatus.HasOutstandingSendRequest ? "true" : "false")
          << ",\"pendingPacketCount\":" << VideoStatus.PendingPacketCount
          << ",\"droppedPacketCount\":" << VideoStatus.DroppedPacketCount
+         << ",\"droppedStaleRequestCount\":"
+         << VideoStatus.DroppedStaleRequestCount
+         << ",\"droppedStalePacketCount\":"
+         << VideoStatus.DroppedStalePacketCount
          << ",\"lastFrameIndex\":";
   if (VideoStatus.LastFrameIndex.has_value()) {
     Stream << *VideoStatus.LastFrameIndex;
+  } else {
+    Stream << "null";
+  }
+  Stream << ",\"latestRequestedFrameIndex\":";
+  if (VideoStatus.LatestRequestedFrameIndex.has_value()) {
+    Stream << *VideoStatus.LatestRequestedFrameIndex;
+  } else {
+    Stream << "null";
+  }
+  Stream << ",\"latestEncodedFrameIndex\":";
+  if (VideoStatus.LatestEncodedFrameIndex.has_value()) {
+    Stream << *VideoStatus.LatestEncodedFrameIndex;
   } else {
     Stream << "null";
   }

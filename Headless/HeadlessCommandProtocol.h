@@ -50,10 +50,15 @@ struct WebRtcVideoStatus {
   std::string Codec{"h264"};
   bool SenderBound{false};
   bool WaitingForKeyframe{true};
+  bool HasOutstandingSendRequest{false};
   size_t PendingPacketCount{0};
   size_t DroppedPacketCount{0};
+  size_t DroppedStaleRequestCount{0};
+  size_t DroppedStalePacketCount{0};
   std::optional<uint64_t> LastFrameIndex;
   std::optional<uint64_t> LastKeyframeFrameIndex;
+  std::optional<uint64_t> LatestRequestedFrameIndex;
+  std::optional<uint64_t> LatestEncodedFrameIndex;
 };
 
 std::optional<HeadlessAppOptions> ParseHeadlessOptions(int argc, char **argv,

@@ -8,6 +8,8 @@
 #import <CoreVideo/CoreVideo.h>
 #import <Foundation/Foundation.h>
 #import <WebRTC/WebRTC.h>
+#import <WebRTC/RTCCodecSpecificInfoH264.h>
+#import <WebRTC/RTCVideoDecoderFactoryH264.h>
 
 #include <chrono>
 #include <condition_variable>
@@ -21,6 +23,20 @@ namespace Axiom {
 class MacOSWebRtcSessionImpl;
 std::unique_ptr<IWebRtcSession> CreateMacOSWebRtcSession();
 } // namespace Axiom
+
+@interface AxiomPacketBackedVideoEncoder
+    : NSObject <RTC_OBJC_TYPE(RTCVideoEncoder)>
+- (instancetype)initWithSession:(Axiom::MacOSWebRtcSessionImpl *)session
+                      codecInfo:(RTC_OBJC_TYPE(RTCVideoCodecInfo) *)codecInfo;
+- (void)deliverEncodedPacket:(const Axiom::EncodedVideoPacket &)packet
+                  timeStamp:(int32_t)timeStamp
+              captureTimeMs:(int64_t)captureTimeMs;
+@end
+
+@interface AxiomPacketBackedVideoEncoderFactory
+    : NSObject <RTC_OBJC_TYPE(RTCVideoEncoderFactory)>
+- (instancetype)initWithSession:(Axiom::MacOSWebRtcSessionImpl *)session;
+@end
 
 @interface AxiomWebRtcBridge
     : NSObject <RTC_OBJC_TYPE(RTCPeerConnectionDelegate),
@@ -113,6 +129,20 @@ std::string ConnectionStateToString(RTCPeerConnectionState State) {
   }
   return "unknown";
 }
+
+NSDictionary<NSString *, NSString *> *DefaultH264CodecParameters() {
+  return @{
+    @"level-asymmetry-allowed" : @"1",
+    @"packetization-mode" : @"1",
+    @"profile-level-id" : @"42e01f",
+  };
+}
+
+struct PendingEncodeRequest {
+  uint64_t FrameIndex{0};
+  int32_t TimeStamp{0};
+  int64_t CaptureTimeMs{0};
+};
 } // namespace
 
 class MacOSWebRtcSessionImpl final : public IWebRtcSession {
@@ -122,8 +152,8 @@ public:
     m_Status.Available = true;
     m_Status.SignalingState = "new";
     m_Status.ConnectionState = "new";
-    m_Status.Video.Codec = "raw-via-webrtc";
-    m_Status.Video.WaitingForKeyframe = false;
+    m_Status.Video.Codec = "h264-latest-only";
+    m_Status.Video.WaitingForKeyframe = true;
     m_Status.Detail =
         "Native macOS WebRTC backend loaded. Waiting for a browser offer.";
 
@@ -134,10 +164,17 @@ public:
   ~MacOSWebRtcSessionImpl() override {
     ResetPeer("session_destroyed");
     std::scoped_lock Lock(m_Mutex);
+    ReleaseObjc(m_DummyFrameBuffer);
+    if (m_DummyPixelBuffer != nullptr) {
+      CVPixelBufferRelease(m_DummyPixelBuffer);
+      m_DummyPixelBuffer = nullptr;
+    }
     ReleaseObjc(m_VideoCapturer);
     ReleaseObjc(m_VideoTrack);
     ReleaseObjc(m_VideoSource);
     ReleaseObjc(m_Factory);
+    ReleaseObjc(m_DecoderFactory);
+    ReleaseObjc(m_EncoderFactory);
     ReleaseObjc(m_Bridge);
   }
 
@@ -253,9 +290,10 @@ public:
 
   std::vector<EncodedVideoPacket> TakePendingEncodedVideoPackets() override {
     std::scoped_lock Lock(m_Mutex);
-    auto Packets = std::move(m_PendingEncodedVideoPackets);
-    m_PendingEncodedVideoPackets.clear();
-    m_Status.Video.PendingPacketCount = 0;
+    std::vector<EncodedVideoPacket> Packets;
+    if (m_LatestEncodedPacket.has_value()) {
+      Packets.push_back(*m_LatestEncodedPacket);
+    }
     return Packets;
   }
 
@@ -287,80 +325,78 @@ public:
   }
 
   void OnViewportFrame(const ViewportFrame &Frame) override {
-    std::scoped_lock Lock(m_Mutex);
-    if (m_VideoCapturer == nil || m_VideoSource == nil) {
-      return;
-    }
-    if (Frame.Format != ViewportFrameFormat::R8G8B8A8Unorm) {
-      UpdateDetailLocked("Unsupported viewport format for WebRTC video path.");
-      return;
-    }
-
-    CVPixelBufferRef PixelBuffer = nullptr;
-    const NSDictionary *Attributes = @{
-      (id)kCVPixelBufferCGImageCompatibilityKey : @YES,
-      (id)kCVPixelBufferCGBitmapContextCompatibilityKey : @YES,
-      (id)kCVPixelBufferMetalCompatibilityKey : @YES,
-    };
-    const CVReturn Result = CVPixelBufferCreate(
-        kCFAllocatorDefault, static_cast<size_t>(Frame.Width),
-        static_cast<size_t>(Frame.Height), kCVPixelFormatType_32BGRA,
-        (__bridge CFDictionaryRef)Attributes, &PixelBuffer);
-    if (Result != kCVReturnSuccess || PixelBuffer == nullptr) {
-      UpdateDetailLocked("Failed to allocate CVPixelBuffer for WebRTC frame.");
-      return;
-    }
-
-    CVPixelBufferLockBaseAddress(PixelBuffer, 0);
-    auto *Destination =
-        static_cast<uint8_t *>(CVPixelBufferGetBaseAddress(PixelBuffer));
-    const size_t DestinationStride =
-        CVPixelBufferGetBytesPerRow(PixelBuffer);
-    const auto *Source =
-        reinterpret_cast<const uint8_t *>(Frame.Pixels.data());
-    const size_t SourceStride = static_cast<size_t>(Frame.Width) * 4u;
-    for (uint32_t Y = 0; Y < Frame.Height; ++Y) {
-      const uint8_t *SourceRow = Source + SourceStride * Y;
-      uint8_t *DestinationRow = Destination + DestinationStride * Y;
-      for (uint32_t X = 0; X < Frame.Width; ++X) {
-        const size_t Offset = static_cast<size_t>(X) * 4u;
-        DestinationRow[Offset + 0u] = SourceRow[Offset + 2u];
-        DestinationRow[Offset + 1u] = SourceRow[Offset + 1u];
-        DestinationRow[Offset + 2u] = SourceRow[Offset + 0u];
-        DestinationRow[Offset + 3u] = SourceRow[Offset + 3u];
+    RTC_OBJC_TYPE(RTCVideoCapturer) *VideoCapturer = nil;
+    RTC_OBJC_TYPE(RTCVideoSource) *VideoSource = nil;
+    RTC_OBJC_TYPE(RTCCVPixelBuffer) *FrameBuffer = nil;
+    {
+      std::scoped_lock Lock(m_Mutex);
+      if (m_VideoCapturer == nil || m_VideoSource == nil) {
+        return;
       }
-    }
-    CVPixelBufferUnlockBaseAddress(PixelBuffer, 0);
+      if (!EnsureDummyFrameBufferLocked(Frame.Width, Frame.Height)) {
+        UpdateDetailLocked("Failed to allocate dummy WebRTC trigger frame.");
+        return;
+      }
 
-    RTC_OBJC_TYPE(RTCCVPixelBuffer) *FrameBuffer =
-        [[RTC_OBJC_TYPE(RTCCVPixelBuffer) alloc]
-            initWithPixelBuffer:PixelBuffer];
+      VideoCapturer = m_VideoCapturer;
+      VideoSource = m_VideoSource;
+      FrameBuffer = m_DummyFrameBuffer;
+      m_Status.Video.LastFrameIndex = Frame.FrameIndex;
+      UpdateDetailLocked("Triggered latest-only H.264 WebRTC send path.");
+    }
+
+    if (VideoCapturer == nil || VideoSource == nil || FrameBuffer == nil) {
+      return;
+    }
+
     const auto Timestamp =
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now().time_since_epoch())
             .count();
-    RTC_OBJC_TYPE(RTCVideoFrame) *VideoFrame =
-        [[RTC_OBJC_TYPE(RTCVideoFrame) alloc] initWithBuffer:FrameBuffer
-                                                    rotation:RTCVideoRotation_0
-                                                 timeStampNs:Timestamp];
-    [m_VideoSource capturer:m_VideoCapturer didCaptureVideoFrame:VideoFrame];
-    CVPixelBufferRelease(PixelBuffer);
-
-    m_Status.Video.LastFrameIndex = Frame.FrameIndex;
-    UpdateDetailLocked("Sent viewport frame through native WebRTC video track.");
+    RTC_OBJC_TYPE(RTCVideoFrame) *VideoFrame = [[RTC_OBJC_TYPE(RTCVideoFrame)
+        alloc] initWithBuffer:FrameBuffer
+                     rotation:RTCVideoRotation_0
+                  timeStampNs:Timestamp];
+    VideoFrame.timeStamp = static_cast<int32_t>(Frame.FrameIndex & 0xffffffffu);
+    [VideoSource capturer:VideoCapturer didCaptureVideoFrame:VideoFrame];
   }
 
   void OnEncodedVideoPacket(const EncodedVideoPacket &Packet) override {
-    std::scoped_lock Lock(m_Mutex);
-    m_PendingEncodedVideoPackets.push_back(Packet);
-    if (m_PendingEncodedVideoPackets.size() > 32u) {
-      m_PendingEncodedVideoPackets.erase(m_PendingEncodedVideoPackets.begin());
-      ++m_Status.Video.DroppedPacketCount;
+    std::optional<EncodedVideoPacket> PacketToDeliver;
+    std::optional<PendingEncodeRequest> RequestToDeliver;
+    AxiomPacketBackedVideoEncoder *Encoder = nil;
+    {
+      std::scoped_lock Lock(m_Mutex);
+      m_Status.Video.LatestEncodedFrameIndex = Packet.FrameIndex;
+      m_Status.Video.LastFrameIndex = Packet.FrameIndex;
+      if (Packet.IsKeyframe) {
+        m_Status.Video.LastKeyframeFrameIndex = Packet.FrameIndex;
+      }
+
+      if (m_Status.Video.WaitingForKeyframe && !Packet.IsKeyframe) {
+        ++m_Status.Video.DroppedStalePacketCount;
+        m_Status.Video.PendingPacketCount = 0u;
+        UpdateDetailLocked(
+            "Dropped delta packet while waiting for the first keyframe.");
+        return;
+      }
+
+      if (m_LatestEncodedPacket.has_value()) {
+        ++m_Status.Video.DroppedStalePacketCount;
+      }
+      m_LatestEncodedPacket = Packet;
+      m_Status.Video.PendingPacketCount = 1u;
+      Encoder = m_PacketBackedEncoder;
+      TryTakeDeliverablePacketLocked(PacketToDeliver, RequestToDeliver);
+      UpdateDetailLocked(m_HasOutstandingSendRequest
+                             ? "Buffered only the latest encoded H.264 packet."
+                             : "Delivered the latest encoded H.264 packet.");
     }
-    m_Status.Video.PendingPacketCount = m_PendingEncodedVideoPackets.size();
-    m_Status.Video.LastFrameIndex = Packet.FrameIndex;
-    if (Packet.IsKeyframe) {
-      m_Status.Video.LastKeyframeFrameIndex = Packet.FrameIndex;
+    if (Encoder != nil && PacketToDeliver.has_value() &&
+        RequestToDeliver.has_value()) {
+      [Encoder deliverEncodedPacket:*PacketToDeliver
+                          timeStamp:RequestToDeliver->TimeStamp
+                      captureTimeMs:RequestToDeliver->CaptureTimeMs];
     }
   }
 
@@ -432,13 +468,78 @@ public:
     UpdateDetailLocked("Signaling state changed.");
   }
 
+  void BindPacketBackedEncoder(AxiomPacketBackedVideoEncoder *Encoder) {
+    std::scoped_lock Lock(m_Mutex);
+    m_PacketBackedEncoder = Encoder;
+    m_Status.Video.SenderBound = Encoder != nil;
+    m_Status.Video.Codec =
+        Encoder != nil ? "h264-latest-only" : "raw-via-webrtc";
+    m_Status.Video.WaitingForKeyframe = true;
+    m_Status.Video.HasOutstandingSendRequest = m_HasOutstandingSendRequest;
+    UpdateDetailLocked(Encoder != nil ? "Bound latest-only H.264 encoder."
+                                      : "Unbound latest-only H.264 encoder.");
+  }
+
+  void OnPacketBackedEncoderReleased(AxiomPacketBackedVideoEncoder *Encoder) {
+    std::scoped_lock Lock(m_Mutex);
+    if (m_PacketBackedEncoder == Encoder) {
+      m_PacketBackedEncoder = nil;
+      m_HasOutstandingSendRequest = false;
+      m_LatestEncodedPacket.reset();
+      m_Status.Video.HasOutstandingSendRequest = false;
+      m_Status.Video.PendingPacketCount = 0;
+      m_Status.Video.SenderBound = false;
+      m_Status.Video.Codec = "raw-via-webrtc";
+      m_Status.Video.LatestRequestedFrameIndex = std::nullopt;
+      m_Status.Video.LatestEncodedFrameIndex = std::nullopt;
+      UpdateDetailLocked("Released latest-only H.264 encoder.");
+    }
+  }
+
+  void OnEncoderFrameRequested(AxiomPacketBackedVideoEncoder *Encoder,
+                               RTC_OBJC_TYPE(RTCVideoFrame) *Frame) {
+    std::optional<EncodedVideoPacket> PacketToDeliver;
+    std::optional<PendingEncodeRequest> RequestToDeliver;
+    {
+      std::scoped_lock Lock(m_Mutex);
+      if (m_PacketBackedEncoder != Encoder) {
+        return;
+      }
+      if (m_HasOutstandingSendRequest) {
+        ++m_Status.Video.DroppedStaleRequestCount;
+      }
+      const uint64_t FrameIndex = m_Status.Video.LastFrameIndex.value_or(
+          static_cast<uint32_t>(Frame.timeStamp));
+      m_OutstandingSendRequest = {
+          .FrameIndex = FrameIndex,
+          .TimeStamp = Frame.timeStamp,
+          .CaptureTimeMs = Frame.timeStampNs / 1000000,
+      };
+      m_HasOutstandingSendRequest = true;
+      m_Status.Video.HasOutstandingSendRequest = true;
+      m_Status.Video.LatestRequestedFrameIndex =
+          m_OutstandingSendRequest.FrameIndex;
+      TryTakeDeliverablePacketLocked(PacketToDeliver, RequestToDeliver);
+    }
+    if (PacketToDeliver.has_value() && RequestToDeliver.has_value()) {
+      [Encoder deliverEncodedPacket:*PacketToDeliver
+                          timeStamp:RequestToDeliver->TimeStamp
+                      captureTimeMs:RequestToDeliver->CaptureTimeMs];
+    }
+  }
+
 private:
   void EnsureFactoryLocked() {
     if (m_Factory != nil) {
       return;
     }
 
-    m_Factory = [[RTC_OBJC_TYPE(RTCPeerConnectionFactory) alloc] init];
+    m_EncoderFactory =
+        [[AxiomPacketBackedVideoEncoderFactory alloc] initWithSession:this];
+    m_DecoderFactory = [[RTC_OBJC_TYPE(RTCVideoDecoderFactoryH264) alloc] init];
+    m_Factory = [[RTC_OBJC_TYPE(RTCPeerConnectionFactory) alloc]
+        initWithEncoderFactory:m_EncoderFactory
+                 decoderFactory:m_DecoderFactory];
     m_VideoSource = RetainObjc([m_Factory videoSourceForScreenCast:YES]);
     [m_VideoSource adaptOutputFormatToWidth:1280 height:720 fps:60];
     m_VideoTrack =
@@ -568,7 +669,104 @@ private:
     return true;
   }
 
+  bool EnsureDummyFrameBufferLocked(uint32_t Width, uint32_t Height) {
+    if (m_DummyPixelBuffer != nullptr && m_DummyFrameWidth == Width &&
+        m_DummyFrameHeight == Height && m_DummyFrameBuffer != nil) {
+      return true;
+    }
+
+    if (m_DummyPixelBuffer != nullptr) {
+      CVPixelBufferRelease(m_DummyPixelBuffer);
+      m_DummyPixelBuffer = nullptr;
+    }
+    ReleaseObjc(m_DummyFrameBuffer);
+
+    const NSDictionary *Attributes = @{
+      (id)kCVPixelBufferCGImageCompatibilityKey : @YES,
+      (id)kCVPixelBufferCGBitmapContextCompatibilityKey : @YES,
+      (id)kCVPixelBufferMetalCompatibilityKey : @YES,
+    };
+    CVPixelBufferRef PixelBuffer = nullptr;
+    const CVReturn Result = CVPixelBufferCreate(
+        kCFAllocatorDefault, static_cast<size_t>(Width),
+        static_cast<size_t>(Height), kCVPixelFormatType_32BGRA,
+        (__bridge CFDictionaryRef)Attributes, &PixelBuffer);
+    if (Result != kCVReturnSuccess || PixelBuffer == nullptr) {
+      return false;
+    }
+
+    CVPixelBufferLockBaseAddress(PixelBuffer, 0);
+    std::memset(CVPixelBufferGetBaseAddress(PixelBuffer), 0,
+                CVPixelBufferGetBytesPerRow(PixelBuffer) *
+                    static_cast<size_t>(Height));
+    CVPixelBufferUnlockBaseAddress(PixelBuffer, 0);
+
+    m_DummyPixelBuffer = PixelBuffer;
+    m_DummyFrameBuffer = [[RTC_OBJC_TYPE(RTCCVPixelBuffer) alloc]
+        initWithPixelBuffer:m_DummyPixelBuffer];
+    m_DummyFrameWidth = Width;
+    m_DummyFrameHeight = Height;
+    [m_VideoSource adaptOutputFormatToWidth:Width height:Height fps:60];
+    return true;
+  }
+
+  void TryTakeDeliverablePacketLocked(
+      std::optional<EncodedVideoPacket> &PacketToDeliver,
+      std::optional<PendingEncodeRequest> &RequestToDeliver) {
+    if (m_PacketBackedEncoder == nil || !m_HasOutstandingSendRequest ||
+        !m_LatestEncodedPacket.has_value()) {
+      return;
+    }
+
+    if (m_LatestEncodedPacket->FrameIndex + 1u <
+        m_OutstandingSendRequest.FrameIndex) {
+      if (m_Status.Video.WaitingForKeyframe && m_LatestEncodedPacket->IsKeyframe) {
+        m_OutstandingSendRequest.FrameIndex = m_LatestEncodedPacket->FrameIndex;
+        m_OutstandingSendRequest.TimeStamp =
+            static_cast<int32_t>(m_LatestEncodedPacket->FrameIndex & 0xffffffffu);
+        m_Status.Video.LatestRequestedFrameIndex =
+            m_OutstandingSendRequest.FrameIndex;
+      } else {
+        ++m_Status.Video.DroppedStalePacketCount;
+        m_LatestEncodedPacket.reset();
+        m_Status.Video.PendingPacketCount = 0;
+        return;
+      }
+    } else if (m_LatestEncodedPacket->FrameIndex < m_OutstandingSendRequest.FrameIndex) {
+      m_OutstandingSendRequest.FrameIndex = m_LatestEncodedPacket->FrameIndex;
+      m_OutstandingSendRequest.TimeStamp =
+          static_cast<int32_t>(m_LatestEncodedPacket->FrameIndex & 0xffffffffu);
+      m_Status.Video.LatestRequestedFrameIndex =
+          m_OutstandingSendRequest.FrameIndex;
+    }
+
+    if (m_LatestEncodedPacket->FrameIndex > m_OutstandingSendRequest.FrameIndex) {
+      ++m_Status.Video.DroppedStaleRequestCount;
+      m_OutstandingSendRequest.FrameIndex = m_LatestEncodedPacket->FrameIndex;
+      m_OutstandingSendRequest.TimeStamp =
+          static_cast<int32_t>(m_LatestEncodedPacket->FrameIndex & 0xffffffffu);
+      m_OutstandingSendRequest.CaptureTimeMs = static_cast<int64_t>(
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now().time_since_epoch())
+              .count());
+      m_Status.Video.LatestRequestedFrameIndex = m_OutstandingSendRequest.FrameIndex;
+    }
+
+    PacketToDeliver = *m_LatestEncodedPacket;
+    RequestToDeliver = m_OutstandingSendRequest;
+    if (m_LatestEncodedPacket->IsKeyframe) {
+      m_Status.Video.WaitingForKeyframe = false;
+    }
+    m_LatestEncodedPacket.reset();
+    m_HasOutstandingSendRequest = false;
+    m_Status.Video.HasOutstandingSendRequest = false;
+    m_Status.Video.PendingPacketCount = 0;
+  }
+
   void ResetPeerLocked(std::string_view Reason) {
+    m_PacketBackedEncoder = nil;
+    m_HasOutstandingSendRequest = false;
+    m_LatestEncodedPacket.reset();
     if (m_ReliableChannel != nil) {
       [m_ReliableChannel close];
       ReleaseObjc(m_ReliableChannel);
@@ -581,11 +779,23 @@ private:
       [m_PeerConnection close];
       ReleaseObjc(m_PeerConnection);
     }
+    if (m_DummyPixelBuffer != nullptr) {
+      CVPixelBufferRelease(m_DummyPixelBuffer);
+      m_DummyPixelBuffer = nullptr;
+    }
+    ReleaseObjc(m_DummyFrameBuffer);
+    m_DummyFrameWidth = 0;
+    m_DummyFrameHeight = 0;
     m_LocalIceCandidates.clear();
     m_Status.PendingLocalIceCandidateCount = 0;
     m_Status.SignalingState = "new";
     m_Status.ConnectionState = "closed";
     m_Status.SessionId.clear();
+    m_Status.Video.WaitingForKeyframe = true;
+    m_Status.Video.HasOutstandingSendRequest = false;
+    m_Status.Video.PendingPacketCount = 0;
+    m_Status.Video.LatestRequestedFrameIndex = std::nullopt;
+    m_Status.Video.LatestEncodedFrameIndex = std::nullopt;
     UpdateDetailLocked(std::string("Peer reset: ") + std::string(Reason));
   }
 
@@ -609,19 +819,191 @@ private:
 private:
   mutable std::mutex m_Mutex;
   AxiomWebRtcBridge *m_Bridge{nil};
+  AxiomPacketBackedVideoEncoderFactory *m_EncoderFactory{nil};
+  RTC_OBJC_TYPE(RTCVideoDecoderFactoryH264) *m_DecoderFactory{nil};
   RTC_OBJC_TYPE(RTCPeerConnectionFactory) *m_Factory{nil};
   RTC_OBJC_TYPE(RTCPeerConnection) *m_PeerConnection{nil};
   RTC_OBJC_TYPE(RTCVideoSource) *m_VideoSource{nil};
   RTC_OBJC_TYPE(RTCVideoTrack) *m_VideoTrack{nil};
   RTC_OBJC_TYPE(RTCVideoCapturer) *m_VideoCapturer{nil};
+  RTC_OBJC_TYPE(RTCCVPixelBuffer) *m_DummyFrameBuffer{nil};
+  CVPixelBufferRef m_DummyPixelBuffer{nullptr};
+  uint32_t m_DummyFrameWidth{0};
+  uint32_t m_DummyFrameHeight{0};
   RTC_OBJC_TYPE(RTCDataChannel) *m_ReliableChannel{nil};
   RTC_OBJC_TYPE(RTCDataChannel) *m_UnreliableChannel{nil};
+  AxiomPacketBackedVideoEncoder *m_PacketBackedEncoder{nil};
+  bool m_HasOutstandingSendRequest{false};
+  PendingEncodeRequest m_OutstandingSendRequest{};
   std::function<void(std::string_view)> m_CommandMessageHandler;
   std::vector<WebRtcIceCandidate> m_LocalIceCandidates;
-  std::vector<EncodedVideoPacket> m_PendingEncodedVideoPackets;
+  std::optional<EncodedVideoPacket> m_LatestEncodedPacket;
   WebRtcSessionStatus m_Status{};
 };
 } // namespace Axiom
+
+@implementation AxiomPacketBackedVideoEncoder {
+  Axiom::MacOSWebRtcSessionImpl *_session;
+  RTCVideoEncoderCallback _callback;
+  RTC_OBJC_TYPE(RTCVideoCodecInfo) *_codecInfo;
+}
+
+- (instancetype)initWithSession:(Axiom::MacOSWebRtcSessionImpl *)session
+                      codecInfo:(RTC_OBJC_TYPE(RTCVideoCodecInfo) *)codecInfo {
+  self = [super init];
+  if (self) {
+    _session = session;
+    _codecInfo = codecInfo;
+  }
+  return self;
+}
+
+- (void)dealloc {
+  if (_session != nullptr) {
+    _session->OnPacketBackedEncoderReleased(self);
+  }
+#if !__has_feature(objc_arc)
+  [_codecInfo release];
+  [_callback release];
+  [super dealloc];
+#endif
+}
+
+- (void)setCallback:(RTCVideoEncoderCallback)callback {
+#if !__has_feature(objc_arc)
+  [_callback release];
+  _callback = [callback copy];
+#else
+  _callback = callback;
+#endif
+}
+
+- (NSInteger)startEncodeWithSettings:
+                (RTC_OBJC_TYPE(RTCVideoEncoderSettings) *)settings
+                      numberOfCores:(int)numberOfCores {
+  (void)settings;
+  (void)numberOfCores;
+  if (_session != nullptr) {
+    _session->BindPacketBackedEncoder(self);
+  }
+  return 0;
+}
+
+- (NSInteger)releaseEncoder {
+  if (_session != nullptr) {
+    _session->OnPacketBackedEncoderReleased(self);
+  }
+  return 0;
+}
+
+- (NSInteger)encode:(RTC_OBJC_TYPE(RTCVideoFrame) *)frame
+    codecSpecificInfo:(id<RTC_OBJC_TYPE(RTCCodecSpecificInfo)>)info
+           frameTypes:(NSArray<NSNumber *> *)frameTypes {
+  (void)info;
+  (void)frameTypes;
+  if (_session != nullptr) {
+    _session->OnEncoderFrameRequested(self, frame);
+  }
+  return 0;
+}
+
+- (int)setBitrate:(uint32_t)bitrateKbit framerate:(uint32_t)framerate {
+  (void)bitrateKbit;
+  (void)framerate;
+  return 0;
+}
+
+- (NSString *)implementationName {
+  return @"AxiomVideoToolboxH264Passthrough";
+}
+
+- (RTC_OBJC_TYPE(RTCVideoEncoderQpThresholds) *)scalingSettings {
+  return nil;
+}
+
+- (NSInteger)resolutionAlignment {
+  return 2;
+}
+
+- (BOOL)applyAlignmentToAllSimulcastLayers {
+  return NO;
+}
+
+- (BOOL)supportsNativeHandle {
+  return NO;
+}
+
+- (void)deliverEncodedPacket:(const Axiom::EncodedVideoPacket &)packet
+                  timeStamp:(int32_t)timeStamp
+              captureTimeMs:(int64_t)captureTimeMs {
+  if (_callback == nil) {
+    return;
+  }
+
+  RTC_OBJC_TYPE(RTCEncodedImage) *encodedImage =
+      [[RTC_OBJC_TYPE(RTCEncodedImage) alloc] init];
+  encodedImage.buffer =
+      [NSData dataWithBytes:packet.Bytes.data() length:packet.Bytes.size()];
+  encodedImage.encodedWidth = static_cast<int32_t>(packet.Width);
+  encodedImage.encodedHeight = static_cast<int32_t>(packet.Height);
+  encodedImage.timeStamp = timeStamp;
+  encodedImage.captureTimeMs = captureTimeMs;
+  encodedImage.frameType =
+      packet.IsKeyframe ? RTCFrameTypeVideoFrameKey
+                        : RTCFrameTypeVideoFrameDelta;
+  encodedImage.rotation = RTCVideoRotation_0;
+  encodedImage.contentType = RTCVideoContentTypeScreenshare;
+
+  RTC_OBJC_TYPE(RTCCodecSpecificInfoH264) *codecInfo =
+      [[RTC_OBJC_TYPE(RTCCodecSpecificInfoH264) alloc] init];
+  codecInfo.packetizationMode = RTCH264PacketizationModeNonInterleaved;
+  _callback(encodedImage, codecInfo);
+}
+
+@end
+
+@implementation AxiomPacketBackedVideoEncoderFactory {
+  Axiom::MacOSWebRtcSessionImpl *_session;
+  NSArray<RTC_OBJC_TYPE(RTCVideoCodecInfo) *> *_supportedCodecs;
+}
+
+- (instancetype)initWithSession:(Axiom::MacOSWebRtcSessionImpl *)session {
+  self = [super init];
+  if (self) {
+    _session = session;
+    RTC_OBJC_TYPE(RTCVideoCodecInfo) *codecInfo =
+        [[RTC_OBJC_TYPE(RTCVideoCodecInfo) alloc] initWithName:@"H264"
+                                                    parameters:Axiom::DefaultH264CodecParameters()];
+    _supportedCodecs = @[ codecInfo ];
+  }
+  return self;
+}
+
+- (id<RTC_OBJC_TYPE(RTCVideoEncoder)>)createEncoder:
+    (RTC_OBJC_TYPE(RTCVideoCodecInfo) *)info {
+  if (![[info.name uppercaseString] isEqualToString:@"H264"]) {
+    return nil;
+  }
+  return [[AxiomPacketBackedVideoEncoder alloc] initWithSession:_session
+                                                      codecInfo:info];
+}
+
+- (NSArray<RTC_OBJC_TYPE(RTCVideoCodecInfo) *> *)supportedCodecs {
+  return _supportedCodecs;
+}
+
+- (RTC_OBJC_TYPE(RTCVideoEncoderCodecSupport) *)
+    queryCodecSupport:(RTC_OBJC_TYPE(RTCVideoCodecInfo) *)info
+      scalabilityMode:(NSString *)scalabilityMode {
+  (void)scalabilityMode;
+  const bool supported =
+      [[info.name uppercaseString] isEqualToString:@"H264"];
+  return [[RTC_OBJC_TYPE(RTCVideoEncoderCodecSupport) alloc]
+      initWithSupported:supported
+        isPowerEfficient:YES];
+}
+
+@end
 
 @implementation AxiomWebRtcBridge
 - (void)peerConnection:(RTCPeerConnection *)peerConnection
