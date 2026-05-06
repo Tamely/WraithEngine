@@ -40,10 +40,21 @@ export function Outliner() {
     new Set(["world", "lighting", "geometry"])
   )
 
-  const visibleTree = useMemo(
-    () => sceneTree.filter((item) => matchesSearch(item, searchQuery)),
-    [sceneTree, searchQuery]
-  )
+  const visibleTree = useMemo(() => {
+    const collaboratorItems: SessionSceneItem[] = participants
+      .filter((participant) => participant.userId !== 1 && participant.camera !== null)
+      .map((participant) => ({
+        id: `participant-camera-${participant.userId}`,
+        displayName: participant.displayName,
+        kind: "camera" as const,
+        visible: true,
+        children: [],
+      }))
+
+    const treeWithParticipants = [...collaboratorItems, ...sceneTree]
+
+    return treeWithParticipants.filter((item) => matchesSearch(item, searchQuery))
+  }, [participants, sceneTree, searchQuery])
 
   const toggleFolder = (id: string) => {
     setExpandedFolders((prev) => {
