@@ -43,15 +43,25 @@ export function DockDropZone({ tabGroupId, zone, isFloatingDrop }: DockDropZoneP
         setIsHovered(false)
     }
 
+    // For floating panel drags, make zones slightly visible so user knows where to drop
+    const isFloatingDrag = dragState.isFloating
+
     return (
         <div
-            className={`${zoneStyles[zone]} z-40 transition-all duration-100 ${isHovered ? zoneHighlight[zone] : "opacity-0 hover:opacity-100"
+            data-dock-drop-zone
+            data-tab-group-id={tabGroupId}
+            data-zone={zone}
+            className={`${zoneStyles[zone]} z-40 transition-all duration-100 ${isHovered
+                    ? zoneHighlight[zone]
+                    : isFloatingDrag
+                        ? "bg-white/5 border border-dashed border-white/20"
+                        : "opacity-0 hover:opacity-100"
                 }`}
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
             onMouseUp={handleDrop}
         >
-            {isHovered && (
+            {(isHovered || isFloatingDrag) && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                     <span className="text-[10px] text-white/70 font-medium uppercase tracking-widest bg-black/60 px-2 py-0.5 rounded">
                         {zone}

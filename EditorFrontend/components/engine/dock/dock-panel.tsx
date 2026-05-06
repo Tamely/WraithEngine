@@ -21,7 +21,8 @@ const PANEL_LABELS: Record<PanelId, string> = {
 
 export function DockPanel({ tabGroup, className = "", style }: DockPanelProps) {
     const { dragState, setDragState, floatPanel, setActiveTab } = useDock()
-    const isDragging = dragState.panelId !== null && !dragState.isFloating
+    // Show drop zones when ANY panel is being dragged (docked OR floating)
+    const isDragging = dragState.panelId !== null
 
     const handleTabMouseDown = useCallback(
         (e: React.MouseEvent, panelId: PanelId) => {
