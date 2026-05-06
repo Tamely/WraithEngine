@@ -33,7 +33,7 @@ function matchesSearch(item: SessionSceneItem, query: string): boolean {
 }
 
 export function Outliner() {
-  const { sceneTree, selectedObjectId, selectObject, selections, presence, sessionState } =
+  const { sceneTree, selectedObjectId, selectObject, participants, sessionState } =
     useRemoteViewport()
   const [searchQuery, setSearchQuery] = useState("")
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
@@ -79,11 +79,10 @@ export function Outliner() {
     const isExpanded = expandedFolders.has(item.id)
     const isSelected = selectedObjectId === item.id
     const hasChildren = item.children.length > 0
-    const selectedBy = selections
-      .filter((selection) => selection.objectId === item.id)
-      .map((selection) => {
-        const collaborator = presence.find((entry) => entry.userId === selection.userId)
-        return collaborator?.displayName ?? `User ${selection.userId}`
+    const selectedBy = participants
+      .filter((participant) => participant.selectionObjectId === item.id)
+      .map((participant) => {
+        return participant.displayName
       })
 
     if (searchQuery.length > 0 && !matchesSearch(item, searchQuery)) {

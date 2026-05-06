@@ -155,6 +155,25 @@ TEST(HeadlessProtocolTests, SerializesSelectionChangedEvent) {
   EXPECT_NE(Json.find("\"objectId\":\"PlayerCharacter\""), std::string::npos);
 }
 
+TEST(HeadlessProtocolTests, SerializesPresenceChangedEvent) {
+  const Axiom::PublishedEditorEvent Event{
+      .Id = Axiom::EventId{8},
+      .Event = {.Payload = Axiom::PresenceChangedEvent{
+                    .User = Axiom::SessionUserId{7},
+                    .DisplayName = "User 7",
+                    .IsLocal = false,
+                    .PresenceState = "connected",
+                    .SelectedObjectId = std::string("PlayerCharacter"),
+                }}};
+
+  const std::string Json = Axiom::SerializeEvent(Event);
+  EXPECT_NE(Json.find("\"payloadType\":\"presence_changed\""),
+            std::string::npos);
+  EXPECT_NE(Json.find("\"displayName\":\"User 7\""), std::string::npos);
+  EXPECT_NE(Json.find("\"selectionObjectId\":\"PlayerCharacter\""),
+            std::string::npos);
+}
+
 TEST(HeadlessProtocolTests, SerializesObjectTransformUpdatedEvent) {
   const Axiom::PublishedEditorEvent Event{
       .Id = Axiom::EventId{7},
@@ -245,8 +264,11 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
       State, Axiom::SessionUserId{1}, true, "connected", "connected");
   EXPECT_NE(Json.find("\"type\":\"session_snapshot\""), std::string::npos);
   EXPECT_NE(Json.find("\"currentUserId\":1"), std::string::npos);
-  EXPECT_NE(Json.find("\"presence\""), std::string::npos);
+  EXPECT_NE(Json.find("\"participants\""), std::string::npos);
   EXPECT_NE(Json.find("\"displayName\":\"Local User\""), std::string::npos);
+  EXPECT_NE(Json.find("\"presenceState\":\"connected\""), std::string::npos);
+  EXPECT_NE(Json.find("\"selectionObjectId\":\"PlayerCharacter\""),
+            std::string::npos);
   EXPECT_NE(Json.find("\"objectId\":\"PlayerCharacter\""), std::string::npos);
   EXPECT_NE(Json.find("\"displayName\":\"World\""), std::string::npos);
   EXPECT_NE(Json.find("\"kind\":\"actor\""), std::string::npos);

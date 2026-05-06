@@ -13,6 +13,27 @@ std::string DefaultUserDisplayName(SessionUserId User) {
   return "User " + std::to_string(User.Value);
 }
 
+std::string PresenceStateName(EditorUserPresenceState State) {
+  switch (State) {
+  case EditorUserPresenceState::Connected:
+    return "connected";
+  case EditorUserPresenceState::Away:
+    return "away";
+  case EditorUserPresenceState::Disconnected:
+    return "disconnected";
+  }
+
+  return "connected";
+}
+
+std::string DefaultPresentationColor(SessionUserId User) {
+  static constexpr const char *Palette[] = {
+      "#F97316", "#22C55E", "#0EA5E9", "#F59E0B",
+      "#EF4444", "#14B8A6", "#8B5CF6", "#84CC16",
+  };
+  return Palette[User.Value % (sizeof(Palette) / sizeof(Palette[0]))];
+}
+
 std::string CommandTypeName(const EditorCommandPayload &Payload) {
   if (std::holds_alternative<UpdateViewportCameraCommand>(Payload)) {
     return "update_viewport_camera";
@@ -73,6 +94,23 @@ void EditorSession::Unsubscribe(IEditorEventSubscriber *Subscriber) {
 
 void EditorSession::EnsureViewportState(SessionUserId User) {
   EnsureViewport(User);
+}
+
+void EditorSession::SetPresenceState(SessionUserId User,
+                                     EditorUserPresenceState State) {
+  const auto [It, Inserted] = m_State.PresenceByUser.try_emplace(User);
+  EditorUserPresence &Presence = It->second;
+  if (Inserted) {
+    Presence.User = User;
+    Presence.DisplayName = DefaultUserDisplayName(User);
+    Presence.IsLocal = User.Value == 1;
+  }
+  if (Presence.State == State) {
+    return;
+  }
+
+  Presence.State = State;
+  PublishPresenceChangedEvent(User);
 }
 
 void EditorSession::SetSceneSubmissions(
@@ -137,6 +175,41 @@ const EditorUserPresence *EditorSession::FindPresence(SessionUserId User) const 
   return It != m_State.PresenceByUser.end() ? &It->second : nullptr;
 }
 
+EditorParticipant EditorSession::BuildParticipant(SessionUserId User) const {
+  EditorParticipant Participant{};
+  Participant.User = User;
+  Participant.DisplayName = DefaultUserDisplayName(User);
+  Participant.PresentationColor = DefaultPresentationColor(User);
+
+  if (const EditorUserPresence *Presence = FindPresence(User); Presence != nullptr) {
+    Participant.DisplayName = Presence->DisplayName;
+    Participant.State = Presence->State;
+    Participant.IsLocal = Presence->IsLocal;
+  }
+
+  if (const std::string *SelectedObjectId = FindSelectedObjectId(User);
+      SelectedObjectId != nullptr) {
+    Participant.SelectedObjectId = *SelectedObjectId;
+  }
+
+  return Participant;
+}
+
+std::vector<EditorParticipant> EditorSession::BuildParticipants(
+    SessionUserId CurrentUser) const {
+  std::vector<EditorParticipant> Participants;
+  Participants.reserve(m_State.PresenceByUser.size());
+
+  for (const auto &[User, Presence] : m_State.PresenceByUser) {
+    (void)Presence;
+    EditorParticipant Participant = BuildParticipant(User);
+  Participant.IsLocal = User.Value == CurrentUser.Value;
+    Participants.push_back(std::move(Participant));
+  }
+
+  return Participants;
+}
+
 const EditorObjectCollaborationState *EditorSession::FindCollaborationState(
     std::string_view ObjectId) const {
   const auto It = m_State.CollaborationByObjectId.find(std::string(ObjectId));
@@ -151,6 +224,17 @@ void EditorSession::UpdateSubmissionTransform(
       Submission.Transform = Matrix;
     }
   }
+}
+
+void EditorSession::PublishPresenceChangedEvent(SessionUserId User) {
+  const EditorParticipant Participant = BuildParticipant(User);
+  PublishEvent({.Payload = PresenceChangedEvent{
+                    .User = User,
+                    .DisplayName = Participant.DisplayName,
+                    .IsLocal = Participant.IsLocal,
+                    .PresenceState = PresenceStateName(Participant.State),
+                    .SelectedObjectId = Participant.SelectedObjectId,
+                }});
 }
 
 EditorUserPresence &EditorSession::EnsurePresence(SessionUserId User) {

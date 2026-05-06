@@ -38,6 +38,14 @@ struct SelectionChangedEvent {
   std::optional<std::string> ObjectId;
 };
 
+struct PresenceChangedEvent {
+  SessionUserId User;
+  std::string DisplayName;
+  bool IsLocal{false};
+  std::string PresenceState;
+  std::optional<std::string> SelectedObjectId;
+};
+
 struct ObjectTransformUpdatedEvent {
   SessionUserId User;
   std::string ObjectId;
@@ -50,6 +58,7 @@ using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         LookStateChangedEvent,
                                         CommandAcknowledgedEvent,
                                         CommandRejectedEvent,
+                                        PresenceChangedEvent,
                                         SelectionChangedEvent,
                                         ObjectTransformUpdatedEvent>;
 

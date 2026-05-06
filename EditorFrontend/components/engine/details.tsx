@@ -51,7 +51,7 @@ export function Details() {
 }
 
 function DetailsContent({ details }: { details: SessionObjectDetails }) {
-  const { presence, updateTransform } = useRemoteViewport()
+  const { participants, updateTransform } = useRemoteViewport()
   const [draft, setDraft] = useState<DraftTransform>(() => toDraft(details))
   const [isSaving, setIsSaving] = useState(false)
 
@@ -61,12 +61,12 @@ function DetailsContent({ details }: { details: SessionObjectDetails }) {
 
   const canEdit = details.capabilities.supportsTransform && !details.capabilities.transformReadOnly
   const selectedByNames = details.collaboration.selectedByUserIds.map((userId) => {
-    const collaborator = presence.find((entry) => entry.userId === userId)
+    const collaborator = participants.find((entry) => entry.userId === userId)
     return collaborator?.displayName ?? `User ${userId}`
   })
   const lockOwnerName =
     details.collaboration.lockOwnerUserId !== null
-      ? presence.find((entry) => entry.userId === details.collaboration.lockOwnerUserId)
+      ? participants.find((entry) => entry.userId === details.collaboration.lockOwnerUserId)
           ?.displayName ?? `User ${details.collaboration.lockOwnerUserId}`
       : "None"
 

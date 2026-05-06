@@ -21,7 +21,7 @@ import {
   type SessionObjectDetails,
   type RemoteViewportConnectionState,
   type RemoteViewportViewMode,
-  type SessionPresence,
+  type SessionParticipant,
   type SessionSceneItem,
   type SessionSelection,
 } from "./remote-viewport-context"
@@ -71,7 +71,7 @@ interface SessionSnapshotResponse {
     state?: string
     webrtcConnectionState?: string
   }
-  presence: SessionPresence[]
+  participants: SessionParticipant[]
   sceneTree: SessionSceneItem[]
   selections: SessionSelection[]
   selectedObjectDetails: SessionObjectDetails | null
@@ -312,7 +312,7 @@ export function Viewport() {
 
       setSessionSnapshot({
         currentUserId: snapshot.currentUserId,
-        presence: snapshot.presence ?? [],
+        participants: snapshot.participants ?? [],
         sceneTree: snapshot.sceneTree ?? [],
         selections: snapshot.selections ?? [],
         selectedObjectDetails: snapshot.selectedObjectDetails ?? null,
@@ -329,7 +329,7 @@ export function Viewport() {
         sessionId: snapshot.sessionId,
         currentUserId: snapshot.currentUserId,
         sceneItemCount: snapshot.sceneTree?.length ?? 0,
-        presenceCount: snapshot.presence?.length ?? 0,
+        participantCount: snapshot.participants?.length ?? 0,
         selectionCount: snapshot.selections?.length ?? 0,
         transportState: snapshot.transport?.state ?? "unknown",
         webrtcConnectionState: snapshot.transport?.webrtcConnectionState ?? "unknown",
@@ -414,6 +414,12 @@ export function Viewport() {
           )
           void refreshSessionSnapshotSafely("event")
         }
+        return
+      }
+
+      if (message.payloadType === "presence_changed") {
+        setSessionUi("session-ready", "Session ready", "Participant state changed.")
+        void refreshSessionSnapshotSafely("event")
         return
       }
 

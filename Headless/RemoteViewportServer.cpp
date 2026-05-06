@@ -1204,6 +1204,20 @@ bool RemoteViewportServer::HandleWebRtcCloseRequest(
     return false;
   }
 
+  if (ClientId.has_value()) {
+    std::optional<SessionUserId> DisconnectedUser;
+    {
+      std::scoped_lock Lock(m_ClientMutex);
+      const auto It = m_RemoteClientsById.find(*ClientId);
+      if (It != m_RemoteClientsById.end()) {
+        DisconnectedUser = It->second.User;
+      }
+    }
+    if (DisconnectedUser.has_value()) {
+      m_Host.GetHeadlessLayer().GetSession().SetPresenceState(
+          *DisconnectedUser, EditorUserPresenceState::Disconnected);
+    }
+  }
   m_WebRtcOwnerClientId.clear();
   const WebRtcSessionStatus Status = m_WebRtcSession->GetStatus();
   const std::string Payload = SerializeWebRtcStatus(
@@ -1233,24 +1247,34 @@ std::optional<SessionUserId> RemoteViewportServer::ResolveClientUser(
 RemoteViewportServer::ClientSessionResolution
 RemoteViewportServer::CreateOrResumeClientSession(
     const std::optional<std::string> &ClientIdHint) {
-  std::scoped_lock Lock(m_ClientMutex);
-  if (ClientIdHint.has_value()) {
-    const auto Existing = m_RemoteClientsById.find(*ClientIdHint);
-    if (Existing != m_RemoteClientsById.end()) {
-      Existing->second.LastActivity = std::chrono::steady_clock::now();
-      return {.Session = &Existing->second, .ResumedExisting = true};
+  RemoteClientSession *ResolvedSession = nullptr;
+  bool ResumedExisting = false;
+  {
+    std::scoped_lock Lock(m_ClientMutex);
+    if (ClientIdHint.has_value()) {
+      const auto Existing = m_RemoteClientsById.find(*ClientIdHint);
+      if (Existing != m_RemoteClientsById.end()) {
+        Existing->second.LastActivity = std::chrono::steady_clock::now();
+        ResolvedSession = &Existing->second;
+        ResumedExisting = true;
+      }
+    }
+    if (ResolvedSession == nullptr) {
+      RemoteClientSession Session{};
+      Session.ClientId = GenerateClientId();
+      Session.User = SessionUserId{m_NextRemoteUserId++};
+      Session.LastActivity = std::chrono::steady_clock::now();
+      auto [It, Inserted] =
+          m_RemoteClientsById.emplace(Session.ClientId, std::move(Session));
+      (void)Inserted;
+      ResolvedSession = &It->second;
     }
   }
 
-  RemoteClientSession Session{};
-  Session.ClientId = GenerateClientId();
-  Session.User = SessionUserId{m_NextRemoteUserId++};
-  Session.LastActivity = std::chrono::steady_clock::now();
-  auto [It, Inserted] =
-      m_RemoteClientsById.emplace(Session.ClientId, std::move(Session));
-  (void)Inserted;
-  m_Host.GetHeadlessLayer().GetSession().EnsureViewportState(It->second.User);
-  return {.Session = &It->second, .ResumedExisting = false};
+  m_Host.GetHeadlessLayer().GetSession().EnsureViewportState(ResolvedSession->User);
+  m_Host.GetHeadlessLayer().GetSession().SetPresenceState(
+      ResolvedSession->User, EditorUserPresenceState::Connected);
+  return {.Session = ResolvedSession, .ResumedExisting = ResumedExisting};
 }
 
 void RemoteViewportServer::TouchClientSession(const std::string &ClientId) {
@@ -1412,9 +1436,23 @@ bool RemoteViewportServer::HandleWebSocketMessage(std::string_view Payload) {
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SelectObject:
   case HeadlessCommandType::SetTransform:
-  case HeadlessCommandType::UpdateViewportCamera:
-    m_Host.SubmitRemoteCommand(Command->EditorPayload);
+  case HeadlessCommandType::UpdateViewportCamera: {
+    std::optional<SessionUserId> User;
+    {
+      std::scoped_lock Lock(m_ClientMutex);
+      if (!m_WebRtcOwnerClientId.empty()) {
+        const auto It = m_RemoteClientsById.find(m_WebRtcOwnerClientId);
+        if (It != m_RemoteClientsById.end()) {
+          User = It->second.User;
+        }
+      }
+    }
+    if (!User.has_value()) {
+      return false;
+    }
+    m_Host.SubmitRemoteCommand(*User, Command->EditorPayload);
     return true;
+  }
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
     m_Host.RequestClose();

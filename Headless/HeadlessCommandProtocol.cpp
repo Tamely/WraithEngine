@@ -134,6 +134,9 @@ std::string EventPayloadType(const EditorEventPayload &Payload) {
   if (std::holds_alternative<CommandRejectedEvent>(Payload)) {
     return "command_rejected";
   }
+  if (std::holds_alternative<PresenceChangedEvent>(Payload)) {
+    return "presence_changed";
+  }
   if (std::holds_alternative<SelectionChangedEvent>(Payload)) {
     return "selection_changed";
   }
@@ -181,6 +184,49 @@ std::string LockStateToString(EditorObjectLockState State) {
   return "unlocked";
 }
 
+std::string DefaultParticipantColor(SessionUserId User) {
+  static constexpr const char *Palette[] = {
+      "#F97316", "#22C55E", "#0EA5E9", "#F59E0B",
+      "#EF4444", "#14B8A6", "#8B5CF6", "#84CC16",
+  };
+  return Palette[User.Value % (sizeof(Palette) / sizeof(Palette[0]))];
+}
+
+EditorParticipant BuildParticipant(const EditorSessionState &State,
+                                   SessionUserId User,
+                                   SessionUserId CurrentUser) {
+  EditorParticipant Participant{};
+  Participant.User = User;
+  Participant.IsLocal = User == CurrentUser;
+  Participant.PresentationColor = DefaultParticipantColor(User);
+
+  if (const auto PresenceIt = State.PresenceByUser.find(User);
+      PresenceIt != State.PresenceByUser.end()) {
+    Participant.DisplayName = PresenceIt->second.DisplayName;
+    Participant.State = PresenceIt->second.State;
+  } else {
+    Participant.DisplayName = "User " + std::to_string(User.Value);
+  }
+
+  if (const auto SelectionIt = State.SelectedObjectIds.find(User);
+      SelectionIt != State.SelectedObjectIds.end()) {
+    Participant.SelectedObjectId = SelectionIt->second;
+  }
+
+  return Participant;
+}
+
+std::vector<EditorParticipant> BuildParticipants(const EditorSessionState &State,
+                                                 SessionUserId CurrentUser) {
+  std::vector<EditorParticipant> Participants;
+  Participants.reserve(State.PresenceByUser.size());
+  for (const auto &[User, Presence] : State.PresenceByUser) {
+    (void)Presence;
+    Participants.push_back(BuildParticipant(State, User, CurrentUser));
+  }
+  return Participants;
+}
+
 void SerializeSceneItem(std::ostringstream &Stream, const EditorSceneItem &Item) {
   Stream << "{\"id\":\"" << EscapeJson(Item.Id) << "\",\"displayName\":\""
          << EscapeJson(Item.DisplayName) << "\",\"kind\":\""
@@ -219,15 +265,16 @@ void SerializeObjectDetails(std::ostringstream &Stream,
   }
   Stream << ",\"collaboration\":{\"selectedByUserIds\":[";
   bool FirstSelectionOwner = true;
-  for (const auto &[User, ObjectId] : State.SelectedObjectIds) {
-    if (ObjectId != Details.ObjectId) {
+  for (const auto &Participant : BuildParticipants(State, SessionUserId{0})) {
+    if (!Participant.SelectedObjectId.has_value() ||
+        *Participant.SelectedObjectId != Details.ObjectId) {
       continue;
     }
     if (!FirstSelectionOwner) {
       Stream << ",";
     }
     FirstSelectionOwner = false;
-    Stream << User.Value;
+    Stream << Participant.User.Value;
   }
   Stream << "],\"lockState\":\"";
   const auto CollaborationIt = State.CollaborationByObjectId.find(Details.ObjectId);
@@ -243,6 +290,23 @@ void SerializeObjectDetails(std::ostringstream &Stream,
     Stream << "unlocked\",\"lockOwnerUserId\":null";
   }
   Stream << "}}";
+}
+void SerializeParticipant(std::ostringstream &Stream,
+                          const EditorParticipant &Participant) {
+  Stream << "{\"userId\":" << Participant.User.Value << ",\"displayName\":\""
+         << EscapeJson(Participant.DisplayName) << "\",\"presenceState\":\""
+         << PresenceStateToString(Participant.State) << "\",\"isLocal\":"
+         << (Participant.IsLocal ? "true" : "false")
+         << ",\"currentTool\":\"" << EscapeJson(Participant.CurrentTool)
+         << "\",\"presentationColor\":\""
+         << EscapeJson(Participant.PresentationColor)
+         << "\",\"selectionObjectId\":";
+  if (Participant.SelectedObjectId.has_value()) {
+    Stream << "\"" << EscapeJson(*Participant.SelectedObjectId) << "\"";
+  } else {
+    Stream << "null";
+  }
+  Stream << "}";
 }
 } // namespace
 
@@ -494,6 +558,18 @@ std::string SerializeEvent(const PublishedEditorEvent &Event) {
     Stream << ",\"user\":" << Rejected->User.Value
            << ",\"rejectedCommandId\":" << Rejected->RejectedCommand.Value
            << ",\"reason\":\"" << EscapeJson(Rejected->Reason) << "\"";
+  } else if (const auto *Presence =
+                 std::get_if<PresenceChangedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"user\":" << Presence->User.Value
+           << ",\"displayName\":\"" << EscapeJson(Presence->DisplayName)
+           << "\",\"isLocal\":" << (Presence->IsLocal ? "true" : "false")
+           << ",\"presenceState\":\"" << EscapeJson(Presence->PresenceState)
+           << "\",\"selectionObjectId\":";
+    if (Presence->SelectedObjectId.has_value()) {
+      Stream << "\"" << EscapeJson(*Presence->SelectedObjectId) << "\"";
+    } else {
+      Stream << "null";
+    }
   } else if (const auto *Selection =
                  std::get_if<SelectionChangedEvent>(&Event.Event.Payload)) {
     Stream << ",\"user\":" << Selection->User.Value << ",\"objectId\":";
@@ -668,24 +744,21 @@ std::string SerializeSessionSnapshot(const EditorSessionState &State,
                                      bool TransportConnected,
                                      std::string_view TransportState,
                                      std::string_view WebRtcConnectionState) {
+  const std::vector<EditorParticipant> Participants =
+      BuildParticipants(State, CurrentUser);
   std::ostringstream Stream;
   Stream << "{\"type\":\"session_snapshot\",\"sessionId\":" << State.Session.Value
          << ",\"currentUserId\":" << CurrentUser.Value
          << ",\"transport\":{\"connected\":"
          << (TransportConnected ? "true" : "false") << ",\"state\":\""
          << EscapeJson(TransportState) << "\",\"webrtcConnectionState\":\""
-         << EscapeJson(WebRtcConnectionState) << "\"},\"presence\":[";
+         << EscapeJson(WebRtcConnectionState) << "\"},\"participants\":[";
 
-  bool FirstPresence = true;
-  for (const auto &[User, Presence] : State.PresenceByUser) {
-    if (!FirstPresence) {
+  for (size_t Index = 0; Index < Participants.size(); ++Index) {
+    if (Index != 0) {
       Stream << ",";
     }
-    FirstPresence = false;
-    Stream << "{\"userId\":" << User.Value << ",\"displayName\":\""
-           << EscapeJson(Presence.DisplayName) << "\",\"state\":\""
-           << PresenceStateToString(Presence.State) << "\",\"isLocal\":"
-           << (Presence.IsLocal ? "true" : "false") << "}";
+    SerializeParticipant(Stream, Participants[Index]);
   }
 
   Stream << "],\"selections\":[";
