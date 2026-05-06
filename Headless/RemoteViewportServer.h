@@ -69,6 +69,11 @@ private:
     std::chrono::steady_clock::time_point LastActivity;
   };
 
+  struct ClientSessionResolution {
+    RemoteClientSession *Session{nullptr};
+    bool ResumedExisting{false};
+  };
+
 private:
   void AcceptLoop();
   void HandleClient(uintptr_t ClientSocketValue);
@@ -110,7 +115,7 @@ private:
   bool TryGetLatestEncodedPacket(LatestEncodedPacket &Packet) const;
   std::optional<SessionUserId> ResolveClientUser(
       std::string_view HeaderBlock) const;
-  RemoteClientSession &CreateOrResumeClientSession(
+  ClientSessionResolution CreateOrResumeClientSession(
       const std::optional<std::string> &ClientIdHint);
   void TouchClientSession(const std::string &ClientId);
 
@@ -130,6 +135,7 @@ private:
   std::vector<WebSocketClient> m_WebSocketClients;
   std::unordered_map<std::string, RemoteClientSession> m_RemoteClientsById;
   uint64_t m_NextRemoteUserId{2};
+  std::string m_WebRtcOwnerClientId;
   mutable std::mutex m_SendMutex;
   std::unique_ptr<IWebRtcSession> m_WebRtcSession;
 };

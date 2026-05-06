@@ -886,8 +886,20 @@ bool RemoteViewportServer::HandleSessionConnectRequest(
   (void)Body;
   const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
   const auto ClientIdHint = FindHeaderValue(HeaderBlock, ClientIdHeaderName);
-  RemoteClientSession &Client = CreateOrResumeClientSession(ClientIdHint);
+  const ClientSessionResolution Resolution =
+      CreateOrResumeClientSession(ClientIdHint);
+  RemoteClientSession &Client = *Resolution.Session;
   TouchClientSession(Client.ClientId);
+
+  if (Resolution.ResumedExisting && m_WebRtcSession != nullptr) {
+    const WebRtcSessionStatus CurrentStatus = m_WebRtcSession->GetStatus();
+    if (m_WebRtcOwnerClientId == Client.ClientId &&
+        CurrentStatus.ConnectionState != "new" &&
+        CurrentStatus.ConnectionState != "closed") {
+      m_WebRtcSession->ResetPeer("client_session_resumed");
+      m_WebRtcOwnerClientId.clear();
+    }
+  }
 
   const WebRtcSessionStatus Status =
       m_WebRtcSession != nullptr ? m_WebRtcSession->GetStatus()
@@ -1024,6 +1036,7 @@ bool RemoteViewportServer::HandleWebRtcOfferRequest(uintptr_t ClientSocketValue,
                                                     std::string_view Body) {
   const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
   const auto User = ResolveClientUser(HeaderBlock);
+  const auto ClientId = FindHeaderValue(HeaderBlock, ClientIdHeaderName);
   if (!User.has_value()) {
     const std::string Response =
         JsonResponse("400 Bad Request",
@@ -1031,8 +1044,7 @@ bool RemoteViewportServer::HandleWebRtcOfferRequest(uintptr_t ClientSocketValue,
     SendAll(ClientSocket, Response.data(), Response.size());
     return false;
   }
-  if (const auto ClientId = FindHeaderValue(HeaderBlock, ClientIdHeaderName);
-      ClientId.has_value()) {
+  if (ClientId.has_value()) {
     TouchClientSession(*ClientId);
   }
 
@@ -1073,6 +1085,10 @@ bool RemoteViewportServer::HandleWebRtcOfferRequest(uintptr_t ClientSocketValue,
         JsonResponse("503 Service Unavailable", Payload);
     SendAll(ClientSocket, Response.data(), Response.size());
     return false;
+  }
+
+  if (ClientId.has_value()) {
+    m_WebRtcOwnerClientId = *ClientId;
   }
 
   const std::string Response =
@@ -1140,6 +1156,7 @@ bool RemoteViewportServer::HandleWebRtcCloseRequest(
     std::string_view Body) {
   const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
   const auto User = ResolveClientUser(HeaderBlock);
+  const auto ClientId = FindHeaderValue(HeaderBlock, ClientIdHeaderName);
   if (!User.has_value()) {
     const std::string Response =
         JsonResponse("400 Bad Request",
@@ -1147,8 +1164,7 @@ bool RemoteViewportServer::HandleWebRtcCloseRequest(
     SendAll(ClientSocket, Response.data(), Response.size());
     return false;
   }
-  if (const auto ClientId = FindHeaderValue(HeaderBlock, ClientIdHeaderName);
-      ClientId.has_value()) {
+  if (ClientId.has_value()) {
     TouchClientSession(*ClientId);
   }
 
@@ -1165,6 +1181,18 @@ bool RemoteViewportServer::HandleWebRtcCloseRequest(
     return false;
   }
 
+  if (ClientId.has_value() && !m_WebRtcOwnerClientId.empty() &&
+      m_WebRtcOwnerClientId != *ClientId) {
+    const WebRtcSessionStatus Status = m_WebRtcSession->GetStatus();
+    const std::string Payload = SerializeWebRtcStatus(
+        Status.Enabled, Status.Available, Status.SignalingState,
+        Status.ConnectionState, Status.Detail, Status.SessionId,
+        Status.PendingLocalIceCandidateCount, Status.Video);
+    const std::string Response = JsonResponse("202 Accepted", Payload);
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
   std::string Error;
   if (!m_WebRtcSession->CloseSession(Reason, Error)) {
     const std::string Response =
@@ -1176,6 +1204,7 @@ bool RemoteViewportServer::HandleWebRtcCloseRequest(
     return false;
   }
 
+  m_WebRtcOwnerClientId.clear();
   const WebRtcSessionStatus Status = m_WebRtcSession->GetStatus();
   const std::string Payload = SerializeWebRtcStatus(
       Status.Enabled, Status.Available, Status.SignalingState,
@@ -1201,7 +1230,7 @@ std::optional<SessionUserId> RemoteViewportServer::ResolveClientUser(
   return It->second.User;
 }
 
-RemoteViewportServer::RemoteClientSession &
+RemoteViewportServer::ClientSessionResolution
 RemoteViewportServer::CreateOrResumeClientSession(
     const std::optional<std::string> &ClientIdHint) {
   std::scoped_lock Lock(m_ClientMutex);
@@ -1209,7 +1238,7 @@ RemoteViewportServer::CreateOrResumeClientSession(
     const auto Existing = m_RemoteClientsById.find(*ClientIdHint);
     if (Existing != m_RemoteClientsById.end()) {
       Existing->second.LastActivity = std::chrono::steady_clock::now();
-      return Existing->second;
+      return {.Session = &Existing->second, .ResumedExisting = true};
     }
   }
 
@@ -1221,7 +1250,7 @@ RemoteViewportServer::CreateOrResumeClientSession(
       m_RemoteClientsById.emplace(Session.ClientId, std::move(Session));
   (void)Inserted;
   m_Host.GetHeadlessLayer().GetSession().EnsureViewportState(It->second.User);
-  return It->second;
+  return {.Session = &It->second, .ResumedExisting = false};
 }
 
 void RemoteViewportServer::TouchClientSession(const std::string &ClientId) {

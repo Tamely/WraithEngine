@@ -1163,7 +1163,9 @@ export function Viewport() {
     }
 
     const handleBeforeUnload = () => {
-      notifyServerOnDestroyRef.current = true
+      // Let a same-tab refresh reclaim the single server peer without an unload
+      // race closing the freshly negotiated replacement session underneath it.
+      notifyServerOnDestroyRef.current = false
       void destroyPeerConnection("page_unload")
     }
 
