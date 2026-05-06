@@ -1,73 +1,98 @@
 "use client"
 
-import { useState } from "react"
 import { useDock, type DockZone, type PanelId } from "./dock-context"
 
 interface DockDropZoneProps {
     tabGroupId: string
     zone: DockZone
-    isFloatingDrop?: boolean
+    onDrop: () => void
 }
 
+// Each zone is a distinct non-overlapping region.
+// "tab" sits in the center as a small badge — directional zones are half-strips on each edge.
 const zoneStyles: Record<DockZone, string> = {
-    left: "absolute left-0 top-0 bottom-0 w-1/4",
-    right: "absolute right-0 top-0 bottom-0 w-1/4",
-    top: "absolute top-0 left-0 right-0 h-1/4",
-    bottom: "absolute bottom-0 left-0 right-0 h-1/4",
-    center: "absolute inset-0",
-    tab: "absolute inset-0",
+    top: "absolute top-0    left-1/4  right-1/4 h-1/4 cursor-pointer",
+    bottom: "absolute bottom-0 left-1/4  right-1/4 h-1/4 cursor-pointer",
+    left: "absolute left-0   top-1/4   bottom-1/4 w-1/4 cursor-pointer",
+    right: "absolute right-0  top-1/4   bottom-1/4 w-1/4 cursor-pointer",
+    tab: "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-10 cursor-pointer",
+    center: "absolute inset-0 cursor-pointer",
 }
 
-const zoneHighlight: Record<DockZone, string> = {
-    left: "bg-white/10 border-l-2 border-white/60",
-    right: "bg-white/10 border-r-2 border-white/60",
-    top: "bg-white/10 border-t-2 border-white/60",
-    bottom: "bg-white/10 border-b-2 border-white/60",
-    center: "bg-white/10 border-2 border-white/60",
-    tab: "bg-white/5 border-2 border-white/40 border-dashed",
+// Visual feedback overlays (separate from hit-targets to avoid z conflicts)
+const zoneHighlightIdle: Record<DockZone, string> = {
+    top: "bg-white/5  border border-dashed border-white/20",
+    bottom: "bg-white/5  border border-dashed border-white/20",
+    left: "bg-white/5  border border-dashed border-white/20",
+    right: "bg-white/5  border border-dashed border-white/20",
+    tab: "bg-white/5  border border-dashed border-white/20 rounded",
+    center: "",
 }
 
-export function DockDropZone({ tabGroupId, zone, isFloatingDrop }: DockDropZoneProps) {
-    const { dragState, dropPanel, dockFloatingPanel } = useDock()
-    const [isHovered, setIsHovered] = useState(false)
+const zoneHighlightHover: Record<DockZone, string> = {
+    top: "bg-blue-500/20 border border-blue-400/70 border-t-2",
+    bottom: "bg-blue-500/20 border border-blue-400/70 border-b-2",
+    left: "bg-blue-500/20 border border-blue-400/70 border-l-2",
+    right: "bg-blue-500/20 border border-blue-400/70 border-r-2",
+    tab: "bg-blue-500/30 border border-blue-400/70 rounded",
+    center: "",
+}
+
+interface ZoneProps {
+    tabGroupId: string
+    zone: DockZone
+    isFloating: boolean
+    onDropZone: (tabGroupId: string, zone: DockZone) => void
+}
+
+function Zone({ tabGroupId, zone, isFloating, onDropZone }: ZoneProps) {
+    const { dropPanel, dockFloatingPanel, dragState } = useDock()
 
     if (!dragState.panelId) return null
 
-    const handleDrop = () => {
+    const handleMouseUp = () => {
         const pid = dragState.panelId as PanelId
-        if (isFloatingDrop || dragState.isFloating) {
+        if (isFloating) {
             dockFloatingPanel(pid, tabGroupId, zone)
         } else {
             dropPanel(pid, tabGroupId, zone)
         }
-        setIsHovered(false)
+        onDropZone(tabGroupId, zone)
     }
 
-    // For floating panel drags, make zones slightly visible so user knows where to drop
-    const isFloatingDrag = dragState.isFloating
+    if (zone === "center") return null // center is not exposed to user
 
     return (
         <div
             data-dock-drop-zone
             data-tab-group-id={tabGroupId}
             data-zone={zone}
-            className={`${zoneStyles[zone]} z-40 transition-all duration-100 ${isHovered
-                    ? zoneHighlight[zone]
-                    : isFloatingDrag
-                        ? "bg-white/5 border border-dashed border-white/20"
-                        : "opacity-0 hover:opacity-100"
-                }`}
-            onMouseEnter={() => setIsHovered(true)}
-            onMouseLeave={() => setIsHovered(false)}
-            onMouseUp={handleDrop}
+            className={`absolute z-50 flex items-center justify-center transition-colors duration-75 select-none group ${zoneStyles[zone]} ${zoneHighlightIdle[zone]} hover:${zoneHighlightHover[zone]}`}
+            onMouseUp={handleMouseUp}
         >
-            {(isHovered || isFloatingDrag) && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <span className="text-[10px] text-white/70 font-medium uppercase tracking-widest bg-black/60 px-2 py-0.5 rounded">
-                        {zone}
-                    </span>
-                </div>
-            )}
+            <span className="text-[9px] font-semibold uppercase tracking-widest text-white/30 group-hover:text-white/90 transition-colors pointer-events-none">
+                {zone}
+            </span>
         </div>
+    )
+}
+
+export function DockDropZones({
+    tabGroupId,
+    isFloating,
+    onDropZone,
+}: {
+    tabGroupId: string
+    isFloating: boolean
+    onDropZone: (tabGroupId: string, zone: DockZone) => void
+}) {
+    return (
+        <>
+            <Zone tabGroupId={tabGroupId} zone="top" isFloating={isFloating} onDropZone={onDropZone} />
+            <Zone tabGroupId={tabGroupId} zone="bottom" isFloating={isFloating} onDropZone={onDropZone} />
+            <Zone tabGroupId={tabGroupId} zone="left" isFloating={isFloating} onDropZone={onDropZone} />
+            <Zone tabGroupId={tabGroupId} zone="right" isFloating={isFloating} onDropZone={onDropZone} />
+            <Zone tabGroupId={tabGroupId} zone="tab" isFloating={isFloating} onDropZone={onDropZone} />
+        </>
     )
 }
