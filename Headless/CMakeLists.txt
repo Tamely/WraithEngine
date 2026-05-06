@@ -27,7 +27,6 @@ target_link_libraries(AxiomRemoteViewportDevClient PRIVATE AxiomCore)
 
 add_executable(AxiomRemoteViewportServer
   AxiomRemoteViewportServer.cpp
-  RemoteViewportBrowserAssets.cpp
   RemoteViewportServer.cpp
   HeadlessCommandProtocol.cpp
   HeadlessSessionHost.cpp

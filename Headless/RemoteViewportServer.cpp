@@ -3,8 +3,6 @@
 #include <Core/Platform.h>
 
 #include "HeadlessCommandProtocol.h"
-#include "RemoteViewportBrowserAssets.h"
-
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -800,14 +798,6 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
                                             std::string_view Path) {
   const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
   const std::string_view Route = StripQuery(Path);
-  RemoteViewportBrowserAsset BrowserAsset{};
-  if (TryGetRemoteViewportBrowserAsset(Route, BrowserAsset)) {
-    const std::string Body(BrowserAsset.Body);
-    const std::string Response =
-        BuildHttpResponse("200 OK", BrowserAsset.ContentType, Body);
-    SendAll(ClientSocket, Response.data(), Response.size());
-    return false;
-  }
   if (Route == "/health") {
     const std::string Body = SerializeReady(m_Options.Width, m_Options.Height);
     const std::string Response = JsonResponse("200 OK", Body);
