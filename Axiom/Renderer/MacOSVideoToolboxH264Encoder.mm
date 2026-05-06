@@ -59,12 +59,6 @@ public:
       return false;
     }
 
-    const OSStatus CompleteStatus =
-        VTCompressionSessionCompleteFrames(m_Session, kCMTimeInvalid);
-    if (CompleteStatus != noErr) {
-      return false;
-    }
-
     return true;
   }
 
@@ -162,8 +156,8 @@ private:
     SetSessionProperty(kVTCompressionPropertyKey_ProfileLevel,
                        kVTProfileLevel_H264_Baseline_AutoLevel);
 
-    const int32_t AverageBitRate =
-        static_cast<int32_t>(std::max<uint32_t>(Width * Height * 4u, 250000u));
+    const int32_t AverageBitRate = static_cast<int32_t>(
+        std::max<uint32_t>(Width * Height * 6u, 500000u));
     CFNumberRef BitRate = CFNumberCreate(nullptr, kCFNumberSInt32Type,
                                          &AverageBitRate);
     if (BitRate != nullptr) {
@@ -171,7 +165,34 @@ private:
       CFRelease(BitRate);
     }
 
-    const int32_t MaxKeyFrameInterval = 30;
+    const int32_t PeakByteRate =
+        std::max(1, (AverageBitRate * 3) / (2 * 8));
+    const int32_t RateLimitWindowSeconds = 1;
+    CFNumberRef PeakByteRateNumber =
+        CFNumberCreate(nullptr, kCFNumberSInt32Type, &PeakByteRate);
+    CFNumberRef RateLimitWindowNumber = CFNumberCreate(
+        nullptr, kCFNumberSInt32Type, &RateLimitWindowSeconds);
+    if (PeakByteRateNumber != nullptr && RateLimitWindowNumber != nullptr) {
+      const void *RateLimitValues[] = {
+          PeakByteRateNumber,
+          RateLimitWindowNumber,
+      };
+      CFArrayRef RateLimits =
+          CFArrayCreate(nullptr, RateLimitValues, 2u, &kCFTypeArrayCallBacks);
+      if (RateLimits != nullptr) {
+        SetSessionProperty(kVTCompressionPropertyKey_DataRateLimits,
+                           RateLimits);
+        CFRelease(RateLimits);
+      }
+    }
+    if (RateLimitWindowNumber != nullptr) {
+      CFRelease(RateLimitWindowNumber);
+    }
+    if (PeakByteRateNumber != nullptr) {
+      CFRelease(PeakByteRateNumber);
+    }
+
+    const int32_t MaxKeyFrameInterval = 15;
     CFNumberRef KeyFrameInterval =
         CFNumberCreate(nullptr, kCFNumberSInt32Type, &MaxKeyFrameInterval);
     if (KeyFrameInterval != nullptr) {
