@@ -7,25 +7,25 @@ import {
   Eye,
   Camera,
   ChevronDown,
-  RotateCcw,
 } from "lucide-react"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  useRemoteViewport,
+  type RemoteViewportConnectionState,
+  type RemoteViewportViewMode,
+} from "./remote-viewport-context"
 
 const DEFAULT_AXIOM_SERVER_ORIGIN = "http://127.0.0.1:8080"
 const STATUS_POLL_INTERVAL_MS = 1500
 const ICE_POLL_INTERVAL_MS = 1000
-const MAX_LOG_LINES = 10
-
-type ConnectionState =
-  | "idle"
-  | "connecting"
-  | "awaiting-backend"
-  | "awaiting-media"
-  | "streaming"
-  | "control-ready"
-  | "unsupported"
-  | "error"
-
-type ViewMode = "lit" | "unlit" | "wireframe"
+type ConnectionState = RemoteViewportConnectionState
+type ViewMode = RemoteViewportViewMode
 type ChannelPreference = "reliable" | "unreliable"
 
 interface WebRtcVideoStatus {
@@ -84,16 +84,6 @@ function formatLogEntry(value: unknown) {
   return typeof value === "string" ? value : JSON.stringify(value)
 }
 
-function nextViewMode(current: ViewMode): ViewMode {
-  if (current === "lit") {
-    return "unlit"
-  }
-  if (current === "unlit") {
-    return "wireframe"
-  }
-  return "lit"
-}
-
 export function Viewport() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const viewportShellRef = useRef<HTMLDivElement>(null)
@@ -117,13 +107,24 @@ export function Viewport() {
   const sendCommandRef = useRef<
     (command: RemoteViewportCommand, preferredChannel?: ChannelPreference) => Promise<boolean>
   >(async () => false)
-  const [connectionState, setConnectionState] = useState<ConnectionState>("idle")
-  const [statusText, setStatusText] = useState("Ready to connect")
-  const [detailText, setDetailText] = useState("Waiting for remote viewport stream")
-  const [frameText, setFrameText] = useState("No stream metadata yet")
-  const [viewMode, setViewMode] = useState<ViewMode>("lit")
-  const [isLooking, setIsLooking] = useState(false)
-  const [eventLog, setEventLog] = useState<string[]>([])
+  const {
+    connectionState,
+    statusText,
+    detailText,
+    frameText,
+    viewMode,
+    isLooking,
+    setConnectionState,
+    setStatusText,
+    setDetailText,
+    setFrameText,
+    setViewMode,
+    setIsLooking,
+    setServerOrigin,
+    appendEventLog,
+    clearEventLog,
+    registerActions,
+  } = useRemoteViewport()
   const [serverOrigin] = useState(getServerOrigin)
 
   const isConnected =
@@ -144,8 +145,7 @@ export function Viewport() {
       if (disposed) {
         return
       }
-      const line = formatLogEntry(value)
-      setEventLog((current) => [line, ...current].slice(0, MAX_LOG_LINES))
+      appendEventLog(formatLogEntry(value))
     }
 
     function setDisconnectedUi(nextStatus: ConnectionState, title: string, detail: string) {
@@ -572,7 +572,7 @@ export function Viewport() {
       setStatusText("Connecting")
       setDetailText("Creating browser WebRTC offer...")
       setFrameText("No stream metadata yet")
-      setEventLog([])
+      clearEventLog()
       startViewportInputPump()
 
       const peer = new window.RTCPeerConnection({
@@ -753,6 +753,37 @@ export function Viewport() {
     }
 
     connectRef.current = connect
+    registerActions({
+      reconnect: connect,
+      toggleLook: async () => {
+        const nextValue = !isLookingRef.current
+        isLookingRef.current = nextValue
+        setIsLooking(nextValue)
+        await sendCommand(
+          {
+            type: "set_look_active",
+            isLooking: nextValue,
+            cursorPosition: [cursorRef.current.x, cursorRef.current.y],
+          },
+          "reliable"
+        )
+      },
+      setMode: async (nextMode) => {
+        if (viewModeRef.current === nextMode) {
+          return
+        }
+        viewModeRef.current = nextMode
+        setViewMode(nextMode)
+        await sendCommand(
+          {
+            type: "set_view_mode",
+            viewMode: nextMode,
+          },
+          "reliable"
+        )
+      },
+    })
+    setServerOrigin(serverOrigin)
 
     const video = videoRef.current
     const shell = viewportShellRef.current
@@ -870,7 +901,7 @@ export function Viewport() {
       window.removeEventListener("beforeunload", handleBeforeUnload)
       void destroyPeerConnection("component_unmount")
     }
-  }, [serverOrigin])
+  }, [appendEventLog, clearEventLog, registerActions, serverOrigin, setConnectionState, setDetailText, setFrameText, setIsLooking, setServerOrigin, setStatusText, setViewMode])
 
   async function toggleLook() {
     const nextValue = !isLookingRef.current
@@ -886,8 +917,11 @@ export function Viewport() {
     )
   }
 
-  async function cycleMode() {
-    const nextMode = nextViewMode(viewModeRef.current)
+  async function setMode(nextMode: ViewMode) {
+    if (viewModeRef.current === nextMode) {
+      return
+    }
+
     viewModeRef.current = nextMode
     setViewMode(nextMode)
     await sendCommandRef.current(
@@ -899,10 +933,6 @@ export function Viewport() {
     )
   }
 
-  async function reconnect() {
-    await connectRef.current()
-  }
-
   return (
     <div className="h-full flex flex-col bg-neutral-900">
       <div className="flex items-center justify-between h-8 bg-neutral-950 border-b border-neutral-800 px-2">
@@ -911,14 +941,30 @@ export function Viewport() {
             Perspective
             <ChevronDown className="w-3 h-3" />
           </button>
-          <button
-            className="flex items-center gap-1 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 rounded"
-            onClick={() => void cycleMode()}
-            type="button"
-          >
-            {viewMode[0].toUpperCase() + viewMode.slice(1)}
-            <ChevronDown className="w-3 h-3" />
-          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="flex items-center gap-1 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 rounded"
+                type="button"
+              >
+                {viewMode[0].toUpperCase() + viewMode.slice(1)}
+                <ChevronDown className="w-3 h-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              className="border-neutral-800 bg-neutral-950 text-neutral-200"
+            >
+              <DropdownMenuRadioGroup
+                value={viewMode}
+                onValueChange={(value) => void setMode(value as ViewMode)}
+              >
+                <DropdownMenuRadioItem value="lit">Lit</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="unlit">Unlit</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="wireframe">Wireframe</DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <button className="flex items-center gap-1 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 rounded">
             Show
             <ChevronDown className="w-3 h-3" />
@@ -926,9 +972,9 @@ export function Viewport() {
         </div>
         <div className="flex items-center gap-1">
           <ViewportButton icon={Grid3X3} />
-          <ViewportButton icon={Eye} onClick={() => void cycleMode()} />
+          <ViewportButton icon={Eye} />
           <ViewportButton icon={Camera} onClick={() => void toggleLook()} />
-          <ViewportButton icon={Maximize2} onClick={() => void reconnect()} />
+          <ViewportButton icon={Maximize2} onClick={() => void connectRef.current()} />
         </div>
       </div>
       <div ref={viewportShellRef} className="relative flex-1 overflow-hidden bg-black">
@@ -956,70 +1002,6 @@ export function Viewport() {
           <span>|</span>
           <span>{statusText}</span>
         </div>
-        <div className="absolute right-2 top-2 w-72 rounded-lg border border-neutral-800 bg-black/65 p-3 text-xs text-neutral-300 backdrop-blur-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
-                Remote Viewport
-              </p>
-              <p className="mt-1 text-sm text-white">{statusText}</p>
-            </div>
-            <div className="flex items-center gap-1">
-              <IconButton icon={RotateCcw} label="Reconnect" onClick={() => void reconnect()} />
-              <IconButton
-                icon={Camera}
-                label={isLooking ? "Disable look" : "Enable look"}
-                onClick={() => void toggleLook()}
-              />
-            </div>
-          </div>
-          <p className="mt-2 text-neutral-400">{detailText}</p>
-          <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-neutral-400">
-            <div className="rounded border border-neutral-800 bg-neutral-950/70 px-2 py-1.5">
-              <span className="block text-neutral-500">View Mode</span>
-              <button
-                className="mt-1 text-left text-neutral-200 hover:text-white"
-                onClick={() => void cycleMode()}
-                type="button"
-              >
-                {viewMode}
-              </button>
-            </div>
-            <div className="rounded border border-neutral-800 bg-neutral-950/70 px-2 py-1.5">
-              <span className="block text-neutral-500">Controls</span>
-              <span className="mt-1 block text-neutral-200">WASD + click to look</span>
-            </div>
-            <div className="rounded border border-neutral-800 bg-neutral-950/70 px-2 py-1.5">
-              <span className="block text-neutral-500">Transport</span>
-              <span className="mt-1 block text-neutral-200">{frameText}</span>
-            </div>
-            <div className="rounded border border-neutral-800 bg-neutral-950/70 px-2 py-1.5">
-              <span className="block text-neutral-500">Server</span>
-              <span className="mt-1 block truncate text-neutral-200">{serverOrigin}</span>
-            </div>
-          </div>
-          <div className="mt-3 rounded border border-neutral-800 bg-neutral-950/70 p-2">
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">
-                Session Log
-              </p>
-              <button
-                className="text-[11px] text-neutral-500 hover:text-neutral-200"
-                onClick={() => setEventLog([])}
-                type="button"
-              >
-                Clear
-              </button>
-            </div>
-            <div className="max-h-28 space-y-1 overflow-auto font-mono text-[10px] text-neutral-400">
-              {eventLog.length === 0 ? (
-                <p>No events yet</p>
-              ) : (
-                eventLog.map((line, index) => <p key={`${index}-${line}`}>{line}</p>)
-              )}
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   )
@@ -1035,27 +1017,6 @@ function ViewportButton({
   return (
     <button
       className="rounded p-1.5 text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-white"
-      onClick={onClick}
-      type="button"
-    >
-      <Icon className="h-3.5 w-3.5" />
-    </button>
-  )
-}
-
-function IconButton({
-  icon: Icon,
-  label,
-  onClick,
-}: {
-  icon: ElementType
-  label: string
-  onClick: () => void
-}) {
-  return (
-    <button
-      aria-label={label}
-      className="rounded border border-neutral-800 bg-neutral-950/70 p-1.5 text-neutral-300 hover:border-neutral-700 hover:text-white"
       onClick={onClick}
       type="button"
     >

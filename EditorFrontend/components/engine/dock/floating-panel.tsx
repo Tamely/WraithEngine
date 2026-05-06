@@ -10,6 +10,7 @@ const PANEL_LABELS: Record<PanelId, string> = {
     outliner: "Outliner",
     details: "Details",
     "content-browser": "Content Browser",
+    "remote-viewport": "Remote Viewport",
 }
 
 interface FloatingPanelProps {
