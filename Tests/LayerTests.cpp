@@ -18,7 +18,9 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -574,6 +576,12 @@ TEST(RemoteViewportTests, DefaultVideoEncoderProducesH264PacketsOnMacOS) {
       .Format = Axiom::ViewportFrameFormat::R8G8B8A8Unorm,
       .Pixels = std::span<const std::byte>(Pixels.data(), Pixels.size()),
   }));
+
+  const auto Deadline = std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(500);
+  while (Output.Packets.empty() && std::chrono::steady_clock::now() < Deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
 
   ASSERT_FALSE(Output.Packets.empty());
   EXPECT_EQ(Output.Packets.front().Codec, Axiom::EncodedVideoCodec::H264);

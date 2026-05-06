@@ -143,6 +143,12 @@ struct PendingEncodeRequest {
   int32_t TimeStamp{0};
   int64_t CaptureTimeMs{0};
 };
+
+int64_t CurrentCaptureTimeMs() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
 } // namespace
 
 class MacOSWebRtcSessionImpl final : public IWebRtcSession {
@@ -733,11 +739,18 @@ private:
         return;
       }
     } else if (m_LatestEncodedPacket->FrameIndex < m_OutstandingSendRequest.FrameIndex) {
-      m_OutstandingSendRequest.FrameIndex = m_LatestEncodedPacket->FrameIndex;
-      m_OutstandingSendRequest.TimeStamp =
-          static_cast<int32_t>(m_LatestEncodedPacket->FrameIndex & 0xffffffffu);
-      m_Status.Video.LatestRequestedFrameIndex =
-          m_OutstandingSendRequest.FrameIndex;
+      if (m_Status.Video.WaitingForKeyframe && m_LatestEncodedPacket->IsKeyframe) {
+        m_OutstandingSendRequest.FrameIndex = m_LatestEncodedPacket->FrameIndex;
+        m_OutstandingSendRequest.TimeStamp =
+            static_cast<int32_t>(m_LatestEncodedPacket->FrameIndex & 0xffffffffu);
+        m_Status.Video.LatestRequestedFrameIndex =
+            m_OutstandingSendRequest.FrameIndex;
+      } else {
+        ++m_Status.Video.DroppedStalePacketCount;
+        m_LatestEncodedPacket.reset();
+        m_Status.Video.PendingPacketCount = 0;
+        return;
+      }
     }
 
     if (m_LatestEncodedPacket->FrameIndex > m_OutstandingSendRequest.FrameIndex) {
@@ -745,10 +758,7 @@ private:
       m_OutstandingSendRequest.FrameIndex = m_LatestEncodedPacket->FrameIndex;
       m_OutstandingSendRequest.TimeStamp =
           static_cast<int32_t>(m_LatestEncodedPacket->FrameIndex & 0xffffffffu);
-      m_OutstandingSendRequest.CaptureTimeMs = static_cast<int64_t>(
-          std::chrono::duration_cast<std::chrono::milliseconds>(
-              std::chrono::steady_clock::now().time_since_epoch())
-              .count());
+      m_OutstandingSendRequest.CaptureTimeMs = CurrentCaptureTimeMs();
       m_Status.Video.LatestRequestedFrameIndex = m_OutstandingSendRequest.FrameIndex;
     }
 

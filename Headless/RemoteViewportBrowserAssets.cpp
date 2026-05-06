@@ -252,7 +252,8 @@ constexpr std::string_view BrowserScript = R"js(const state = {
   lastFrameIndex: 0,
   webrtcStatus: null,
   signalingInFlight: false,
-  connectionGeneration: 0
+  connectionGeneration: 0,
+  inputFrameHandle: null
 };
 
 const statusPill = document.getElementById('status-pill');
@@ -450,6 +451,41 @@ function applyPendingLook() {
   return true;
 }
 
+function sendViewportInputFrame() {
+  const lookChanged = applyPendingLook();
+  const [x, y, z] = movementVector();
+  if (!lookChanged && x === 0 && y === 0 && z === 0) {
+    return false;
+  }
+
+  void sendCommand({
+    type: 'update_viewport_camera',
+    worldMovement: [x, y, z],
+    cursorPosition: [state.cursor.x, state.cursor.y]
+  }, 'unreliable');
+  return true;
+}
+
+function pumpViewportInput() {
+  sendViewportInputFrame();
+  state.inputFrameHandle = window.requestAnimationFrame(pumpViewportInput);
+}
+
+function startViewportInputPump() {
+  if (state.inputFrameHandle !== null) {
+    return;
+  }
+  state.inputFrameHandle = window.requestAnimationFrame(pumpViewportInput);
+}
+
+function stopViewportInputPump() {
+  if (state.inputFrameHandle === null) {
+    return;
+  }
+  window.cancelAnimationFrame(state.inputFrameHandle);
+  state.inputFrameHandle = null;
+}
+
 function updateFrameMetaFromStatus(status) {
   if (!status || !status.video) {
     frameMeta.textContent = 'No WebRTC status yet';
@@ -520,6 +556,7 @@ async function notifyServerSessionClosed(reason) {
 
 async function destroyPeerConnection(reason = 'client_reset', notifyServer = false) {
   stopPolling();
+  stopViewportInputPump();
   if (state.reliableChannel) {
     state.reliableChannel.close();
     state.reliableChannel = null;
@@ -616,6 +653,7 @@ async function connect() {
   await destroyPeerConnection('reconnect', true);
   state.signalingInFlight = true;
   state.keepPollingStatus = true;
+  startViewportInputPump();
   state.pendingLocalIceCandidates = [];
   state.remoteDescriptionApplied = false;
 
@@ -808,6 +846,9 @@ document.addEventListener('mousemove', (event) => {
   }
   state.pendingLookDelta.x += event.movementX;
   state.pendingLookDelta.y += event.movementY;
+  if (state.isLooking) {
+    sendViewportInputFrame();
+  }
 });
 
 document.addEventListener('keydown', (event) => {
@@ -835,20 +876,6 @@ document.addEventListener('keyup', (event) => {
   }
   state.keys.delete(event.code);
 });
-
-setInterval(() => {
-  const lookChanged = applyPendingLook();
-  const [x, y, z] = movementVector();
-  if (!lookChanged && x === 0 && y === 0 && z === 0) {
-    return;
-  }
-
-  void sendCommand({
-    type: 'update_viewport_camera',
-    worldMovement: [x, y, z],
-    cursorPosition: [state.cursor.x, state.cursor.y]
-  }, 'unreliable');
-}, 16);
 
 updateLookButton();
 connect();
