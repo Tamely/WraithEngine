@@ -4,9 +4,9 @@
 
 `AxiomRemoteViewportDevClient` is a companion dev executable that exercises the same authoritative session through the new transport seam and writes the frames it receives as a transport subscriber.
 
-`AxiomRemoteViewportServer` is now the primary remote viewport prototype. It runs the authoritative headless session, serves a browser client over HTTP, streams JSON control/events over WebSocket, and pushes binary JPEG viewport frames over that same WebSocket connection.
+`AxiomRemoteViewportServer` is now the primary remote viewport prototype. It runs the authoritative headless session, serves a browser client over HTTP, negotiates a native macOS WebRTC session with the browser, and keeps a JPEG `/frame` path available only as a diagnostics and fallback surface.
 
-The current slice also adds an encoder-first H.264 path on macOS. Encoded packets are produced through the same endpoint seam and exposed as diagnostics through the headless server, while the temporary browser UI continues to use the existing JPEG viewport path.
+The current slice includes a macOS-first H.264 path that is now wired into the native WebRTC sender. Encoded packets are still exposed through diagnostics endpoints, but the browser viewport now consumes the WebRTC video track rather than the older JPEG push path during normal use.
 
 ## Current Status
 
@@ -21,13 +21,17 @@ The current slice also adds an encoder-first H.264 path on macOS. Encoded packet
 - `AxiomSessionEndpoint` is the first in-process transport implementation
 - `AxiomRemoteViewportDevClient` is a dev harness for transport-delivered frames/events, not a browser client
 - `AxiomRemoteViewportServer` is the current browser-facing demo path for remote viewport work
-- the current server/browser slice has moved from SSE plus HTTP image polling to WebSocket plus JPEG streaming
+- the current server/browser slice has moved from SSE plus HTTP image polling to WebRTC video plus data channels, with JPEG retained only for diagnostics and fallback access
 - encoded video packet delivery now exists as an additive transport seam beside raw viewport frame delivery
 - `IVideoEncoder` now exists as the engine-owned video encode boundary
 - a macOS `VideoToolbox` H.264 encoder path now exists for headless remote-viewport bring-up
-- `AxiomRemoteViewportServer` now exposes H.264 diagnostics through separate `/h264` and `/h264/metadata` endpoints while preserving the current JPEG browser path
-- the current stream is meaningfully better than the original PNG-polling prototype, but is still too choppy for the target remote-editor experience
-- H.264 packet production now exists, but WebRTC is still the near-term transport priority rather than a later optional refinement
+- `AxiomRemoteViewportServer` now exposes H.264 diagnostics through separate `/h264` and `/h264/metadata` endpoints while preserving a JPEG `/frame` fallback
+- the main-loop throttle in the headless remote viewport server has been removed so the runtime can tick at full cadence
+- the server now skips duplicate JPEG encode/broadcast work while WebRTC is actively connected
+- the macOS `VideoToolbox` encoder is now tuned for lower latency by avoiding per-frame synchronous completion, tightening bitrate/rate limits, and shortening the keyframe interval
+- the native WebRTC sender now prefers the freshest available H.264 packet instead of rewinding to older packets during normal latest-only delivery
+- the browser client now pumps camera/input updates on `requestAnimationFrame` and flushes pointer-lock look input immediately instead of batching on a fixed timer
+- the current stream no longer has the severe FPS collapse seen in the older prototype, but there is still roughly half a second of residual input latency to investigate later
 - the long-lived browser editor UI should move into a root-level `EditorFrontend` workspace using React, Next.js, and Tailwind CSS instead of continuing to grow the inline server-served prototype
 - sandboxed validation on macOS can hide the availability of VideoToolbox H.264 encoders; authoritative H.264 validation should be done outside the sandbox on a Vulkan/MoltenVK-capable machine
 
@@ -147,14 +151,13 @@ This prototype proves that:
 - the same seam can now deliver encoded video packets in addition to raw viewport frames
 - remote-style command submission can reuse the same session authority path as the local adapter
 - a browser can connect to the headless authoritative session over a real network boundary and drive the existing viewport camera commands
-- the browser client can now receive pushed binary viewport frames over WebSocket instead of re-requesting image files every frame
-- the headless server can now expose the latest H.264 access unit and packet metadata for diagnostics without changing the temporary browser UI contract
+- the browser client can now receive the authoritative viewport over a WebRTC H.264 video track while using data channels for control/input traffic
+- the headless server can now expose the latest H.264 access unit and packet metadata for diagnostics while keeping `/frame` available as a non-primary fallback path
+- the major FPS bottlenecks in the remote viewport prototype have been removed through server-loop, duplicate-work, encoder, and input-pump latency fixes
 
 This prototype does not yet provide:
 
-- the low-latency smoothness expected from the real remote editor target
-- WebRTC transport
-- browser-consumed H.264 playback
+- the low-latency input response expected from the final remote editor target
 - a dedicated `EditorFrontend` application workspace at the repository root
 - a full browser editor shell beyond the viewport-focused prototype
 - a production-ready remote viewer/editor client
@@ -164,8 +167,7 @@ This prototype does not yet provide:
 
 The next remote-viewport milestone should prioritize:
 
-- WebRTC session transport
-- connection of the existing H.264 packet path to a real WebRTC sender
+- deeper WebRTC sender and browser playout-delay tuning to reduce the remaining input latency
 - migration of the browser UI from the current inline server-served prototype into a root-level `EditorFrontend` folder
 
 The current localhost:8080 page should be treated as a temporary bring-up client. It remains useful for validating the engine/session boundary, but it should not become the final home of the editor UI.
