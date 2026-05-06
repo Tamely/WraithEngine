@@ -192,6 +192,13 @@ std::string DefaultParticipantColor(SessionUserId User) {
   return Palette[User.Value % (sizeof(Palette) / sizeof(Palette[0]))];
 }
 
+std::string DefaultParticipantDisplayName(SessionUserId User) {
+  if (User.Value == 1) {
+    return "Host";
+  }
+  return "User " + std::to_string(User.Value - 1);
+}
+
 EditorParticipant BuildParticipant(const EditorSessionState &State,
                                    SessionUserId User,
                                    SessionUserId CurrentUser) {
@@ -205,7 +212,7 @@ EditorParticipant BuildParticipant(const EditorSessionState &State,
     Participant.DisplayName = PresenceIt->second.DisplayName;
     Participant.State = PresenceIt->second.State;
   } else {
-    Participant.DisplayName = "User " + std::to_string(User.Value);
+    Participant.DisplayName = DefaultParticipantDisplayName(User);
   }
 
   if (const auto SelectionIt = State.SelectedObjectIds.find(User);

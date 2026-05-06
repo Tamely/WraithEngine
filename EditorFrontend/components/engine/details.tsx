@@ -8,6 +8,10 @@ import {
   type SessionObjectTransformUpdate,
 } from "./remote-viewport-context"
 
+function fallbackUserLabel(userId: number) {
+  return userId === 1 ? "Host" : `User ${userId - 1}`
+}
+
 type DraftTransform = {
   location: [string, string, string]
   rotationDegrees: [string, string, string]
@@ -62,12 +66,12 @@ function DetailsContent({ details }: { details: SessionObjectDetails }) {
   const canEdit = details.capabilities.supportsTransform && !details.capabilities.transformReadOnly
   const selectedByNames = details.collaboration.selectedByUserIds.map((userId) => {
     const collaborator = participants.find((entry) => entry.userId === userId)
-    return collaborator?.displayName ?? `User ${userId}`
+    return collaborator?.displayName ?? fallbackUserLabel(userId)
   })
   const lockOwnerName =
     details.collaboration.lockOwnerUserId !== null
       ? participants.find((entry) => entry.userId === details.collaboration.lockOwnerUserId)
-          ?.displayName ?? `User ${details.collaboration.lockOwnerUserId}`
+          ?.displayName ?? fallbackUserLabel(details.collaboration.lockOwnerUserId)
       : "None"
 
   async function applyTransform() {

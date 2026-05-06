@@ -10,7 +10,10 @@
 namespace Axiom {
 namespace {
 std::string DefaultUserDisplayName(SessionUserId User) {
-  return "User " + std::to_string(User.Value);
+  if (User.Value == 1) {
+    return "Host";
+  }
+  return "User " + std::to_string(User.Value - 1);
 }
 
 std::string PresenceStateName(EditorUserPresenceState State) {
