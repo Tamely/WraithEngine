@@ -1,0 +1,154 @@
+"use client"
+
+import { useRef, useCallback, useState } from "react"
+import { X, GripHorizontal } from "lucide-react"
+import { useDock, type FloatingPanel as FP, type PanelId } from "./dock-context"
+import { PanelContent } from "./panel-content"
+
+const PANEL_LABELS: Record<PanelId, string> = {
+    viewport: "Viewport",
+    outliner: "Outliner",
+    details: "Details",
+    "content-browser": "Content Browser",
+}
+
+interface FloatingPanelProps {
+    floating: FP
+}
+
+export function FloatingPanel({ floating }: FloatingPanelProps) {
+    const { setDragState, setFloatingPosition, dockFloatingPanel, dragState, layout } =
+        useDock()
+    const dragging = useRef(false)
+    const offset = useRef({ x: 0, y: 0 })
+    const [size, setSize] = useState({ w: floating.width, h: floating.height })
+    const resizing = useRef<{ edge: string; startX: number; startY: number; startW: number; startH: number; startLeft: number; startTop: number } | null>(null)
+    const [pos, setPos] = useState({ x: floating.x, y: floating.y })
+    const isDraggingAny = dragState.panelId !== null
+
+    const onTitleMouseDown = useCallback(
+        (e: React.MouseEvent) => {
+            if (e.button !== 0) return
+            e.preventDefault()
+            dragging.current = true
+            offset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y }
+
+            setDragState({ panelId: floating.panelId, sourceTabGroupId: null, isFloating: true })
+
+            const onMove = (ev: MouseEvent) => {
+                if (!dragging.current) return
+                setPos({ x: ev.clientX - offset.current.x, y: ev.clientY - offset.current.y })
+            }
+
+            const onUp = (ev: MouseEvent) => {
+                dragging.current = false
+                window.removeEventListener("mousemove", onMove)
+                window.removeEventListener("mouseup", onUp)
+                setFloatingPosition(floating.panelId, ev.clientX - offset.current.x, ev.clientY - offset.current.y)
+                setDragState({ panelId: null, sourceTabGroupId: null, isFloating: false })
+            }
+
+            window.addEventListener("mousemove", onMove)
+            window.addEventListener("mouseup", onUp)
+        },
+        [floating.panelId, pos, setDragState, setFloatingPosition]
+    )
+
+    const onResizeMouseDown = useCallback(
+        (e: React.MouseEvent, edge: string) => {
+            e.preventDefault()
+            e.stopPropagation()
+            resizing.current = {
+                edge,
+                startX: e.clientX,
+                startY: e.clientY,
+                startW: size.w,
+                startH: size.h,
+                startLeft: pos.x,
+                startTop: pos.y,
+            }
+
+            const onMove = (ev: MouseEvent) => {
+                if (!resizing.current) return
+                const { edge, startX, startY, startW, startH, startLeft, startTop } = resizing.current
+                const dx = ev.clientX - startX
+                const dy = ev.clientY - startY
+
+                let newW = startW
+                let newH = startH
+                let newX = startLeft
+                let newY = startTop
+
+                if (edge.includes("e")) newW = Math.max(200, startW + dx)
+                if (edge.includes("s")) newH = Math.max(120, startH + dy)
+                if (edge.includes("w")) { newW = Math.max(200, startW - dx); newX = startLeft + dx }
+                if (edge.includes("n")) { newH = Math.max(120, startH - dy); newY = startTop + dy }
+
+                setSize({ w: newW, h: newH })
+                setPos({ x: newX, y: newY })
+            }
+
+            const onUp = () => {
+                resizing.current = null
+                window.removeEventListener("mousemove", onMove)
+                window.removeEventListener("mouseup", onUp)
+            }
+
+            window.addEventListener("mousemove", onMove)
+            window.addEventListener("mouseup", onUp)
+        },
+        [size, pos]
+    )
+
+    return (
+        <div
+            className="fixed z-50 flex flex-col border border-neutral-700 shadow-2xl bg-neutral-950 rounded overflow-hidden"
+            style={{ left: pos.x, top: pos.y, width: size.w, height: size.h }}
+        >
+            {/* Title bar */}
+            <div
+                className="flex items-center h-8 bg-black border-b border-neutral-800 shrink-0 cursor-grab active:cursor-grabbing select-none px-2 gap-2"
+                onMouseDown={onTitleMouseDown}
+            >
+                <GripHorizontal className="w-3.5 h-3.5 text-neutral-600" />
+                <span className="text-xs text-neutral-300 font-medium flex-1">
+                    {PANEL_LABELS[floating.panelId]}
+                </span>
+                <span className="text-[10px] text-neutral-600 mr-1">drag to dock</span>
+                <button
+                    className="p-0.5 hover:bg-neutral-800 rounded text-neutral-500 hover:text-white"
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={() => {
+                        // Re-dock to the first available tab group — find the viewport's group
+                        // For simplicity, float close = remove. You'd normally dock back.
+                    }}
+                >
+                    <X className="w-3.5 h-3.5" />
+                </button>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-hidden relative">
+                <PanelContent panelId={floating.panelId} />
+                {/* Drop zones when something else is being dragged over this floating window */}
+                {isDraggingAny && dragState.panelId !== floating.panelId && (
+                    <div className="absolute inset-0 z-10 border-2 border-dashed border-white/20 pointer-events-none" />
+                )}
+            </div>
+
+            {/* Resize handles */}
+            <div className="absolute inset-0 pointer-events-none">
+                {/* edges */}
+                <div className="absolute top-0 left-2 right-2 h-1 cursor-n-resize pointer-events-auto" onMouseDown={(e) => onResizeMouseDown(e, "n")} />
+                <div className="absolute bottom-0 left-2 right-2 h-1 cursor-s-resize pointer-events-auto" onMouseDown={(e) => onResizeMouseDown(e, "s")} />
+                <div className="absolute left-0 top-2 bottom-2 w-1 cursor-w-resize pointer-events-auto" onMouseDown={(e) => onResizeMouseDown(e, "w")} />
+                <div className="absolute right-0 top-2 bottom-2 w-1 cursor-e-resize pointer-events-auto" onMouseDown={(e) => onResizeMouseDown(e, "e")} />
+                {/* corners */}
+                <div className="absolute top-0 left-0 w-3 h-3 cursor-nw-resize pointer-events-auto" onMouseDown={(e) => onResizeMouseDown(e, "nw")} />
+                <div className="absolute top-0 right-0 w-3 h-3 cursor-ne-resize pointer-events-auto" onMouseDown={(e) => onResizeMouseDown(e, "ne")} />
+                <div className="absolute bottom-0 left-0 w-3 h-3 cursor-sw-resize pointer-events-auto" onMouseDown={(e) => onResizeMouseDown(e, "sw")} />
+                <div className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize pointer-events-auto" onMouseDown={(e) => onResizeMouseDown(e, "se")} />
+            </div>
+        </div>
+    )
+}
