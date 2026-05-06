@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef, useCallback } from "react"
 import {
   Search,
   Plus,
@@ -71,6 +71,30 @@ export function ContentBrowser() {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(["content", "materials"]))
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid")
   const [selectedAsset, setSelectedAsset] = useState<string | null>(null)
+  const [folderWidth, setFolderWidth] = useState(192)
+  const isDraggingFolderRef = useRef(false)
+  const startXRef = useRef(0)
+  const startWidthRef = useRef(0)
+
+  const onFolderSplitterMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    isDraggingFolderRef.current = true
+    startXRef.current = e.clientX
+    startWidthRef.current = folderWidth
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isDraggingFolderRef.current) return
+      const delta = ev.clientX - startXRef.current
+      setFolderWidth(Math.max(100, Math.min(400, startWidthRef.current + delta)))
+    }
+    const onMouseUp = () => {
+      isDraggingFolderRef.current = false
+      window.removeEventListener("mousemove", onMouseMove)
+      window.removeEventListener("mouseup", onMouseUp)
+    }
+    window.addEventListener("mousemove", onMouseMove)
+    window.addEventListener("mouseup", onMouseUp)
+  }, [folderWidth])
 
   const toggleFolder = (id: string) => {
     setExpandedFolders((prev) => {
@@ -144,8 +168,18 @@ export function ContentBrowser() {
         </div>
       </div>
       <div className="flex flex-1 overflow-hidden">
-        <div className="w-48 border-r border-neutral-800 overflow-y-auto">
+        <div
+          className="shrink-0 overflow-y-auto border-r border-neutral-800"
+          style={{ width: folderWidth }}
+        >
           {folderStructure.map((folder) => renderFolder(folder))}
+        </div>
+        {/* Folder tree resize handle */}
+        <div
+          className="w-1 shrink-0 bg-transparent hover:bg-white/20 active:bg-white/30 cursor-col-resize transition-colors relative group"
+          onMouseDown={onFolderSplitterMouseDown}
+        >
+          <div className="absolute inset-y-0 -left-0.5 -right-0.5 group-hover:bg-white/10" />
         </div>
         <div className="flex-1 flex flex-col">
           <div className="flex items-center gap-2 p-2 border-b border-neutral-800">
