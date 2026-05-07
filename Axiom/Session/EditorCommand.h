@@ -48,6 +48,18 @@ struct SetObjectVisibilityCommand {
   bool Visible{true};
 };
 
+struct CreateObjectCommand {
+  std::string TemplateId;
+};
+
+struct DuplicateObjectCommand {
+  std::string ObjectId;
+};
+
+struct DeleteObjectCommand {
+  std::string ObjectId;
+};
+
 struct SetTransformCommand {
   std::string ObjectId;
   glm::vec3 Location{0.0f};
@@ -59,6 +71,8 @@ using EditorCommandPayload =
     std::variant<UpdateViewportCameraCommand, SetViewportCameraPoseCommand,
                  SetLookActiveCommand, SelectObjectCommand,
                  RenameObjectCommand, SetObjectVisibilityCommand,
+                 CreateObjectCommand, DuplicateObjectCommand,
+                 DeleteObjectCommand,
                  SetTransformCommand>;
 
 struct EditorCommand {

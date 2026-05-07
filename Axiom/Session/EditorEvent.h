@@ -50,6 +50,17 @@ struct ObjectVisibilityChangedEvent {
   bool Visible{true};
 };
 
+struct ObjectCreatedEvent {
+  SessionUserId User;
+  std::string ObjectId;
+  std::string DisplayName;
+};
+
+struct ObjectDeletedEvent {
+  SessionUserId User;
+  std::string ObjectId;
+};
+
 struct PresenceChangedEvent {
   SessionUserId User;
   std::string DisplayName;
@@ -74,6 +85,8 @@ using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         SelectionChangedEvent,
                                         ObjectRenamedEvent,
                                         ObjectVisibilityChangedEvent,
+                                        ObjectCreatedEvent,
+                                        ObjectDeletedEvent,
                                         ObjectTransformUpdatedEvent>;
 
 struct EditorEvent {
