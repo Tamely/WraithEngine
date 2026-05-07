@@ -28,9 +28,11 @@ import {
 
 const DEFAULT_AXIOM_SERVER_ORIGIN = "http://127.0.0.1:8080"
 const CLIENT_ID_STORAGE_KEY = "axiom-remote-client-id"
+const CLIENT_ID_CLAIM_CHANNEL = "axiom-remote-client-claims"
 const STATUS_POLL_INTERVAL_MS = 1500
 const ICE_POLL_INTERVAL_MS = 1000
 const SESSION_POLL_INTERVAL_MS = 1500
+const CLIENT_ID_CLAIM_TIMEOUT_MS = 100
 type ConnectionState = RemoteViewportConnectionState
 type ViewMode = RemoteViewportViewMode
 type ChannelPreference = "reliable" | "unreliable"
@@ -134,10 +136,16 @@ export function Viewport() {
   const icePollHandleRef = useRef<number | null>(null)
   const sessionPollHandleRef = useRef<number | null>(null)
   const inputFrameHandleRef = useRef<number | null>(null)
+  const claimChannelRef = useRef<BroadcastChannel | null>(null)
   const localIceQueueRef = useRef<IceCandidatePayload[]>([])
   const remoteDescriptionAppliedRef = useRef(false)
   const activeGenerationRef = useRef(0)
   const clientIdRef = useRef<string | null>(null)
+  const tabInstanceIdRef = useRef(
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `tab-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  )
   const participantsRef = useRef<SessionParticipant[]>([])
   const sessionReadyRef = useRef(false)
   const reconnectingRef = useRef(false)
@@ -258,6 +266,87 @@ export function Viewport() {
       }
     }
 
+    function setupClientIdClaimChannel() {
+      if (typeof window === "undefined" || typeof BroadcastChannel === "undefined") {
+        return
+      }
+
+      const channel = new BroadcastChannel(CLIENT_ID_CLAIM_CHANNEL)
+      claimChannelRef.current = channel
+      channel.onmessage = (event: MessageEvent<unknown>) => {
+        const message =
+          event.data && typeof event.data === "object"
+            ? (event.data as Record<string, unknown>)
+            : null
+        if (message === null || message.type !== "query-client-id") {
+          return
+        }
+
+        const queriedClientId =
+          typeof message.clientId === "string" ? message.clientId : null
+        const sourceInstanceId =
+          typeof message.instanceId === "string" ? message.instanceId : null
+        if (
+          queriedClientId === null ||
+          sourceInstanceId === null ||
+          sourceInstanceId === tabInstanceIdRef.current ||
+          clientIdRef.current !== queriedClientId
+        ) {
+          return
+        }
+
+        channel.postMessage({
+          type: "client-id-claimed",
+          clientId: queriedClientId,
+          instanceId: tabInstanceIdRef.current,
+        })
+      }
+    }
+
+    async function canReuseStoredClientId(clientId: string) {
+      const channel = claimChannelRef.current
+      if (channel === null) {
+        return true
+      }
+
+      return await new Promise<boolean>((resolve) => {
+        let settled = false
+        const handleMessage = (event: MessageEvent<unknown>) => {
+          const message =
+            event.data && typeof event.data === "object"
+              ? (event.data as Record<string, unknown>)
+              : null
+          if (message === null || message.type !== "client-id-claimed") {
+            return
+          }
+
+          if (
+            message.clientId === clientId &&
+            message.instanceId !== tabInstanceIdRef.current
+          ) {
+            settled = true
+            channel.removeEventListener("message", handleMessage)
+            resolve(false)
+          }
+        }
+
+        channel.addEventListener("message", handleMessage)
+        channel.postMessage({
+          type: "query-client-id",
+          clientId,
+          instanceId: tabInstanceIdRef.current,
+        })
+
+        window.setTimeout(() => {
+          if (settled) {
+            return
+          }
+          channel.removeEventListener("message", handleMessage)
+          resolve(true)
+        }, CLIENT_ID_CLAIM_TIMEOUT_MS)
+      })
+    }
+
     function stopViewportInputPump() {
       if (inputFrameHandleRef.current !== null) {
         window.cancelAnimationFrame(inputFrameHandleRef.current)
@@ -360,7 +449,11 @@ export function Viewport() {
         typeof window !== "undefined"
           ? window.sessionStorage.getItem(CLIENT_ID_STORAGE_KEY)
           : null
-      clientIdRef.current = storedClientId
+      const reusableClientId =
+        storedClientId !== null && (await canReuseStoredClientId(storedClientId))
+          ? storedClientId
+          : null
+      clientIdRef.current = reusableClientId
 
       const bootstrap = await fetchJson<SessionConnectResponse>("/session/connect", {
         method: "POST",
@@ -380,6 +473,13 @@ export function Viewport() {
         clientId: bootstrap.clientId,
         currentUserId: bootstrap.snapshot.currentUserId,
       })
+      if (storedClientId !== null && reusableClientId === null) {
+        appendLog({
+          type: "session_client_forked",
+          previousClientId: storedClientId,
+          clientId: bootstrap.clientId,
+        })
+      }
     }
 
     async function refreshSessionSnapshot(reason: "connect" | "reconnect" | "resync" | "command" | "event" | "manual" = "manual") {
@@ -1155,6 +1255,7 @@ export function Viewport() {
       },
     })
     setServerOrigin(serverOrigin)
+    setupClientIdClaimChannel()
 
     const video = videoRef.current
     const shell = viewportShellRef.current
@@ -1272,6 +1373,8 @@ export function Viewport() {
       document.removeEventListener("keydown", handleKeyDown)
       document.removeEventListener("keyup", handleKeyUp)
       window.removeEventListener("beforeunload", handleBeforeUnload)
+      claimChannelRef.current?.close()
+      claimChannelRef.current = null
       void destroyPeerConnection("component_unmount")
     }
   }, [appendEventLog, clearEventLog, registerActions, serverOrigin, setConnectionState, setDetailText, setFrameText, setIsLooking, setServerOrigin, setStatusText, setViewMode])

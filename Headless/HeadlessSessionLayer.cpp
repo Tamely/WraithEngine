@@ -90,19 +90,25 @@ void HeadlessSessionLayer::OnAttach() {
 void HeadlessSessionLayer::OnUpdate() { m_Session.Tick(); }
 
 void HeadlessSessionLayer::OnRender() {
-  const EditorViewportState *Viewport = m_Session.FindViewport(m_ActiveRenderUserId);
-  if (Viewport == nullptr && m_ActiveRenderUserId.Value != m_LocalUserId.Value) {
-    Viewport = m_Session.FindViewport(m_LocalUserId);
+  SessionUserId RenderUser = m_ActiveRenderUserId;
+  const EditorViewportState *Viewport = m_Session.FindViewport(RenderUser);
+  if (Viewport == nullptr && RenderUser.Value != m_LocalUserId.Value) {
+    RenderUser = m_LocalUserId;
+    Viewport = m_Session.FindViewport(RenderUser);
   }
   if (Viewport == nullptr) {
     return;
+  }
+
+  if (m_RenderFrameObserver) {
+    m_RenderFrameObserver(Application::Get().GetFrameIndex(), RenderUser);
   }
 
   RenderCommand::SetCamera(Viewport->Camera);
   for (const auto &Submission : m_Session.GetState().SceneSubmissions) {
     RenderCommand::Submit(Submission);
   }
-  for (const auto &Submission : BuildPresenceOverlaySubmissions()) {
+  for (const auto &Submission : BuildPresenceOverlaySubmissions(RenderUser)) {
     RenderCommand::Submit(Submission);
   }
 }
@@ -127,17 +133,18 @@ void HeadlessSessionLayer::SubmitToTransport(ISessionTransport &Transport,
 }
 
 std::vector<RenderMeshSubmission>
-HeadlessSessionLayer::BuildPresenceOverlaySubmissions() const {
+HeadlessSessionLayer::BuildPresenceOverlaySubmissions(
+    SessionUserId RenderUser) const {
   std::vector<RenderMeshSubmission> Result;
   if (m_PresenceMarkerMesh == nullptr) {
     return Result;
   }
 
   const std::vector<EditorParticipant> Participants =
-      m_Session.BuildParticipants(m_ActiveRenderUserId);
+      m_Session.BuildParticipants(RenderUser);
   for (const EditorParticipant &Participant : Participants) {
     if (Participant.User.Value == 1 ||
-        Participant.User.Value == m_ActiveRenderUserId.Value ||
+        Participant.User.Value == RenderUser.Value ||
         Participant.State != EditorUserPresenceState::Connected ||
         !Participant.Camera.has_value()) {
       continue;

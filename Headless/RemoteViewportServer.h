@@ -5,6 +5,7 @@
 
 #include <Remote/SessionTransport.h>
 #include <Renderer/RendererBackend.h>
+#include <Renderer/VideoEncoding.h>
 
 #include <atomic>
 #include <chrono>
@@ -64,10 +65,14 @@ private:
   };
 
   struct RemoteClientSession {
+    struct PacketOutput;
+
     std::string ClientId;
     SessionUserId User;
     std::chrono::steady_clock::time_point LastActivity;
     std::unique_ptr<IWebRtcSession> WebRtcSession;
+    std::unique_ptr<IVideoEncoder> VideoEncoder;
+    std::unique_ptr<PacketOutput> VideoPacketOutput;
   };
 
   struct ClientSessionResolution {
@@ -112,6 +117,11 @@ private:
                                  std::string_view Payload);
 
   bool ShouldPublishJpegFrames() const;
+  void RecordRenderFrameTarget(uint64_t FrameIndex, SessionUserId User);
+  void AdvanceRenderTargetForNextFrame();
+  std::optional<std::string> TakeNextRenderTargetClientId();
+  void HandleClientEncodedVideoPacket(std::string_view ClientId,
+                                      const EncodedVideoPacket &Packet);
   void SetLatestFrame(const CapturedFrame &Frame);
   bool TryGetLatestFrame(LatestFrame &Frame) const;
   void SetLatestEncodedPacket(const EncodedVideoPacket &Packet);
@@ -137,11 +147,13 @@ private:
   mutable std::mutex m_FrameMutex;
   LatestFrame m_LatestFrame;
   LatestEncodedPacket m_LatestEncodedPacket;
+  std::vector<std::string> m_PendingRenderTargetClientIds;
 
   mutable std::mutex m_ClientMutex;
   std::vector<WebSocketClient> m_WebSocketClients;
   std::unordered_map<std::string, RemoteClientSession> m_RemoteClientsById;
   uint64_t m_NextRemoteUserId{2};
+  std::string m_NextRenderClientId;
   mutable std::mutex m_SendMutex;
 };
 
