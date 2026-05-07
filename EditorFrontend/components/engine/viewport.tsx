@@ -111,6 +111,16 @@ type RemoteViewportCommand =
       type: "select_object"
       objectId: string
     }
+  | {
+      type: "rename_object"
+      objectId: string
+      displayName: string
+    }
+  | {
+      type: "set_object_visibility"
+      objectId: string
+      visible: boolean
+    }
   | ({
       type: "set_transform"
     } & SessionObjectTransformUpdate)
@@ -574,6 +584,18 @@ export function Viewport() {
 
       if (message.payloadType === "object_transform_updated") {
         setSessionUi("session-ready", "Session ready", "Transform update applied.")
+        void refreshSessionSnapshotSafely("event")
+        return
+      }
+
+      if (message.payloadType === "object_renamed") {
+        setSessionUi("session-ready", "Session ready", "Object rename applied.")
+        void refreshSessionSnapshotSafely("event")
+        return
+      }
+
+      if (message.payloadType === "object_visibility_changed") {
+        setSessionUi("session-ready", "Session ready", "Visibility update applied.")
         void refreshSessionSnapshotSafely("event")
         return
       }
@@ -1199,6 +1221,34 @@ export function Viewport() {
           {
             type: "select_object",
             objectId,
+          },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
+      renameObject: async (objectId, displayName) => {
+        const accepted = await sendCommand(
+          {
+            type: "rename_object",
+            objectId,
+            displayName,
+          },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
+      setObjectVisibility: async (objectId, visible) => {
+        const accepted = await sendCommand(
+          {
+            type: "set_object_visibility",
+            objectId,
+            visible,
           },
           "reliable"
         )

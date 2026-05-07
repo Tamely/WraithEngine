@@ -90,6 +90,8 @@ interface RemoteViewportActions {
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
   refreshSessionSnapshot: () => Promise<void>
   selectObject: (objectId: string) => Promise<boolean>
+  renameObject: (objectId: string, displayName: string) => Promise<boolean>
+  setObjectVisibility: (objectId: string, visible: boolean) => Promise<boolean>
   goToParticipantCamera: (userId: number) => Promise<boolean>
   updateTransform: (details: SessionObjectTransformUpdate) => Promise<boolean>
 }
@@ -145,6 +147,8 @@ interface RemoteViewportContextValue {
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
   refreshSessionSnapshot: () => Promise<void>
   selectObject: (objectId: string) => Promise<boolean>
+  renameObject: (objectId: string, displayName: string) => Promise<boolean>
+  setObjectVisibility: (objectId: string, visible: boolean) => Promise<boolean>
   goToParticipantCamera: (userId: number) => Promise<boolean>
   updateTransform: (details: SessionObjectTransformUpdate) => Promise<boolean>
 }
@@ -187,6 +191,8 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     setMode: async () => {},
     refreshSessionSnapshot: async () => {},
     selectObject: async () => false,
+    renameObject: async () => false,
+    setObjectVisibility: async () => false,
     goToParticipantCamera: async () => false,
     updateTransform: async () => false,
   })
@@ -288,6 +294,14 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     return actionsRef.current.goToParticipantCamera(userId)
   }, [])
 
+  const renameObject = useCallback(async (objectId: string, displayName: string) => {
+    return actionsRef.current.renameObject(objectId, displayName)
+  }, [])
+
+  const setObjectVisibility = useCallback(async (objectId: string, visible: boolean) => {
+    return actionsRef.current.setObjectVisibility(objectId, visible)
+  }, [])
+
   const updateTransform = useCallback(async (details: SessionObjectTransformUpdate) => {
     return actionsRef.current.updateTransform(details)
   }, [])
@@ -340,6 +354,8 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       setMode,
       refreshSessionSnapshot,
       selectObject,
+      renameObject,
+      setObjectVisibility,
       goToParticipantCamera,
       updateTransform,
     }),
@@ -362,8 +378,10 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       reconnect,
       refreshSessionSnapshot,
       registerActions,
+      renameObject,
       sceneTree,
       selectObject,
+      setObjectVisibility,
       goToParticipantCamera,
       selectedObject,
       selectedObjectDetails,

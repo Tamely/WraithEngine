@@ -538,6 +538,105 @@ TEST(EditorSessionTests, SelectedObjectDetailsMatchAuthoritativeState) {
   EXPECT_EQ(Details->Transform->Scale, glm::vec3(1.0f, 1.5f, 2.0f));
 }
 
+TEST(EditorSessionTests, RenameObjectUpdatesAuthoritativeSceneState) {
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+  Session.SetSceneItems({{
+      .Id = "PlayerCharacter",
+      .DisplayName = "PlayerCharacter",
+      .Kind = Axiom::EditorSceneItemKind::Actor,
+      .Visible = true,
+      .Children = {},
+  }});
+  Session.SetObjectDetails({{
+      .ObjectId = "PlayerCharacter",
+      .DisplayName = "PlayerCharacter",
+      .Kind = Axiom::EditorSceneItemKind::Actor,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      .Transform = Axiom::EditorTransformDetails{},
+  }});
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::RenameObjectCommand{
+                      .ObjectId = "PlayerCharacter",
+                      .DisplayName = "Hero",
+                  }});
+  Session.Tick();
+
+  const Axiom::EditorObjectDetails *Details =
+      Session.FindObjectDetails("PlayerCharacter");
+  ASSERT_NE(Details, nullptr);
+  EXPECT_EQ(Details->DisplayName, "Hero");
+  const Axiom::EditorSceneItem *SceneItem =
+      Session.FindSceneItem("PlayerCharacter");
+  ASSERT_NE(SceneItem, nullptr);
+  EXPECT_EQ(SceneItem->DisplayName, "Hero");
+
+  ASSERT_EQ(Subscriber.Events.size(), 2u);
+  ASSERT_TRUE(std::holds_alternative<Axiom::ObjectRenamedEvent>(
+      Subscriber.Events.front().Event.Payload));
+  const auto &Renamed = std::get<Axiom::ObjectRenamedEvent>(
+      Subscriber.Events.front().Event.Payload);
+  EXPECT_EQ(Renamed.ObjectId, "PlayerCharacter");
+  EXPECT_EQ(Renamed.DisplayName, "Hero");
+}
+
+TEST(EditorSessionTests, VisibilityChangeUpdatesSceneDetailsAndRenderSubmissions) {
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+  Session.SetSceneItems({{
+      .Id = "PlayerCharacter",
+      .DisplayName = "PlayerCharacter",
+      .Kind = Axiom::EditorSceneItemKind::Actor,
+      .Visible = true,
+      .Children = {},
+  }});
+  Session.SetObjectDetails({{
+      .ObjectId = "PlayerCharacter",
+      .DisplayName = "PlayerCharacter",
+      .Kind = Axiom::EditorSceneItemKind::Actor,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      .Transform = Axiom::EditorTransformDetails{},
+  }});
+  Session.SetSceneMeshInstances({{
+      .ObjectId = "PlayerCharacter",
+      .Mesh = Axiom::MeshData{},
+      .Material = nullptr,
+      .RenderPath = Axiom::MeshRenderPath::Graphics,
+      .Transform = glm::mat4(1.0f),
+  }});
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetObjectVisibilityCommand{
+                      .ObjectId = "PlayerCharacter",
+                      .Visible = false,
+                  }});
+  Session.Tick();
+
+  const Axiom::EditorObjectDetails *Details =
+      Session.FindObjectDetails("PlayerCharacter");
+  ASSERT_NE(Details, nullptr);
+  EXPECT_FALSE(Details->Visible);
+  const Axiom::EditorSceneItem *SceneItem =
+      Session.FindSceneItem("PlayerCharacter");
+  ASSERT_NE(SceneItem, nullptr);
+  EXPECT_FALSE(SceneItem->Visible);
+
+  ASSERT_EQ(Subscriber.Events.size(), 2u);
+  ASSERT_TRUE(std::holds_alternative<Axiom::ObjectVisibilityChangedEvent>(
+      Subscriber.Events.front().Event.Payload));
+  const auto &Visibility = std::get<Axiom::ObjectVisibilityChangedEvent>(
+      Subscriber.Events.front().Event.Payload);
+  EXPECT_EQ(Visibility.ObjectId, "PlayerCharacter");
+  EXPECT_FALSE(Visibility.Visible);
+}
+
 TEST(EditorSessionTests, SetTransformUpdatesAuthoritativeDetailsAndSceneMesh) {
   Axiom::EditorSession Session(Axiom::SessionId{1});
   RecordingSubscriber Subscriber;

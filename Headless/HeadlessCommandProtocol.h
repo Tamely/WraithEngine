@@ -21,6 +21,8 @@ enum class HeadlessCommandType {
   SetLookActive,
   SetViewportCameraPose,
   SelectObject,
+  RenameObject,
+  SetObjectVisibility,
   SetTransform,
   UpdateViewportCamera,
   RenderFrame,

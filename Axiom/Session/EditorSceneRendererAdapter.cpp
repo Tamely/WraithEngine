@@ -16,6 +16,12 @@ EditorSceneRendererAdapter::BuildRenderSubmissions(const EditorSession &Session)
   for (const EditorSceneMeshInstance &Instance : State.Scene.MeshInstances) {
     LiveObjectIds.insert(Instance.ObjectId);
 
+    const auto DetailsIt = State.Scene.ObjectDetailsById.find(Instance.ObjectId);
+    if (DetailsIt != State.Scene.ObjectDetailsById.end() &&
+        !DetailsIt->second.Visible) {
+      continue;
+    }
+
     auto &Cached = m_MeshesByObjectId[Instance.ObjectId];
     if (Cached.Mesh == nullptr) {
       Cached.Mesh = Renderer::Get().CreateMesh(Instance.Mesh);

@@ -108,6 +108,36 @@ TEST(HeadlessProtocolTests, RemoteViewportAcceptsSelectObjectCommand) {
   EXPECT_EQ(Payload->ObjectId, "PlayerCharacter");
 }
 
+TEST(HeadlessProtocolTests, RemoteViewportAcceptsRenameObjectCommand) {
+  std::string Error;
+  const auto Command = Axiom::ParseRemoteViewportCommand(
+      R"json({"type":"rename_object","objectId":"PlayerCharacter","displayName":"Hero"})json",
+      Error);
+
+  ASSERT_TRUE(Command.has_value()) << Error;
+  EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::RenameObject);
+  const auto *Payload =
+      std::get_if<Axiom::RenameObjectCommand>(&Command->EditorPayload.Payload);
+  ASSERT_NE(Payload, nullptr);
+  EXPECT_EQ(Payload->ObjectId, "PlayerCharacter");
+  EXPECT_EQ(Payload->DisplayName, "Hero");
+}
+
+TEST(HeadlessProtocolTests, RemoteViewportAcceptsSetObjectVisibilityCommand) {
+  std::string Error;
+  const auto Command = Axiom::ParseRemoteViewportCommand(
+      R"json({"type":"set_object_visibility","objectId":"PlayerCharacter","visible":false})json",
+      Error);
+
+  ASSERT_TRUE(Command.has_value()) << Error;
+  EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::SetObjectVisibility);
+  const auto *Payload = std::get_if<Axiom::SetObjectVisibilityCommand>(
+      &Command->EditorPayload.Payload);
+  ASSERT_NE(Payload, nullptr);
+  EXPECT_EQ(Payload->ObjectId, "PlayerCharacter");
+  EXPECT_FALSE(Payload->Visible);
+}
+
 TEST(HeadlessProtocolTests, RemoteViewportAcceptsSetTransformCommand) {
   std::string Error;
   const auto Command = Axiom::ParseRemoteViewportCommand(
@@ -169,6 +199,37 @@ TEST(HeadlessProtocolTests, SerializesSelectionChangedEvent) {
   EXPECT_NE(Json.find("\"payloadType\":\"selection_changed\""),
             std::string::npos);
   EXPECT_NE(Json.find("\"objectId\":\"PlayerCharacter\""), std::string::npos);
+}
+
+TEST(HeadlessProtocolTests, SerializesObjectRenamedEvent) {
+  const Axiom::PublishedEditorEvent Event{
+      .Id = Axiom::EventId{7},
+      .Event = {.Payload = Axiom::ObjectRenamedEvent{
+                    .User = Axiom::SessionUserId{7},
+                    .ObjectId = "PlayerCharacter",
+                    .DisplayName = "Hero",
+                }}};
+
+  const std::string Json = Axiom::SerializeEvent(Event);
+  EXPECT_NE(Json.find("\"payloadType\":\"object_renamed\""), std::string::npos);
+  EXPECT_NE(Json.find("\"objectId\":\"PlayerCharacter\""), std::string::npos);
+  EXPECT_NE(Json.find("\"displayName\":\"Hero\""), std::string::npos);
+}
+
+TEST(HeadlessProtocolTests, SerializesObjectVisibilityChangedEvent) {
+  const Axiom::PublishedEditorEvent Event{
+      .Id = Axiom::EventId{8},
+      .Event = {.Payload = Axiom::ObjectVisibilityChangedEvent{
+                    .User = Axiom::SessionUserId{7},
+                    .ObjectId = "PlayerCharacter",
+                    .Visible = false,
+                }}};
+
+  const std::string Json = Axiom::SerializeEvent(Event);
+  EXPECT_NE(Json.find("\"payloadType\":\"object_visibility_changed\""),
+            std::string::npos);
+  EXPECT_NE(Json.find("\"objectId\":\"PlayerCharacter\""), std::string::npos);
+  EXPECT_NE(Json.find("\"visible\":false"), std::string::npos);
 }
 
 TEST(HeadlessProtocolTests, SerializesPresenceChangedEvent) {

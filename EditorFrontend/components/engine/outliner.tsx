@@ -39,8 +39,15 @@ function matchesSearch(item: SessionSceneItem, query: string): boolean {
 }
 
 export function Outliner() {
-  const { sceneTree, selectedObjectId, selectObject, goToParticipantCamera, participants, sessionState } =
-    useRemoteViewport()
+  const {
+    sceneTree,
+    selectedObjectId,
+    selectObject,
+    setObjectVisibility,
+    goToParticipantCamera,
+    participants,
+    sessionState,
+  } = useRemoteViewport()
   const [searchQuery, setSearchQuery] = useState("")
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
     new Set(["world", "lighting", "geometry"])
@@ -152,6 +159,13 @@ export function Outliner() {
         )}
         <button
           className="rounded p-0.5 opacity-0 hover:bg-neutral-700 group-hover:opacity-100"
+          onClick={(event) => {
+            event.stopPropagation()
+            if (participantCameraUserId !== null && Number.isFinite(participantCameraUserId)) {
+              return
+            }
+            void setObjectVisibility(item.id, !item.visible)
+          }}
           type="button"
         >
           {item.visible ? (

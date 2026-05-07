@@ -55,11 +55,14 @@ export function Details() {
 }
 
 function DetailsContent({ details }: { details: SessionObjectDetails }) {
-  const { participants, updateTransform } = useRemoteViewport()
+  const { participants, renameObject, setObjectVisibility, updateTransform } =
+    useRemoteViewport()
+  const [draftName, setDraftName] = useState(details.displayName)
   const [draft, setDraft] = useState<DraftTransform>(() => toDraft(details))
   const [isSaving, setIsSaving] = useState(false)
 
   useEffect(() => {
+    setDraftName(details.displayName)
     setDraft(toDraft(details))
   }, [details])
 
@@ -88,12 +91,48 @@ function DetailsContent({ details }: { details: SessionObjectDetails }) {
     }
   }
 
+  async function applyIdentity() {
+    const nextName = draftName.trim()
+    if (nextName.length === 0) {
+      return
+    }
+
+    setIsSaving(true)
+    try {
+      if (nextName !== details.displayName) {
+        await renameObject(details.objectId, nextName)
+      }
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  async function toggleVisibility() {
+    setIsSaving(true)
+    try {
+      await setObjectVisibility(details.objectId, !details.visible)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   return (
     <div className="space-y-4 p-3">
       <section className="rounded border border-neutral-800 bg-neutral-950/60 p-3">
         <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">Identity</p>
         <div className="mt-3 space-y-2">
-          <DetailRow label="Name" value={details.displayName} />
+          <div className="flex items-center gap-3">
+            <span className="w-20 shrink-0 text-xs text-neutral-500">Name</span>
+            <div className="min-w-0 flex-1">
+              <input
+                className="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 outline-none focus:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={isSaving}
+                onChange={(event) => setDraftName(event.target.value)}
+                type="text"
+                value={draftName}
+              />
+            </div>
+          </div>
           <DetailRow label="Object ID" value={details.objectId} />
           <DetailRow label="Type" value={details.kind} />
           <DetailRow label="Visible" value={details.visible ? "true" : "false"} />
@@ -103,6 +142,24 @@ function DetailsContent({ details }: { details: SessionObjectDetails }) {
           />
           <DetailRow label="Lock State" value={details.collaboration.lockState} />
           <DetailRow label="Lock Owner" value={lockOwnerName} />
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isSaving}
+              onClick={() => void toggleVisibility()}
+              type="button"
+            >
+              {details.visible ? "Hide Object" : "Show Object"}
+            </button>
+            <button
+              className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isSaving || draftName.trim().length === 0 || draftName === details.displayName}
+              onClick={() => void applyIdentity()}
+              type="button"
+            >
+              Apply Name
+            </button>
+          </div>
         </div>
       </section>
 

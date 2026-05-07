@@ -160,6 +160,12 @@ public:
 private:
   static std::unordered_map<std::string, EditorObjectDetails>
   BuildObjectDetailsMap(std::vector<EditorObjectDetails> ObjectDetails);
+  static bool IsBlankString(std::string_view Value);
+  bool UpdateSceneItemDisplayName(std::vector<EditorSceneItem> &Items,
+                                  std::string_view ObjectId,
+                                  std::string_view DisplayName);
+  bool UpdateSceneItemVisibility(std::vector<EditorSceneItem> &Items,
+                                 std::string_view ObjectId, bool Visible);
   void PruneInvalidSelections();
   void UpdateSubmissionTransform(std::string_view ObjectId,
                                  const EditorTransformDetails &Transform);
@@ -179,6 +185,10 @@ private:
                      const SetLookActiveCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SelectObjectCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const RenameObjectCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const SetObjectVisibilityCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SetTransformCommand &Command);
   void PublishEvent(const EditorEvent &Event);

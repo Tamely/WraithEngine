@@ -50,6 +50,12 @@ std::string CommandTypeName(const EditorCommandPayload &Payload) {
   if (std::holds_alternative<SelectObjectCommand>(Payload)) {
     return "select_object";
   }
+  if (std::holds_alternative<RenameObjectCommand>(Payload)) {
+    return "rename_object";
+  }
+  if (std::holds_alternative<SetObjectVisibilityCommand>(Payload)) {
+    return "set_object_visibility";
+  }
   return "set_transform";
 }
 
@@ -59,6 +65,11 @@ bool ShouldPublishCommandAcknowledgedEvent(const EditorCommandPayload &Payload) 
 
 bool IsNearlyZero(const glm::vec3 &Value) {
   return glm::dot(Value, Value) <= 0.0f;
+}
+
+bool IsWhitespace(char Value) {
+  return Value == ' ' || Value == '\t' || Value == '\n' || Value == '\r' ||
+         Value == '\f' || Value == '\v';
 }
 
 glm::mat4 BuildTransformMatrix(const EditorTransformDetails &Transform) {
@@ -249,6 +260,49 @@ EditorSession::BuildObjectDetailsMap(
   return DetailsByObjectId;
 }
 
+bool EditorSession::IsBlankString(std::string_view Value) {
+  for (const char Character : Value) {
+    if (!IsWhitespace(Character)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool EditorSession::UpdateSceneItemDisplayName(std::vector<EditorSceneItem> &Items,
+                                               std::string_view ObjectId,
+                                               std::string_view DisplayName) {
+  for (EditorSceneItem &Item : Items) {
+    if (Item.Id == ObjectId) {
+      Item.DisplayName = std::string(DisplayName);
+      return true;
+    }
+
+    if (UpdateSceneItemDisplayName(Item.Children, ObjectId, DisplayName)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool EditorSession::UpdateSceneItemVisibility(std::vector<EditorSceneItem> &Items,
+                                              std::string_view ObjectId,
+                                              bool Visible) {
+  for (EditorSceneItem &Item : Items) {
+    if (Item.Id == ObjectId) {
+      Item.Visible = Visible;
+      return true;
+    }
+
+    if (UpdateSceneItemVisibility(Item.Children, ObjectId, Visible)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 void EditorSession::PruneInvalidSelections() {
   for (auto It = m_State.SelectedObjectIds.begin();
        It != m_State.SelectedObjectIds.end();) {
@@ -412,6 +466,36 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
     }
   }
 
+  if (const auto *RenameCommand =
+          std::get_if<RenameObjectCommand>(&QueuedCommand.Command.Payload)) {
+    if (RenameCommand->ObjectId.empty()) {
+      FailureReason = "Rename commands require a non-empty object id.";
+      return false;
+    }
+    if (FindSceneItem(RenameCommand->ObjectId) == nullptr) {
+      FailureReason = "Rename targeted an unknown object.";
+      return false;
+    }
+    if (RenameCommand->DisplayName.empty() ||
+        IsBlankString(RenameCommand->DisplayName)) {
+      FailureReason = "Rename commands require a non-empty display name.";
+      return false;
+    }
+  }
+
+  if (const auto *VisibilityCommand =
+          std::get_if<SetObjectVisibilityCommand>(
+              &QueuedCommand.Command.Payload)) {
+    if (VisibilityCommand->ObjectId.empty()) {
+      FailureReason = "Visibility commands require a non-empty object id.";
+      return false;
+    }
+    if (FindSceneItem(VisibilityCommand->ObjectId) == nullptr) {
+      FailureReason = "Visibility targeted an unknown object.";
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -501,6 +585,51 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
   PublishEvent({.Payload = SelectionChangedEvent{
                     .User = QueuedCommand.Context.User,
                     .ObjectId = Command.ObjectId,
+                }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const RenameObjectCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
+  auto DetailsIt = m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
+  if (DetailsIt == m_State.Scene.ObjectDetailsById.end()) {
+    return;
+  }
+
+  if (DetailsIt->second.DisplayName == Command.DisplayName) {
+    return;
+  }
+
+  DetailsIt->second.DisplayName = Command.DisplayName;
+  UpdateSceneItemDisplayName(m_State.Scene.Items, Command.ObjectId,
+                             Command.DisplayName);
+
+  PublishEvent({.Payload = ObjectRenamedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .ObjectId = Command.ObjectId,
+                    .DisplayName = Command.DisplayName,
+                }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const SetObjectVisibilityCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
+  auto DetailsIt = m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
+  if (DetailsIt == m_State.Scene.ObjectDetailsById.end()) {
+    return;
+  }
+
+  if (DetailsIt->second.Visible == Command.Visible) {
+    return;
+  }
+
+  DetailsIt->second.Visible = Command.Visible;
+  UpdateSceneItemVisibility(m_State.Scene.Items, Command.ObjectId, Command.Visible);
+
+  PublishEvent({.Payload = ObjectVisibilityChangedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .ObjectId = Command.ObjectId,
+                    .Visible = Command.Visible,
                 }});
 }
 
