@@ -9,13 +9,18 @@
 #include <Session/EditorSession.h>
 
 #include <functional>
+#include <optional>
 #include <unordered_map>
 
 namespace Axiom {
+struct HeadlessRenderViewState;
+
 class HeadlessSessionLayer final : public Layer {
 public:
   using RenderFrameObserver =
       std::function<void(uint64_t FrameIndex, SessionUserId User)>;
+  using RenderViewResolver =
+      std::function<std::optional<HeadlessRenderViewState>()>;
 
   HeadlessSessionLayer();
 
@@ -29,7 +34,12 @@ public:
                          const EditorCommand &Command);
   void SubmitToTransport(ISessionTransport &Transport, SessionUserId User,
                          const EditorCommand &Command);
-  void SetActiveRenderUser(SessionUserId User) { m_ActiveRenderUserId = User; }
+  void SetSharedRendererAdapter(EditorSceneRendererAdapter *RendererAdapter) {
+    m_RendererAdapter = RendererAdapter;
+  }
+  void SetRenderViewResolver(RenderViewResolver Resolver) {
+    m_RenderViewResolver = std::move(Resolver);
+  }
   void SetRenderFrameObserver(RenderFrameObserver Observer) {
     m_RenderFrameObserver = std::move(Observer);
   }
@@ -46,10 +56,10 @@ private:
 
   SessionId m_SessionId{1};
   SessionUserId m_LocalUserId{1};
-  SessionUserId m_ActiveRenderUserId{1};
   EditorSession m_Session;
-  EditorSceneRendererAdapter m_RendererAdapter;
+  EditorSceneRendererAdapter *m_RendererAdapter{nullptr};
   MeshRef m_PresenceMarkerMesh;
+  RenderViewResolver m_RenderViewResolver;
   RenderFrameObserver m_RenderFrameObserver;
   mutable std::unordered_map<uint64_t, MaterialInstanceRef> m_PresenceMaterials;
 };

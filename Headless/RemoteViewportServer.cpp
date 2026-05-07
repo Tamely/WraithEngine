@@ -631,9 +631,14 @@ void RemoteViewportServer::OnSessionTransportEditorEvent(
 
 void RemoteViewportServer::OnSessionTransportViewportFrame(
     const ViewportFrame &Frame) {
-  if (const auto ClientId = TakeNextRenderTargetClientId();
-      ClientId.has_value()) {
-    if (RemoteClientSession *Client = FindClientSession(*ClientId);
+  std::optional<std::string> CurrentRenderTargetClientId;
+  {
+    std::scoped_lock Lock(m_FrameMutex);
+    CurrentRenderTargetClientId = m_CurrentRenderTargetClientId;
+  }
+
+  if (CurrentRenderTargetClientId.has_value()) {
+    if (RemoteClientSession *Client = FindClientSession(*CurrentRenderTargetClientId);
         Client != nullptr) {
       if (Client->WebRtcSession != nullptr) {
         Client->WebRtcSession->OnViewportFrame(Frame);
@@ -649,8 +654,6 @@ void RemoteViewportServer::OnSessionTransportViewportFrame(
       }
     }
   }
-
-  AdvanceRenderTargetForNextFrame();
 
   if (!ShouldPublishJpegFrames()) {
     return;
@@ -885,7 +888,7 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
 
   switch (Command->Type) {
   case HeadlessCommandType::SetViewMode:
-    m_Host.SetRemoteViewMode(Command->ViewMode);
+    m_Host.SetRemoteViewMode(*User, Command->ViewMode);
     break;
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
@@ -920,7 +923,6 @@ bool RemoteViewportServer::HandleSessionConnectRequest(
       CreateOrResumeClientSession(ClientIdHint);
   RemoteClientSession &Client = *Resolution.Session;
   TouchClientSession(Client.ClientId);
-  AdvanceRenderTargetForNextFrame();
 
   if (Resolution.ResumedExisting && Client.WebRtcSession != nullptr) {
     const WebRtcSessionStatus CurrentStatus = Client.WebRtcSession->GetStatus();
@@ -1130,8 +1132,6 @@ bool RemoteViewportServer::HandleWebRtcOfferRequest(uintptr_t ClientSocketValue,
     return false;
   }
 
-  AdvanceRenderTargetForNextFrame();
-
   const std::string Response =
       JsonResponse("200 OK", SerializeWebRtcSessionDescription(
                                  Answer, Client->WebRtcSession->GetStatus().SessionId));
@@ -1263,10 +1263,9 @@ bool RemoteViewportServer::HandleWebRtcCloseRequest(
       m_Host.GetHeadlessLayer().GetSession().SetPresenceState(
           *DisconnectedUser, EditorUserPresenceState::Disconnected);
     }
+    m_Host.RemoveRemoteRenderView(*ClientId);
   }
-  m_Host.SetActiveRenderUser(
-      m_Host.GetHeadlessLayer().GetLocalUserId());
-  AdvanceRenderTargetForNextFrame();
+  m_Host.FocusLocalRenderView();
   const WebRtcSessionStatus Status = Client->WebRtcSession->GetStatus();
   const std::string Payload = SerializeWebRtcStatus(
       Status.Enabled, Status.Available, Status.SignalingState,
@@ -1373,6 +1372,7 @@ RemoteViewportServer::CreateOrResumeClientSession(
   m_Host.GetHeadlessLayer().GetSession().EnsureViewportState(ResolvedSession->User);
   m_Host.GetHeadlessLayer().GetSession().SetPresenceState(
       ResolvedSession->User, EditorUserPresenceState::Connected);
+  m_Host.EnsureRemoteRenderView(ResolvedSession->ClientId, ResolvedSession->User);
   return {.Session = ResolvedSession, .ResumedExisting = ResumedExisting};
 }
 
@@ -1382,86 +1382,28 @@ void RemoteViewportServer::TouchClientSession(const std::string &ClientId) {
   if (It != m_RemoteClientsById.end()) {
     It->second.LastActivity = std::chrono::steady_clock::now();
   }
+  m_Host.FocusRemoteRenderView(ClientId);
 }
 
 void RemoteViewportServer::RecordRenderFrameTarget(uint64_t FrameIndex,
                                                    SessionUserId User) {
   (void)FrameIndex;
-  std::scoped_lock Lock(m_FrameMutex, m_ClientMutex);
-  auto ClientIt = std::find_if(
-      m_RemoteClientsById.begin(), m_RemoteClientsById.end(),
-      [User](const auto &Entry) { return Entry.second.User.Value == User.Value; });
-  if (ClientIt == m_RemoteClientsById.end()) {
-    return;
-  }
-
-  m_PendingRenderTargetClientIds.push_back(ClientIt->second.ClientId);
-  if (m_PendingRenderTargetClientIds.size() > 16u) {
-    m_PendingRenderTargetClientIds.erase(m_PendingRenderTargetClientIds.begin());
-  }
-}
-
-void RemoteViewportServer::AdvanceRenderTargetForNextFrame() {
-  struct RenderCandidate {
-    std::string ClientId;
-    SessionUserId User;
-  };
-
-  std::optional<RenderCandidate> Selected;
+  std::optional<std::string> CurrentClientId;
   {
     std::scoped_lock Lock(m_ClientMutex);
-    std::vector<RenderCandidate> Candidates;
-    Candidates.reserve(m_RemoteClientsById.size());
-    for (const auto &[ClientId, Session] : m_RemoteClientsById) {
-      if (Session.WebRtcSession == nullptr) {
-        continue;
-      }
-
-      const WebRtcSessionStatus Status = Session.WebRtcSession->GetStatus();
-      if (!Status.Enabled || !Status.Available ||
-          Status.ConnectionState != "connected") {
-        continue;
-      }
-
-      Candidates.push_back({.ClientId = ClientId, .User = Session.User});
-    }
-
-    std::sort(Candidates.begin(), Candidates.end(),
-              [](const RenderCandidate &Left, const RenderCandidate &Right) {
-                return Left.User.Value < Right.User.Value;
-              });
-
-    if (!Candidates.empty()) {
-      auto Current = std::find_if(
-          Candidates.begin(), Candidates.end(),
-          [this](const RenderCandidate &Candidate) {
-            return Candidate.ClientId == m_NextRenderClientId;
-          });
-      if (Current == Candidates.end()) {
-        Selected = Candidates.front();
-      } else {
-        ++Current;
-        Selected = Current == Candidates.end() ? Candidates.front() : *Current;
-      }
-      m_NextRenderClientId = Selected->ClientId;
-    } else {
-      m_NextRenderClientId.clear();
+    auto ClientIt = std::find_if(
+        m_RemoteClientsById.begin(), m_RemoteClientsById.end(),
+        [User](const auto &Entry) {
+          return Entry.second.User.Value == User.Value;
+        });
+    if (ClientIt != m_RemoteClientsById.end()) {
+      CurrentClientId = ClientIt->second.ClientId;
     }
   }
-
-  m_Host.SetActiveRenderUser(Selected.has_value()
-                                 ? Selected->User
-                                 : m_Host.GetHeadlessLayer().GetLocalUserId());
-}
-
-std::optional<std::string> RemoteViewportServer::TakeNextRenderTargetClientId() {
-  std::scoped_lock Lock(m_FrameMutex);
-  if (m_PendingRenderTargetClientIds.empty()) {
-    return std::nullopt;
+  {
+    std::scoped_lock Lock(m_FrameMutex);
+    m_CurrentRenderTargetClientId = CurrentClientId;
   }
-  const std::string ClientId = m_PendingRenderTargetClientIds.front();
-  m_PendingRenderTargetClientIds.erase(m_PendingRenderTargetClientIds.begin());
-  return ClientId;
 }
 
 void RemoteViewportServer::HandleClientEncodedVideoPacket(
@@ -1656,7 +1598,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
 
   switch (Command->Type) {
   case HeadlessCommandType::SetViewMode:
-    m_Host.SetRemoteViewMode(Command->ViewMode);
+    m_Host.SetRemoteViewMode(Client->User, Command->ViewMode);
     return true;
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:

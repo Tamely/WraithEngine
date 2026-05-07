@@ -4,6 +4,7 @@
 #include <Core/Platform.h>
 #include <Core/GlfwEditorInputSource.h>
 #include <Core/InputPlatform.h>
+#include "../Headless/HeadlessRenderView.h"
 #include <Remote/AxiomSessionEndpoint.h>
 #include <Renderer/OffscreenRenderSurface.h>
 #include <Renderer/VideoEncoderFactory.h>
@@ -728,6 +729,59 @@ TEST(RemoteViewportTests, OffscreenSurfaceExposesHeadlessContract) {
   EXPECT_EQ(Surface.GetHeight(), 720u);
   EXPECT_FALSE(Surface.SupportsPresentation());
   EXPECT_EQ(Surface.GetNativeWindowHandle(), nullptr);
+}
+
+TEST(RemoteViewportTests, HeadlessRenderViewsCreateFocusAndRemoveCleanly) {
+  Axiom::HeadlessRenderViewRegistry Registry(Axiom::SessionUserId{1});
+
+  ASSERT_NE(Registry.GetFocusedView(), nullptr);
+  EXPECT_TRUE(Registry.GetFocusedView()->IsLocal);
+  EXPECT_EQ(Registry.GetRemoteViewCount(), 0u);
+
+  Registry.UpsertRemoteView("client-a", Axiom::SessionUserId{2});
+  Registry.UpsertRemoteView("client-b", Axiom::SessionUserId{3});
+  EXPECT_EQ(Registry.GetRemoteViewCount(), 2u);
+
+  EXPECT_TRUE(Registry.FocusRemoteView("client-a"));
+  ASSERT_NE(Registry.GetFocusedView(), nullptr);
+  EXPECT_EQ(Registry.GetFocusedView()->ClientId, "client-a");
+  EXPECT_EQ(Registry.GetFocusedView()->User.Value, 2u);
+
+  EXPECT_TRUE(Registry.RemoveRemoteView("client-a"));
+  ASSERT_NE(Registry.GetFocusedView(), nullptr);
+  EXPECT_TRUE(Registry.GetFocusedView()->IsLocal);
+  EXPECT_EQ(Registry.GetRemoteViewCount(), 1u);
+
+  EXPECT_FALSE(Registry.FocusRemoteView("missing-client"));
+}
+
+TEST(RemoteViewportTests, HeadlessRenderViewsKeepPerClientModesIsolated) {
+  Axiom::HeadlessRenderViewRegistry Registry(Axiom::SessionUserId{1});
+  Registry.UpsertRemoteView("client-a", Axiom::SessionUserId{2});
+  Registry.UpsertRemoteView("client-b", Axiom::SessionUserId{3});
+
+  EXPECT_TRUE(Registry.SetRemoteViewMode("client-a",
+                                         Axiom::RendererViewMode::Wireframe));
+  EXPECT_TRUE(Registry.SetViewMode(Axiom::SessionUserId{3},
+                                   Axiom::RendererViewMode::Unlit));
+
+  const auto *ClientA = Registry.FindRemoteView("client-a");
+  const auto *ClientB = Registry.FindRemoteView("client-b");
+  const auto *Local = Registry.FindView(Axiom::SessionUserId{1});
+  ASSERT_NE(ClientA, nullptr);
+  ASSERT_NE(ClientB, nullptr);
+  ASSERT_NE(Local, nullptr);
+  EXPECT_EQ(ClientA->ViewMode, Axiom::RendererViewMode::Wireframe);
+  EXPECT_EQ(ClientB->ViewMode, Axiom::RendererViewMode::Unlit);
+  EXPECT_EQ(Local->ViewMode, Axiom::RendererViewMode::Lit);
+
+  Registry.FocusRemoteView("client-a");
+  ASSERT_NE(Registry.GetFocusedView(), nullptr);
+  EXPECT_EQ(Registry.GetFocusedView()->ClientId, "client-a");
+
+  Registry.UpsertRemoteView("client-c", Axiom::SessionUserId{4});
+  ASSERT_NE(Registry.GetFocusedView(), nullptr);
+  EXPECT_EQ(Registry.GetFocusedView()->ClientId, "client-a");
 }
 
 TEST(RemoteViewportTests, AxiomEndpointForwardsEventsAndFrames) {
