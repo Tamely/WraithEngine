@@ -32,6 +32,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { useRemoteViewport, type SessionSceneItem, type SessionSceneItemKind } from "./remote-viewport-context"
 
+type EditingState = { id: string; name: string } | null
+
 const OBJECT_TEMPLATES = [
   { id: "Folder", label: "Folder", Icon: Folder },
   { id: "Mesh", label: "Mesh", Icon: Box },
@@ -66,6 +68,7 @@ export function Outliner() {
     createObject,
     duplicateObject,
     deleteObject,
+    renameObject,
     participants,
     sessionState,
   } = useRemoteViewport()
@@ -73,6 +76,7 @@ export function Outliner() {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
     new Set(["world", "lighting", "geometry"])
   )
+  const [editing, setEditing] = useState<EditingState>(null)
 
   const visibleTree = useMemo(() => {
     const collaboratorItems: SessionSceneItem[] = participants
@@ -138,6 +142,26 @@ export function Outliner() {
       ? Number(item.id.replace("participant-camera-", ""))
       : null
 
+    const isEditing = editing !== null && editing.id === item.id
+    const isParticipantCamera = participantCameraUserId !== null && Number.isFinite(participantCameraUserId)
+
+    function startEditing() {
+      setEditing({ id: item.id, name: item.displayName })
+    }
+
+    function commitEdit() {
+      if (editing === null || editing.id !== item.id) return
+      const trimmed = editing.name.trim()
+      if (trimmed.length > 0 && trimmed !== item.displayName) {
+        void renameObject(item.id, trimmed)
+      }
+      setEditing(null)
+    }
+
+    function cancelEdit() {
+      setEditing(null)
+    }
+
     const row = (
       <div
         className={`group flex cursor-pointer items-center gap-1 px-2 py-1 hover:bg-neutral-800 ${
@@ -145,9 +169,7 @@ export function Outliner() {
         }`}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
         onClick={() => {
-          if (participantCameraUserId !== null && Number.isFinite(participantCameraUserId)) {
-            return
-          }
+          if (isParticipantCamera || isEditing) return
           void selectObject(item.id)
         }}
       >
@@ -170,10 +192,39 @@ export function Outliner() {
           <div className="w-4" />
         )}
         <Icon className="h-4 w-4 text-neutral-400" />
-        <span className="flex-1 truncate text-xs text-neutral-300">
-          {item.displayName}
-        </span>
-        {selectedBy.length > 0 && (
+        {isEditing ? (
+          <input
+            autoFocus
+            className="flex-1 rounded bg-neutral-900 px-1 text-xs text-neutral-100 outline outline-1 outline-blue-500"
+            onBlur={commitEdit}
+            onChange={(e) => setEditing({ id: item.id, name: e.target.value })}
+            onClick={(e) => e.stopPropagation()}
+            onFocus={(e) => e.target.select()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                commitEdit()
+              } else if (e.key === "Escape") {
+                e.preventDefault()
+                cancelEdit()
+              }
+            }}
+            type="text"
+            value={editing.name}
+          />
+        ) : (
+          <span
+            className="flex-1 truncate text-xs text-neutral-300"
+            onDoubleClick={(e) => {
+              if (isParticipantCamera) return
+              e.stopPropagation()
+              startEditing()
+            }}
+          >
+            {item.displayName}
+          </span>
+        )}
+        {!isEditing && selectedBy.length > 0 && (
           <span className="max-w-28 truncate text-[10px] text-amber-300/80">
             {selectedBy.join(", ")}
           </span>
@@ -182,9 +233,7 @@ export function Outliner() {
           className="rounded p-0.5 opacity-0 hover:bg-neutral-700 group-hover:opacity-100"
           onClick={(event) => {
             event.stopPropagation()
-            if (participantCameraUserId !== null && Number.isFinite(participantCameraUserId)) {
-              return
-            }
+            if (isParticipantCamera) return
             void setObjectVisibility(item.id, !item.visible)
           }}
           type="button"
