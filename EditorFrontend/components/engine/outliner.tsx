@@ -13,14 +13,32 @@ import {
   Camera,
   User,
   Layers,
+  Plus,
+  Trash2,
+  Copy,
 } from "lucide-react"
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { useRemoteViewport, type SessionSceneItem, type SessionSceneItemKind } from "./remote-viewport-context"
+
+const OBJECT_TEMPLATES = [
+  { id: "Folder", label: "Folder", Icon: Folder },
+  { id: "Mesh", label: "Mesh", Icon: Box },
+  { id: "Light", label: "Light", Icon: Lightbulb },
+  { id: "Camera", label: "Camera", Icon: Camera },
+  { id: "Actor", label: "Actor", Icon: User },
+] as const
 
 function matchesSearch(item: SessionSceneItem, query: string): boolean {
   if (query.length === 0) {
@@ -45,6 +63,9 @@ export function Outliner() {
     selectObject,
     setObjectVisibility,
     goToParticipantCamera,
+    createObject,
+    duplicateObject,
+    deleteObject,
     participants,
     sessionState,
   } = useRemoteViewport()
@@ -179,10 +200,10 @@ export function Outliner() {
 
     return (
       <div key={item.id}>
-        {participantCameraUserId !== null && Number.isFinite(participantCameraUserId) ? (
-          <ContextMenu>
-            <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-            <ContextMenuContent className="border-neutral-800 bg-neutral-950 text-neutral-200">
+        <ContextMenu>
+          <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+          <ContextMenuContent className="border-neutral-800 bg-neutral-950 text-neutral-200">
+            {participantCameraUserId !== null && Number.isFinite(participantCameraUserId) ? (
               <ContextMenuItem
                 onClick={() => {
                   void goToParticipantCamera(participantCameraUserId)
@@ -190,11 +211,30 @@ export function Outliner() {
               >
                 Go to Camera
               </ContextMenuItem>
-            </ContextMenuContent>
-          </ContextMenu>
-        ) : (
-          row
-        )}
+            ) : (
+              <>
+                <ContextMenuItem
+                  onClick={() => {
+                    void duplicateObject(item.id)
+                  }}
+                >
+                  <Copy className="mr-2 h-3.5 w-3.5" />
+                  Duplicate
+                </ContextMenuItem>
+                <ContextMenuSeparator className="bg-neutral-800" />
+                <ContextMenuItem
+                  className="text-red-400 focus:text-red-400"
+                  onClick={() => {
+                    void deleteObject(item.id)
+                  }}
+                >
+                  <Trash2 className="mr-2 h-3.5 w-3.5" />
+                  Delete
+                </ContextMenuItem>
+              </>
+            )}
+          </ContextMenuContent>
+        </ContextMenu>
         {hasChildren && isExpanded && item.children.map((child) => renderItem(child, depth + 1))}
       </div>
     )
@@ -206,6 +246,45 @@ export function Outliner() {
         <div className="flex items-center gap-1">
           <Layers className="h-4 w-4 text-neutral-400" />
           <span className="text-xs font-medium text-neutral-300">Outliner</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
+                type="button"
+              >
+                <Plus className="h-3 w-3" />
+                Add
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="border-neutral-800 bg-neutral-950 text-neutral-200">
+              {OBJECT_TEMPLATES.map(({ id, label, Icon }) => (
+                <DropdownMenuItem
+                  key={id}
+                  onClick={() => {
+                    void createObject(id)
+                  }}
+                >
+                  <Icon className="mr-2 h-3.5 w-3.5 text-neutral-400" />
+                  {label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <button
+            className="rounded p-0.5 text-neutral-400 hover:bg-neutral-800 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-30"
+            disabled={selectedObjectId === null}
+            onClick={() => {
+              if (selectedObjectId !== null) {
+                void deleteObject(selectedObjectId)
+              }
+            }}
+            title="Delete selected"
+            type="button"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
         </div>
       </div>
       <div className="p-2">

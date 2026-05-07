@@ -94,6 +94,9 @@ interface RemoteViewportActions {
   setObjectVisibility: (objectId: string, visible: boolean) => Promise<boolean>
   goToParticipantCamera: (userId: number) => Promise<boolean>
   updateTransform: (details: SessionObjectTransformUpdate) => Promise<boolean>
+  createObject: (templateId: string) => Promise<boolean>
+  duplicateObject: (objectId: string) => Promise<boolean>
+  deleteObject: (objectId: string) => Promise<boolean>
 }
 
 export interface SessionObjectTransformUpdate {
@@ -151,6 +154,9 @@ interface RemoteViewportContextValue {
   setObjectVisibility: (objectId: string, visible: boolean) => Promise<boolean>
   goToParticipantCamera: (userId: number) => Promise<boolean>
   updateTransform: (details: SessionObjectTransformUpdate) => Promise<boolean>
+  createObject: (templateId: string) => Promise<boolean>
+  duplicateObject: (objectId: string) => Promise<boolean>
+  deleteObject: (objectId: string) => Promise<boolean>
 }
 
 interface SessionSnapshot {
@@ -195,6 +201,9 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     setObjectVisibility: async () => false,
     goToParticipantCamera: async () => false,
     updateTransform: async () => false,
+    createObject: async () => false,
+    duplicateObject: async () => false,
+    deleteObject: async () => false,
   })
   const [connectionState, setConnectionState] =
     useState<RemoteViewportConnectionState>("idle")
@@ -306,6 +315,18 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     return actionsRef.current.updateTransform(details)
   }, [])
 
+  const createObject = useCallback(async (templateId: string) => {
+    return actionsRef.current.createObject(templateId)
+  }, [])
+
+  const duplicateObject = useCallback(async (objectId: string) => {
+    return actionsRef.current.duplicateObject(objectId)
+  }, [])
+
+  const deleteObject = useCallback(async (objectId: string) => {
+    return actionsRef.current.deleteObject(objectId)
+  }, [])
+
   const selectedObjectId =
     currentUserId !== null
       ? selections.find((selection) => selection.userId === currentUserId)?.objectId ?? null
@@ -358,6 +379,9 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       setObjectVisibility,
       goToParticipantCamera,
       updateTransform,
+      createObject,
+      duplicateObject,
+      deleteObject,
     }),
     [
       appendEventLog,
@@ -396,6 +420,9 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       statusText,
       toggleLook,
       updateTransform,
+      createObject,
+      duplicateObject,
+      deleteObject,
       viewMode,
     ]
   )

@@ -1391,6 +1391,11 @@ bool RemoteViewportServer::HandleWebSocketMessage(std::string_view Payload) {
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
   case HeadlessCommandType::SelectObject:
+  case HeadlessCommandType::RenameObject:
+  case HeadlessCommandType::SetObjectVisibility:
+  case HeadlessCommandType::CreateObject:
+  case HeadlessCommandType::DuplicateObject:
+  case HeadlessCommandType::DeleteObject:
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::UpdateViewportCamera:
     return false;
@@ -1429,6 +1434,11 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::SetViewportCameraPose:
   case HeadlessCommandType::UpdateViewportCamera:
   case HeadlessCommandType::SelectObject:
+  case HeadlessCommandType::RenameObject:
+  case HeadlessCommandType::SetObjectVisibility:
+  case HeadlessCommandType::CreateObject:
+  case HeadlessCommandType::DuplicateObject:
+  case HeadlessCommandType::DeleteObject:
   case HeadlessCommandType::SetTransform:
     m_Host.SubmitRemoteCommand(Client->User, Command->EditorPayload);
     return true;

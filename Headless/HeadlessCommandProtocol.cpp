@@ -146,6 +146,12 @@ std::string EventPayloadType(const EditorEventPayload &Payload) {
   if (std::holds_alternative<ObjectVisibilityChangedEvent>(Payload)) {
     return "object_visibility_changed";
   }
+  if (std::holds_alternative<ObjectCreatedEvent>(Payload)) {
+    return "object_created";
+  }
+  if (std::holds_alternative<ObjectDeletedEvent>(Payload)) {
+    return "object_deleted";
+  }
   return "object_transform_updated";
 }
 
@@ -561,6 +567,54 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
              }},
     };
   }
+  if (*Type == "create_object") {
+    static const std::regex TemplateIdPattern(
+        R"json("templateId"\s*:\s*"((?:\\.|[^"])*)")json");
+    const auto TemplateId = MatchString(JsonLine, TemplateIdPattern);
+    if (!TemplateId.has_value()) {
+      Error = "`create_object` requires `templateId`.";
+      return std::nullopt;
+    }
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::CreateObject,
+        .EditorPayload =
+            {.Payload = CreateObjectCommand{
+                 .TemplateId = UnescapeJsonString(*TemplateId),
+             }},
+    };
+  }
+  if (*Type == "duplicate_object") {
+    static const std::regex ObjectIdPattern(
+        R"json("objectId"\s*:\s*"((?:\\.|[^"])*)")json");
+    const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
+    if (!ObjectId.has_value()) {
+      Error = "`duplicate_object` requires `objectId`.";
+      return std::nullopt;
+    }
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::DuplicateObject,
+        .EditorPayload =
+            {.Payload = DuplicateObjectCommand{
+                 .ObjectId = UnescapeJsonString(*ObjectId),
+             }},
+    };
+  }
+  if (*Type == "delete_object") {
+    static const std::regex ObjectIdPattern(
+        R"json("objectId"\s*:\s*"((?:\\.|[^"])*)")json");
+    const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
+    if (!ObjectId.has_value()) {
+      Error = "`delete_object` requires `objectId`.";
+      return std::nullopt;
+    }
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::DeleteObject,
+        .EditorPayload =
+            {.Payload = DeleteObjectCommand{
+                 .ObjectId = UnescapeJsonString(*ObjectId),
+             }},
+    };
+  }
   if (*Type == "update_viewport_camera") {
     const auto Movement = MatchVec3(JsonLine, MovementPattern);
     if (!Movement.has_value()) {
@@ -596,6 +650,9 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::SelectObject:
   case HeadlessCommandType::RenameObject:
   case HeadlessCommandType::SetObjectVisibility:
+  case HeadlessCommandType::CreateObject:
+  case HeadlessCommandType::DuplicateObject:
+  case HeadlessCommandType::DeleteObject:
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::UpdateViewportCamera:
   case HeadlessCommandType::Quit:
@@ -694,6 +751,15 @@ std::string SerializeEvent(const PublishedEditorEvent &Event) {
     Stream << ",\"user\":" << Visibility->User.Value << ",\"objectId\":\""
            << EscapeJson(Visibility->ObjectId) << "\",\"visible\":"
            << (Visibility->Visible ? "true" : "false");
+  } else if (const auto *Created =
+                 std::get_if<ObjectCreatedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"user\":" << Created->User.Value << ",\"objectId\":\""
+           << EscapeJson(Created->ObjectId) << "\",\"displayName\":\""
+           << EscapeJson(Created->DisplayName) << "\"";
+  } else if (const auto *Deleted =
+                 std::get_if<ObjectDeletedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"user\":" << Deleted->User.Value << ",\"objectId\":\""
+           << EscapeJson(Deleted->ObjectId) << "\"";
   } else if (const auto *Transform =
                  std::get_if<ObjectTransformUpdatedEvent>(&Event.Event.Payload)) {
     Stream << ",\"user\":" << Transform->User.Value << ",\"objectId\":\""

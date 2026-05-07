@@ -124,6 +124,18 @@ type RemoteViewportCommand =
   | ({
       type: "set_transform"
     } & SessionObjectTransformUpdate)
+  | {
+      type: "create_object"
+      templateId: string
+    }
+  | {
+      type: "duplicate_object"
+      objectId: string
+    }
+  | {
+      type: "delete_object"
+      objectId: string
+    }
 
 function getServerOrigin() {
   const configuredOrigin = process.env.NEXT_PUBLIC_AXIOM_SERVER_ORIGIN?.trim()
@@ -596,6 +608,18 @@ export function Viewport() {
 
       if (message.payloadType === "object_visibility_changed") {
         setSessionUi("session-ready", "Session ready", "Visibility update applied.")
+        void refreshSessionSnapshotSafely("event")
+        return
+      }
+
+      if (message.payloadType === "object_created") {
+        setSessionUi("session-ready", "Session ready", "Object created.")
+        void refreshSessionSnapshotSafely("event")
+        return
+      }
+
+      if (message.payloadType === "object_deleted") {
+        setSessionUi("session-ready", "Session ready", "Object deleted.")
         void refreshSessionSnapshotSafely("event")
         return
       }
@@ -1281,6 +1305,45 @@ export function Viewport() {
           {
             type: "set_transform",
             ...details,
+          },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
+      createObject: async (templateId) => {
+        const accepted = await sendCommand(
+          {
+            type: "create_object",
+            templateId,
+          },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
+      duplicateObject: async (objectId) => {
+        const accepted = await sendCommand(
+          {
+            type: "duplicate_object",
+            objectId,
+          },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
+      deleteObject: async (objectId) => {
+        const accepted = await sendCommand(
+          {
+            type: "delete_object",
+            objectId,
           },
           "reliable"
         )
