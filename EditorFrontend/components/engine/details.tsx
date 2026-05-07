@@ -64,7 +64,7 @@ function DetailsContent({ details }: { details: SessionObjectDetails }) {
   useEffect(() => {
     setDraftName(details.displayName)
     setDraft(toDraft(details))
-  }, [details])
+  }, [details.objectId])
 
   const canEdit = details.capabilities.supportsTransform && !details.capabilities.transformReadOnly
   const selectedByNames = details.collaboration.selectedByUserIds.map((userId) => {
