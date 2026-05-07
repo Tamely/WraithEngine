@@ -38,6 +38,9 @@
 - Delete removes the entire Instance subtree, strips all descendant entries from `ObjectDetailsById` and `MeshInstances`, and clears any selections pointing at deleted objects
 - New object creation always parents to the "world" `SceneFolder` (direct child of `DataModel`); valid built-in templates are `Folder`, `Mesh`, `Light`, `Camera`, and `Actor`
 - Added 16 focused tests in `Tests/SceneLifecycleTests.cpp` covering create, duplicate, delete, all rejection cases, uniqueness generation, and snapshot rehydration
+- The object lifecycle commands are now fully wired through the browser editor shell: `HeadlessCommandType` and `ParseRemoteViewportCommand` were extended for `create_object`, `duplicate_object`, and `delete_object`; `object_created` and `object_deleted` events are now serialized and broadcast to all connected clients
+- The outliner gained an Add dropdown (Folder, Mesh, Light, Camera, Actor templates), a Delete toolbar button active when an object is selected, and right-click context menus on every scene item with Duplicate and Delete entries; all three operations dispatch through the same authoritative command/event path
+- The `RemoteViewportCommand` TypeScript union was extended for the three new command types; the event dispatch block in `viewport.tsx` handles `object_created` and `object_deleted` by triggering a session snapshot refresh so the outliner updates automatically
 
 ## 1. Executive Summary
 WraithEngine will evolve from a single-process native editor into a distributed platform with one shared C++ engine runtime that supports two execution styles:
@@ -1048,9 +1051,10 @@ Progress update:
 - item 6 is now implemented locally
 - items 1 through 5 now exist in prototype form and are wired through the same session authority seam rather than bypassing it
 - the remote viewport prototype has already pivoted from shared-frame multiplexing to per-client render views with WebRTC-only streaming
-- the authoritative scene-authoring loop has advanced: selection, transform, rename, visibility, and full object lifecycle (create/duplicate/delete) are all command-driven with event publication and test coverage
+- the authoritative scene-authoring loop has advanced: selection, transform, rename, visibility, and full object lifecycle (create/duplicate/delete) are all command-driven with event publication, test coverage, and end-to-end wiring through the browser editor shell
 - all scene objects are now backed by a Roblox-inspired `DataModel`-rooted Instance hierarchy; the session owns the live tree and exposes a serializable snapshot projection for consumers
-- the next authoring step is exposing the object lifecycle commands through the browser editor shell (outliner add/delete, context menus) and binding transform gizmos to the authoritative `SetTransform` path
+- the outliner exposes the full object lifecycle to the user: an Add dropdown with built-in templates, a Delete toolbar button, and a right-click context menu with Duplicate and Delete; the three operations travel the same WebRTC/HTTP → `ParseRemoteViewportCommand` → `EditorSession::Tick` → event broadcast path as every other authoritative command
+- the next authoring steps are binding transform gizmos to the authoritative `SetTransform` path, and deeper inline editing such as in-outliner rename
 - multi-client validation, transport tuning, and deeper collaboration surfaces should continue afterward through that same command/event path instead of becoming the lead implementation track
 
 That slice proves the core thesis:
