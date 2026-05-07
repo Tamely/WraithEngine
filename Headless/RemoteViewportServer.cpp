@@ -801,6 +801,11 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetViewportCameraPose:
   case HeadlessCommandType::UpdateViewportCamera:
   case HeadlessCommandType::SelectObject:
+  case HeadlessCommandType::RenameObject:
+  case HeadlessCommandType::SetObjectVisibility:
+  case HeadlessCommandType::CreateObject:
+  case HeadlessCommandType::DuplicateObject:
+  case HeadlessCommandType::DeleteObject:
   case HeadlessCommandType::SetTransform:
     m_Host.SubmitRemoteCommand(*User, Command->EditorPayload);
     break;

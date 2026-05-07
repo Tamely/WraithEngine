@@ -23,7 +23,7 @@ export function Details() {
   const [isLocked, setIsLocked] = useState(false)
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden">
       <div className="flex h-8 items-center justify-between border-b border-neutral-800 bg-neutral-950 px-2">
         <div className="flex items-center gap-1">
           <Settings className="h-4 w-4 text-neutral-400" />
