@@ -13,6 +13,7 @@ set(ENGINE_SOURCES
   Remote/AxiomSessionEndpoint.cpp
   Session/BufferedEditorInputSource.cpp
   Session/EditorMessageBus.cpp
+  Session/EditorSceneRendererAdapter.cpp
   Session/EditorSession.cpp
   Session/StartupScene.cpp
   Renderer/Camera.cpp

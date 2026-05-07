@@ -119,9 +119,9 @@ void EditorSession::SetPresenceState(SessionUserId User,
   PublishPresenceChangedEvent(User);
 }
 
-void EditorSession::SetSceneSubmissions(
-    std::vector<RenderMeshSubmission> SceneSubmissions) {
-  m_State.SceneSubmissions = std::move(SceneSubmissions);
+void EditorSession::SetSceneMeshInstances(
+    std::vector<EditorSceneMeshInstance> SceneMeshInstances) {
+  m_State.SceneMeshInstances = std::move(SceneMeshInstances);
 }
 
 void EditorSession::SetSceneItems(std::vector<EditorSceneItem> SceneItems) {
@@ -234,9 +234,9 @@ const EditorObjectCollaborationState *EditorSession::FindCollaborationState(
 void EditorSession::UpdateSubmissionTransform(
     std::string_view ObjectId, const EditorTransformDetails &Transform) {
   const glm::mat4 Matrix = BuildTransformMatrix(Transform);
-  for (RenderMeshSubmission &Submission : m_State.SceneSubmissions) {
-    if (Submission.Name == ObjectId) {
-      Submission.Transform = Matrix;
+  for (EditorSceneMeshInstance &Instance : m_State.SceneMeshInstances) {
+    if (Instance.ObjectId == ObjectId) {
+      Instance.Transform = Matrix;
     }
   }
 }

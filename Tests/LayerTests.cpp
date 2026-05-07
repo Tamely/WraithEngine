@@ -534,7 +534,7 @@ TEST(EditorSessionTests, SelectedObjectDetailsMatchAuthoritativeState) {
   EXPECT_EQ(Details->Transform->Scale, glm::vec3(1.0f, 1.5f, 2.0f));
 }
 
-TEST(EditorSessionTests, SetTransformUpdatesAuthoritativeDetailsAndSubmission) {
+TEST(EditorSessionTests, SetTransformUpdatesAuthoritativeDetailsAndSceneMesh) {
   Axiom::EditorSession Session(Axiom::SessionId{1});
   RecordingSubscriber Subscriber;
   Session.Subscribe(&Subscriber);
@@ -554,10 +554,10 @@ TEST(EditorSessionTests, SetTransformUpdatesAuthoritativeDetailsAndSubmission) {
       .TransformReadOnly = false,
       .Transform = Axiom::EditorTransformDetails{},
   }});
-  Session.SetSceneSubmissions({{
-      .Mesh = nullptr,
+  Session.SetSceneMeshInstances({{
+      .ObjectId = "PlayerCharacter",
+      .Mesh = Axiom::MeshData{},
       .Material = nullptr,
-      .Name = "PlayerCharacter",
       .RenderPath = Axiom::MeshRenderPath::Graphics,
       .Transform = glm::mat4(1.0f),
   }});
@@ -579,8 +579,9 @@ TEST(EditorSessionTests, SetTransformUpdatesAuthoritativeDetailsAndSubmission) {
   EXPECT_EQ(Details->Transform->RotationDegrees, glm::vec3(0.0f, 90.0f, 0.0f));
   EXPECT_EQ(Details->Transform->Scale, glm::vec3(2.0f, 2.0f, 2.0f));
 
-  ASSERT_EQ(Session.GetState().SceneSubmissions.size(), 1u);
-  const glm::vec4 TranslationColumn = Session.GetState().SceneSubmissions[0].Transform[3];
+  ASSERT_EQ(Session.GetState().SceneMeshInstances.size(), 1u);
+  const glm::vec4 TranslationColumn =
+      Session.GetState().SceneMeshInstances[0].Transform[3];
   EXPECT_EQ(glm::vec3(TranslationColumn), glm::vec3(1.0f, 2.0f, 3.0f));
 
   ASSERT_EQ(Subscriber.Events.size(), 2u);

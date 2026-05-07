@@ -94,13 +94,21 @@ struct EditorObjectCollaborationState {
   std::optional<SessionUserId> LockOwner;
 };
 
+struct EditorSceneMeshInstance {
+  std::string ObjectId;
+  MeshData Mesh;
+  MaterialInstanceRef Material;
+  MeshRenderPath RenderPath{MeshRenderPath::Graphics};
+  glm::mat4 Transform{1.0f};
+};
+
 struct EditorSessionState {
   SessionId Session;
   std::unordered_map<SessionUserId, EditorViewportState, SessionUserIdHash>
       Viewports;
   std::unordered_map<SessionUserId, EditorUserPresence, SessionUserIdHash>
       PresenceByUser;
-  std::vector<RenderMeshSubmission> SceneSubmissions;
+  std::vector<EditorSceneMeshInstance> SceneMeshInstances;
   std::vector<EditorSceneItem> SceneItems;
   std::unordered_map<std::string, EditorObjectDetails> ObjectDetailsById;
   std::unordered_map<std::string, EditorObjectCollaborationState>
@@ -123,7 +131,8 @@ public:
 
   void EnsureViewportState(SessionUserId User);
   void SetPresenceState(SessionUserId User, EditorUserPresenceState State);
-  void SetSceneSubmissions(std::vector<RenderMeshSubmission> SceneSubmissions);
+  void SetSceneMeshInstances(
+      std::vector<EditorSceneMeshInstance> SceneMeshInstances);
   void SetSceneItems(std::vector<EditorSceneItem> SceneItems);
   void SetObjectDetails(std::vector<EditorObjectDetails> ObjectDetails);
   void SetPresence(std::vector<EditorUserPresence> Presence);

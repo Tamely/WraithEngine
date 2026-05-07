@@ -4,4 +4,6 @@
 
 namespace Axiom {
 bool LoadStartupScene(EditorSession &Session);
+std::vector<EditorSceneMeshInstance>
+BuildStartupSceneMeshInstances();
 } // namespace Axiom

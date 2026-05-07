@@ -5,6 +5,7 @@
 #include <Remote/SessionTransport.h>
 #include <Renderer/Material.h>
 #include <Renderer/Mesh.h>
+#include <Session/EditorSceneRendererAdapter.h>
 #include <Session/EditorSession.h>
 
 #include <functional>
@@ -47,6 +48,7 @@ private:
   SessionUserId m_LocalUserId{1};
   SessionUserId m_ActiveRenderUserId{1};
   EditorSession m_Session;
+  EditorSceneRendererAdapter m_RendererAdapter;
   MeshRef m_PresenceMarkerMesh;
   RenderFrameObserver m_RenderFrameObserver;
   mutable std::unordered_map<uint64_t, MaterialInstanceRef> m_PresenceMaterials;

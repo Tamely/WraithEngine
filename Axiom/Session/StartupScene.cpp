@@ -1,9 +1,13 @@
 #include "Session/StartupScene.h"
 
+#include "Assets/MeshAsset.h"
 #include "Core/Log.h"
-#include "Renderer/Renderer.h"
 
 #include <filesystem>
+#include <glm/ext/matrix_transform.hpp>
+#include <glm/trigonometric.hpp>
+#include <optional>
+#include <unordered_map>
 #include <utility>
 
 #ifndef AXIOM_CONTENT_DIR
@@ -12,6 +16,31 @@
 
 namespace Axiom {
 namespace {
+glm::mat4 BuildTransformMatrix(const EditorTransformDetails &Transform) {
+  glm::mat4 Matrix(1.0f);
+  Matrix = glm::translate(Matrix, Transform.Location);
+  Matrix = glm::rotate(Matrix, glm::radians(Transform.RotationDegrees.y),
+                       glm::vec3(0.0f, 1.0f, 0.0f));
+  Matrix = glm::rotate(Matrix, glm::radians(Transform.RotationDegrees.x),
+                       glm::vec3(1.0f, 0.0f, 0.0f));
+  Matrix = glm::rotate(Matrix, glm::radians(Transform.RotationDegrees.z),
+                       glm::vec3(0.0f, 0.0f, 1.0f));
+  Matrix = glm::scale(Matrix, Transform.Scale);
+  return Matrix;
+}
+
+std::optional<std::string> ResolveStartupObjectId(std::string_view SourceName) {
+  static const std::unordered_map<std::string, std::string> ObjectIds = {
+      {"Floor_Platform", "floor"},
+      {"Crate_01", "crate-1"},
+      {"Crate_02", "crate-2"},
+      {"WallPanel_SciFi", "wall-panel"},
+  };
+
+  const auto It = ObjectIds.find(std::string(SourceName));
+  return It != ObjectIds.end() ? std::make_optional(It->second) : std::nullopt;
+}
+
 std::vector<EditorSceneItem> BuildStartupSceneItems() {
   return {{
       .Id = "world",
@@ -216,17 +245,62 @@ std::vector<EditorObjectDetails> BuildStartupObjectDetails() {
 }
 } // namespace
 
-bool LoadStartupScene(EditorSession &Session) {
+std::vector<EditorSceneMeshInstance> BuildStartupSceneMeshInstances() {
   const auto MeshPath =
       std::filesystem::path(AXIOM_CONTENT_DIR) / "basicmesh.glb";
-  auto Submissions = Renderer::Get().LoadMeshSceneFromFile(MeshPath);
-  if (Submissions.empty()) {
-    A_CORE_ERROR("Failed to create startup mesh scene from {0}",
+  const auto SceneData = Assets::LoadBasicMeshAsset(MeshPath);
+  if (!SceneData.has_value()) {
+    A_CORE_ERROR("Failed to load startup mesh asset scene: {0}",
                  MeshPath.string());
+    return {};
+  }
+
+  std::vector<EditorObjectDetails> ObjectDetails = BuildStartupObjectDetails();
+  std::unordered_map<std::string, EditorTransformDetails> TransformsByObjectId;
+  for (const EditorObjectDetails &Details : ObjectDetails) {
+    if (Details.Transform.has_value()) {
+      TransformsByObjectId.emplace(Details.ObjectId, *Details.Transform);
+    }
+  }
+
+  std::vector<EditorSceneMeshInstance> Instances;
+  Instances.reserve(SceneData->Instances.size());
+  for (const auto &Instance : SceneData->Instances) {
+    const auto ObjectId = ResolveStartupObjectId(Instance.Name);
+    if (!ObjectId.has_value()) {
+      continue;
+    }
+
+    glm::mat4 Transform = Instance.Transform;
+    if (const auto TransformIt = TransformsByObjectId.find(*ObjectId);
+        TransformIt != TransformsByObjectId.end()) {
+      Transform = BuildTransformMatrix(TransformIt->second);
+    }
+
+    Instances.push_back({
+        .ObjectId = *ObjectId,
+        .Mesh = Instance.Mesh,
+        .Material = Instance.Material,
+        .RenderPath = MeshRenderPath::Graphics,
+        .Transform = Transform,
+    });
+  }
+
+  if (Instances.empty()) {
+    A_CORE_ERROR("Startup scene {0} did not yield any mapped mesh instances.",
+                 MeshPath.string());
+  }
+
+  return Instances;
+}
+
+bool LoadStartupScene(EditorSession &Session) {
+  auto SceneMeshInstances = BuildStartupSceneMeshInstances();
+  if (SceneMeshInstances.empty()) {
     return false;
   }
 
-  Session.SetSceneSubmissions(std::move(Submissions));
+  Session.SetSceneMeshInstances(std::move(SceneMeshInstances));
   Session.SetSceneItems(BuildStartupSceneItems());
   Session.SetObjectDetails(BuildStartupObjectDetails());
   return true;

@@ -243,7 +243,7 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
               .IsLocal = true,
           },
       }},
-      .SceneSubmissions = {},
+      .SceneMeshInstances = {},
       .SceneItems = {{
           .Id = "world",
           .DisplayName = "World",
@@ -313,7 +313,7 @@ TEST(HeadlessProtocolTests, SerializesSessionConnectResponse) {
       .Session = Axiom::SessionId{1},
       .Viewports = {},
       .PresenceByUser = {},
-      .SceneSubmissions = {},
+      .SceneMeshInstances = {},
       .SceneItems = {},
       .ObjectDetailsById = {},
       .CollaborationByObjectId = {},
