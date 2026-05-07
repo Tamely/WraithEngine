@@ -12,7 +12,7 @@ The current slice includes a macOS-first H.264 path that is wired into the nativ
 
 - Status: working prototype
 - Verified on Windows as of 2026-05-05
-- Builds on macOS as of 2026-05-06
+- Builds on macOS as of 2026-05-07
 - Runtime validation on macOS requires a Vulkan/MoltenVK-capable environment with Metal available
 - This subphase is complete for the runtime-side seam restoration work
 - `AxiomHeadless` is a command-driven authoritative runtime, not a full editor client
@@ -202,11 +202,24 @@ This prototype does not yet provide:
 - a production-ready remote viewer/editor client
 - a replacement for the current local windowed editor executable
 
+## Scene Authoring Progress
+
+The authoritative scene-authoring loop has advanced on the `scene-editing` branch:
+
+- `CreateObjectCommand`, `DuplicateObjectCommand`, and `DeleteObjectCommand` are now implemented as validated authoritative commands with matching `ObjectCreatedEvent` and `ObjectDeletedEvent` events
+- all scene objects are now backed by a `DataModel`-rooted Instance hierarchy (`Axiom/CoreInstance/SceneInstances.h`); `EditorSession` owns the live tree and keeps `EditorSceneState::Items` synchronized as a derived projection
+- `SetSceneState` and `SetSceneItems` rebuild the Instance tree from snapshot data, enabling round-trip rehydration
+- deep subtree duplication clones all descendant Instances with fresh unique IDs and display names
+- delete removes the entire subtree from the Instance tree, `ObjectDetailsById`, `MeshInstances`, and any active user selections
+- 16 focused tests cover creation, duplication, deletion, all rejection cases, uniqueness generation, and snapshot rehydration
+
 ## Next Priority
 
-The next remote-viewport milestone should prioritize:
+The next milestone should connect the new object-lifecycle commands to the browser editor shell:
 
-- turning the browser shell plus authoritative session into a real single-user scene-authoring loop
-- continued hardening of the `EditorFrontend/components/engine/viewport.tsx` client as the primary browser UI around selection, inspection, and transform-authoring workflows
-- editor-shell integration around session lifecycle and transport health in support of core editing behavior
-- full manual 3-tab browser validation, deeper WebRTC tuning, and future collaboration surfaces after the single-user command/event authoring loop is stable
+- wire `CreateObjectCommand` to an "Add Object" flow in the `EditorFrontend` outliner (context menu or toolbar button)
+- wire `DeleteObjectCommand` to the outliner delete action and keyboard shortcut
+- wire `DuplicateObjectCommand` to an outliner duplicate action
+- continued hardening of the `EditorFrontend/components/engine/viewport.tsx` client around selection, inspection, and transform-authoring workflows
+- expose transform gizmo interactions through the authoritative `SetTransformCommand` path rather than local client state
+- full manual browser validation of create/delete round-trips before widening to collaboration surfaces

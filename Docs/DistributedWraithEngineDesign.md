@@ -2,7 +2,7 @@
 
 ## Document Status
 - Status: Draft
-- Date: 2026-05-06
+- Date: 2026-05-07
 - Audience: Engine, tools, networking, web, and infrastructure contributors
 - Intended outcome: Establish the target architecture for evolving WraithEngine into a distributed game engine and browser-based collaborative editor
 
@@ -30,6 +30,14 @@
 - a delayed-readback frame attribution bug in multi-pass headless rendering was fixed by stamping each offscreen capture with the submitting `SessionUserId` at submission time
 - The next browser-facing step after the migration is turning the browser shell plus authoritative session into a real single-user scene editor, not more work on a server-hosted prototype page
 - Collaboration should continue to follow that same authoritative command/event path after the single-user authoring loop is stable, rather than leading the roadmap ahead of core editor behavior
+- `scene-editing` branch introduces the first authoritative object-lifecycle commands: `CreateObjectCommand`, `DuplicateObjectCommand`, and `DeleteObjectCommand`, with matching `ObjectCreatedEvent` and `ObjectDeletedEvent` authoritative events
+- All scene objects are now backed by an Instance-class hierarchy rooted at a `DataModel` node, mimicking the Roblox object model; `EditorSession` owns the live `DataModel` tree and keeps `EditorSceneState::Items` synchronized as a derived projection
+- Concrete scene Instance subclasses introduced: `SceneFolder`, `SceneMeshObject`, `SceneLight`, `SceneCamera`, and `SceneActor` under `Axiom/CoreInstance/SceneInstances.h`
+- `SetSceneState` and `SetSceneItems` now rebuild the Instance tree from snapshot data, enabling round-trip snapshot rehydration
+- Deep subtree duplication is supported: duplicating a folder clones all descendant Instances and their `ObjectDetails` entries with fresh unique IDs and display names
+- Delete removes the entire Instance subtree, strips all descendant entries from `ObjectDetailsById` and `MeshInstances`, and clears any selections pointing at deleted objects
+- New object creation always parents to the "world" `SceneFolder` (direct child of `DataModel`); valid built-in templates are `Folder`, `Mesh`, `Light`, `Camera`, and `Actor`
+- Added 16 focused tests in `Tests/SceneLifecycleTests.cpp` covering create, duplicate, delete, all rejection cases, uniqueness generation, and snapshot rehydration
 
 ## 1. Executive Summary
 WraithEngine will evolve from a single-process native editor into a distributed platform with one shared C++ engine runtime that supports two execution styles:
@@ -373,6 +381,8 @@ Current implementation note:
 
 - the current slice covers per-user viewport camera state, look/cursor-capture state, last cursor position bookkeeping, presence state, startup-scene logical mesh instances, selection state, and object transform authority for the startup scene
 - renderer-owned `RenderMeshSubmission` objects are no longer authoritative session state; they are now rebuilt from logical session scene data through an adapter at render time
+- all scene objects are now backed by an Instance hierarchy rooted at `DataModel`; `EditorSession` owns a `std::unique_ptr<DataModel>` and keeps `EditorSceneState::Items` synchronized as a projection of the live tree
+- `SetSceneState` and `SetSceneItems` rebuild the Instance tree from the provided snapshot, enabling rehydration and round-trip restore
 - entity/component/object registries, locks, presence, and asset editing state remain future work
 
 ### 11.3 Why This Matters
@@ -447,6 +457,8 @@ Current implementation note:
 
 - `UpdateViewportCamera` is implemented as the first authoritative viewport command
 - `SetLookActive` is implemented locally as an editor-session command to control cursor-capture / mouselook authority
+- `CreateObject` (with `TemplateId`), `DuplicateObject`, and `DeleteObject` are now implemented as the first authoritative object-lifecycle commands; valid built-in templates are `Folder`, `Mesh`, `Light`, `Camera`, and `Actor`
+- `RenameObject`, `SetObjectVisibility`, `SelectObject`, and `SetTransform` are implemented as the core per-object mutation commands
 
 ### 13.2 Events
 Events represent authoritative outcomes or state broadcasts. Initial event set:
@@ -471,11 +483,9 @@ Events represent authoritative outcomes or state broadcasts. Initial event set:
 
 Current implementation note:
 
-- `ViewportCameraUpdated`
-- `LookStateChanged`
-- `CommandRejected`
-
-are now implemented locally as the first authoritative session events
+- `ViewportCameraUpdated`, `LookStateChanged`, `CommandRejected`, `CommandAcknowledged` are implemented as the first authoritative session events
+- `SelectionChanged`, `ObjectRenamed`, `ObjectVisibilityChanged`, `ObjectTransformUpdated` are implemented as per-object mutation events
+- `ObjectCreated` and `ObjectDeleted` are now implemented as the first authoritative object-lifecycle events; `ObjectCreated` carries the new object's stable ID and display name
 
 ### 13.3 Validation Rules
 Commands should be validated against:
@@ -937,6 +947,16 @@ Current implementation note:
 - add `EditorSessionState`
 - support selection, transform, rename, reparent, component/property edits
 
+Progress update:
+
+- command/event model is in place and proven through 30+ focused tests
+- `EditorSessionState` covers viewport camera, look state, selection, presence, scene items, object details, mesh instances, and object collaboration state
+- selection, transform, rename, and visibility are all implemented as validated authoritative commands
+- object lifecycle (create/duplicate/delete) is now implemented for a narrow built-in type set (`Folder`, `Mesh`, `Light`, `Camera`, `Actor`) in-memory without asset-browser integration
+- all scene objects are now backed by a `DataModel`-rooted Instance hierarchy; the `EditorSession` owns the live tree and keeps the serializable `Items` projection in sync
+- deep subtree duplication generates unique IDs and display names for every descendant
+- reparent and component/property edits remain future work
+
 ### Phase 4: Collaboration v1
 - presence
 - user cameras/avatars
@@ -1028,7 +1048,9 @@ Progress update:
 - item 6 is now implemented locally
 - items 1 through 5 now exist in prototype form and are wired through the same session authority seam rather than bypassing it
 - the remote viewport prototype has already pivoted from shared-frame multiplexing to per-client render views with WebRTC-only streaming
-- the immediate priority is now stabilizing a single-user authoritative scene-authoring loop in the browser shell so selection, inspection, transform editing, and the next object-authoring operations live on one authoritative session model
+- the authoritative scene-authoring loop has advanced: selection, transform, rename, visibility, and full object lifecycle (create/duplicate/delete) are all command-driven with event publication and test coverage
+- all scene objects are now backed by a Roblox-inspired `DataModel`-rooted Instance hierarchy; the session owns the live tree and exposes a serializable snapshot projection for consumers
+- the next authoring step is exposing the object lifecycle commands through the browser editor shell (outliner add/delete, context menus) and binding transform gizmos to the authoritative `SetTransform` path
 - multi-client validation, transport tuning, and deeper collaboration surfaces should continue afterward through that same command/event path instead of becoming the lead implementation track
 
 That slice proves the core thesis:
