@@ -524,17 +524,9 @@ struct RemoteViewportServer::RemoteClientSession::PacketOutput final
 
 RemoteViewportServer::RemoteViewportServer(
     HeadlessSessionHost &Host, const RemoteViewportServerOptions &Options)
-    : m_Host(Host), m_Options(Options) {
-  m_Host.GetHeadlessLayer().SetRenderFrameObserver(
-      [this](uint64_t FrameIndex, SessionUserId User) {
-        RecordRenderFrameTarget(FrameIndex, User);
-      });
-}
+    : m_Host(Host), m_Options(Options) {}
 
-RemoteViewportServer::~RemoteViewportServer() {
-  m_Host.GetHeadlessLayer().SetRenderFrameObserver({});
-  Stop();
-}
+RemoteViewportServer::~RemoteViewportServer() { Stop(); }
 
 bool RemoteViewportServer::Start(std::string &Error) {
 #if AXIOM_PLATFORM_WINDOWS
@@ -631,26 +623,24 @@ void RemoteViewportServer::OnSessionTransportEditorEvent(
 
 void RemoteViewportServer::OnSessionTransportViewportFrame(
     const ViewportFrame &Frame) {
-  std::optional<std::string> CurrentRenderTargetClientId;
-  {
-    std::scoped_lock Lock(m_FrameMutex);
-    CurrentRenderTargetClientId = m_CurrentRenderTargetClientId;
-  }
-
-  if (CurrentRenderTargetClientId.has_value()) {
-    if (RemoteClientSession *Client = FindClientSession(*CurrentRenderTargetClientId);
-        Client != nullptr) {
-      if (Client->WebRtcSession != nullptr) {
-        Client->WebRtcSession->OnViewportFrame(Frame);
-      }
-      if (Client->VideoEncoder != nullptr) {
-        Client->VideoEncoder->EncodeFrame({
-            .FrameIndex = Frame.FrameIndex,
-            .Width = Frame.Width,
-            .Height = Frame.Height,
-            .Format = Frame.Format,
-            .Pixels = Frame.Pixels,
-        });
+  if (Frame.User.Value != 0u) {
+    if (const HeadlessRenderViewState *RenderView =
+            m_Host.FindRenderView(Frame.User);
+        RenderView != nullptr && !RenderView->IsLocal) {
+      if (RemoteClientSession *Client = FindClientSession(RenderView->ClientId);
+          Client != nullptr) {
+        if (Client->WebRtcSession != nullptr) {
+          Client->WebRtcSession->OnViewportFrame(Frame);
+        }
+        if (Client->VideoEncoder != nullptr) {
+          Client->VideoEncoder->EncodeFrame({
+              .FrameIndex = Frame.FrameIndex,
+              .Width = Frame.Width,
+              .Height = Frame.Height,
+              .Format = Frame.Format,
+              .Pixels = Frame.Pixels,
+          });
+        }
       }
     }
   }
@@ -1383,27 +1373,6 @@ void RemoteViewportServer::TouchClientSession(const std::string &ClientId) {
     It->second.LastActivity = std::chrono::steady_clock::now();
   }
   m_Host.FocusRemoteRenderView(ClientId);
-}
-
-void RemoteViewportServer::RecordRenderFrameTarget(uint64_t FrameIndex,
-                                                   SessionUserId User) {
-  (void)FrameIndex;
-  std::optional<std::string> CurrentClientId;
-  {
-    std::scoped_lock Lock(m_ClientMutex);
-    auto ClientIt = std::find_if(
-        m_RemoteClientsById.begin(), m_RemoteClientsById.end(),
-        [User](const auto &Entry) {
-          return Entry.second.User.Value == User.Value;
-        });
-    if (ClientIt != m_RemoteClientsById.end()) {
-      CurrentClientId = ClientIt->second.ClientId;
-    }
-  }
-  {
-    std::scoped_lock Lock(m_FrameMutex);
-    m_CurrentRenderTargetClientId = CurrentClientId;
-  }
 }
 
 void RemoteViewportServer::HandleClientEncodedVideoPacket(

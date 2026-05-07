@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <cstddef>
 #include <string>
 
 #include "Core/LayerStack.h"
@@ -50,6 +51,12 @@ public:
   void RequestClose();
   void SetRendererViewMode(RendererViewMode ViewMode);
   void SetViewportFrameOutput(IViewportFrameOutput *FrameOutput);
+
+protected:
+  virtual size_t BeginRenderPasses();
+  virtual void PrepareRenderPass(size_t PassIndex);
+  virtual bool ShouldRenderImGuiForPass(size_t PassIndex,
+                                        size_t PassCount) const;
 
 private:
   static Application *s_Instance;

@@ -118,7 +118,6 @@ private:
                                  std::string_view Payload);
 
   bool ShouldPublishJpegFrames() const;
-  void RecordRenderFrameTarget(uint64_t FrameIndex, SessionUserId User);
   void HandleClientEncodedVideoPacket(std::string_view ClientId,
                                       const EncodedVideoPacket &Packet);
   void SetLatestFrame(const CapturedFrame &Frame);
@@ -146,7 +145,6 @@ private:
   mutable std::mutex m_FrameMutex;
   LatestFrame m_LatestFrame;
   LatestEncodedPacket m_LatestEncodedPacket;
-  std::optional<std::string> m_CurrentRenderTargetClientId;
 
   mutable std::mutex m_ClientMutex;
   std::vector<WebSocketClient> m_WebSocketClients;

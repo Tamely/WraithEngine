@@ -1,5 +1,7 @@
 #include "HeadlessSessionHost.h"
 
+#include <algorithm>
+
 #include <Renderer/VideoEncoderFactory.h>
 
 namespace Axiom {
@@ -23,9 +25,19 @@ HeadlessSessionHost::HeadlessSessionHost(const ApplicationArgs &Args,
   PushLayer(m_Layer);
   m_Endpoint = std::make_unique<AxiomSessionEndpoint>(m_Layer->GetSession());
   m_Endpoint->SetVideoEncoder(CreateDefaultVideoEncoder());
-  SetViewportFrameOutput(m_Endpoint.get());
   m_RenderViews.EnsureLocalView(m_Layer->GetLocalUserId());
+  m_FrameBridge = std::make_unique<HeadlessViewportFrameBridge>(
+      *m_Endpoint, [this]() -> std::optional<HeadlessRenderViewState> {
+        if (const HeadlessRenderViewState *View = GetActiveRenderView();
+            View != nullptr) {
+          return *View;
+        }
+        return std::nullopt;
+      });
+  SetViewportFrameOutput(m_FrameBridge.get());
 }
+
+bool HeadlessSessionHost::Step() { return Application::Step(); }
 
 bool HeadlessSessionHost::LoadStartupSceneIntoSession() {
   return m_Layer->LoadStartupSceneIntoSession();
@@ -71,6 +83,9 @@ void HeadlessSessionHost::FocusLocalRenderView() {
 }
 
 const HeadlessRenderViewState *HeadlessSessionHost::GetActiveRenderView() const {
+  if (m_CurrentRenderPassIndex < m_ActiveRenderPassViews.size()) {
+    return &m_ActiveRenderPassViews[m_CurrentRenderPassIndex];
+  }
   return m_RenderViews.GetFocusedView();
 }
 
@@ -82,5 +97,38 @@ HeadlessSessionHost::FindRemoteRenderView(std::string_view ClientId) const {
 const HeadlessRenderViewState *
 HeadlessSessionHost::FindRenderView(SessionUserId User) const {
   return m_RenderViews.FindView(User);
+}
+
+size_t HeadlessSessionHost::BeginRenderPasses() {
+  m_ActiveRenderPassViews.clear();
+  m_CurrentRenderPassIndex = 0;
+
+  m_ActiveRenderPassViews = m_RenderViews.BuildRemoteViewSnapshot();
+  std::sort(m_ActiveRenderPassViews.begin(), m_ActiveRenderPassViews.end(),
+            [](const HeadlessRenderViewState &Left,
+               const HeadlessRenderViewState &Right) {
+              return Left.User.Value < Right.User.Value;
+            });
+
+  if (m_ActiveRenderPassViews.empty()) {
+    if (const HeadlessRenderViewState *LocalView = m_RenderViews.FindView(
+            m_Layer->GetLocalUserId());
+        LocalView != nullptr) {
+      m_ActiveRenderPassViews.push_back(*LocalView);
+    }
+  }
+
+  return m_ActiveRenderPassViews.size();
+}
+
+void HeadlessSessionHost::PrepareRenderPass(size_t PassIndex) {
+  m_CurrentRenderPassIndex = PassIndex;
+}
+
+bool HeadlessSessionHost::ShouldRenderImGuiForPass(size_t PassIndex,
+                                                   size_t PassCount) const {
+  (void)PassIndex;
+  (void)PassCount;
+  return false;
 }
 } // namespace Axiom

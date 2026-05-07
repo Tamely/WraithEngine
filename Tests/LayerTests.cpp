@@ -5,6 +5,7 @@
 #include <Core/GlfwEditorInputSource.h>
 #include <Core/InputPlatform.h>
 #include "../Headless/HeadlessRenderView.h"
+#include "../Headless/HeadlessViewportFrameBridge.h"
 #include <Remote/AxiomSessionEndpoint.h>
 #include <Renderer/OffscreenRenderSurface.h>
 #include <Renderer/VideoEncoderFactory.h>
@@ -81,6 +82,7 @@ public:
     uint32_t Height{0};
     Axiom::ViewportFrameFormat Format{
         Axiom::ViewportFrameFormat::R16G16B16A16Float};
+    Axiom::SessionUserId User{};
   };
 
   struct EncodedPacketRecord {
@@ -105,7 +107,8 @@ public:
     Frames.push_back({.FrameIndex = Frame.FrameIndex,
                       .Width = Frame.Width,
                       .Height = Frame.Height,
-                      .Format = Frame.Format});
+                      .Format = Frame.Format,
+                      .User = Frame.User});
     LastFrameBytes.assign(Frame.Pixels.begin(), Frame.Pixels.end());
   }
 
@@ -784,6 +787,43 @@ TEST(RemoteViewportTests, HeadlessRenderViewsKeepPerClientModesIsolated) {
   EXPECT_EQ(Registry.GetFocusedView()->ClientId, "client-a");
 }
 
+TEST(RemoteViewportTests, HeadlessViewportFrameBridgeTagsFramesWithRenderUser) {
+  class RecordingFrameOutput final : public Axiom::IViewportFrameOutput {
+  public:
+    void OnViewportFrame(const Axiom::ViewportFrame &Frame) override {
+      LastUser = Frame.User;
+      LastFrameIndex = Frame.FrameIndex;
+    }
+
+    Axiom::SessionUserId LastUser{};
+    uint64_t LastFrameIndex{0};
+  };
+
+  RecordingFrameOutput Output;
+  Axiom::HeadlessViewportFrameBridge Bridge(
+      Output, []() -> std::optional<Axiom::HeadlessRenderViewState> {
+        return Axiom::HeadlessRenderViewState{
+            .ClientId = "client-a",
+            .User = Axiom::SessionUserId{7},
+            .ViewMode = Axiom::RendererViewMode::Wireframe,
+            .IsLocal = false,
+        };
+      });
+
+  std::array<std::byte, 4> Bytes{std::byte{0x01}, std::byte{0x02},
+                                 std::byte{0x03}, std::byte{0x04}};
+  Bridge.OnViewportFrame({
+      .FrameIndex = 55,
+      .Width = 1,
+      .Height = 1,
+      .Format = Axiom::ViewportFrameFormat::R8G8B8A8Unorm,
+      .Pixels = std::span<const std::byte>(Bytes.data(), Bytes.size()),
+  });
+
+  EXPECT_EQ(Output.LastFrameIndex, 55u);
+  EXPECT_EQ(Output.LastUser.Value, 7u);
+}
+
 TEST(RemoteViewportTests, AxiomEndpointForwardsEventsAndFrames) {
   Axiom::EditorSession Session(Axiom::SessionId{1});
   Axiom::AxiomSessionEndpoint Endpoint(Session);
@@ -815,6 +855,7 @@ TEST(RemoteViewportTests, AxiomEndpointForwardsEventsAndFrames) {
 
   ASSERT_EQ(Subscriber.Frames.size(), 1u);
   EXPECT_EQ(Subscriber.Frames.front().FrameIndex, 99u);
+  EXPECT_EQ(Subscriber.Frames.front().User.Value, 0u);
   EXPECT_EQ(Subscriber.LastFrameBytes.size(), Bytes.size());
   EXPECT_EQ(Subscriber.LastFrameBytes[0], Bytes[0]);
 

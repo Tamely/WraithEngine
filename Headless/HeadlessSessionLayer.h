@@ -17,8 +17,6 @@ struct HeadlessRenderViewState;
 
 class HeadlessSessionLayer final : public Layer {
 public:
-  using RenderFrameObserver =
-      std::function<void(uint64_t FrameIndex, SessionUserId User)>;
   using RenderViewResolver =
       std::function<std::optional<HeadlessRenderViewState>()>;
 
@@ -40,9 +38,6 @@ public:
   void SetRenderViewResolver(RenderViewResolver Resolver) {
     m_RenderViewResolver = std::move(Resolver);
   }
-  void SetRenderFrameObserver(RenderFrameObserver Observer) {
-    m_RenderFrameObserver = std::move(Observer);
-  }
   void SetPresenceMarkerMeshForTesting(MeshRef Mesh) { m_PresenceMarkerMesh = std::move(Mesh); }
   EditorSession &GetSession() { return m_Session; }
   SessionUserId GetLocalUserId() const { return m_LocalUserId; }
@@ -60,7 +55,6 @@ private:
   EditorSceneRendererAdapter *m_RendererAdapter{nullptr};
   MeshRef m_PresenceMarkerMesh;
   RenderViewResolver m_RenderViewResolver;
-  RenderFrameObserver m_RenderFrameObserver;
   mutable std::unordered_map<uint64_t, MaterialInstanceRef> m_PresenceMaterials;
 };
 } // namespace Axiom

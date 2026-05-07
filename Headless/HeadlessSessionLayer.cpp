@@ -114,10 +114,6 @@ void HeadlessSessionLayer::OnRender() {
     return;
   }
 
-  if (m_RenderFrameObserver) {
-    m_RenderFrameObserver(Application::Get().GetFrameIndex(), RenderUser);
-  }
-
   if (m_RendererAdapter == nullptr) {
     return;
   }
