@@ -1408,9 +1408,10 @@ export function Viewport() {
 
     const handlePointerLockChange = () => {
       pointerLockedRef.current = document.pointerLockElement === shell
-      if (!pointerLockedRef.current && isLookingRef.current) {
-        void setLookEnabled(false)
-      } else if (pointerLockedRef.current && !isLookingRef.current) {
+      if (!pointerLockedRef.current) {
+        keysRef.current.clear()
+        if (isLookingRef.current) void setLookEnabled(false)
+      } else if (!isLookingRef.current) {
         void setLookEnabled(true)
       }
     }
@@ -1427,6 +1428,7 @@ export function Viewport() {
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (!pointerLockedRef.current) return
       if (
         event.code === "Space" ||
         event.code === "ShiftLeft" ||
@@ -1442,6 +1444,7 @@ export function Viewport() {
     }
 
     const handleKeyUp = (event: KeyboardEvent) => {
+      if (!pointerLockedRef.current) return
       if (
         event.code === "Space" ||
         event.code === "ShiftLeft" ||
