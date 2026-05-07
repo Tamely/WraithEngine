@@ -583,9 +583,9 @@ TEST(EditorSessionTests, SetTransformUpdatesAuthoritativeDetailsAndSceneMesh) {
   EXPECT_EQ(Details->Transform->RotationDegrees, glm::vec3(0.0f, 90.0f, 0.0f));
   EXPECT_EQ(Details->Transform->Scale, glm::vec3(2.0f, 2.0f, 2.0f));
 
-  ASSERT_EQ(Session.GetState().SceneMeshInstances.size(), 1u);
+  ASSERT_EQ(Session.GetState().Scene.MeshInstances.size(), 1u);
   const glm::vec4 TranslationColumn =
-      Session.GetState().SceneMeshInstances[0].Transform[3];
+      Session.GetState().Scene.MeshInstances[0].Transform[3];
   EXPECT_EQ(glm::vec3(TranslationColumn), glm::vec3(1.0f, 2.0f, 3.0f));
 
   ASSERT_EQ(Subscriber.Events.size(), 2u);
@@ -631,6 +631,50 @@ TEST(EditorSessionTests, SetTransformRejectsReadOnlyTarget) {
   ASSERT_EQ(Subscriber.Events.size(), 1u);
   ASSERT_TRUE(std::holds_alternative<Axiom::CommandRejectedEvent>(
       Subscriber.Events.front().Event.Payload));
+}
+
+TEST(EditorSessionTests, ReplacingAuthoritativeSceneStatePrunesInvalidSelections) {
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  Session.SetSceneState({
+      .MeshInstances = {},
+      .Items = {{
+          .Id = "world",
+          .DisplayName = "World",
+          .Kind = Axiom::EditorSceneItemKind::Folder,
+          .Visible = true,
+          .Children = {{
+              .Id = "PlayerCharacter",
+              .DisplayName = "PlayerCharacter",
+              .Kind = Axiom::EditorSceneItemKind::Actor,
+              .Visible = true,
+              .Children = {},
+          }},
+      }},
+      .ObjectDetailsById = {},
+      .CollaborationByObjectId = {},
+  });
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SelectObjectCommand{
+                      .ObjectId = "PlayerCharacter",
+                  }});
+  Session.Tick();
+  ASSERT_NE(Session.FindSelectedObjectId(Axiom::SessionUserId{7}), nullptr);
+
+  Session.SetSceneState({
+      .MeshInstances = {},
+      .Items = {{
+          .Id = "replacement-world",
+          .DisplayName = "Replacement World",
+          .Kind = Axiom::EditorSceneItemKind::Folder,
+          .Visible = true,
+          .Children = {},
+      }},
+      .ObjectDetailsById = {},
+      .CollaborationByObjectId = {},
+  });
+
+  EXPECT_EQ(Session.FindSelectedObjectId(Axiom::SessionUserId{7}), nullptr);
 }
 
 TEST(EditorInputSourceTests, GlfwInputSourceTranslatesPlatformStateIntoCommands) {

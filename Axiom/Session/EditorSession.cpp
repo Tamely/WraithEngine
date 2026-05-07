@@ -119,20 +119,24 @@ void EditorSession::SetPresenceState(SessionUserId User,
   PublishPresenceChangedEvent(User);
 }
 
+void EditorSession::SetSceneState(EditorSceneState SceneState) {
+  m_State.Scene = std::move(SceneState);
+  PruneInvalidSelections();
+}
+
 void EditorSession::SetSceneMeshInstances(
     std::vector<EditorSceneMeshInstance> SceneMeshInstances) {
-  m_State.SceneMeshInstances = std::move(SceneMeshInstances);
+  m_State.Scene.MeshInstances = std::move(SceneMeshInstances);
 }
 
 void EditorSession::SetSceneItems(std::vector<EditorSceneItem> SceneItems) {
-  m_State.SceneItems = std::move(SceneItems);
+  m_State.Scene.Items = std::move(SceneItems);
+  PruneInvalidSelections();
 }
 
-void EditorSession::SetObjectDetails(std::vector<EditorObjectDetails> ObjectDetails) {
-  m_State.ObjectDetailsById.clear();
-  for (EditorObjectDetails &Details : ObjectDetails) {
-    m_State.ObjectDetailsById.emplace(Details.ObjectId, std::move(Details));
-  }
+void EditorSession::SetObjectDetails(
+    std::vector<EditorObjectDetails> ObjectDetails) {
+  m_State.Scene.ObjectDetailsById = BuildObjectDetailsMap(std::move(ObjectDetails));
 }
 
 void EditorSession::SetPresence(std::vector<EditorUserPresence> Presence) {
@@ -144,9 +148,10 @@ void EditorSession::SetPresence(std::vector<EditorUserPresence> Presence) {
 
 void EditorSession::SetObjectCollaborationStates(
     std::vector<EditorObjectCollaborationState> CollaborationStates) {
-  m_State.CollaborationByObjectId.clear();
+  m_State.Scene.CollaborationByObjectId.clear();
   for (EditorObjectCollaborationState &Entry : CollaborationStates) {
-    m_State.CollaborationByObjectId.emplace(Entry.ObjectId, std::move(Entry));
+    m_State.Scene.CollaborationByObjectId.emplace(Entry.ObjectId,
+                                                  std::move(Entry));
   }
 }
 
@@ -156,7 +161,7 @@ const EditorViewportState *EditorSession::FindViewport(SessionUserId User) const
 }
 
 const EditorSceneItem *EditorSession::FindSceneItem(std::string_view ObjectId) const {
-  return FindSceneItemRecursive(m_State.SceneItems, ObjectId);
+  return FindSceneItemRecursive(m_State.Scene.Items, ObjectId);
 }
 
 const std::string *EditorSession::FindSelectedObjectId(SessionUserId User) const {
@@ -166,8 +171,8 @@ const std::string *EditorSession::FindSelectedObjectId(SessionUserId User) const
 
 const EditorObjectDetails *EditorSession::FindObjectDetails(
     std::string_view ObjectId) const {
-  const auto It = m_State.ObjectDetailsById.find(std::string(ObjectId));
-  return It != m_State.ObjectDetailsById.end() ? &It->second : nullptr;
+  const auto It = m_State.Scene.ObjectDetailsById.find(std::string(ObjectId));
+  return It != m_State.Scene.ObjectDetailsById.end() ? &It->second : nullptr;
 }
 
 const EditorObjectDetails *EditorSession::FindSelectedObjectDetails(
@@ -227,14 +232,38 @@ std::vector<EditorParticipant> EditorSession::BuildParticipants(
 
 const EditorObjectCollaborationState *EditorSession::FindCollaborationState(
     std::string_view ObjectId) const {
-  const auto It = m_State.CollaborationByObjectId.find(std::string(ObjectId));
-  return It != m_State.CollaborationByObjectId.end() ? &It->second : nullptr;
+  const auto It =
+      m_State.Scene.CollaborationByObjectId.find(std::string(ObjectId));
+  return It != m_State.Scene.CollaborationByObjectId.end() ? &It->second
+                                                           : nullptr;
+}
+
+std::unordered_map<std::string, EditorObjectDetails>
+EditorSession::BuildObjectDetailsMap(
+    std::vector<EditorObjectDetails> ObjectDetails) {
+  std::unordered_map<std::string, EditorObjectDetails> DetailsByObjectId;
+  DetailsByObjectId.reserve(ObjectDetails.size());
+  for (EditorObjectDetails &Details : ObjectDetails) {
+    DetailsByObjectId.emplace(Details.ObjectId, std::move(Details));
+  }
+  return DetailsByObjectId;
+}
+
+void EditorSession::PruneInvalidSelections() {
+  for (auto It = m_State.SelectedObjectIds.begin();
+       It != m_State.SelectedObjectIds.end();) {
+    if (FindSceneItem(It->second) == nullptr) {
+      It = m_State.SelectedObjectIds.erase(It);
+    } else {
+      ++It;
+    }
+  }
 }
 
 void EditorSession::UpdateSubmissionTransform(
     std::string_view ObjectId, const EditorTransformDetails &Transform) {
   const glm::mat4 Matrix = BuildTransformMatrix(Transform);
-  for (EditorSceneMeshInstance &Instance : m_State.SceneMeshInstances) {
+  for (EditorSceneMeshInstance &Instance : m_State.Scene.MeshInstances) {
     if (Instance.ObjectId == ObjectId) {
       Instance.Transform = Matrix;
     }
@@ -478,8 +507,8 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
 void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                   const SetTransformCommand &Command) {
   EnsurePresence(QueuedCommand.Context.User);
-  auto DetailsIt = m_State.ObjectDetailsById.find(Command.ObjectId);
-  if (DetailsIt == m_State.ObjectDetailsById.end()) {
+  auto DetailsIt = m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
+  if (DetailsIt == m_State.Scene.ObjectDetailsById.end()) {
     return;
   }
 

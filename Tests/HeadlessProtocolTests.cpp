@@ -243,44 +243,47 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
               .IsLocal = true,
           },
       }},
-      .SceneMeshInstances = {},
-      .SceneItems = {{
-          .Id = "world",
-          .DisplayName = "World",
-          .Kind = Axiom::EditorSceneItemKind::Folder,
-          .Visible = true,
-          .Children = {{
-              .Id = "PlayerCharacter",
-              .DisplayName = "PlayerCharacter",
-              .Kind = Axiom::EditorSceneItemKind::Actor,
-              .Visible = true,
-              .Children = {},
-          }},
-      }},
-      .ObjectDetailsById = {{
-          "PlayerCharacter",
-          Axiom::EditorObjectDetails{
-              .ObjectId = "PlayerCharacter",
-              .DisplayName = "PlayerCharacter",
-              .Kind = Axiom::EditorSceneItemKind::Actor,
-              .Visible = true,
-              .SupportsTransform = true,
-              .TransformReadOnly = true,
-              .Transform = Axiom::EditorTransformDetails{
-                  .Location = glm::vec3(1.0f, 2.0f, 3.0f),
-                  .RotationDegrees = glm::vec3(4.0f, 5.0f, 6.0f),
-                  .Scale = glm::vec3(1.0f, 1.0f, 1.0f),
-              },
+      .Scene =
+          {
+              .MeshInstances = {},
+              .Items = {{
+                  .Id = "world",
+                  .DisplayName = "World",
+                  .Kind = Axiom::EditorSceneItemKind::Folder,
+                  .Visible = true,
+                  .Children = {{
+                      .Id = "PlayerCharacter",
+                      .DisplayName = "PlayerCharacter",
+                      .Kind = Axiom::EditorSceneItemKind::Actor,
+                      .Visible = true,
+                      .Children = {},
+                  }},
+              }},
+              .ObjectDetailsById = {{
+                  "PlayerCharacter",
+                  Axiom::EditorObjectDetails{
+                      .ObjectId = "PlayerCharacter",
+                      .DisplayName = "PlayerCharacter",
+                      .Kind = Axiom::EditorSceneItemKind::Actor,
+                      .Visible = true,
+                      .SupportsTransform = true,
+                      .TransformReadOnly = true,
+                      .Transform = Axiom::EditorTransformDetails{
+                          .Location = glm::vec3(1.0f, 2.0f, 3.0f),
+                          .RotationDegrees = glm::vec3(4.0f, 5.0f, 6.0f),
+                          .Scale = glm::vec3(1.0f, 1.0f, 1.0f),
+                      },
+                  },
+              }},
+              .CollaborationByObjectId = {{
+                  "PlayerCharacter",
+                  Axiom::EditorObjectCollaborationState{
+                      .ObjectId = "PlayerCharacter",
+                      .LockState = Axiom::EditorObjectLockState::Placeholder,
+                      .LockOwner = Axiom::SessionUserId{1},
+                  },
+              }},
           },
-      }},
-      .CollaborationByObjectId = {{
-          "PlayerCharacter",
-          Axiom::EditorObjectCollaborationState{
-              .ObjectId = "PlayerCharacter",
-              .LockState = Axiom::EditorObjectLockState::Placeholder,
-              .LockOwner = Axiom::SessionUserId{1},
-          },
-      }},
       .SelectedObjectIds = {{Axiom::SessionUserId{1}, "PlayerCharacter"}},
   };
 
@@ -313,10 +316,13 @@ TEST(HeadlessProtocolTests, SerializesSessionConnectResponse) {
       .Session = Axiom::SessionId{1},
       .Viewports = {},
       .PresenceByUser = {},
-      .SceneMeshInstances = {},
-      .SceneItems = {},
-      .ObjectDetailsById = {},
-      .CollaborationByObjectId = {},
+      .Scene =
+          {
+              .MeshInstances = {},
+              .Items = {},
+              .ObjectDetailsById = {},
+              .CollaborationByObjectId = {},
+          },
       .SelectedObjectIds = {},
   };
 

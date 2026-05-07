@@ -293,8 +293,9 @@ void SerializeObjectDetails(std::ostringstream &Stream,
     Stream << Participant.User.Value;
   }
   Stream << "],\"lockState\":\"";
-  const auto CollaborationIt = State.CollaborationByObjectId.find(Details.ObjectId);
-  if (CollaborationIt != State.CollaborationByObjectId.end()) {
+  const auto CollaborationIt =
+      State.Scene.CollaborationByObjectId.find(Details.ObjectId);
+  if (CollaborationIt != State.Scene.CollaborationByObjectId.end()) {
     Stream << LockStateToString(CollaborationIt->second.LockState)
            << "\",\"lockOwnerUserId\":";
     if (CollaborationIt->second.LockOwner.has_value()) {
@@ -831,11 +832,11 @@ std::string SerializeSessionSnapshot(const EditorSessionState &State,
   }
 
   Stream << "],\"sceneTree\":[";
-  for (size_t Index = 0; Index < State.SceneItems.size(); ++Index) {
+  for (size_t Index = 0; Index < State.Scene.Items.size(); ++Index) {
     if (Index != 0) {
       Stream << ",";
     }
-    SerializeSceneItem(Stream, State.SceneItems[Index]);
+    SerializeSceneItem(Stream, State.Scene.Items[Index]);
   }
   Stream << "],\"selectedObjectDetails\":";
   if (const EditorObjectDetails *Details =
@@ -845,9 +846,10 @@ std::string SerializeSessionSnapshot(const EditorSessionState &State,
               return nullptr;
             }
             const auto DetailsIt =
-                State.ObjectDetailsById.find(SelectionIt->second);
-            return DetailsIt != State.ObjectDetailsById.end() ? &DetailsIt->second
-                                                              : nullptr;
+                State.Scene.ObjectDetailsById.find(SelectionIt->second);
+            return DetailsIt != State.Scene.ObjectDetailsById.end()
+                       ? &DetailsIt->second
+                       : nullptr;
           }();
       Details != nullptr) {
     SerializeObjectDetails(Stream, State, *Details);

@@ -223,6 +223,16 @@ std::vector<EditorObjectDetails> BuildStartupObjectDetails() {
       },
   }};
 }
+
+std::unordered_map<std::string, EditorObjectDetails> BuildObjectDetailsMap(
+    std::vector<EditorObjectDetails> ObjectDetails) {
+  std::unordered_map<std::string, EditorObjectDetails> DetailsByObjectId;
+  DetailsByObjectId.reserve(ObjectDetails.size());
+  for (EditorObjectDetails &Details : ObjectDetails) {
+    DetailsByObjectId.emplace(Details.ObjectId, std::move(Details));
+  }
+  return DetailsByObjectId;
+}
 } // namespace
 
 std::vector<EditorSceneMeshInstance> BuildStartupSceneMeshInstances() {
@@ -274,15 +284,25 @@ std::vector<EditorSceneMeshInstance> BuildStartupSceneMeshInstances() {
   return Instances;
 }
 
+EditorSceneState BuildStartupSceneState() {
+  EditorSceneState SceneState{};
+  SceneState.MeshInstances = BuildStartupSceneMeshInstances();
+  if (SceneState.MeshInstances.empty()) {
+    return SceneState;
+  }
+
+  SceneState.Items = BuildStartupSceneItems();
+  SceneState.ObjectDetailsById = BuildObjectDetailsMap(BuildStartupObjectDetails());
+  return SceneState;
+}
+
 bool LoadStartupScene(EditorSession &Session) {
-  auto SceneMeshInstances = BuildStartupSceneMeshInstances();
-  if (SceneMeshInstances.empty()) {
+  EditorSceneState SceneState = BuildStartupSceneState();
+  if (SceneState.MeshInstances.empty()) {
     return false;
   }
 
-  Session.SetSceneMeshInstances(std::move(SceneMeshInstances));
-  Session.SetSceneItems(BuildStartupSceneItems());
-  Session.SetObjectDetails(BuildStartupObjectDetails());
+  Session.SetSceneState(std::move(SceneState));
   return true;
 }
 } // namespace Axiom

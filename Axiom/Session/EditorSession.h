@@ -102,17 +102,21 @@ struct EditorSceneMeshInstance {
   glm::mat4 Transform{1.0f};
 };
 
+struct EditorSceneState {
+  std::vector<EditorSceneMeshInstance> MeshInstances;
+  std::vector<EditorSceneItem> Items;
+  std::unordered_map<std::string, EditorObjectDetails> ObjectDetailsById;
+  std::unordered_map<std::string, EditorObjectCollaborationState>
+      CollaborationByObjectId;
+};
+
 struct EditorSessionState {
   SessionId Session;
   std::unordered_map<SessionUserId, EditorViewportState, SessionUserIdHash>
       Viewports;
   std::unordered_map<SessionUserId, EditorUserPresence, SessionUserIdHash>
       PresenceByUser;
-  std::vector<EditorSceneMeshInstance> SceneMeshInstances;
-  std::vector<EditorSceneItem> SceneItems;
-  std::unordered_map<std::string, EditorObjectDetails> ObjectDetailsById;
-  std::unordered_map<std::string, EditorObjectCollaborationState>
-      CollaborationByObjectId;
+  EditorSceneState Scene;
   std::unordered_map<SessionUserId, std::string, SessionUserIdHash>
       SelectedObjectIds;
 };
@@ -131,6 +135,7 @@ public:
 
   void EnsureViewportState(SessionUserId User);
   void SetPresenceState(SessionUserId User, EditorUserPresenceState State);
+  void SetSceneState(EditorSceneState SceneState);
   void SetSceneMeshInstances(
       std::vector<EditorSceneMeshInstance> SceneMeshInstances);
   void SetSceneItems(std::vector<EditorSceneItem> SceneItems);
@@ -153,6 +158,9 @@ public:
       std::string_view ObjectId) const;
 
 private:
+  static std::unordered_map<std::string, EditorObjectDetails>
+  BuildObjectDetailsMap(std::vector<EditorObjectDetails> ObjectDetails);
+  void PruneInvalidSelections();
   void UpdateSubmissionTransform(std::string_view ObjectId,
                                  const EditorTransformDetails &Transform);
   void PublishPresenceChangedEvent(SessionUserId User);
