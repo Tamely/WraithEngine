@@ -28,7 +28,8 @@
 - the headless remote viewport path now uses per-client render views rendered sequentially in one engine tick instead of a single-frame ownership splitter
 - remote view mode is now per client
 - a delayed-readback frame attribution bug in multi-pass headless rendering was fixed by stamping each offscreen capture with the submitting `SessionUserId` at submission time
-- The next browser-facing step after the migration is transport-quality tuning and broader editor-shell integration, not more work on a server-hosted prototype page
+- The next browser-facing step after the migration is turning the browser shell plus authoritative session into a real single-user scene editor, not more work on a server-hosted prototype page
+- Collaboration should continue to follow that same authoritative command/event path after the single-user authoring loop is stable, rather than leading the roadmap ahead of core editor behavior
 
 ## 1. Executive Summary
 WraithEngine will evolve from a single-process native editor into a distributed platform with one shared C++ engine runtime that supports two execution styles:
@@ -1027,7 +1028,8 @@ Progress update:
 - item 6 is now implemented locally
 - items 1 through 5 now exist in prototype form and are wired through the same session authority seam rather than bypassing it
 - the remote viewport prototype has already pivoted from shared-frame multiplexing to per-client render views with WebRTC-only streaming
-- the immediate priority is now finalizing multi-client browser validation, then continuing WebRTC latency-quality tuning and broader browser-editor integration
+- the immediate priority is now stabilizing a single-user authoritative scene-authoring loop in the browser shell so selection, inspection, transform editing, and the next object-authoring operations live on one authoritative session model
+- multi-client validation, transport tuning, and deeper collaboration surfaces should continue afterward through that same command/event path instead of becoming the lead implementation track
 
 That slice proves the core thesis:
 
@@ -1045,6 +1047,7 @@ The first milestone should stay disciplined:
 - browser-based editor shell
 - streamed native viewport
 - authoritative engine session
+- single-user authoritative scene authoring before broader collaboration depth
 - collaboration via presence and locking
 - clear trust boundaries
 

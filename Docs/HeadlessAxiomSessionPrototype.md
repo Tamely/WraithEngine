@@ -206,7 +206,7 @@ This prototype does not yet provide:
 
 The next remote-viewport milestone should prioritize:
 
-- full manual 3-tab browser validation and any remaining bugfixes in the per-client render-view path
-- deeper WebRTC sender and browser playout-delay tuning to reduce the remaining input latency
-- continued hardening of the `EditorFrontend/components/engine/viewport.tsx` client as the primary browser UI
-- better editor-shell integration around session lifecycle, transport health, and future collaboration surfaces
+- turning the browser shell plus authoritative session into a real single-user scene-authoring loop
+- continued hardening of the `EditorFrontend/components/engine/viewport.tsx` client as the primary browser UI around selection, inspection, and transform-authoring workflows
+- editor-shell integration around session lifecycle and transport health in support of core editing behavior
+- full manual 3-tab browser validation, deeper WebRTC tuning, and future collaboration surfaces after the single-user command/event authoring loop is stable
