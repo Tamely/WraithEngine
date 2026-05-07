@@ -31,9 +31,6 @@
 #include <unistd.h>
 #endif
 
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include <stb_image_write.h>
-
 namespace Axiom {
 namespace {
 constexpr std::string_view WebSocketGuid =
@@ -93,30 +90,6 @@ struct HttpRequest {
   size_t ContentLength{0};
 };
 
-struct EncodedImageBuffer {
-  std::vector<unsigned char> Bytes;
-};
-
-void WriteImageBytes(void *Context, void *Data, int Size) {
-  auto *Buffer = static_cast<EncodedImageBuffer *>(Context);
-  const auto *Bytes = static_cast<const unsigned char *>(Data);
-  Buffer->Bytes.insert(Buffer->Bytes.end(), Bytes, Bytes + Size);
-}
-
-std::optional<CapturedFrame> ConvertFrame(const ViewportFrame &Frame) {
-  if (Frame.Format != ViewportFrameFormat::R8G8B8A8Unorm) {
-    return std::nullopt;
-  }
-
-  CapturedFrame Captured{};
-  Captured.FrameIndex = Frame.FrameIndex;
-  Captured.Width = Frame.Width;
-  Captured.Height = Frame.Height;
-  Captured.Pixels.resize(Frame.Pixels.size());
-  std::memcpy(Captured.Pixels.data(), Frame.Pixels.data(), Frame.Pixels.size());
-  return Captured;
-}
-
 std::string BuildHttpResponse(std::string_view Status,
                               std::string_view ContentType,
                               std::string_view Body,
@@ -132,23 +105,6 @@ std::string BuildHttpResponse(std::string_view Status,
     Stream << ExtraHeaders;
   }
   Stream << "\r\n" << Body;
-  return Stream.str();
-}
-
-std::string BuildBinaryResponse(std::string_view Status,
-                                std::string_view ContentType, size_t Size,
-                                std::string_view ExtraHeaders = {}) {
-  std::ostringstream Stream;
-  Stream << "HTTP/1.1 " << Status << "\r\n"
-         << "Content-Type: " << ContentType << "\r\n"
-         << "Content-Length: " << Size << "\r\n"
-         << "Cache-Control: no-store\r\n"
-         << "Connection: close\r\n"
-         << "Access-Control-Allow-Origin: *\r\n";
-  if (!ExtraHeaders.empty()) {
-    Stream << ExtraHeaders;
-  }
-  Stream << "\r\n";
   return Stream.str();
 }
 
@@ -525,16 +481,10 @@ struct RemoteViewportServer::RemoteClientSession::PacketOutput final
 RemoteViewportServer::RemoteViewportServer(
     HeadlessSessionHost &Host, const RemoteViewportServerOptions &Options)
     : m_Host(Host), m_Options(Options) {
-  m_Host.GetHeadlessLayer().SetRenderFrameObserver(
-      [this](uint64_t FrameIndex, SessionUserId User) {
-        RecordRenderFrameTarget(FrameIndex, User);
-      });
+  m_Host.SetTransportVideoEncoder(nullptr);
 }
 
-RemoteViewportServer::~RemoteViewportServer() {
-  m_Host.GetHeadlessLayer().SetRenderFrameObserver({});
-  Stop();
-}
+RemoteViewportServer::~RemoteViewportServer() { Stop(); }
 
 bool RemoteViewportServer::Start(std::string &Error) {
 #if AXIOM_PLATFORM_WINDOWS
@@ -631,43 +581,27 @@ void RemoteViewportServer::OnSessionTransportEditorEvent(
 
 void RemoteViewportServer::OnSessionTransportViewportFrame(
     const ViewportFrame &Frame) {
-  if (const auto ClientId = TakeNextRenderTargetClientId();
-      ClientId.has_value()) {
-    if (RemoteClientSession *Client = FindClientSession(*ClientId);
-        Client != nullptr) {
-      if (Client->WebRtcSession != nullptr) {
-        Client->WebRtcSession->OnViewportFrame(Frame);
-      }
-      if (Client->VideoEncoder != nullptr) {
-        Client->VideoEncoder->EncodeFrame({
-            .FrameIndex = Frame.FrameIndex,
-            .Width = Frame.Width,
-            .Height = Frame.Height,
-            .Format = Frame.Format,
-            .Pixels = Frame.Pixels,
-        });
+  if (Frame.User.Value != 0u) {
+    if (const HeadlessRenderViewState *RenderView =
+            m_Host.FindRenderView(Frame.User);
+        RenderView != nullptr && !RenderView->IsLocal) {
+      if (RemoteClientSession *Client = FindClientSession(RenderView->ClientId);
+          Client != nullptr) {
+        if (Client->WebRtcSession != nullptr) {
+          Client->WebRtcSession->OnViewportFrame(Frame);
+        }
+        if (Client->VideoEncoder != nullptr) {
+          Client->VideoEncoder->EncodeFrame({
+              .FrameIndex = Frame.FrameIndex,
+              .Width = Frame.Width,
+              .Height = Frame.Height,
+              .Format = Frame.Format,
+              .Pixels = Frame.Pixels,
+          });
+        }
       }
     }
   }
-
-  AdvanceRenderTargetForNextFrame();
-
-  if (!ShouldPublishJpegFrames()) {
-    return;
-  }
-
-  const auto Captured = ConvertFrame(Frame);
-  if (!Captured.has_value()) {
-    BroadcastTextMessage(SerializeError("Unsupported viewport frame format."));
-    return;
-  }
-
-  SetLatestFrame(*Captured);
-}
-
-void RemoteViewportServer::OnSessionTransportEncodedVideoPacket(
-    const EncodedVideoPacket &Packet) {
-  SetLatestEncodedPacket(Packet);
 }
 
 void RemoteViewportServer::AcceptLoop() {
@@ -712,30 +646,6 @@ void RemoteViewportServer::BroadcastTextMessage(std::string Message) {
   std::vector<uintptr_t> FailedClients;
   for (const uintptr_t ClientSocketValue : Clients) {
     if (!SendTextMessage(ClientSocketValue, Message)) {
-      FailedClients.push_back(ClientSocketValue);
-    }
-  }
-
-  for (const uintptr_t FailedClient : FailedClients) {
-    RemoveWebSocketClient(FailedClient);
-  }
-}
-
-void RemoteViewportServer::BroadcastBinaryFrame(const LatestFrame &Frame) {
-  std::vector<uintptr_t> Clients;
-  {
-    std::scoped_lock Lock(m_ClientMutex);
-    for (const auto &Client : m_WebSocketClients) {
-      if (Client.IsOpen) {
-        Clients.push_back(Client.SocketValue);
-      }
-    }
-  }
-
-  std::vector<uintptr_t> FailedClients;
-  for (const uintptr_t ClientSocketValue : Clients) {
-    if (!SendBinaryMessage(ClientSocketValue, Frame.JpegBytes.data(),
-                           Frame.JpegBytes.size())) {
       FailedClients.push_back(ClientSocketValue);
     }
   }
@@ -885,7 +795,7 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
 
   switch (Command->Type) {
   case HeadlessCommandType::SetViewMode:
-    m_Host.SetRemoteViewMode(Command->ViewMode);
+    m_Host.SetRemoteViewMode(*User, Command->ViewMode);
     break;
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
@@ -920,7 +830,6 @@ bool RemoteViewportServer::HandleSessionConnectRequest(
       CreateOrResumeClientSession(ClientIdHint);
   RemoteClientSession &Client = *Resolution.Session;
   TouchClientSession(Client.ClientId);
-  AdvanceRenderTargetForNextFrame();
 
   if (Resolution.ResumedExisting && Client.WebRtcSession != nullptr) {
     const WebRtcSessionStatus CurrentStatus = Client.WebRtcSession->GetStatus();
@@ -1008,58 +917,6 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
     SendAll(ClientSocket, Response.data(), Response.size());
     return false;
   }
-  if (Route == "/frame") {
-    LatestFrame Frame{};
-    if (!TryGetLatestFrame(Frame)) {
-      const std::string Response = JsonResponse(
-          "404 Not Found", SerializeError("No captured frame is available yet."));
-      SendAll(ClientSocket, Response.data(), Response.size());
-      return false;
-    }
-
-    const std::string Headers =
-        BuildBinaryResponse("200 OK", "image/jpeg", Frame.JpegBytes.size());
-    if (!SendAll(ClientSocket, Headers.data(), Headers.size())) {
-      return false;
-    }
-    SendAll(ClientSocket, Frame.JpegBytes.data(), Frame.JpegBytes.size());
-    return false;
-  }
-  if (Route == "/h264/metadata") {
-    LatestEncodedPacket Packet{};
-    if (!TryGetLatestEncodedPacket(Packet)) {
-      const std::string Response = JsonResponse(
-          "404 Not Found",
-          SerializeError("No encoded H.264 packet is available yet."));
-      SendAll(ClientSocket, Response.data(), Response.size());
-      return false;
-    }
-
-    const std::string Body =
-        SerializeEncodedVideoPacketMetadata(Packet.Packet, "/h264");
-    const std::string Response = JsonResponse("200 OK", Body);
-    SendAll(ClientSocket, Response.data(), Response.size());
-    return false;
-  }
-  if (Route == "/h264") {
-    LatestEncodedPacket Packet{};
-    if (!TryGetLatestEncodedPacket(Packet)) {
-      const std::string Response = JsonResponse(
-          "404 Not Found",
-          SerializeError("No encoded H.264 packet is available yet."));
-      SendAll(ClientSocket, Response.data(), Response.size());
-      return false;
-    }
-
-    const std::string Headers =
-        BuildBinaryResponse("200 OK", "video/h264", Packet.Packet.Bytes.size());
-    if (!SendAll(ClientSocket, Headers.data(), Headers.size())) {
-      return false;
-    }
-    SendAll(ClientSocket, Packet.Packet.Bytes.data(), Packet.Packet.Bytes.size());
-    return false;
-  }
-
   const std::string Response =
       JsonResponse("404 Not Found", SerializeError("Unknown GET endpoint."));
   SendAll(ClientSocket, Response.data(), Response.size());
@@ -1129,8 +986,6 @@ bool RemoteViewportServer::HandleWebRtcOfferRequest(uintptr_t ClientSocketValue,
     SendAll(ClientSocket, Response.data(), Response.size());
     return false;
   }
-
-  AdvanceRenderTargetForNextFrame();
 
   const std::string Response =
       JsonResponse("200 OK", SerializeWebRtcSessionDescription(
@@ -1263,10 +1118,9 @@ bool RemoteViewportServer::HandleWebRtcCloseRequest(
       m_Host.GetHeadlessLayer().GetSession().SetPresenceState(
           *DisconnectedUser, EditorUserPresenceState::Disconnected);
     }
+    m_Host.RemoveRemoteRenderView(*ClientId);
   }
-  m_Host.SetActiveRenderUser(
-      m_Host.GetHeadlessLayer().GetLocalUserId());
-  AdvanceRenderTargetForNextFrame();
+  m_Host.FocusLocalRenderView();
   const WebRtcSessionStatus Status = Client->WebRtcSession->GetStatus();
   const std::string Payload = SerializeWebRtcStatus(
       Status.Enabled, Status.Available, Status.SignalingState,
@@ -1373,6 +1227,7 @@ RemoteViewportServer::CreateOrResumeClientSession(
   m_Host.GetHeadlessLayer().GetSession().EnsureViewportState(ResolvedSession->User);
   m_Host.GetHeadlessLayer().GetSession().SetPresenceState(
       ResolvedSession->User, EditorUserPresenceState::Connected);
+  m_Host.EnsureRemoteRenderView(ResolvedSession->ClientId, ResolvedSession->User);
   return {.Session = ResolvedSession, .ResumedExisting = ResumedExisting};
 }
 
@@ -1382,91 +1237,11 @@ void RemoteViewportServer::TouchClientSession(const std::string &ClientId) {
   if (It != m_RemoteClientsById.end()) {
     It->second.LastActivity = std::chrono::steady_clock::now();
   }
-}
-
-void RemoteViewportServer::RecordRenderFrameTarget(uint64_t FrameIndex,
-                                                   SessionUserId User) {
-  (void)FrameIndex;
-  std::scoped_lock Lock(m_FrameMutex, m_ClientMutex);
-  auto ClientIt = std::find_if(
-      m_RemoteClientsById.begin(), m_RemoteClientsById.end(),
-      [User](const auto &Entry) { return Entry.second.User.Value == User.Value; });
-  if (ClientIt == m_RemoteClientsById.end()) {
-    return;
-  }
-
-  m_PendingRenderTargetClientIds.push_back(ClientIt->second.ClientId);
-  if (m_PendingRenderTargetClientIds.size() > 16u) {
-    m_PendingRenderTargetClientIds.erase(m_PendingRenderTargetClientIds.begin());
-  }
-}
-
-void RemoteViewportServer::AdvanceRenderTargetForNextFrame() {
-  struct RenderCandidate {
-    std::string ClientId;
-    SessionUserId User;
-  };
-
-  std::optional<RenderCandidate> Selected;
-  {
-    std::scoped_lock Lock(m_ClientMutex);
-    std::vector<RenderCandidate> Candidates;
-    Candidates.reserve(m_RemoteClientsById.size());
-    for (const auto &[ClientId, Session] : m_RemoteClientsById) {
-      if (Session.WebRtcSession == nullptr) {
-        continue;
-      }
-
-      const WebRtcSessionStatus Status = Session.WebRtcSession->GetStatus();
-      if (!Status.Enabled || !Status.Available ||
-          Status.ConnectionState != "connected") {
-        continue;
-      }
-
-      Candidates.push_back({.ClientId = ClientId, .User = Session.User});
-    }
-
-    std::sort(Candidates.begin(), Candidates.end(),
-              [](const RenderCandidate &Left, const RenderCandidate &Right) {
-                return Left.User.Value < Right.User.Value;
-              });
-
-    if (!Candidates.empty()) {
-      auto Current = std::find_if(
-          Candidates.begin(), Candidates.end(),
-          [this](const RenderCandidate &Candidate) {
-            return Candidate.ClientId == m_NextRenderClientId;
-          });
-      if (Current == Candidates.end()) {
-        Selected = Candidates.front();
-      } else {
-        ++Current;
-        Selected = Current == Candidates.end() ? Candidates.front() : *Current;
-      }
-      m_NextRenderClientId = Selected->ClientId;
-    } else {
-      m_NextRenderClientId.clear();
-    }
-  }
-
-  m_Host.SetActiveRenderUser(Selected.has_value()
-                                 ? Selected->User
-                                 : m_Host.GetHeadlessLayer().GetLocalUserId());
-}
-
-std::optional<std::string> RemoteViewportServer::TakeNextRenderTargetClientId() {
-  std::scoped_lock Lock(m_FrameMutex);
-  if (m_PendingRenderTargetClientIds.empty()) {
-    return std::nullopt;
-  }
-  const std::string ClientId = m_PendingRenderTargetClientIds.front();
-  m_PendingRenderTargetClientIds.erase(m_PendingRenderTargetClientIds.begin());
-  return ClientId;
+  m_Host.FocusRemoteRenderView(ClientId);
 }
 
 void RemoteViewportServer::HandleClientEncodedVideoPacket(
     std::string_view ClientId, const EncodedVideoPacket &Packet) {
-  SetLatestEncodedPacket(Packet);
   if (RemoteClientSession *Client = FindClientSession(ClientId);
       Client != nullptr && Client->WebRtcSession != nullptr) {
     Client->WebRtcSession->OnEncodedVideoPacket(Packet);
@@ -1522,14 +1297,6 @@ bool RemoteViewportServer::HandleWebSocketUpgrade(uintptr_t ClientSocketValue,
   SendTextMessage(ClientSocketValue,
                   SerializeReady(m_Options.Width, m_Options.Height));
   SendTextMessage(ClientSocketValue, SerializeConnected());
-  LatestFrame Frame{};
-  if (TryGetLatestFrame(Frame)) {
-    SendTextMessage(ClientSocketValue,
-                    SerializeFrameMetadata(Frame.FrameIndex, Frame.Width,
-                                           Frame.Height, "jpeg"));
-    SendBinaryMessage(ClientSocketValue, Frame.JpegBytes.data(),
-                      Frame.JpegBytes.size());
-  }
 
   RunWebSocketSession(ClientSocketValue);
   return true;
@@ -1656,7 +1423,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
 
   switch (Command->Type) {
   case HeadlessCommandType::SetViewMode:
-    m_Host.SetRemoteViewMode(Command->ViewMode);
+    m_Host.SetRemoteViewMode(Client->User, Command->ViewMode);
     return true;
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
@@ -1676,73 +1443,6 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   }
 
   return false;
-}
-
-bool RemoteViewportServer::ShouldPublishJpegFrames() const {
-  for (IWebRtcSession *Session : CollectClientWebRtcSessions()) {
-    const WebRtcSessionStatus Status = Session->GetStatus();
-    if (Status.Enabled && Status.Available &&
-        Status.ConnectionState == "connected") {
-      return false;
-    }
-  }
-  return true;
-}
-
-void RemoteViewportServer::SetLatestFrame(const CapturedFrame &Frame) {
-  EncodedImageBuffer Buffer{};
-  if (stbi_write_jpg_to_func(WriteImageBytes, &Buffer, static_cast<int>(Frame.Width),
-                             static_cast<int>(Frame.Height), 4,
-                             Frame.Pixels.data(), m_Options.JpegQuality) == 0) {
-    BroadcastTextMessage(SerializeError("Failed to encode a JPEG frame."));
-    return;
-  }
-
-  LatestFrame Latest{};
-  Latest.FrameIndex = Frame.FrameIndex;
-  Latest.Width = Frame.Width;
-  Latest.Height = Frame.Height;
-  Latest.JpegBytes = std::move(Buffer.Bytes);
-  {
-    std::scoped_lock Lock(m_FrameMutex);
-    m_LatestFrame = Latest;
-  }
-
-  BroadcastTextMessage(SerializeFrameMetadata(Latest.FrameIndex, Latest.Width,
-                                              Latest.Height, "jpeg"));
-  BroadcastBinaryFrame(Latest);
-}
-
-bool RemoteViewportServer::TryGetLatestFrame(LatestFrame &Frame) const {
-  std::scoped_lock Lock(m_FrameMutex);
-  if (m_LatestFrame.JpegBytes.empty()) {
-    return false;
-  }
-  Frame = m_LatestFrame;
-  return true;
-}
-
-void RemoteViewportServer::SetLatestEncodedPacket(
-    const EncodedVideoPacket &Packet) {
-  {
-    std::scoped_lock Lock(m_FrameMutex);
-    m_LatestEncodedPacket.Packet = Packet;
-    m_LatestEncodedPacket.HasPacket = true;
-  }
-
-  std::cout << SerializeEncodedVideoPacketMetadata(Packet, "/h264")
-            << std::endl;
-}
-
-bool RemoteViewportServer::TryGetLatestEncodedPacket(
-    LatestEncodedPacket &Packet) const {
-  std::scoped_lock Lock(m_FrameMutex);
-  if (!m_LatestEncodedPacket.HasPacket) {
-    return false;
-  }
-
-  Packet = m_LatestEncodedPacket;
-  return true;
 }
 
 bool ParseRemoteViewportServerOptions(int argc, char **argv,
@@ -1783,17 +1483,6 @@ bool ParseRemoteViewportServerOptions(int argc, char **argv,
         return false;
       }
       Options.Height = Height;
-    } else if (Argument == "--jpeg-quality" && Index + 1 < argc) {
-      int Quality = 0;
-      const std::string_view Value(argv[++Index]);
-      const auto [Ptr, Ec] =
-          std::from_chars(Value.data(), Value.data() + Value.size(), Quality);
-      if (Ec != std::errc{} || Ptr != Value.data() + Value.size() ||
-          Quality < 1 || Quality > 100) {
-        Error = "Invalid --jpeg-quality value.";
-        return false;
-      }
-      Options.JpegQuality = Quality;
     } else {
       Error = "Unknown or incomplete argument: " + std::string(Argument);
       return false;

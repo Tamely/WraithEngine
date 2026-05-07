@@ -4,6 +4,8 @@
 #include <Core/Platform.h>
 #include <Core/GlfwEditorInputSource.h>
 #include <Core/InputPlatform.h>
+#include "../Headless/HeadlessRenderView.h"
+#include "../Headless/HeadlessViewportFrameBridge.h"
 #include <Remote/AxiomSessionEndpoint.h>
 #include <Renderer/OffscreenRenderSurface.h>
 #include <Renderer/VideoEncoderFactory.h>
@@ -80,6 +82,7 @@ public:
     uint32_t Height{0};
     Axiom::ViewportFrameFormat Format{
         Axiom::ViewportFrameFormat::R16G16B16A16Float};
+    Axiom::SessionUserId User{};
   };
 
   struct EncodedPacketRecord {
@@ -104,7 +107,8 @@ public:
     Frames.push_back({.FrameIndex = Frame.FrameIndex,
                       .Width = Frame.Width,
                       .Height = Frame.Height,
-                      .Format = Frame.Format});
+                      .Format = Frame.Format,
+                      .User = Frame.User});
     LastFrameBytes.assign(Frame.Pixels.begin(), Frame.Pixels.end());
   }
 
@@ -534,7 +538,7 @@ TEST(EditorSessionTests, SelectedObjectDetailsMatchAuthoritativeState) {
   EXPECT_EQ(Details->Transform->Scale, glm::vec3(1.0f, 1.5f, 2.0f));
 }
 
-TEST(EditorSessionTests, SetTransformUpdatesAuthoritativeDetailsAndSubmission) {
+TEST(EditorSessionTests, SetTransformUpdatesAuthoritativeDetailsAndSceneMesh) {
   Axiom::EditorSession Session(Axiom::SessionId{1});
   RecordingSubscriber Subscriber;
   Session.Subscribe(&Subscriber);
@@ -554,10 +558,10 @@ TEST(EditorSessionTests, SetTransformUpdatesAuthoritativeDetailsAndSubmission) {
       .TransformReadOnly = false,
       .Transform = Axiom::EditorTransformDetails{},
   }});
-  Session.SetSceneSubmissions({{
-      .Mesh = nullptr,
+  Session.SetSceneMeshInstances({{
+      .ObjectId = "PlayerCharacter",
+      .Mesh = Axiom::MeshData{},
       .Material = nullptr,
-      .Name = "PlayerCharacter",
       .RenderPath = Axiom::MeshRenderPath::Graphics,
       .Transform = glm::mat4(1.0f),
   }});
@@ -579,8 +583,9 @@ TEST(EditorSessionTests, SetTransformUpdatesAuthoritativeDetailsAndSubmission) {
   EXPECT_EQ(Details->Transform->RotationDegrees, glm::vec3(0.0f, 90.0f, 0.0f));
   EXPECT_EQ(Details->Transform->Scale, glm::vec3(2.0f, 2.0f, 2.0f));
 
-  ASSERT_EQ(Session.GetState().SceneSubmissions.size(), 1u);
-  const glm::vec4 TranslationColumn = Session.GetState().SceneSubmissions[0].Transform[3];
+  ASSERT_EQ(Session.GetState().SceneMeshInstances.size(), 1u);
+  const glm::vec4 TranslationColumn =
+      Session.GetState().SceneMeshInstances[0].Transform[3];
   EXPECT_EQ(glm::vec3(TranslationColumn), glm::vec3(1.0f, 2.0f, 3.0f));
 
   ASSERT_EQ(Subscriber.Events.size(), 2u);
@@ -729,6 +734,134 @@ TEST(RemoteViewportTests, OffscreenSurfaceExposesHeadlessContract) {
   EXPECT_EQ(Surface.GetNativeWindowHandle(), nullptr);
 }
 
+TEST(RemoteViewportTests, HeadlessRenderViewsCreateFocusAndRemoveCleanly) {
+  Axiom::HeadlessRenderViewRegistry Registry(Axiom::SessionUserId{1});
+
+  ASSERT_NE(Registry.GetFocusedView(), nullptr);
+  EXPECT_TRUE(Registry.GetFocusedView()->IsLocal);
+  EXPECT_EQ(Registry.GetRemoteViewCount(), 0u);
+
+  Registry.UpsertRemoteView("client-a", Axiom::SessionUserId{2});
+  Registry.UpsertRemoteView("client-b", Axiom::SessionUserId{3});
+  EXPECT_EQ(Registry.GetRemoteViewCount(), 2u);
+
+  EXPECT_TRUE(Registry.FocusRemoteView("client-a"));
+  ASSERT_NE(Registry.GetFocusedView(), nullptr);
+  EXPECT_EQ(Registry.GetFocusedView()->ClientId, "client-a");
+  EXPECT_EQ(Registry.GetFocusedView()->User.Value, 2u);
+
+  EXPECT_TRUE(Registry.RemoveRemoteView("client-a"));
+  ASSERT_NE(Registry.GetFocusedView(), nullptr);
+  EXPECT_TRUE(Registry.GetFocusedView()->IsLocal);
+  EXPECT_EQ(Registry.GetRemoteViewCount(), 1u);
+
+  EXPECT_FALSE(Registry.FocusRemoteView("missing-client"));
+}
+
+TEST(RemoteViewportTests, HeadlessRenderViewsKeepPerClientModesIsolated) {
+  Axiom::HeadlessRenderViewRegistry Registry(Axiom::SessionUserId{1});
+  Registry.UpsertRemoteView("client-a", Axiom::SessionUserId{2});
+  Registry.UpsertRemoteView("client-b", Axiom::SessionUserId{3});
+
+  EXPECT_TRUE(Registry.SetRemoteViewMode("client-a",
+                                         Axiom::RendererViewMode::Wireframe));
+  EXPECT_TRUE(Registry.SetViewMode(Axiom::SessionUserId{3},
+                                   Axiom::RendererViewMode::Unlit));
+
+  const auto *ClientA = Registry.FindRemoteView("client-a");
+  const auto *ClientB = Registry.FindRemoteView("client-b");
+  const auto *Local = Registry.FindView(Axiom::SessionUserId{1});
+  ASSERT_NE(ClientA, nullptr);
+  ASSERT_NE(ClientB, nullptr);
+  ASSERT_NE(Local, nullptr);
+  EXPECT_EQ(ClientA->ViewMode, Axiom::RendererViewMode::Wireframe);
+  EXPECT_EQ(ClientB->ViewMode, Axiom::RendererViewMode::Unlit);
+  EXPECT_EQ(Local->ViewMode, Axiom::RendererViewMode::Lit);
+
+  Registry.FocusRemoteView("client-a");
+  ASSERT_NE(Registry.GetFocusedView(), nullptr);
+  EXPECT_EQ(Registry.GetFocusedView()->ClientId, "client-a");
+
+  Registry.UpsertRemoteView("client-c", Axiom::SessionUserId{4});
+  ASSERT_NE(Registry.GetFocusedView(), nullptr);
+  EXPECT_EQ(Registry.GetFocusedView()->ClientId, "client-a");
+}
+
+TEST(RemoteViewportTests, HeadlessViewportFrameBridgeTagsFramesWithRenderUser) {
+  class RecordingFrameOutput final : public Axiom::IViewportFrameOutput {
+  public:
+    void OnViewportFrame(const Axiom::ViewportFrame &Frame) override {
+      LastUser = Frame.User;
+      LastFrameIndex = Frame.FrameIndex;
+    }
+
+    Axiom::SessionUserId LastUser{};
+    uint64_t LastFrameIndex{0};
+  };
+
+  RecordingFrameOutput Output;
+  Axiom::HeadlessViewportFrameBridge Bridge(
+      Output, []() -> std::optional<Axiom::HeadlessRenderViewState> {
+        return Axiom::HeadlessRenderViewState{
+            .ClientId = "client-a",
+            .User = Axiom::SessionUserId{7},
+            .ViewMode = Axiom::RendererViewMode::Wireframe,
+            .IsLocal = false,
+        };
+      });
+
+  std::array<std::byte, 4> Bytes{std::byte{0x01}, std::byte{0x02},
+                                 std::byte{0x03}, std::byte{0x04}};
+  Bridge.OnViewportFrame({
+      .FrameIndex = 55,
+      .Width = 1,
+      .Height = 1,
+      .Format = Axiom::ViewportFrameFormat::R8G8B8A8Unorm,
+      .Pixels = std::span<const std::byte>(Bytes.data(), Bytes.size()),
+  });
+
+  EXPECT_EQ(Output.LastFrameIndex, 55u);
+  EXPECT_EQ(Output.LastUser.Value, 7u);
+}
+
+TEST(RemoteViewportTests, HeadlessViewportFrameBridgePreservesTaggedRenderUser) {
+  class RecordingFrameOutput final : public Axiom::IViewportFrameOutput {
+  public:
+    void OnViewportFrame(const Axiom::ViewportFrame &Frame) override {
+      LastUser = Frame.User;
+      LastFrameIndex = Frame.FrameIndex;
+    }
+
+    Axiom::SessionUserId LastUser{};
+    uint64_t LastFrameIndex{0};
+  };
+
+  RecordingFrameOutput Output;
+  Axiom::HeadlessViewportFrameBridge Bridge(
+      Output, []() -> std::optional<Axiom::HeadlessRenderViewState> {
+        return Axiom::HeadlessRenderViewState{
+            .ClientId = "client-a",
+            .User = Axiom::SessionUserId{7},
+            .ViewMode = Axiom::RendererViewMode::Wireframe,
+            .IsLocal = false,
+        };
+      });
+
+  std::array<std::byte, 4> Bytes{std::byte{0x01}, std::byte{0x02},
+                                 std::byte{0x03}, std::byte{0x04}};
+  Bridge.OnViewportFrame({
+      .FrameIndex = 56,
+      .Width = 1,
+      .Height = 1,
+      .Format = Axiom::ViewportFrameFormat::R8G8B8A8Unorm,
+      .Pixels = std::span<const std::byte>(Bytes.data(), Bytes.size()),
+      .User = Axiom::SessionUserId{11},
+  });
+
+  EXPECT_EQ(Output.LastFrameIndex, 56u);
+  EXPECT_EQ(Output.LastUser.Value, 11u);
+}
+
 TEST(RemoteViewportTests, AxiomEndpointForwardsEventsAndFrames) {
   Axiom::EditorSession Session(Axiom::SessionId{1});
   Axiom::AxiomSessionEndpoint Endpoint(Session);
@@ -760,6 +893,7 @@ TEST(RemoteViewportTests, AxiomEndpointForwardsEventsAndFrames) {
 
   ASSERT_EQ(Subscriber.Frames.size(), 1u);
   EXPECT_EQ(Subscriber.Frames.front().FrameIndex, 99u);
+  EXPECT_EQ(Subscriber.Frames.front().User.Value, 0u);
   EXPECT_EQ(Subscriber.LastFrameBytes.size(), Bytes.size());
   EXPECT_EQ(Subscriber.LastFrameBytes[0], Bytes[0]);
 

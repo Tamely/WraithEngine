@@ -55,7 +55,7 @@ void GlfwEditorLayer::OnRender() {
   }
 
   RenderCommand::SetCamera(Viewport->Camera);
-  for (const auto &Submission : m_Session.GetState().SceneSubmissions) {
+  for (const auto &Submission : m_RendererAdapter.BuildRenderSubmissions(m_Session)) {
     RenderCommand::Submit(Submission);
   }
 }

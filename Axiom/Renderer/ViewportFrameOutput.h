@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Session/SessionTypes.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -16,6 +18,7 @@ struct ViewportFrame {
   uint32_t Height{0};
   ViewportFrameFormat Format{ViewportFrameFormat::R16G16B16A16Float};
   std::span<const std::byte> Pixels;
+  SessionUserId User{};
 };
 
 class IViewportFrameOutput {

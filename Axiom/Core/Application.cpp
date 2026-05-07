@@ -4,6 +4,7 @@
 #include "Core/HeadlessWindow.h"
 #include "Core/Log.h"
 
+#include <algorithm>
 #include <memory>
 #include <utility>
 
@@ -69,6 +70,12 @@ void Application::SetRendererViewMode(RendererViewMode ViewMode) {
   }
 }
 
+void Application::SetViewportFrameUser(SessionUserId User) {
+  if (m_Renderer) {
+    m_Renderer->SetViewportFrameUser(User);
+  }
+}
+
 void Application::SetViewportFrameOutput(IViewportFrameOutput *FrameOutput) {
   m_Config.FrameOutput = FrameOutput;
   if (m_Renderer) {
@@ -79,6 +86,15 @@ void Application::SetViewportFrameOutput(IViewportFrameOutput *FrameOutput) {
 void Application::Run() {
   while (Step()) {
   }
+}
+
+size_t Application::BeginRenderPasses() { return 1u; }
+
+void Application::PrepareRenderPass(size_t PassIndex) { (void)PassIndex; }
+
+bool Application::ShouldRenderImGuiForPass(size_t PassIndex,
+                                           size_t PassCount) const {
+  return PassIndex + 1u == PassCount;
 }
 
 bool Application::Step() {
@@ -94,23 +110,29 @@ bool Application::Step() {
 
   m_Window->PollEvents();
 
-  m_Renderer->BeginFrame();
-
   for (Layer *Layer : m_LayerStack) {
     Layer->OnUpdate();
   }
 
-  for (Layer *Layer : m_LayerStack) {
-    Layer->OnRender();
+  const size_t RenderPassCount = std::max<size_t>(1u, BeginRenderPasses());
+  for (size_t PassIndex = 0; PassIndex < RenderPassCount; ++PassIndex) {
+    PrepareRenderPass(PassIndex);
+    m_Renderer->BeginFrame();
+
+    for (Layer *Layer : m_LayerStack) {
+      Layer->OnRender();
+    }
+
+    m_Renderer->Render();
+
+    if (ShouldRenderImGuiForPass(PassIndex, RenderPassCount)) {
+      for (Layer *Layer : m_LayerStack) {
+        Layer->OnImGuiRender();
+      }
+    }
+
+    m_Renderer->EndFrame();
   }
-
-  m_Renderer->Render();
-
-  for (Layer *Layer : m_LayerStack) {
-    Layer->OnImGuiRender();
-  }
-
-  m_Renderer->EndFrame();
   return !m_Window->ShouldClose();
 }
 } // namespace Axiom

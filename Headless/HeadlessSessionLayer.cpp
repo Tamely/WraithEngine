@@ -1,5 +1,7 @@
 #include "HeadlessSessionLayer.h"
 
+#include "HeadlessRenderView.h"
+
 #include <Core/Application.h>
 
 #include <Renderer/Camera.h>
@@ -83,14 +85,26 @@ HeadlessSessionLayer::HeadlessSessionLayer()
 
 void HeadlessSessionLayer::OnAttach() {
   m_Session.EnsureViewportState(m_LocalUserId);
-  m_ActiveRenderUserId = m_LocalUserId;
   m_PresenceMarkerMesh = Renderer::Get().CreateMesh(BuildPresenceMarkerMeshData());
 }
 
 void HeadlessSessionLayer::OnUpdate() { m_Session.Tick(); }
 
 void HeadlessSessionLayer::OnRender() {
-  SessionUserId RenderUser = m_ActiveRenderUserId;
+  HeadlessRenderViewState RenderView{
+      .ClientId = "",
+      .User = m_LocalUserId,
+      .ViewMode = RendererViewMode::Lit,
+      .IsLocal = true,
+  };
+  if (m_RenderViewResolver) {
+    if (const auto ResolvedView = m_RenderViewResolver();
+        ResolvedView.has_value()) {
+      RenderView = *ResolvedView;
+    }
+  }
+
+  SessionUserId RenderUser = RenderView.User;
   const EditorViewportState *Viewport = m_Session.FindViewport(RenderUser);
   if (Viewport == nullptr && RenderUser.Value != m_LocalUserId.Value) {
     RenderUser = m_LocalUserId;
@@ -100,12 +114,14 @@ void HeadlessSessionLayer::OnRender() {
     return;
   }
 
-  if (m_RenderFrameObserver) {
-    m_RenderFrameObserver(Application::Get().GetFrameIndex(), RenderUser);
+  if (m_RendererAdapter == nullptr) {
+    return;
   }
 
+  Application::Get().SetRendererViewMode(RenderView.ViewMode);
+  Application::Get().SetViewportFrameUser(RenderUser);
   RenderCommand::SetCamera(Viewport->Camera);
-  for (const auto &Submission : m_Session.GetState().SceneSubmissions) {
+  for (const auto &Submission : m_RendererAdapter->BuildRenderSubmissions(m_Session)) {
     RenderCommand::Submit(Submission);
   }
   for (const auto &Submission : BuildPresenceOverlaySubmissions(RenderUser)) {

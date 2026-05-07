@@ -26,6 +26,7 @@ public:
   void Render();
   void EndFrame();
   void SetViewMode(RendererViewMode ViewMode);
+  void SetViewportFrameUser(SessionUserId User);
   void SetViewportFrameOutput(IViewportFrameOutput *FrameOutput);
   std::optional<CapturedFrame> ConsumeCapturedFrame();
   void SetCpuFrameTime(float CpuFrameMs);
