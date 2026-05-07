@@ -69,6 +69,23 @@ struct EditorUserPresence {
   bool IsLocal{false};
 };
 
+struct EditorParticipant {
+  struct CameraState {
+    glm::vec3 Position{0.0f};
+    float YawDegrees{0.0f};
+    float PitchDegrees{0.0f};
+  };
+
+  SessionUserId User;
+  std::string DisplayName;
+  EditorUserPresenceState State{EditorUserPresenceState::Connected};
+  bool IsLocal{false};
+  std::optional<std::string> SelectedObjectId;
+  std::string CurrentTool{"viewport"};
+  std::string PresentationColor{"#94A3B8"};
+  std::optional<CameraState> Camera;
+};
+
 enum class EditorObjectLockState { Unlocked, Placeholder };
 
 struct EditorObjectCollaborationState {
@@ -105,6 +122,7 @@ public:
   void Unsubscribe(IEditorEventSubscriber *Subscriber);
 
   void EnsureViewportState(SessionUserId User);
+  void SetPresenceState(SessionUserId User, EditorUserPresenceState State);
   void SetSceneSubmissions(std::vector<RenderMeshSubmission> SceneSubmissions);
   void SetSceneItems(std::vector<EditorSceneItem> SceneItems);
   void SetObjectDetails(std::vector<EditorObjectDetails> ObjectDetails);
@@ -120,12 +138,15 @@ public:
   const EditorObjectDetails *FindObjectDetails(std::string_view ObjectId) const;
   const EditorObjectDetails *FindSelectedObjectDetails(SessionUserId User) const;
   const EditorUserPresence *FindPresence(SessionUserId User) const;
+  EditorParticipant BuildParticipant(SessionUserId User) const;
+  std::vector<EditorParticipant> BuildParticipants(SessionUserId CurrentUser) const;
   const EditorObjectCollaborationState *FindCollaborationState(
       std::string_view ObjectId) const;
 
 private:
   void UpdateSubmissionTransform(std::string_view ObjectId,
                                  const EditorTransformDetails &Transform);
+  void PublishPresenceChangedEvent(SessionUserId User);
   EditorUserPresence &EnsurePresence(SessionUserId User);
   EditorViewportState &EnsureViewport(SessionUserId User);
   const EditorSceneItem *FindSceneItemRecursive(
@@ -135,6 +156,8 @@ private:
                        std::string &FailureReason);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const UpdateViewportCameraCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const SetViewportCameraPoseCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SetLookActiveCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,

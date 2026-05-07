@@ -16,7 +16,7 @@ export function RemoteViewportPanel() {
     eventLog,
     frameText,
     isLooking,
-    presence,
+    participants,
     sessionDetailText,
     sessionState,
     sessionStatusText,
@@ -28,6 +28,21 @@ export function RemoteViewportPanel() {
     setMode,
     toggleLook,
   } = useRemoteViewport()
+
+  function formatCameraPose(
+    camera: {
+      position: [number, number, number]
+      yawDegrees: number
+      pitchDegrees: number
+    } | null
+  ) {
+    if (!camera) {
+      return "Camera pending"
+    }
+
+    const [x, y, z] = camera.position
+    return `Pos ${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)} | Yaw ${camera.yawDegrees.toFixed(1)} | Pitch ${camera.pitchDegrees.toFixed(1)}`
+  }
 
   return (
     <div className="h-full overflow-auto bg-neutral-950 p-3 text-xs text-neutral-300">
@@ -81,22 +96,28 @@ export function RemoteViewportPanel() {
             <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">
               Collaborators
             </p>
-            <span className="text-[11px] text-neutral-500">{presence.length}</span>
+            <span className="text-[11px] text-neutral-500">{participants.length}</span>
           </div>
           <div className="space-y-1 text-[11px] text-neutral-300">
-            {presence.length === 0 ? (
+            {participants.length === 0 ? (
               <p className="text-neutral-500">No presence data yet</p>
             ) : (
-              presence.map((entry) => (
+              participants.map((entry) => (
                 <div
                   key={entry.userId}
                   className="flex items-center justify-between rounded border border-neutral-900 bg-neutral-950/60 px-2 py-1"
+                  style={{ borderLeftColor: entry.presentationColor, borderLeftWidth: "3px" }}
                 >
-                  <span className="truncate">
-                    {entry.displayName}
-                    {entry.isLocal ? " (you)" : ""}
-                  </span>
-                  <span className="text-neutral-500">{entry.state}</span>
+                  <div className="min-w-0">
+                    <span className="block truncate">
+                      {entry.displayName}
+                      {entry.isLocal ? " (you)" : ""}
+                    </span>
+                    <span className="block truncate text-neutral-500">
+                      {formatCameraPose(entry.camera)}
+                    </span>
+                  </div>
+                  <span className="ml-2 shrink-0 text-neutral-500">{entry.presenceState}</span>
                 </div>
               ))
             )}

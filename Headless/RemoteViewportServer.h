@@ -5,13 +5,16 @@
 
 #include <Remote/SessionTransport.h>
 #include <Renderer/RendererBackend.h>
+#include <Renderer/VideoEncoding.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace Axiom {
@@ -61,6 +64,22 @@ private:
     bool IsOpen{true};
   };
 
+  struct RemoteClientSession {
+    struct PacketOutput;
+
+    std::string ClientId;
+    SessionUserId User;
+    std::chrono::steady_clock::time_point LastActivity;
+    std::unique_ptr<IWebRtcSession> WebRtcSession;
+    std::unique_ptr<IVideoEncoder> VideoEncoder;
+    std::unique_ptr<PacketOutput> VideoPacketOutput;
+  };
+
+  struct ClientSessionResolution {
+    RemoteClientSession *Session{nullptr};
+    bool ResumedExisting{false};
+  };
+
 private:
   void AcceptLoop();
   void HandleClient(uintptr_t ClientSocketValue);
@@ -72,26 +91,50 @@ private:
   bool SendBinaryMessage(uintptr_t ClientSocketValue, const void *Data,
                          size_t Size);
   bool HandleHttpRequest(uintptr_t ClientSocketValue);
-  bool HandleGetRequest(uintptr_t ClientSocketValue, std::string_view Path);
+  bool HandleGetRequest(uintptr_t ClientSocketValue, std::string_view Path,
+                        std::string_view HeaderBlock);
   bool HandlePostRequest(uintptr_t ClientSocketValue, std::string_view Path,
+                         std::string_view HeaderBlock,
                          std::string_view Body);
+  bool HandleSessionConnectRequest(uintptr_t ClientSocketValue,
+                                   std::string_view HeaderBlock,
+                                   std::string_view Body);
   bool HandleWebRtcOfferRequest(uintptr_t ClientSocketValue,
+                                std::string_view HeaderBlock,
                                 std::string_view Body);
   bool HandleWebRtcIceCandidateRequest(uintptr_t ClientSocketValue,
+                                       std::string_view HeaderBlock,
                                        std::string_view Body);
   bool HandleWebRtcCloseRequest(uintptr_t ClientSocketValue,
+                                std::string_view HeaderBlock,
                                 std::string_view Body);
   bool HandleWebSocketUpgrade(uintptr_t ClientSocketValue,
                               std::string_view HeaderBlock,
                               std::string_view Path);
   void RunWebSocketSession(uintptr_t ClientSocketValue);
   bool HandleWebSocketMessage(std::string_view Payload);
+  bool HandleClientWebRtcMessage(std::string_view ClientId,
+                                 std::string_view Payload);
 
   bool ShouldPublishJpegFrames() const;
+  void RecordRenderFrameTarget(uint64_t FrameIndex, SessionUserId User);
+  void AdvanceRenderTargetForNextFrame();
+  std::optional<std::string> TakeNextRenderTargetClientId();
+  void HandleClientEncodedVideoPacket(std::string_view ClientId,
+                                      const EncodedVideoPacket &Packet);
   void SetLatestFrame(const CapturedFrame &Frame);
   bool TryGetLatestFrame(LatestFrame &Frame) const;
   void SetLatestEncodedPacket(const EncodedVideoPacket &Packet);
   bool TryGetLatestEncodedPacket(LatestEncodedPacket &Packet) const;
+  std::optional<SessionUserId> ResolveClientUser(
+      std::string_view HeaderBlock) const;
+  RemoteClientSession *FindClientSession(std::string_view ClientId);
+  const RemoteClientSession *FindClientSession(std::string_view ClientId) const;
+  WebRtcSessionStatus GetClientWebRtcStatus(std::string_view ClientId) const;
+  std::vector<IWebRtcSession *> CollectClientWebRtcSessions() const;
+  ClientSessionResolution CreateOrResumeClientSession(
+      const std::optional<std::string> &ClientIdHint);
+  void TouchClientSession(const std::string &ClientId);
 
 private:
   HeadlessSessionHost &m_Host;
@@ -104,11 +147,14 @@ private:
   mutable std::mutex m_FrameMutex;
   LatestFrame m_LatestFrame;
   LatestEncodedPacket m_LatestEncodedPacket;
+  std::vector<std::string> m_PendingRenderTargetClientIds;
 
   mutable std::mutex m_ClientMutex;
   std::vector<WebSocketClient> m_WebSocketClients;
+  std::unordered_map<std::string, RemoteClientSession> m_RemoteClientsById;
+  uint64_t m_NextRemoteUserId{2};
+  std::string m_NextRenderClientId;
   mutable std::mutex m_SendMutex;
-  std::unique_ptr<IWebRtcSession> m_WebRtcSession;
 };
 
 bool ParseRemoteViewportServerOptions(int argc, char **argv,

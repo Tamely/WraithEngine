@@ -27,3 +27,4 @@ imgui.ini
 *.log
 EditorFrontend/tsconfig.tsbuildinfo
 *.tsbuildinfo
+EditorFrontend/.env

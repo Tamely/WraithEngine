@@ -46,11 +46,19 @@ export interface SessionSelection {
   objectId: string
 }
 
-export interface SessionPresence {
+export interface SessionParticipant {
   userId: number
   displayName: string
-  state: "connected" | "away" | "disconnected"
+  presenceState: "connected" | "away" | "disconnected"
   isLocal: boolean
+  selectionObjectId: string | null
+  currentTool: string
+  presentationColor: string
+  camera: {
+    position: [number, number, number]
+    yawDegrees: number
+    pitchDegrees: number
+  } | null
 }
 
 export interface SessionTransformDetails {
@@ -82,6 +90,7 @@ interface RemoteViewportActions {
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
   refreshSessionSnapshot: () => Promise<void>
   selectObject: (objectId: string) => Promise<boolean>
+  goToParticipantCamera: (userId: number) => Promise<boolean>
   updateTransform: (details: SessionObjectTransformUpdate) => Promise<boolean>
 }
 
@@ -105,7 +114,7 @@ interface RemoteViewportContextValue {
   eventLog: string[]
   serverOrigin: string
   currentUserId: number | null
-  presence: SessionPresence[]
+  participants: SessionParticipant[]
   sceneTree: SessionSceneItem[]
   selectedObjectId: string | null
   selectedObject: SessionSceneItem | null
@@ -127,17 +136,22 @@ interface RemoteViewportContextValue {
   setSessionSnapshot: (snapshot: SessionSnapshot) => void
   clearSessionSnapshot: () => void
   applySelectionChanged: (userId: number, objectId: string | null) => void
+  applyParticipantCameraUpdate: (
+    userId: number,
+    camera: SessionParticipant["camera"]
+  ) => void
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
   refreshSessionSnapshot: () => Promise<void>
   selectObject: (objectId: string) => Promise<boolean>
+  goToParticipantCamera: (userId: number) => Promise<boolean>
   updateTransform: (details: SessionObjectTransformUpdate) => Promise<boolean>
 }
 
 interface SessionSnapshot {
   currentUserId: number
-  presence: SessionPresence[]
+  participants: SessionParticipant[]
   sceneTree: SessionSceneItem[]
   selections: SessionSelection[]
   selectedObjectDetails: SessionObjectDetails | null
@@ -173,6 +187,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     setMode: async () => {},
     refreshSessionSnapshot: async () => {},
     selectObject: async () => false,
+    goToParticipantCamera: async () => false,
     updateTransform: async () => false,
   })
   const [connectionState, setConnectionState] =
@@ -190,7 +205,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
   const [eventLog, setEventLog] = useState<string[]>([])
   const [serverOrigin, setServerOrigin] = useState("")
   const [currentUserId, setCurrentUserId] = useState<number | null>(null)
-  const [presence, setPresence] = useState<SessionPresence[]>([])
+  const [participants, setParticipants] = useState<SessionParticipant[]>([])
   const [sceneTree, setSceneTree] = useState<SessionSceneItem[]>([])
   const [selections, setSelections] = useState<SessionSelection[]>([])
   const [selectedObjectDetails, setSelectedObjectDetails] =
@@ -210,15 +225,22 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
 
   const setSessionSnapshot = useCallback((snapshot: SessionSnapshot) => {
     setCurrentUserId(snapshot.currentUserId)
-    setPresence(snapshot.presence)
+    setParticipants(snapshot.participants)
     setSceneTree(snapshot.sceneTree)
-    setSelections(snapshot.selections)
+    setSelections(
+      snapshot.participants
+        .filter((participant) => participant.selectionObjectId !== null)
+        .map((participant) => ({
+          userId: participant.userId,
+          objectId: participant.selectionObjectId as string,
+        }))
+    )
     setSelectedObjectDetails(snapshot.selectedObjectDetails)
   }, [])
 
   const clearSessionSnapshot = useCallback(() => {
     setCurrentUserId(null)
-    setPresence([])
+    setParticipants([])
     setSceneTree([])
     setSelections([])
     setSelectedObjectDetails(null)
@@ -230,6 +252,17 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       return objectId ? [...withoutUser, { userId, objectId }] : withoutUser
     })
   }, [])
+
+  const applyParticipantCameraUpdate = useCallback(
+    (userId: number, camera: SessionParticipant["camera"]) => {
+      setParticipants((current) =>
+        current.map((participant) =>
+          participant.userId === userId ? { ...participant, camera } : participant
+        )
+      )
+    },
+    []
+  )
 
   const reconnect = useCallback(async () => {
     await actionsRef.current.reconnect()
@@ -249,6 +282,10 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
 
   const selectObject = useCallback(async (objectId: string) => {
     return actionsRef.current.selectObject(objectId)
+  }, [])
+
+  const goToParticipantCamera = useCallback(async (userId: number) => {
+    return actionsRef.current.goToParticipantCamera(userId)
   }, [])
 
   const updateTransform = useCallback(async (details: SessionObjectTransformUpdate) => {
@@ -275,7 +312,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       eventLog,
       serverOrigin,
       currentUserId,
-      presence,
+      participants,
       sceneTree,
       selectedObjectId,
       selectedObject,
@@ -297,16 +334,19 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       setSessionSnapshot,
       clearSessionSnapshot,
       applySelectionChanged,
+      applyParticipantCameraUpdate,
       reconnect,
       toggleLook,
       setMode,
       refreshSessionSnapshot,
       selectObject,
+      goToParticipantCamera,
       updateTransform,
     }),
     [
       appendEventLog,
       applySelectionChanged,
+      applyParticipantCameraUpdate,
       clearEventLog,
       connectionState,
       clearSessionSnapshot,
@@ -315,7 +355,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       eventLog,
       frameText,
       isLooking,
-      presence,
+      participants,
       sessionDetailText,
       sessionState,
       sessionStatusText,
@@ -324,6 +364,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       registerActions,
       sceneTree,
       selectObject,
+      goToParticipantCamera,
       selectedObject,
       selectedObjectDetails,
       selectedObjectId,

@@ -153,6 +153,14 @@ int64_t CurrentCaptureTimeMs() {
 
 class MacOSWebRtcSessionImpl final : public IWebRtcSession {
 public:
+  struct DetachedPeerResources {
+    RTC_OBJC_TYPE(RTCDataChannel) *ReliableChannel{nil};
+    RTC_OBJC_TYPE(RTCDataChannel) *UnreliableChannel{nil};
+    RTC_OBJC_TYPE(RTCPeerConnection) *PeerConnection{nil};
+    RTC_OBJC_TYPE(RTCCVPixelBuffer) *DummyFrameBuffer{nil};
+    CVPixelBufferRef DummyPixelBuffer{nullptr};
+  };
+
   MacOSWebRtcSessionImpl() {
     m_Status.Enabled = true;
     m_Status.Available = true;
@@ -192,9 +200,15 @@ public:
   bool HandleOffer(const WebRtcSessionDescription &Offer,
                    WebRtcSessionDescription &Answer,
                    std::string &Error) override {
+    DetachedPeerResources DetachedResources{};
     {
       std::scoped_lock Lock(m_Mutex);
-      ResetPeerLocked("new_offer");
+      DetachedResources = DetachPeerResourcesLocked("new_offer");
+    }
+    CloseDetachedPeerResources(DetachedResources);
+
+    {
+      std::scoped_lock Lock(m_Mutex);
       EnsureFactoryLocked();
       if (m_Factory == nil || !CreatePeerConnectionLocked(Error)) {
         return false;
@@ -304,9 +318,13 @@ public:
   }
 
   bool CloseSession(std::string_view Reason, std::string &Error) override {
-    std::scoped_lock Lock(m_Mutex);
+    DetachedPeerResources DetachedResources{};
+    {
+      std::scoped_lock Lock(m_Mutex);
+      DetachedResources = DetachPeerResourcesLocked(Reason);
+    }
+    CloseDetachedPeerResources(DetachedResources);
     Error.clear();
-    ResetPeerLocked(Reason);
     return true;
   }
 
@@ -407,8 +425,12 @@ public:
   }
 
   void ResetPeer(std::string_view Reason) override {
-    std::scoped_lock Lock(m_Mutex);
-    ResetPeerLocked(Reason);
+    DetachedPeerResources DetachedResources{};
+    {
+      std::scoped_lock Lock(m_Mutex);
+      DetachedResources = DetachPeerResourcesLocked(Reason);
+    }
+    CloseDetachedPeerResources(DetachedResources);
   }
 
   void OnLocalIceCandidate(RTC_OBJC_TYPE(RTCIceCandidate) *Candidate) {
@@ -773,27 +795,31 @@ private:
     m_Status.Video.PendingPacketCount = 0;
   }
 
-  void ResetPeerLocked(std::string_view Reason) {
+  DetachedPeerResources DetachPeerResourcesLocked(std::string_view Reason) {
+    DetachedPeerResources Detached{};
     m_PacketBackedEncoder = nil;
     m_HasOutstandingSendRequest = false;
     m_LatestEncodedPacket.reset();
     if (m_ReliableChannel != nil) {
-      [m_ReliableChannel close];
+      Detached.ReliableChannel = RetainObjc(m_ReliableChannel);
       ReleaseObjc(m_ReliableChannel);
     }
     if (m_UnreliableChannel != nil) {
-      [m_UnreliableChannel close];
+      Detached.UnreliableChannel = RetainObjc(m_UnreliableChannel);
       ReleaseObjc(m_UnreliableChannel);
     }
     if (m_PeerConnection != nil) {
-      [m_PeerConnection close];
+      Detached.PeerConnection = RetainObjc(m_PeerConnection);
       ReleaseObjc(m_PeerConnection);
     }
     if (m_DummyPixelBuffer != nullptr) {
-      CVPixelBufferRelease(m_DummyPixelBuffer);
+      Detached.DummyPixelBuffer = m_DummyPixelBuffer;
       m_DummyPixelBuffer = nullptr;
     }
-    ReleaseObjc(m_DummyFrameBuffer);
+    if (m_DummyFrameBuffer != nil) {
+      Detached.DummyFrameBuffer = RetainObjc(m_DummyFrameBuffer);
+      ReleaseObjc(m_DummyFrameBuffer);
+    }
     m_DummyFrameWidth = 0;
     m_DummyFrameHeight = 0;
     m_LocalIceCandidates.clear();
@@ -807,6 +833,29 @@ private:
     m_Status.Video.LatestRequestedFrameIndex = std::nullopt;
     m_Status.Video.LatestEncodedFrameIndex = std::nullopt;
     UpdateDetailLocked(std::string("Peer reset: ") + std::string(Reason));
+    return Detached;
+  }
+
+  void CloseDetachedPeerResources(DetachedPeerResources &Detached) {
+    if (Detached.ReliableChannel != nil) {
+      [Detached.ReliableChannel close];
+      ReleaseObjc(Detached.ReliableChannel);
+    }
+    if (Detached.UnreliableChannel != nil) {
+      [Detached.UnreliableChannel close];
+      ReleaseObjc(Detached.UnreliableChannel);
+    }
+    if (Detached.PeerConnection != nil) {
+      [Detached.PeerConnection close];
+      ReleaseObjc(Detached.PeerConnection);
+    }
+    if (Detached.DummyPixelBuffer != nullptr) {
+      CVPixelBufferRelease(Detached.DummyPixelBuffer);
+      Detached.DummyPixelBuffer = nullptr;
+    }
+    if (Detached.DummyFrameBuffer != nil) {
+      ReleaseObjc(Detached.DummyFrameBuffer);
+    }
   }
 
   void UpdateDetailLocked(std::string_view Prefix) {
@@ -863,7 +912,11 @@ private:
   self = [super init];
   if (self) {
     _session = session;
+#if !__has_feature(objc_arc)
+    _codecInfo = [codecInfo retain];
+#else
     _codecInfo = codecInfo;
+#endif
   }
   return self;
 }
@@ -984,9 +1037,22 @@ private:
     RTC_OBJC_TYPE(RTCVideoCodecInfo) *codecInfo =
         [[RTC_OBJC_TYPE(RTCVideoCodecInfo) alloc] initWithName:@"H264"
                                                     parameters:Axiom::DefaultH264CodecParameters()];
-    _supportedCodecs = @[ codecInfo ];
+    NSArray<RTC_OBJC_TYPE(RTCVideoCodecInfo) *> *supportedCodecs = @[ codecInfo ];
+#if !__has_feature(objc_arc)
+    _supportedCodecs = [supportedCodecs retain];
+    [codecInfo release];
+#else
+    _supportedCodecs = supportedCodecs;
+#endif
   }
   return self;
+}
+
+- (void)dealloc {
+#if !__has_feature(objc_arc)
+  [_supportedCodecs release];
+  [super dealloc];
+#endif
 }
 
 - (id<RTC_OBJC_TYPE(RTCVideoEncoder)>)createEncoder:
@@ -994,8 +1060,14 @@ private:
   if (![[info.name uppercaseString] isEqualToString:@"H264"]) {
     return nil;
   }
-  return [[AxiomPacketBackedVideoEncoder alloc] initWithSession:_session
-                                                      codecInfo:info];
+  AxiomPacketBackedVideoEncoder *encoder =
+      [[AxiomPacketBackedVideoEncoder alloc] initWithSession:_session
+                                                   codecInfo:info];
+#if !__has_feature(objc_arc)
+  return [encoder autorelease];
+#else
+  return encoder;
+#endif
 }
 
 - (NSArray<RTC_OBJC_TYPE(RTCVideoCodecInfo) *> *)supportedCodecs {
@@ -1008,9 +1080,15 @@ private:
   (void)scalabilityMode;
   const bool supported =
       [[info.name uppercaseString] isEqualToString:@"H264"];
-  return [[RTC_OBJC_TYPE(RTCVideoEncoderCodecSupport) alloc]
-      initWithSupported:supported
-        isPowerEfficient:YES];
+  RTC_OBJC_TYPE(RTCVideoEncoderCodecSupport) *codecSupport =
+      [[RTC_OBJC_TYPE(RTCVideoEncoderCodecSupport) alloc]
+          initWithSupported:supported
+            isPowerEfficient:YES];
+#if !__has_feature(objc_arc)
+  return [codecSupport autorelease];
+#else
+  return codecSupport;
+#endif
 }
 
 @end

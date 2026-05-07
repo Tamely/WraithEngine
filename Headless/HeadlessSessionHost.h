@@ -16,7 +16,9 @@ public:
   bool LoadStartupSceneIntoSession();
   void SubmitLocalCommand(const EditorCommand &Command);
   void SubmitRemoteCommand(const EditorCommand &Command);
+  void SubmitRemoteCommand(SessionUserId User, const EditorCommand &Command);
   void SetRemoteViewMode(RendererViewMode ViewMode);
+  void SetActiveRenderUser(SessionUserId User);
   ISessionTransport &GetTransport() { return *m_Endpoint; }
   HeadlessSessionLayer &GetHeadlessLayer() { return *m_Layer; }
 

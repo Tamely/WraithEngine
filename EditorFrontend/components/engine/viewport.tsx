@@ -21,14 +21,18 @@ import {
   type SessionObjectDetails,
   type RemoteViewportConnectionState,
   type RemoteViewportViewMode,
-  type SessionPresence,
+  type SessionParticipant,
   type SessionSceneItem,
   type SessionSelection,
 } from "./remote-viewport-context"
 
 const DEFAULT_AXIOM_SERVER_ORIGIN = "http://127.0.0.1:8080"
+const CLIENT_ID_STORAGE_KEY = "axiom-remote-client-id"
+const CLIENT_ID_CLAIM_CHANNEL = "axiom-remote-client-claims"
 const STATUS_POLL_INTERVAL_MS = 1500
 const ICE_POLL_INTERVAL_MS = 1000
+const SESSION_POLL_INTERVAL_MS = 1500
+const CLIENT_ID_CLAIM_TIMEOUT_MS = 100
 type ConnectionState = RemoteViewportConnectionState
 type ViewMode = RemoteViewportViewMode
 type ChannelPreference = "reliable" | "unreliable"
@@ -70,10 +74,16 @@ interface SessionSnapshotResponse {
     state?: string
     webrtcConnectionState?: string
   }
-  presence: SessionPresence[]
+  participants: SessionParticipant[]
   sceneTree: SessionSceneItem[]
   selections: SessionSelection[]
   selectedObjectDetails: SessionObjectDetails | null
+}
+
+interface SessionConnectResponse {
+  type: "session_connect"
+  clientId: string
+  snapshot: SessionSnapshotResponse
 }
 
 type RemoteViewportCommand =
@@ -90,6 +100,12 @@ type RemoteViewportCommand =
       type: "update_viewport_camera"
       worldMovement: [number, number, number]
       cursorPosition: [number, number]
+    }
+  | {
+      type: "set_viewport_camera_pose"
+      position: [number, number, number]
+      yawDegrees: number
+      pitchDegrees: number
     }
   | {
       type: "select_object"
@@ -118,10 +134,19 @@ export function Viewport() {
   const unreliableChannelRef = useRef<RTCDataChannel | null>(null)
   const statusPollHandleRef = useRef<number | null>(null)
   const icePollHandleRef = useRef<number | null>(null)
+  const sessionPollHandleRef = useRef<number | null>(null)
   const inputFrameHandleRef = useRef<number | null>(null)
+  const claimChannelRef = useRef<BroadcastChannel | null>(null)
   const localIceQueueRef = useRef<IceCandidatePayload[]>([])
   const remoteDescriptionAppliedRef = useRef(false)
   const activeGenerationRef = useRef(0)
+  const clientIdRef = useRef<string | null>(null)
+  const tabInstanceIdRef = useRef(
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `tab-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  )
+  const participantsRef = useRef<SessionParticipant[]>([])
   const sessionReadyRef = useRef(false)
   const reconnectingRef = useRef(false)
   const pointerLockedRef = useRef(false)
@@ -142,6 +167,7 @@ export function Viewport() {
     frameText,
     viewMode,
     isLooking,
+    participants,
     setConnectionState,
     setStatusText,
     setDetailText,
@@ -155,6 +181,7 @@ export function Viewport() {
     setSessionSnapshot,
     clearSessionSnapshot,
     applySelectionChanged,
+    applyParticipantCameraUpdate,
     setSessionState,
     sessionStatusText,
     setSessionStatusText,
@@ -172,6 +199,10 @@ export function Viewport() {
   useEffect(() => {
     isLookingRef.current = isLooking
   }, [isLooking])
+
+  useEffect(() => {
+    participantsRef.current = participants
+  }, [participants])
 
   useEffect(() => {
     let disposed = false
@@ -229,6 +260,91 @@ export function Viewport() {
         window.clearInterval(icePollHandleRef.current)
         icePollHandleRef.current = null
       }
+      if (sessionPollHandleRef.current !== null) {
+        window.clearInterval(sessionPollHandleRef.current)
+        sessionPollHandleRef.current = null
+      }
+    }
+
+    function setupClientIdClaimChannel() {
+      if (typeof window === "undefined" || typeof BroadcastChannel === "undefined") {
+        return
+      }
+
+      const channel = new BroadcastChannel(CLIENT_ID_CLAIM_CHANNEL)
+      claimChannelRef.current = channel
+      channel.onmessage = (event: MessageEvent<unknown>) => {
+        const message =
+          event.data && typeof event.data === "object"
+            ? (event.data as Record<string, unknown>)
+            : null
+        if (message === null || message.type !== "query-client-id") {
+          return
+        }
+
+        const queriedClientId =
+          typeof message.clientId === "string" ? message.clientId : null
+        const sourceInstanceId =
+          typeof message.instanceId === "string" ? message.instanceId : null
+        if (
+          queriedClientId === null ||
+          sourceInstanceId === null ||
+          sourceInstanceId === tabInstanceIdRef.current ||
+          clientIdRef.current !== queriedClientId
+        ) {
+          return
+        }
+
+        channel.postMessage({
+          type: "client-id-claimed",
+          clientId: queriedClientId,
+          instanceId: tabInstanceIdRef.current,
+        })
+      }
+    }
+
+    async function canReuseStoredClientId(clientId: string) {
+      const channel = claimChannelRef.current
+      if (channel === null) {
+        return true
+      }
+
+      return await new Promise<boolean>((resolve) => {
+        let settled = false
+        const handleMessage = (event: MessageEvent<unknown>) => {
+          const message =
+            event.data && typeof event.data === "object"
+              ? (event.data as Record<string, unknown>)
+              : null
+          if (message === null || message.type !== "client-id-claimed") {
+            return
+          }
+
+          if (
+            message.clientId === clientId &&
+            message.instanceId !== tabInstanceIdRef.current
+          ) {
+            settled = true
+            channel.removeEventListener("message", handleMessage)
+            resolve(false)
+          }
+        }
+
+        channel.addEventListener("message", handleMessage)
+        channel.postMessage({
+          type: "query-client-id",
+          clientId,
+          instanceId: tabInstanceIdRef.current,
+        })
+
+        window.setTimeout(() => {
+          if (settled) {
+            return
+          }
+          channel.removeEventListener("message", handleMessage)
+          resolve(true)
+        }, CLIENT_ID_CLAIM_TIMEOUT_MS)
+      })
     }
 
     function stopViewportInputPump() {
@@ -265,7 +381,14 @@ export function Viewport() {
     }
 
     async function fetchJson<T>(path: string, init?: RequestInit) {
-      const response = await fetch(`${serverOrigin}${path}`, init)
+      const headers = new Headers(init?.headers)
+      if (clientIdRef.current) {
+        headers.set("X-Axiom-Client-Id", clientIdRef.current)
+      }
+      const response = await fetch(`${serverOrigin}${path}`, {
+        ...init,
+        headers,
+      })
       const payload = await parseResponse(response)
 
       if (!response.ok) {
@@ -290,17 +413,14 @@ export function Viewport() {
       })
     }
 
-    async function refreshSessionSnapshot(reason: "connect" | "reconnect" | "resync" | "command" | "event" | "manual" = "manual") {
-      const snapshot = await fetchJson<SessionSnapshotResponse>("/session", {
-        cache: "no-store",
-      })
+    function applySessionSnapshot(snapshot: SessionSnapshotResponse, reason: string) {
       if (disposed) {
         return
       }
 
       setSessionSnapshot({
         currentUserId: snapshot.currentUserId,
-        presence: snapshot.presence ?? [],
+        participants: snapshot.participants ?? [],
         sceneTree: snapshot.sceneTree ?? [],
         selections: snapshot.selections ?? [],
         selectedObjectDetails: snapshot.selectedObjectDetails ?? null,
@@ -313,13 +433,60 @@ export function Viewport() {
       )
       appendLog({
         type: "session_snapshot_received",
+        reason,
         sessionId: snapshot.sessionId,
+        currentUserId: snapshot.currentUserId,
         sceneItemCount: snapshot.sceneTree?.length ?? 0,
-        presenceCount: snapshot.presence?.length ?? 0,
+        participantCount: snapshot.participants?.length ?? 0,
         selectionCount: snapshot.selections?.length ?? 0,
         transportState: snapshot.transport?.state ?? "unknown",
         webrtcConnectionState: snapshot.transport?.webrtcConnectionState ?? "unknown",
       })
+    }
+
+    async function bootstrapClientSession() {
+      const storedClientId =
+        typeof window !== "undefined"
+          ? window.sessionStorage.getItem(CLIENT_ID_STORAGE_KEY)
+          : null
+      const reusableClientId =
+        storedClientId !== null && (await canReuseStoredClientId(storedClientId))
+          ? storedClientId
+          : null
+      clientIdRef.current = reusableClientId
+
+      const bootstrap = await fetchJson<SessionConnectResponse>("/session/connect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      })
+      clientIdRef.current = bootstrap.clientId
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(CLIENT_ID_STORAGE_KEY, bootstrap.clientId)
+      }
+
+      applySessionSnapshot(bootstrap.snapshot, "bootstrap")
+      appendLog({
+        type: "session_client_connected",
+        clientId: bootstrap.clientId,
+        currentUserId: bootstrap.snapshot.currentUserId,
+      })
+      if (storedClientId !== null && reusableClientId === null) {
+        appendLog({
+          type: "session_client_forked",
+          previousClientId: storedClientId,
+          clientId: bootstrap.clientId,
+        })
+      }
+    }
+
+    async function refreshSessionSnapshot(reason: "connect" | "reconnect" | "resync" | "command" | "event" | "manual" = "manual") {
+      const snapshot = await fetchJson<SessionSnapshotResponse>("/session", {
+        cache: "no-store",
+      })
+      applySessionSnapshot(snapshot, reason)
       if (reconnectingRef.current || reason === "reconnect") {
         reconnectingRef.current = false
         appendLog({
@@ -366,6 +533,42 @@ export function Viewport() {
           )
           void refreshSessionSnapshotSafely("event")
         }
+        return
+      }
+
+      if (message.payloadType === "viewport_camera_updated") {
+        const userId =
+          typeof message.user === "number" ? message.user : Number(message.user)
+        const position = Array.isArray(message.position) ? message.position : null
+        const yawDegrees =
+          typeof message.yawDegrees === "number"
+            ? message.yawDegrees
+            : Number(message.yawDegrees)
+        const pitchDegrees =
+          typeof message.pitchDegrees === "number"
+            ? message.pitchDegrees
+            : Number(message.pitchDegrees)
+        if (
+          Number.isFinite(userId) &&
+          position !== null &&
+          position.length === 3 &&
+          position.every((component) => typeof component === "number") &&
+          Number.isFinite(yawDegrees) &&
+          Number.isFinite(pitchDegrees)
+        ) {
+          applyParticipantCameraUpdate(userId, {
+            position: [position[0], position[1], position[2]],
+            yawDegrees,
+            pitchDegrees,
+          })
+          setSessionUi("session-ready", "Session ready", "Camera presence updated.")
+        }
+        return
+      }
+
+      if (message.payloadType === "presence_changed") {
+        setSessionUi("session-ready", "Session ready", "Participant state changed.")
+        void refreshSessionSnapshotSafely("event")
         return
       }
 
@@ -765,8 +968,19 @@ export function Viewport() {
       setFrameText("No stream metadata yet")
       clearEventLog()
       startViewportInputPump()
-      setSessionUi("snapshot-loading", "Snapshot loading", "Fetching authoritative session snapshot...")
-      await refreshSessionSnapshotSafely(reconnectingRef.current ? "reconnect" : "connect")
+      setSessionUi("snapshot-loading", "Snapshot loading", "Connecting to authoritative session...")
+      try {
+        await bootstrapClientSession()
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Failed to connect to authoritative session."
+        setDisconnectedUi("error", "Session bootstrap failed", message)
+        setSessionUi("error", "Session bootstrap failed", message)
+        return
+      }
+      if (reconnectingRef.current) {
+        appendLog({ type: "session_client_resumed", clientId: clientIdRef.current })
+      }
 
       const peer = new window.RTCPeerConnection({
         bundlePolicy: "max-bundle",
@@ -952,9 +1166,15 @@ export function Viewport() {
       icePollHandleRef.current = window.setInterval(() => {
         void pollIceCandidates(nextGeneration)
       }, ICE_POLL_INTERVAL_MS)
+      sessionPollHandleRef.current = window.setInterval(() => {
+        if (sessionReadyRef.current) {
+          void refreshSessionSnapshotSafely("resync")
+        }
+      }, SESSION_POLL_INTERVAL_MS)
 
       void pollStatus(nextGeneration)
       void pollIceCandidates(nextGeneration)
+      void refreshSessionSnapshotSafely("resync")
     }
 
     connectRef.current = connect
@@ -979,6 +1199,25 @@ export function Viewport() {
           {
             type: "select_object",
             objectId,
+          },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
+      goToParticipantCamera: async (userId) => {
+        const participant = participantsRef.current.find((entry) => entry.userId === userId)
+        if (!participant?.camera) {
+          return false
+        }
+        const accepted = await sendCommand(
+          {
+            type: "set_viewport_camera_pose",
+            position: participant.camera.position,
+            yawDegrees: participant.camera.yawDegrees,
+            pitchDegrees: participant.camera.pitchDegrees,
           },
           "reliable"
         )
@@ -1016,6 +1255,7 @@ export function Viewport() {
       },
     })
     setServerOrigin(serverOrigin)
+    setupClientIdClaimChannel()
 
     const video = videoRef.current
     const shell = viewportShellRef.current
@@ -1104,7 +1344,9 @@ export function Viewport() {
     }
 
     const handleBeforeUnload = () => {
-      notifyServerOnDestroyRef.current = true
+      // Let a same-tab refresh reclaim the single server peer without an unload
+      // race closing the freshly negotiated replacement session underneath it.
+      notifyServerOnDestroyRef.current = false
       void destroyPeerConnection("page_unload")
     }
 
@@ -1131,6 +1373,8 @@ export function Viewport() {
       document.removeEventListener("keydown", handleKeyDown)
       document.removeEventListener("keyup", handleKeyUp)
       window.removeEventListener("beforeunload", handleBeforeUnload)
+      claimChannelRef.current?.close()
+      claimChannelRef.current = null
       void destroyPeerConnection("component_unmount")
     }
   }, [appendEventLog, clearEventLog, registerActions, serverOrigin, setConnectionState, setDetailText, setFrameText, setIsLooking, setServerOrigin, setStatusText, setViewMode])
