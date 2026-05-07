@@ -2,7 +2,7 @@
 
 ## Document Status
 - Status: Draft
-- Date: 2026-05-05
+- Date: 2026-05-06
 - Audience: Engine, tools, networking, web, and infrastructure contributors
 - Intended outcome: Establish the target architecture for evolving WraithEngine into a distributed game engine and browser-based collaborative editor
 
@@ -19,10 +19,15 @@
 - Added engine-owned encoded-video packet types plus `IVideoEncoder` and extended `AxiomSessionEndpoint` so encoded packets can flow beside raw viewport frames
 - Added a macOS-first `VideoToolbox` H.264 encoder path for headless remote-viewport bring-up
 - `AxiomRemoteViewportServer` now treats WebRTC as the only supported remote viewport media path
-- Removed the largest remote-viewport performance bottlenecks by unthrottling the headless server loop, skipping duplicate JPEG work while WebRTC is connected, and tuning the encoder/input path for latency
+- Removed the largest remote-viewport performance bottlenecks by unthrottling the headless server loop and tuning the encoder/input path for latency
 - The remote viewport now runs at acceptable frame rate, but still has noticeable residual input latency that likely requires deeper WebRTC sender/playout tuning
 - A root-level `EditorFrontend` workspace now serves as the longer-lived browser editor shell using Next.js, React, and Tailwind CSS
 - `EditorFrontend` contains a docked editor UI with a menu bar, toolbar, outliner, details panel, content browser, and the active WebRTC viewport client
+- `EditorSession` scene authority has been decoupled from renderer-owned submissions and now stores renderer-agnostic logical scene mesh instances
+- local and headless rendering now rebuild renderer submissions through a shared adapter instead of treating renderer-owned objects as session state
+- the headless remote viewport path now uses per-client render views rendered sequentially in one engine tick instead of a single-frame ownership splitter
+- remote view mode is now per client
+- a delayed-readback frame attribution bug in multi-pass headless rendering was fixed by stamping each offscreen capture with the submitting `SessionUserId` at submission time
 - The next browser-facing step after the migration is transport-quality tuning and broader editor-shell integration, not more work on a server-hosted prototype page
 
 ## 1. Executive Summary
@@ -365,7 +370,8 @@ Each live editing session owns an `EditorSessionState` that includes:
 
 Current implementation note:
 
-- the initial local slice currently covers per-user viewport camera state, look/cursor-capture state, last cursor position bookkeeping, and authoritative scene submissions for the startup scene
+- the current slice covers per-user viewport camera state, look/cursor-capture state, last cursor position bookkeeping, presence state, startup-scene logical mesh instances, selection state, and object transform authority for the startup scene
+- renderer-owned `RenderMeshSubmission` objects are no longer authoritative session state; they are now rebuilt from logical session scene data through an adapter at render time
 - entity/component/object registries, locks, presence, and asset editing state remain future work
 
 ### 11.3 Why This Matters
@@ -1019,8 +1025,9 @@ The first implementation slice after this design doc should be:
 Progress update:
 
 - item 6 is now implemented locally
-- the next slice should focus on items 1 through 5 in a way that reuses the new local session authority seam instead of bypassing it
-- the immediate priority inside items 3 through 5 is now WebRTC latency-quality tuning and browser-editor integration, not further iteration on retired server-hosted UI or the temporary JPEG-streaming localhost page
+- items 1 through 5 now exist in prototype form and are wired through the same session authority seam rather than bypassing it
+- the remote viewport prototype has already pivoted from shared-frame multiplexing to per-client render views with WebRTC-only streaming
+- the immediate priority is now finalizing multi-client browser validation, then continuing WebRTC latency-quality tuning and broader browser-editor integration
 
 That slice proves the core thesis:
 

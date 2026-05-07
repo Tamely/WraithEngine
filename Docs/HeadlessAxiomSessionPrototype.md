@@ -12,7 +12,7 @@ The current slice includes a macOS-first H.264 path that is wired into the nativ
 
 - Status: working prototype
 - Verified on Windows as of 2026-05-05
-- Builds on macOS as of 2026-05-05
+- Builds on macOS as of 2026-05-06
 - Runtime validation on macOS requires a Vulkan/MoltenVK-capable environment with Metal available
 - This subphase is complete for the runtime-side seam restoration work
 - `AxiomHeadless` is a command-driven authoritative runtime, not a full editor client
@@ -26,15 +26,48 @@ The current slice includes a macOS-first H.264 path that is wired into the nativ
 - `IVideoEncoder` now exists as the engine-owned video encode boundary
 - a macOS `VideoToolbox` H.264 encoder path now exists for headless remote-viewport bring-up
 - `AxiomRemoteViewportServer` now treats WebRTC as the only supported remote viewport media path
+- the old frame-ownership splitter and round-robin render-target path have been removed
+- headless remote rendering now uses one authoritative `EditorSession`, one shared GPU resource world, and one render view per connected remote client
+- the authoritative session scene is now renderer-agnostic and no longer stores renderer-owned mesh submissions as its source of truth
+- startup scene loading now populates logical scene mesh instances from the current `basicmesh.glb` asset mapping instead of calling directly into the renderer singleton
+- local windowed rendering and headless rendering both rebuild render submissions through a shared `EditorSceneRendererAdapter`
+- the headless host now performs one render pass per active remote render view during a single engine tick
+- remote `set_view_mode` is now per-client state, not a global remote-server toggle
 - the main-loop throttle in the headless remote viewport server has been removed so the runtime can tick at full cadence
 - the macOS `VideoToolbox` encoder is now tuned for lower latency by avoiding per-frame synchronous completion, tightening bitrate/rate limits, and shortening the keyframe interval
 - the native WebRTC sender now prefers the freshest available H.264 packet instead of rewinding to older packets during normal latest-only delivery
 - the browser client now pumps camera/input updates on `requestAnimationFrame` and flushes pointer-lock look input immediately instead of batching on a fixed timer
 - the current stream no longer has the severe FPS collapse seen in the older prototype, but there is still roughly half a second of residual input latency to investigate later
+- a multi-client frame-routing bug was fixed by stamping each offscreen capture with the submitting `SessionUserId` at render time instead of inferring ownership later from mutable active-pass state
 - a root-level `EditorFrontend` workspace now hosts the primary browser editor shell using Next.js, React, and Tailwind CSS
 - `EditorFrontend` includes the docked editor layout, menu bar, toolbar, outliner, details panel, content browser, and the active WebRTC viewport client in `components/engine/viewport.tsx`
 - the old inline localhost:8080 page has been retired; the server now focuses on backend/session and diagnostics endpoints
 - sandboxed validation on macOS can hide the availability of VideoToolbox H.264 encoders; authoritative H.264 validation should be done outside the sandbox on a Vulkan/MoltenVK-capable machine
+
+## Remote Viewport Architecture
+
+The current remote viewport stack is organized as:
+
+- one authoritative `EditorSession`
+- one shared renderer and GPU resource cache
+- one headless render view per connected remote client
+- one WebRTC session and one encoder per connected remote client
+- one multi-pass headless engine tick that renders all active remote views sequentially
+
+Important implementation notes:
+
+- render-view state is per client and currently includes at least `SessionUserId`, client id, and view mode
+- per-client camera state remains authoritative in `EditorSession`
+- presence overlays are assembled per rendered user so a viewer sees other participants, not their own marker
+- offscreen frame routing is keyed by `ViewportFrame.User`
+- the headless bridge now only fills in a frame user when one was not already stamped by the renderer
+
+Retired paths:
+
+- no frame splitter
+- no active render-user ownership rotation
+- no `/frame`, `/h264`, or `/h264/metadata` server fallback endpoints
+- no JPEG fallback publishing in normal browser operation
 
 ## CLI
 
@@ -161,6 +194,7 @@ This prototype proves that:
 - a browser can connect to the headless authoritative session over a real network boundary and drive the existing viewport camera commands
 - the browser client can now receive the authoritative viewport over a WebRTC H.264 video track while using data channels for control/input traffic
 - the major FPS bottlenecks in the remote viewport prototype have been removed through server-loop, duplicate-work, encoder, and input-pump latency fixes
+- multiple connected browser clients now have distinct render views instead of sharing a split single-frame ownership path
 
 This prototype does not yet provide:
 
@@ -172,6 +206,7 @@ This prototype does not yet provide:
 
 The next remote-viewport milestone should prioritize:
 
+- full manual 3-tab browser validation and any remaining bugfixes in the per-client render-view path
 - deeper WebRTC sender and browser playout-delay tuning to reduce the remaining input latency
 - continued hardening of the `EditorFrontend/components/engine/viewport.tsx` client as the primary browser UI
 - better editor-shell integration around session lifecycle, transport health, and future collaboration surfaces
