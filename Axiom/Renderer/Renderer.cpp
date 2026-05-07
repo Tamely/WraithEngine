@@ -75,6 +75,12 @@ void Renderer::SetViewMode(RendererViewMode ViewMode) {
   }
 }
 
+void Renderer::SetViewportFrameUser(SessionUserId User) {
+  if (m_Backend != nullptr) {
+    m_Backend->SetViewportFrameUser(User);
+  }
+}
+
 void Renderer::SetViewportFrameOutput(IViewportFrameOutput *FrameOutput) {
   if (m_Backend != nullptr) {
     m_Backend->SetViewportFrameOutput(FrameOutput);

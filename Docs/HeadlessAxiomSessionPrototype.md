@@ -4,9 +4,9 @@
 
 `AxiomRemoteViewportDevClient` is a companion dev executable that exercises the same authoritative session through the new transport seam and writes the frames it receives as a transport subscriber.
 
-`AxiomRemoteViewportServer` is now the primary remote viewport prototype backend. It runs the authoritative headless session, exposes HTTP/WebRTC endpoints for the browser editor, and keeps a JPEG `/frame` path available only as a diagnostics and fallback surface.
+`AxiomRemoteViewportServer` is now the primary remote viewport prototype backend. It runs the authoritative headless session and exposes the HTTP/WebRTC endpoints used by the browser editor.
 
-The current slice includes a macOS-first H.264 path that is now wired into the native WebRTC sender. Encoded packets are still exposed through diagnostics endpoints, but the browser viewport now consumes the WebRTC video track rather than the older JPEG push path during normal use.
+The current slice includes a macOS-first H.264 path that is wired into the native WebRTC sender. The browser viewport consumes the WebRTC video track as the only remote viewport media path.
 
 ## Current Status
 
@@ -21,13 +21,12 @@ The current slice includes a macOS-first H.264 path that is now wired into the n
 - `AxiomSessionEndpoint` is the first in-process transport implementation
 - `AxiomRemoteViewportDevClient` is a dev harness for transport-delivered frames/events, not a browser client
 - `AxiomRemoteViewportServer` is the current browser-facing backend for remote viewport work
-- the current server/browser slice has moved from SSE plus HTTP image polling to WebRTC video plus data channels, with JPEG retained only for diagnostics and fallback access
+- the current server/browser slice has moved from SSE plus HTTP image polling to WebRTC video plus data channels
 - encoded video packet delivery now exists as an additive transport seam beside raw viewport frame delivery
 - `IVideoEncoder` now exists as the engine-owned video encode boundary
 - a macOS `VideoToolbox` H.264 encoder path now exists for headless remote-viewport bring-up
-- `AxiomRemoteViewportServer` now exposes H.264 diagnostics through separate `/h264` and `/h264/metadata` endpoints while preserving a JPEG `/frame` fallback
+- `AxiomRemoteViewportServer` now treats WebRTC as the only supported remote viewport media path
 - the main-loop throttle in the headless remote viewport server has been removed so the runtime can tick at full cadence
-- the server now skips duplicate JPEG encode/broadcast work while WebRTC is actively connected
 - the macOS `VideoToolbox` encoder is now tuned for lower latency by avoiding per-frame synchronous completion, tightening bitrate/rate limits, and shortening the keyframe interval
 - the native WebRTC sender now prefers the freshest available H.264 packet instead of rewinding to older packets during normal latest-only delivery
 - the browser client now pumps camera/input updates on `requestAnimationFrame` and flushes pointer-lock look input immediately instead of batching on a fixed timer
@@ -63,7 +62,7 @@ Dev-client example:
 Remote viewport server example:
 
 ```sh
-./AxiomRemoteViewportServer --host 127.0.0.1 --port 8080 --width 1280 --height 720 --jpeg-quality 75
+./AxiomRemoteViewportServer --host 127.0.0.1 --port 8080 --width 1280 --height 720
 ```
 
 Then start the browser editor:
@@ -161,7 +160,6 @@ This prototype proves that:
 - remote-style command submission can reuse the same session authority path as the local adapter
 - a browser can connect to the headless authoritative session over a real network boundary and drive the existing viewport camera commands
 - the browser client can now receive the authoritative viewport over a WebRTC H.264 video track while using data channels for control/input traffic
-- the headless server can now expose the latest H.264 access unit and packet metadata for diagnostics while keeping `/frame` available as a non-primary fallback path
 - the major FPS bottlenecks in the remote viewport prototype have been removed through server-loop, duplicate-work, encoder, and input-pump latency fixes
 
 This prototype does not yet provide:

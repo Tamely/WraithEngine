@@ -237,6 +237,7 @@ void VulkanRendererBackend::InitViewportReadbackBuffers() {
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
     CaptureFrame.HasPendingReadback = false;
     CaptureFrame.SubmittedFrameNumber = 0;
+    CaptureFrame.SubmittedUser = {};
   }
 }
 
@@ -1358,6 +1359,7 @@ void VulkanRendererBackend::Draw() {
                             CurrentFrame.RenderFence));
     CaptureFrame.HasPendingReadback = true;
     CaptureFrame.SubmittedFrameNumber = m_FrameNumber;
+    CaptureFrame.SubmittedUser = m_ViewportFrameUser;
   }
 
   m_FrameNumber++;
@@ -1426,6 +1428,10 @@ void VulkanRendererBackend::SetViewMode(RendererViewMode ViewMode) {
   m_ViewMode = ViewMode;
 }
 
+void VulkanRendererBackend::SetViewportFrameUser(SessionUserId User) {
+  m_ViewportFrameUser = User;
+}
+
 void VulkanRendererBackend::SetViewportFrameOutput(
     IViewportFrameOutput *FrameOutput) {
   m_FrameOutput = FrameOutput;
@@ -1459,6 +1465,7 @@ void VulkanRendererBackend::PublishCompletedOffscreenFrame(uint64_t FrameNumber)
       .Height = Captured.Height,
       .Format = ViewportFrameFormat::R8G8B8A8Unorm,
       .Pixels = std::span<const std::byte>(Bytes, Captured.Pixels.size()),
+      .User = CaptureFrame.SubmittedUser,
   });
 }
 } // namespace Axiom

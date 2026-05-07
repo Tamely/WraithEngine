@@ -31,10 +31,9 @@ glm::mat4 BuildTransformMatrix(const EditorTransformDetails &Transform) {
 
 std::optional<std::string> ResolveStartupObjectId(std::string_view SourceName) {
   static const std::unordered_map<std::string, std::string> ObjectIds = {
-      {"Floor_Platform", "floor"},
-      {"Crate_01", "crate-1"},
-      {"Crate_02", "crate-2"},
-      {"WallPanel_SciFi", "wall-panel"},
+      {"Cube", "floor"},
+      {"Sphere", "crate-1"},
+      {"Suzanne", "crate-2"},
   };
 
   const auto It = ObjectIds.find(std::string(SourceName));
@@ -73,27 +72,21 @@ std::vector<EditorSceneItem> BuildStartupSceneItems() {
                .Kind = EditorSceneItemKind::Folder,
                .Visible = true,
                .Children =
-                   {{
+                    {{
                         .Id = "floor",
-                        .DisplayName = "Floor_Platform",
+                        .DisplayName = "Cube",
                         .Kind = EditorSceneItemKind::Mesh,
                         .Visible = true,
                     },
                     {
                         .Id = "crate-1",
-                        .DisplayName = "Crate_01",
+                        .DisplayName = "Sphere",
                         .Kind = EditorSceneItemKind::Mesh,
                         .Visible = true,
                     },
                     {
                         .Id = "crate-2",
-                        .DisplayName = "Crate_02",
-                        .Kind = EditorSceneItemKind::Mesh,
-                        .Visible = true,
-                    },
-                    {
-                        .Id = "wall-panel",
-                        .DisplayName = "WallPanel_SciFi",
+                        .DisplayName = "Suzanne",
                         .Kind = EditorSceneItemKind::Mesh,
                         .Visible = true,
                     }},
@@ -166,7 +159,7 @@ std::vector<EditorObjectDetails> BuildStartupObjectDetails() {
   },
   {
       .ObjectId = "floor",
-      .DisplayName = "Floor_Platform",
+      .DisplayName = "Cube",
       .Kind = EditorSceneItemKind::Mesh,
       .Visible = true,
       .SupportsTransform = true,
@@ -179,7 +172,7 @@ std::vector<EditorObjectDetails> BuildStartupObjectDetails() {
   },
   {
       .ObjectId = "crate-1",
-      .DisplayName = "Crate_01",
+      .DisplayName = "Sphere",
       .Kind = EditorSceneItemKind::Mesh,
       .Visible = true,
       .SupportsTransform = true,
@@ -192,7 +185,7 @@ std::vector<EditorObjectDetails> BuildStartupObjectDetails() {
   },
   {
       .ObjectId = "crate-2",
-      .DisplayName = "Crate_02",
+      .DisplayName = "Suzanne",
       .Kind = EditorSceneItemKind::Mesh,
       .Visible = true,
       .SupportsTransform = true,
@@ -201,19 +194,6 @@ std::vector<EditorObjectDetails> BuildStartupObjectDetails() {
           .Location = glm::vec3(1.1f, 0.0f, 0.85f),
           .RotationDegrees = glm::vec3(0.0f, -22.0f, 0.0f),
           .Scale = glm::vec3(1.0f),
-      },
-  },
-  {
-      .ObjectId = "wall-panel",
-      .DisplayName = "WallPanel_SciFi",
-      .Kind = EditorSceneItemKind::Mesh,
-      .Visible = true,
-      .SupportsTransform = true,
-      .TransformReadOnly = false,
-      .Transform = EditorTransformDetails{
-          .Location = glm::vec3(0.0f, 1.0f, -3.0f),
-          .RotationDegrees = glm::vec3(0.0f),
-          .Scale = glm::vec3(1.0f, 2.0f, 1.0f),
       },
   },
   {

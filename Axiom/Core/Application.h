@@ -50,6 +50,7 @@ public:
   [[nodiscard]] Renderer &GetRenderer() const { return *m_Renderer; }
   void RequestClose();
   void SetRendererViewMode(RendererViewMode ViewMode);
+  void SetViewportFrameUser(SessionUserId User);
   void SetViewportFrameOutput(IViewportFrameOutput *FrameOutput);
 
 protected:

@@ -73,6 +73,7 @@ public:
   virtual void RenderImGui() = 0;
   virtual void EndFrame() = 0;
   virtual void SetViewMode(RendererViewMode ViewMode) = 0;
+  virtual void SetViewportFrameUser(SessionUserId User) = 0;
   virtual void SetViewportFrameOutput(IViewportFrameOutput *FrameOutput) = 0;
   virtual std::optional<CapturedFrame> ConsumeCapturedFrame() = 0;
 };

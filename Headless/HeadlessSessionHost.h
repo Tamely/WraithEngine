@@ -2,6 +2,7 @@
 
 #include <Core/Application.h>
 #include <Remote/AxiomSessionEndpoint.h>
+#include <Renderer/VideoEncoding.h>
 #include <Session/EditorSceneRendererAdapter.h>
 
 #include "HeadlessRenderView.h"
@@ -22,6 +23,7 @@ public:
   void SubmitLocalCommand(const EditorCommand &Command);
   void SubmitRemoteCommand(const EditorCommand &Command);
   void SubmitRemoteCommand(SessionUserId User, const EditorCommand &Command);
+  void SetTransportVideoEncoder(std::unique_ptr<IVideoEncoder> Encoder);
   void SetRemoteViewMode(RendererViewMode ViewMode);
   void SetRemoteViewMode(SessionUserId User, RendererViewMode ViewMode);
   void EnsureRemoteRenderView(const std::string &ClientId, SessionUserId User);

@@ -19,7 +19,7 @@ public:
 
   void OnViewportFrame(const ViewportFrame &Frame) override {
     ViewportFrame TaggedFrame = Frame;
-    if (m_RenderViewResolver) {
+    if (TaggedFrame.User.Value == 0u && m_RenderViewResolver) {
       if (const auto RenderView = m_RenderViewResolver();
           RenderView.has_value()) {
         TaggedFrame.User = RenderView->User;

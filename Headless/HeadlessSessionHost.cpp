@@ -56,6 +56,11 @@ void HeadlessSessionHost::SubmitRemoteCommand(SessionUserId User,
   m_Layer->SubmitToTransport(*m_Endpoint, User, Command);
 }
 
+void HeadlessSessionHost::SetTransportVideoEncoder(
+    std::unique_ptr<IVideoEncoder> Encoder) {
+  m_Endpoint->SetVideoEncoder(std::move(Encoder));
+}
+
 void HeadlessSessionHost::SetRemoteViewMode(RendererViewMode ViewMode) {
   m_RenderViews.SetViewMode(m_Layer->GetLocalUserId(), ViewMode);
 }

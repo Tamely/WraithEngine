@@ -40,6 +40,7 @@ public:
   void RenderImGui() override;
   void EndFrame() override;
   void SetViewMode(RendererViewMode ViewMode) override;
+  void SetViewportFrameUser(SessionUserId User) override;
   void SetViewportFrameOutput(IViewportFrameOutput *FrameOutput) override;
   std::optional<CapturedFrame> ConsumeCapturedFrame() override;
 
@@ -76,6 +77,7 @@ private:
     AllocatedBuffer ReadbackBuffer;
     bool HasPendingReadback{false};
     uint64_t SubmittedFrameNumber{0};
+    SessionUserId SubmittedUser{};
   };
 
   FrameData &GetCurrentFrame() {
@@ -154,6 +156,7 @@ private:
   float m_RenderScale{0.5f};
   bool m_HasWarnedMeshSubmissionOverflow{false};
   RendererViewMode m_ViewMode{RendererViewMode::Lit};
+  SessionUserId m_ViewportFrameUser{};
   std::optional<CapturedFrame> m_CapturedFrame;
 };
 } // namespace Axiom

@@ -119,6 +119,7 @@ void HeadlessSessionLayer::OnRender() {
   }
 
   Application::Get().SetRendererViewMode(RenderView.ViewMode);
+  Application::Get().SetViewportFrameUser(RenderUser);
   RenderCommand::SetCamera(Viewport->Camera);
   for (const auto &Submission : m_RendererAdapter->BuildRenderSubmissions(m_Session)) {
     RenderCommand::Submit(Submission);

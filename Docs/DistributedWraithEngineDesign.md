@@ -18,7 +18,7 @@
 - Added `AxiomRemoteViewportServer` as the first real browser-facing remote viewport prototype, evolving from HTTP image polling to WebSocket/JPEG bring-up and now to a native macOS WebRTC plus H.264 browser path
 - Added engine-owned encoded-video packet types plus `IVideoEncoder` and extended `AxiomSessionEndpoint` so encoded packets can flow beside raw viewport frames
 - Added a macOS-first `VideoToolbox` H.264 encoder path for headless remote-viewport bring-up
-- Added H.264 diagnostics to `AxiomRemoteViewportServer` through `/h264` and `/h264/metadata` while keeping `/frame` as a fallback/diagnostics path
+- `AxiomRemoteViewportServer` now treats WebRTC as the only supported remote viewport media path
 - Removed the largest remote-viewport performance bottlenecks by unthrottling the headless server loop, skipping duplicate JPEG work while WebRTC is connected, and tuning the encoder/input path for latency
 - The remote viewport now runs at acceptable frame rate, but still has noticeable residual input latency that likely requires deeper WebRTC sender/playout tuning
 - A root-level `EditorFrontend` workspace now serves as the longer-lived browser editor shell using Next.js, React, and Tailwind CSS
@@ -879,7 +879,7 @@ Progress update:
 - `ISessionTransport` now formalizes the engine-facing remote boundary
 - `AxiomRemoteViewportDevClient` remains available as a transport debug harness
 - `AxiomRemoteViewportServer` now proves browser-driven remote viewport control against the same authoritative session seam over a native macOS WebRTC plus H.264 path
-- the temporary JPEG path now exists primarily for diagnostics and fallback access rather than as the primary streamed viewport path
+- the temporary JPEG fallback path has been removed from the remote viewport server
 - encoded video packet publication and macOS H.264 encode now exist as part of the active browser viewport path rather than only as additive diagnostics seams
 - `EditorFrontend` now exists as the real browser editor shell and owns the live WebRTC viewport client
 - WebRTC sender/playout latency tuning is now the highest-priority remaining item in the remote viewport slice
@@ -904,7 +904,7 @@ Subphase status update:
 - encoded H.264 diagnostics are now exposed through the current server even though the browser viewport now uses the native WebRTC path
 - validation on macOS should treat sandboxed media capability checks with caution because the sandbox can hide VideoToolbox encoder availability even when the machine supports H.264 encode
 - the browser client now lives in the existing `EditorFrontend` application, specifically its viewport component and related browser-shell plumbing
-- the next slice should prioritize deeper WebRTC transport-quality tuning rather than investing in retired server-hosted UI or the temporary JPEG fallback path
+- the next slice should prioritize deeper WebRTC transport-quality tuning rather than investing in retired server-hosted UI or removed fallback media paths
 
 The first implementation step inside that phase is the `GLFW split`:
 

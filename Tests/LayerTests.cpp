@@ -824,6 +824,44 @@ TEST(RemoteViewportTests, HeadlessViewportFrameBridgeTagsFramesWithRenderUser) {
   EXPECT_EQ(Output.LastUser.Value, 7u);
 }
 
+TEST(RemoteViewportTests, HeadlessViewportFrameBridgePreservesTaggedRenderUser) {
+  class RecordingFrameOutput final : public Axiom::IViewportFrameOutput {
+  public:
+    void OnViewportFrame(const Axiom::ViewportFrame &Frame) override {
+      LastUser = Frame.User;
+      LastFrameIndex = Frame.FrameIndex;
+    }
+
+    Axiom::SessionUserId LastUser{};
+    uint64_t LastFrameIndex{0};
+  };
+
+  RecordingFrameOutput Output;
+  Axiom::HeadlessViewportFrameBridge Bridge(
+      Output, []() -> std::optional<Axiom::HeadlessRenderViewState> {
+        return Axiom::HeadlessRenderViewState{
+            .ClientId = "client-a",
+            .User = Axiom::SessionUserId{7},
+            .ViewMode = Axiom::RendererViewMode::Wireframe,
+            .IsLocal = false,
+        };
+      });
+
+  std::array<std::byte, 4> Bytes{std::byte{0x01}, std::byte{0x02},
+                                 std::byte{0x03}, std::byte{0x04}};
+  Bridge.OnViewportFrame({
+      .FrameIndex = 56,
+      .Width = 1,
+      .Height = 1,
+      .Format = Axiom::ViewportFrameFormat::R8G8B8A8Unorm,
+      .Pixels = std::span<const std::byte>(Bytes.data(), Bytes.size()),
+      .User = Axiom::SessionUserId{11},
+  });
+
+  EXPECT_EQ(Output.LastFrameIndex, 56u);
+  EXPECT_EQ(Output.LastUser.Value, 11u);
+}
+
 TEST(RemoteViewportTests, AxiomEndpointForwardsEventsAndFrames) {
   Axiom::EditorSession Session(Axiom::SessionId{1});
   Axiom::AxiomSessionEndpoint Endpoint(Session);

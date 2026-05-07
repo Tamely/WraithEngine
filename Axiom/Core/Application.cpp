@@ -70,6 +70,12 @@ void Application::SetRendererViewMode(RendererViewMode ViewMode) {
   }
 }
 
+void Application::SetViewportFrameUser(SessionUserId User) {
+  if (m_Renderer) {
+    m_Renderer->SetViewportFrameUser(User);
+  }
+}
+
 void Application::SetViewportFrameOutput(IViewportFrameOutput *FrameOutput) {
   m_Config.FrameOutput = FrameOutput;
   if (m_Renderer) {
