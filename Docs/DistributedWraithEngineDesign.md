@@ -1054,7 +1054,10 @@ Progress update:
 - the authoritative scene-authoring loop has advanced: selection, transform, rename, visibility, and full object lifecycle (create/duplicate/delete) are all command-driven with event publication, test coverage, and end-to-end wiring through the browser editor shell
 - all scene objects are now backed by a Roblox-inspired `DataModel`-rooted Instance hierarchy; the session owns the live tree and exposes a serializable snapshot projection for consumers
 - the outliner exposes the full object lifecycle to the user: an Add dropdown with built-in templates, a Delete toolbar button, and a right-click context menu with Duplicate and Delete; the three operations travel the same WebRTC/HTTP → `ParseRemoteViewportCommand` → `EditorSession::Tick` → event broadcast path as every other authoritative command
-- the next authoring steps are binding transform gizmos to the authoritative `SetTransform` path, and deeper inline editing such as in-outliner rename
+- in-outliner inline rename is now implemented: double-clicking any object name in the outliner opens an in-place input that commits on Enter or blur and cancels on Escape; it drives the existing `rename_object` command path without any new C++ or protocol work
+- the details panel supports rename and transform editing; drafts are scoped to the selected object's ID so periodic server snapshot polls do not clobber edits in progress
+- viewport keyboard input (WASD, Space, Shift) is now gated on pointer lock state; keys are only consumed while the viewport has pointer lock and are cleared immediately when it releases, so other UI elements (inputs, the outliner) receive input normally
+- the next authoring steps are binding transform gizmos to the authoritative `SetTransform` path and implementing reparent
 - multi-client validation, transport tuning, and deeper collaboration surfaces should continue afterward through that same command/event path instead of becoming the lead implementation track
 
 That slice proves the core thesis:
