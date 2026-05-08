@@ -176,7 +176,8 @@ export function Viewport() {
   const participantsRef = useRef<SessionParticipant[]>([])
   const sessionReadyRef = useRef(false)
   const reconnectingRef = useRef(false)
-  const pointerLockedRef = useRef(false)
+  const rightMouseDownRef = useRef(false)
+  const viewportFocusedRef = useRef(false)
   const keysRef = useRef(new Set<string>())
   const cursorRef = useRef({ x: 0, y: 0 })
   const pendingLookDeltaRef = useRef({ x: 0, y: 0 })
@@ -1400,55 +1401,60 @@ export function Viewport() {
       }
     }
 
-    const handleShellClick = async () => {
-      if (!shell || pointerLockedRef.current) {
-        return
+    const handleMouseDown = (event: MouseEvent) => {
+      const inViewport = shell?.contains(event.target as Node) ?? false
+      if (inViewport) {
+        viewportFocusedRef.current = true
+      } else if (viewportFocusedRef.current) {
+        viewportFocusedRef.current = false
+        keysRef.current.clear()
       }
-      try {
-        await shell.requestPointerLock()
-      } catch (error) {
-        appendLog(`pointer lock failed: ${String(error)}`)
-      }
+
+      if (event.button !== 2 || !inViewport) return
+      event.preventDefault()
+      rightMouseDownRef.current = true
+      void setLookEnabled(true)
     }
 
-    const handlePointerLockChange = () => {
-      pointerLockedRef.current = document.pointerLockElement === shell
-      if (!pointerLockedRef.current) {
-        keysRef.current.clear()
-        if (isLookingRef.current) void setLookEnabled(false)
-      } else if (!isLookingRef.current) {
-        void setLookEnabled(true)
+    const handleMouseUp = (event: MouseEvent) => {
+      if (event.button !== 2) return
+      if (!rightMouseDownRef.current) return
+      rightMouseDownRef.current = false
+      void setLookEnabled(false)
+    }
+
+    const handleContextMenu = (event: MouseEvent) => {
+      if (shell?.contains(event.target as Node)) {
+        event.preventDefault()
       }
     }
 
     const handleMouseMove = (event: MouseEvent) => {
-      if (!pointerLockedRef.current) {
-        const shell = viewportShellRef.current
-        const video = videoRef.current
-        if (shell && video && video.videoWidth && video.videoHeight) {
-          const rect = shell.getBoundingClientRect()
-          const cssX = event.clientX - rect.left
-          const cssY = event.clientY - rect.top
-          if (cssX >= 0 && cssY >= 0 && cssX <= rect.width && cssY <= rect.height) {
-            const serverX = (cssX / rect.width) * video.videoWidth
-            const serverY = (cssY / rect.height) * video.videoHeight
-            void sendCommand(
-              { type: "gizmo_hover", mouseX: serverX, mouseY: serverY },
-              "unreliable"
-            )
-          }
-        }
+      if (rightMouseDownRef.current) {
+        pendingLookDeltaRef.current.x += event.movementX
+        pendingLookDeltaRef.current.y += event.movementY
+        sendViewportInputFrame()
         return
       }
-      pendingLookDeltaRef.current.x += event.movementX
-      pendingLookDeltaRef.current.y += event.movementY
-      if (isLookingRef.current) {
-        sendViewportInputFrame()
+      const shell = viewportShellRef.current
+      const video = videoRef.current
+      if (shell && video && video.videoWidth && video.videoHeight) {
+        const rect = shell.getBoundingClientRect()
+        const cssX = event.clientX - rect.left
+        const cssY = event.clientY - rect.top
+        if (cssX >= 0 && cssY >= 0 && cssX <= rect.width && cssY <= rect.height) {
+          const serverX = (cssX / rect.width) * video.videoWidth
+          const serverY = (cssY / rect.height) * video.videoHeight
+          void sendCommand(
+            { type: "gizmo_hover", mouseX: serverX, mouseY: serverY },
+            "unreliable"
+          )
+        }
       }
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (!pointerLockedRef.current) return
+      if (!viewportFocusedRef.current) return
       if (
         event.code === "Space" ||
         event.code === "ShiftLeft" ||
@@ -1464,18 +1470,6 @@ export function Viewport() {
     }
 
     const handleKeyUp = (event: KeyboardEvent) => {
-      if (!pointerLockedRef.current) return
-      if (
-        event.code === "Space" ||
-        event.code === "ShiftLeft" ||
-        event.code === "ShiftRight" ||
-        event.code === "KeyW" ||
-        event.code === "KeyA" ||
-        event.code === "KeyS" ||
-        event.code === "KeyD"
-      ) {
-        event.preventDefault()
-      }
       keysRef.current.delete(event.code)
     }
 
@@ -1488,8 +1482,9 @@ export function Viewport() {
 
     video?.addEventListener("loadedmetadata", handleLoadedMetadata)
     video?.addEventListener("resize", handleResize)
-    shell?.addEventListener("click", handleShellClick)
-    document.addEventListener("pointerlockchange", handlePointerLockChange)
+    document.addEventListener("mousedown", handleMouseDown)
+    document.addEventListener("mouseup", handleMouseUp)
+    document.addEventListener("contextmenu", handleContextMenu)
     document.addEventListener("mousemove", handleMouseMove)
     document.addEventListener("keydown", handleKeyDown)
     document.addEventListener("keyup", handleKeyUp)
@@ -1503,8 +1498,9 @@ export function Viewport() {
       stopViewportInputPump()
       video?.removeEventListener("loadedmetadata", handleLoadedMetadata)
       video?.removeEventListener("resize", handleResize)
-      shell?.removeEventListener("click", handleShellClick)
-      document.removeEventListener("pointerlockchange", handlePointerLockChange)
+      document.removeEventListener("mousedown", handleMouseDown)
+      document.removeEventListener("mouseup", handleMouseUp)
+      document.removeEventListener("contextmenu", handleContextMenu)
       document.removeEventListener("mousemove", handleMouseMove)
       document.removeEventListener("keydown", handleKeyDown)
       document.removeEventListener("keyup", handleKeyUp)

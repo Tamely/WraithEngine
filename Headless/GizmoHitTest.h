@@ -9,6 +9,30 @@
 
 namespace Axiom {
 
+// Returns the world-space arm length that makes the gizmo appear DesiredPixelLength
+// pixels long on screen, regardless of camera distance. Uses the same projection
+// trick ImGizmo uses: measure how many pixels one world unit spans at the gizmo
+// position, then divide the desired pixel length by that ratio.
+inline float ComputeGizmoScale(const Camera &Cam, glm::vec3 GizmoWorldPos,
+                                uint32_t VpWidth, uint32_t VpHeight,
+                                float DesiredPixelLength = 120.0f) {
+  if (VpWidth == 0 || VpHeight == 0) {
+    return 0.5f;
+  }
+  const glm::mat4 VP = Cam.GetViewProjectionMatrix();
+  const glm::vec4 OClip = VP * glm::vec4(GizmoWorldPos, 1.0f);
+  const glm::vec4 TClip = VP * glm::vec4(GizmoWorldPos + glm::vec3(0.0f, 1.0f, 0.0f), 1.0f);
+  if (OClip.w <= 0.001f || TClip.w <= 0.001f) {
+    return 0.5f;
+  }
+  const glm::vec2 OScreen((OClip.x / OClip.w * 0.5f + 0.5f) * VpWidth,
+                           (1.0f - (OClip.y / OClip.w * 0.5f + 0.5f)) * VpHeight);
+  const glm::vec2 TScreen((TClip.x / TClip.w * 0.5f + 0.5f) * VpWidth,
+                           (1.0f - (TClip.y / TClip.w * 0.5f + 0.5f)) * VpHeight);
+  const float PixelsPerUnit = glm::distance(OScreen, TScreen);
+  return PixelsPerUnit > 0.001f ? DesiredPixelLength / PixelsPerUnit : 0.5f;
+}
+
 // Returns hovered translate-gizmo axis (0=X, 1=Y, 2=Z) or -1 if none.
 // Projects each axis line to screen space and tests 2D point-to-segment
 // distance. This avoids 3D ray-cylinder math and handles perspective correctly.

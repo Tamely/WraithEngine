@@ -1460,10 +1460,13 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
         Session.FindSelectedObjectDetails(Client->User);
     if (Viewport != nullptr && Selected != nullptr &&
         Selected->SupportsTransform && Selected->Transform.has_value()) {
+      const float GizmoScale = ComputeGizmoScale(
+          Viewport->Camera, Selected->Transform->Location,
+          m_Options.Width, m_Options.Height);
       const int Axis =
           HitTestGizmoAxes(Viewport->Camera, m_Options.Width, m_Options.Height,
                            Command->MousePosition,
-                           Selected->Transform->Location, 0.5f);
+                           Selected->Transform->Location, GizmoScale);
       m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, Axis);
     } else {
       m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);

@@ -99,7 +99,7 @@ void VulkanGizmoRenderer::Init(const InitInfo &Info,
       .cullMode = VK_CULL_MODE_NONE,
       .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
       .depthBiasEnable = VK_FALSE,
-      .lineWidth = 2.0f};
+      .lineWidth = 40.0f};
 
   VkPipelineMultisampleStateCreateInfo Multisampling{
       .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
@@ -186,6 +186,26 @@ void VulkanGizmoRenderer::DrawGizmoOverlay(VkCommandBuffer CommandBuffer,
   const GizmoOverlayData &Gizmo = *Scene.GizmoOverlay;
   const glm::mat4 VP = Scene.ActiveCamera->GetViewProjectionMatrix();
 
+  // Compute screen-space-constant scale: measure how many pixels one world unit
+  // spans at the gizmo origin, then set the arm length to hit DesiredPixelLength.
+  const float DesiredPixelLength = 120.0f;
+  float GizmoScale = Gizmo.Scale;
+  {
+    const glm::vec4 OClip = VP * glm::vec4(Gizmo.WorldPosition, 1.0f);
+    const glm::vec4 TClip =
+        VP * glm::vec4(Gizmo.WorldPosition + glm::vec3(0.0f, 1.0f, 0.0f), 1.0f);
+    if (OClip.w > 0.001f && TClip.w > 0.001f) {
+      const glm::vec2 OScreen((OClip.x / OClip.w * 0.5f + 0.5f) * DrawExtent.width,
+                               (1.0f - (OClip.y / OClip.w * 0.5f + 0.5f)) * DrawExtent.height);
+      const glm::vec2 TScreen((TClip.x / TClip.w * 0.5f + 0.5f) * DrawExtent.width,
+                               (1.0f - (TClip.y / TClip.w * 0.5f + 0.5f)) * DrawExtent.height);
+      const float PixelsPerUnit = glm::distance(OScreen, TScreen);
+      if (PixelsPerUnit > 0.001f) {
+        GizmoScale = DesiredPixelLength / PixelsPerUnit;
+      }
+    }
+  }
+
   VkRenderingAttachmentInfo ColorAttachment = VkInit::AttachmentInfo(
       DrawImageView, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
   VkRenderingInfo RenderingInfo =
@@ -223,7 +243,7 @@ void VulkanGizmoRenderer::DrawGizmoOverlay(VkCommandBuffer CommandBuffer,
     Push.ViewProjection = VP;
     Push.StartWorld = glm::vec4(Gizmo.WorldPosition, 0.0f);
     Push.EndWorld =
-        glm::vec4(Gizmo.WorldPosition + Axis.Direction * Gizmo.Scale, 0.0f);
+        glm::vec4(Gizmo.WorldPosition + Axis.Direction * GizmoScale, 0.0f);
     Push.Color = Axis.Color;
     vkCmdPushConstants(CommandBuffer, m_PipelineLayout,
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
