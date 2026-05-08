@@ -242,6 +242,7 @@ export function Viewport() {
     applySelectionChanged,
     applyParticipantCameraUpdate,
     applyObjectLockChanged,
+    setAssets,
     setSessionState,
     sessionStatusText,
     setSessionStatusText,
@@ -682,6 +683,21 @@ export function Viewport() {
         if (objectId) {
           applyObjectLockChanged(objectId, lockState, lockOwnerUserId)
         }
+        return
+      }
+
+      if (message.type === "asset_list") {
+        const raw = Array.isArray(message.assets) ? message.assets : []
+        setAssets(
+          raw
+            .filter((a): a is Record<string, unknown> => !!a && typeof a === "object")
+            .map((a) => ({
+              id: typeof a.id === "number" ? a.id : Number(a.id),
+              name: typeof a.name === "string" ? a.name : String(a.name ?? ""),
+              kind: a.kind === "texture" ? ("texture" as const) : ("mesh" as const),
+              path: typeof a.path === "string" ? a.path : String(a.path ?? ""),
+            }))
+        )
         return
       }
 
@@ -1418,6 +1434,9 @@ export function Viewport() {
           await refreshSessionSnapshotSafely("command")
         }
         return accepted
+      },
+      listAssets: async () => {
+        await sendCommand({ type: "list_assets" }, "reliable")
       },
       reparentObject: async (objectId, newParentId) => {
         const accepted = await sendCommand(
