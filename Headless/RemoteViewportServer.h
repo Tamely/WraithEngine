@@ -6,6 +6,7 @@
 
 #include <Remote/SessionTransport.h>
 #include <Renderer/RendererBackend.h>
+#include <Renderer/RenderScene.h>
 #include <Renderer/VideoEncoding.h>
 
 #include <atomic>
@@ -56,6 +57,8 @@ private:
     std::string ObjectId;
     glm::vec3 StartRotDeg{0.0f};
     glm::vec3 StartScale{1.0f};
+    GizmoMode Mode{GizmoMode::Translate};
+    float GizmoScaleAtDragStart{1.0f};
   };
 
   struct RemoteClientSession {
@@ -68,6 +71,7 @@ private:
     std::unique_ptr<IVideoEncoder> VideoEncoder;
     std::unique_ptr<PacketOutput> VideoPacketOutput;
     std::optional<ActiveGizmoDrag> GizmoDrag;
+    GizmoMode CurrentGizmoMode{GizmoMode::Translate};
   };
 
   struct ClientSessionResolution {

@@ -5,6 +5,7 @@
 #include <Remote/SessionTransport.h>
 #include <Renderer/Material.h>
 #include <Renderer/Mesh.h>
+#include <Renderer/RenderScene.h>
 #include <Session/EditorSceneRendererAdapter.h>
 #include <Session/EditorSession.h>
 
@@ -45,6 +46,8 @@ public:
 
   void SetGizmoHoveredAxis(SessionUserId User, int Axis);
   int GetGizmoHoveredAxis(SessionUserId User) const;
+  void SetGizmoMode(SessionUserId User, GizmoMode Mode);
+  GizmoMode GetGizmoMode(SessionUserId User) const;
   std::vector<RenderMeshSubmission>
   BuildPresenceOverlaySubmissions(SessionUserId RenderUser) const;
 
@@ -62,5 +65,7 @@ private:
   mutable std::unordered_map<uint64_t, MaterialInstanceRef> m_PresenceMaterials;
   mutable std::mutex m_GizmoHoverMutex;
   std::unordered_map<uint64_t, int> m_GizmoHoveredAxisByUser;
+  mutable std::mutex m_GizmoModeMutex;
+  std::unordered_map<uint64_t, GizmoMode> m_GizmoModeByUser;
 };
 } // namespace Axiom

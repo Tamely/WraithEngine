@@ -12,10 +12,13 @@
 namespace Axiom {
 class Camera;
 
+enum class GizmoMode { Translate, Scale, Rotate };
+
 struct GizmoOverlayData {
   glm::vec3 WorldPosition{0.0f};
   float Scale{0.5f};
   int HoveredAxis{-1};
+  GizmoMode Mode{GizmoMode::Translate};
 };
 
 class RenderScene {

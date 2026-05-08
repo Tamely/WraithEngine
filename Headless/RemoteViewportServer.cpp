@@ -814,6 +814,7 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::GizmoDragStart:
   case HeadlessCommandType::GizmoDragUpdate:
   case HeadlessCommandType::GizmoDragEnd:
+  case HeadlessCommandType::SetGizmoMode:
     break;
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
@@ -1413,6 +1414,7 @@ bool RemoteViewportServer::HandleWebSocketMessage(std::string_view Payload) {
   case HeadlessCommandType::GizmoDragStart:
   case HeadlessCommandType::GizmoDragUpdate:
   case HeadlessCommandType::GizmoDragEnd:
+  case HeadlessCommandType::SetGizmoMode:
     return false;
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
@@ -1457,6 +1459,10 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::SetTransform:
     m_Host.SubmitRemoteCommand(Client->User, Command->EditorPayload);
     return true;
+  case HeadlessCommandType::SetGizmoMode:
+    Client->CurrentGizmoMode = Command->Mode;
+    m_Host.GetHeadlessLayer().SetGizmoMode(Client->User, Command->Mode);
+    return true;
   case HeadlessCommandType::GizmoHover: {
     if (Client->GizmoDrag.has_value()) {
       return true;
@@ -1473,9 +1479,13 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
           Viewport->Camera, Selected->Transform->Location,
           m_Options.Width, m_Options.Height);
       const int Axis =
-          HitTestGizmoAxes(Viewport->Camera, m_Options.Width, m_Options.Height,
-                           Command->MousePosition,
-                           Selected->Transform->Location, GizmoScale);
+          (Client->CurrentGizmoMode == GizmoMode::Rotate)
+              ? HitTestGizmoRings(Viewport->Camera, m_Options.Width,
+                                  m_Options.Height, Command->MousePosition,
+                                  Selected->Transform->Location, GizmoScale)
+              : HitTestGizmoAxes(Viewport->Camera, m_Options.Width,
+                                 m_Options.Height, Command->MousePosition,
+                                 Selected->Transform->Location, GizmoScale);
       m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, Axis);
     } else {
       m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
@@ -1499,19 +1509,39 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     const glm::vec3 &ObjPos = Selected->Transform->Location;
     const float GizmoScale = ComputeGizmoScale(
         Viewport->Camera, ObjPos, m_Options.Width, m_Options.Height);
-    auto DragState = BeginGizmoDrag(
-        Viewport->Camera, m_Options.Width, m_Options.Height,
-        Command->MousePosition, ObjPos, GizmoScale, ObjPos);
-    if (!DragState.has_value()) {
-      return true;
+    if (Client->CurrentGizmoMode == GizmoMode::Rotate) {
+      auto DragState = BeginGizmoRotateDrag(
+          Viewport->Camera, m_Options.Width, m_Options.Height,
+          Command->MousePosition, ObjPos, GizmoScale, ObjPos);
+      if (!DragState.has_value()) {
+        return true;
+      }
+      Client->GizmoDrag = ActiveGizmoDrag{
+          .Math = *DragState,
+          .ObjectId = Selected->ObjectId,
+          .StartRotDeg = Selected->Transform->RotationDegrees,
+          .StartScale = Selected->Transform->Scale,
+          .Mode = GizmoMode::Rotate,
+          .GizmoScaleAtDragStart = GizmoScale,
+      };
+      m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, DragState->Axis);
+    } else {
+      auto DragState = BeginGizmoDrag(
+          Viewport->Camera, m_Options.Width, m_Options.Height,
+          Command->MousePosition, ObjPos, GizmoScale, ObjPos);
+      if (!DragState.has_value()) {
+        return true;
+      }
+      Client->GizmoDrag = ActiveGizmoDrag{
+          .Math = *DragState,
+          .ObjectId = Selected->ObjectId,
+          .StartRotDeg = Selected->Transform->RotationDegrees,
+          .StartScale = Selected->Transform->Scale,
+          .Mode = Client->CurrentGizmoMode,
+          .GizmoScaleAtDragStart = GizmoScale,
+      };
+      m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, DragState->Axis);
     }
-    Client->GizmoDrag = ActiveGizmoDrag{
-        .Math = *DragState,
-        .ObjectId = Selected->ObjectId,
-        .StartRotDeg = Selected->Transform->RotationDegrees,
-        .StartScale = Selected->Transform->Scale,
-    };
-    m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, DragState->Axis);
     return true;
   }
   case HeadlessCommandType::GizmoDragUpdate: {
@@ -1525,16 +1555,36 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     if (Viewport == nullptr) {
       return true;
     }
-    const glm::vec3 NewPos = UpdateGizmoDrag(
-        Client->GizmoDrag->Math, Viewport->Camera,
-        m_Options.Width, m_Options.Height,
-        Command->MousePosition.x, Command->MousePosition.y);
+    const ActiveGizmoDrag &Drag = *Client->GizmoDrag;
+    glm::vec3 Location = Drag.Math.ObjectStartPos;
+    glm::vec3 RotDeg = Drag.StartRotDeg;
+    glm::vec3 Scale = Drag.StartScale;
+    if (Drag.Mode == GizmoMode::Translate) {
+      Location = UpdateGizmoDrag(Drag.Math, Viewport->Camera,
+                                 m_Options.Width, m_Options.Height,
+                                 Command->MousePosition.x, Command->MousePosition.y);
+    } else if (Drag.Mode == GizmoMode::Scale) {
+      const glm::vec3 NewPosTmp =
+          UpdateGizmoDrag(Drag.Math, Viewport->Camera, m_Options.Width,
+                          m_Options.Height, Command->MousePosition.x,
+                          Command->MousePosition.y);
+      const float DeltaT =
+          glm::dot(NewPosTmp - Drag.Math.ObjectStartPos, Drag.Math.AxisDir);
+      const float Factor = std::max(
+          0.001f, 1.0f + DeltaT / std::max(0.001f, Drag.GizmoScaleAtDragStart));
+      Scale[Drag.Math.Axis] = Drag.StartScale[Drag.Math.Axis] * Factor;
+    } else {
+      const float DeltaDeg = UpdateGizmoRotateDrag(
+          Drag.Math, Viewport->Camera, m_Options.Width, m_Options.Height,
+          Command->MousePosition.x, Command->MousePosition.y);
+      RotDeg[Drag.Math.Axis] = Drag.StartRotDeg[Drag.Math.Axis] + DeltaDeg;
+    }
     EditorCommand Cmd;
     Cmd.Payload = SetTransformCommand{
-        .ObjectId = Client->GizmoDrag->ObjectId,
-        .Location = NewPos,
-        .RotationDegrees = Client->GizmoDrag->StartRotDeg,
-        .Scale = Client->GizmoDrag->StartScale,
+        .ObjectId = Drag.ObjectId,
+        .Location = Location,
+        .RotationDegrees = RotDeg,
+        .Scale = Scale,
     };
     m_Host.SubmitRemoteCommand(Client->User, Cmd);
     return true;
@@ -1548,16 +1598,36 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     const EditorViewportState *Viewport =
         Session.FindViewport(Client->User);
     if (Viewport != nullptr) {
-      const glm::vec3 NewPos = UpdateGizmoDrag(
-          Client->GizmoDrag->Math, Viewport->Camera,
-          m_Options.Width, m_Options.Height,
-          Command->MousePosition.x, Command->MousePosition.y);
+      const ActiveGizmoDrag &Drag = *Client->GizmoDrag;
+      glm::vec3 Location = Drag.Math.ObjectStartPos;
+      glm::vec3 RotDeg = Drag.StartRotDeg;
+      glm::vec3 Scale = Drag.StartScale;
+      if (Drag.Mode == GizmoMode::Translate) {
+        Location = UpdateGizmoDrag(Drag.Math, Viewport->Camera,
+                                   m_Options.Width, m_Options.Height,
+                                   Command->MousePosition.x, Command->MousePosition.y);
+      } else if (Drag.Mode == GizmoMode::Scale) {
+        const glm::vec3 NewPosTmp =
+            UpdateGizmoDrag(Drag.Math, Viewport->Camera, m_Options.Width,
+                            m_Options.Height, Command->MousePosition.x,
+                            Command->MousePosition.y);
+        const float DeltaT =
+            glm::dot(NewPosTmp - Drag.Math.ObjectStartPos, Drag.Math.AxisDir);
+        const float Factor = std::max(
+            0.001f, 1.0f + DeltaT / std::max(0.001f, Drag.GizmoScaleAtDragStart));
+        Scale[Drag.Math.Axis] = Drag.StartScale[Drag.Math.Axis] * Factor;
+      } else {
+        const float DeltaDeg = UpdateGizmoRotateDrag(
+            Drag.Math, Viewport->Camera, m_Options.Width, m_Options.Height,
+            Command->MousePosition.x, Command->MousePosition.y);
+        RotDeg[Drag.Math.Axis] = Drag.StartRotDeg[Drag.Math.Axis] + DeltaDeg;
+      }
       EditorCommand Cmd;
       Cmd.Payload = SetTransformCommand{
-          .ObjectId = Client->GizmoDrag->ObjectId,
-          .Location = NewPos,
-          .RotationDegrees = Client->GizmoDrag->StartRotDeg,
-          .Scale = Client->GizmoDrag->StartScale,
+          .ObjectId = Drag.ObjectId,
+          .Location = Location,
+          .RotationDegrees = RotDeg,
+          .Scale = Scale,
       };
       m_Host.SubmitRemoteCommand(Client->User, Cmd);
     }

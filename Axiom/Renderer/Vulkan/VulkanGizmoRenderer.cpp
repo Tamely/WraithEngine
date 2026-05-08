@@ -6,6 +6,7 @@
 #include "Renderer/Vulkan/VulkanPipeline.h"
 
 #include <array>
+#include <glm/gtc/constants.hpp>
 
 #ifndef AXIOM_CONTENT_DIR
 #define AXIOM_CONTENT_DIR "Content"
@@ -235,23 +236,67 @@ void VulkanGizmoRenderer::DrawGizmoOverlay(VkCommandBuffer CommandBuffer,
       {{0.0f, 0.0f, 1.0f}, {0.15f, 0.15f, 1.0f, 1.0f}},
   }};
 
-  for (int AxisIndex = 0; AxisIndex < 3; ++AxisIndex) {
-    AxisDef Axis = BaseAxes[AxisIndex];
-    if (AxisIndex == Gizmo.HoveredAxis) {
-      const glm::vec3 Base(Axis.Color);
-      Axis.Color = glm::vec4(Base + (glm::vec3(1.0f) - Base) * 0.7f, 1.0f);
-    }
+  auto DrawSegment = [&](glm::vec3 Start, glm::vec3 End, glm::vec4 Color) {
     GizmoPushConstants Push{};
     Push.ViewProjection = VP;
-    Push.StartWorld = glm::vec4(Gizmo.WorldPosition, 0.0f);
-    Push.EndWorld =
-        glm::vec4(Gizmo.WorldPosition + Axis.Direction * GizmoScale, 0.0f);
-    Push.Color = Axis.Color;
+    Push.StartWorld = glm::vec4(Start, 0.0f);
+    Push.EndWorld = glm::vec4(End, 0.0f);
+    Push.Color = Color;
     Push.ViewportSize = glm::vec2(DrawExtent.width, DrawExtent.height);
     vkCmdPushConstants(CommandBuffer, m_PipelineLayout,
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(GizmoPushConstants), &Push);
     vkCmdDraw(CommandBuffer, 6, 1, 0, 0);
+  };
+
+  if (Gizmo.Mode == GizmoMode::Rotate) {
+    constexpr int RingSegments = 24;
+    for (int AxisIndex = 0; AxisIndex < 3; ++AxisIndex) {
+      AxisDef Axis = BaseAxes[AxisIndex];
+      if (AxisIndex == Gizmo.HoveredAxis) {
+        const glm::vec3 Base(Axis.Color);
+        Axis.Color = glm::vec4(Base + (glm::vec3(1.0f) - Base) * 0.7f, 1.0f);
+      }
+      const glm::vec3 Ref = (glm::abs(Axis.Direction.x) < 0.9f)
+                                ? glm::vec3(1, 0, 0)
+                                : glm::vec3(0, 1, 0);
+      const glm::vec3 P1 = glm::normalize(glm::cross(Axis.Direction, Ref));
+      const glm::vec3 P2 = glm::cross(Axis.Direction, P1);
+      for (int J = 0; J < RingSegments; ++J) {
+        const float A0 = glm::two_pi<float>() * J / RingSegments;
+        const float A1 = glm::two_pi<float>() * (J + 1) / RingSegments;
+        const glm::vec3 W0 = Gizmo.WorldPosition +
+                              GizmoScale * (glm::cos(A0) * P1 + glm::sin(A0) * P2);
+        const glm::vec3 W1 = Gizmo.WorldPosition +
+                              GizmoScale * (glm::cos(A1) * P1 + glm::sin(A1) * P2);
+        DrawSegment(W0, W1, Axis.Color);
+      }
+    }
+  } else {
+    // Translate and Scale: draw axis arrows
+    const std::array<std::array<glm::vec3, 2>, 3> ScaleCapPerps = {{
+        {glm::vec3(0, 1, 0), glm::vec3(0, 0, 1)},
+        {glm::vec3(1, 0, 0), glm::vec3(0, 0, 1)},
+        {glm::vec3(1, 0, 0), glm::vec3(0, 1, 0)},
+    }};
+    for (int AxisIndex = 0; AxisIndex < 3; ++AxisIndex) {
+      AxisDef Axis = BaseAxes[AxisIndex];
+      if (AxisIndex == Gizmo.HoveredAxis) {
+        const glm::vec3 Base(Axis.Color);
+        Axis.Color = glm::vec4(Base + (glm::vec3(1.0f) - Base) * 0.7f, 1.0f);
+      }
+      DrawSegment(Gizmo.WorldPosition,
+                  Gizmo.WorldPosition + Axis.Direction * GizmoScale,
+                  Axis.Color);
+      if (Gizmo.Mode == GizmoMode::Scale) {
+        const glm::vec3 Tip = Gizmo.WorldPosition + Axis.Direction * GizmoScale;
+        const float CapSize = GizmoScale * 0.18f;
+        const glm::vec3 &CP1 = ScaleCapPerps[AxisIndex][0];
+        const glm::vec3 &CP2 = ScaleCapPerps[AxisIndex][1];
+        DrawSegment(Tip - CP1 * CapSize, Tip + CP1 * CapSize, Axis.Color);
+        DrawSegment(Tip - CP2 * CapSize, Tip + CP2 * CapSize, Axis.Color);
+      }
+    }
   }
 
   vkCmdEndRendering(CommandBuffer);

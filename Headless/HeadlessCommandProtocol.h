@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Renderer/RendererBackend.h>
+#include <Renderer/RenderScene.h>
 #include <Renderer/VideoEncoding.h>
 #include <Session/EditorCommand.h>
 #include <Session/EditorEvent.h>
@@ -34,6 +35,7 @@ enum class HeadlessCommandType {
   GizmoDragStart,
   GizmoDragUpdate,
   GizmoDragEnd,
+  SetGizmoMode,
   RenderFrame,
   Quit,
 };
@@ -43,6 +45,7 @@ struct HeadlessCommand {
   EditorCommand EditorPayload;
   RendererViewMode ViewMode{RendererViewMode::Lit};
   glm::vec2 MousePosition{0.0f};
+  GizmoMode Mode{GizmoMode::Translate};
 };
 
 struct HeadlessAppOptions {
