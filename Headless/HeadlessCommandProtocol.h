@@ -47,6 +47,7 @@ enum class HeadlessCommandType {
   SaveScene,
   AttachScript,
   DetachScript,
+  ReloadScripts,
   Heartbeat,
   RenderFrame,
   Quit,

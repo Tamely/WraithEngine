@@ -876,6 +876,7 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::GetSchema:
   case HeadlessCommandType::SetProperty:
   case HeadlessCommandType::SaveScene:
+  case HeadlessCommandType::ReloadScripts:
     break;
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
@@ -1476,6 +1477,7 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::AttachScript:
   case HeadlessCommandType::DetachScript:
+  case HeadlessCommandType::ReloadScripts:
   case HeadlessCommandType::UpdateViewportCamera:
   case HeadlessCommandType::GizmoHover:
   case HeadlessCommandType::GizmoDragStart:
@@ -1555,6 +1557,14 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::DetachScript:
     m_Host.SubmitRemoteCommand(Client->User, Command->EditorPayload);
     return true;
+  case HeadlessCommandType::ReloadScripts: {
+    m_Host.ReloadUserScripts();
+    if (Client->WebRtcSession != nullptr) {
+      Client->WebRtcSession->SendReliableMessage(
+          "{\"type\":\"scripts_reloaded\"}");
+    }
+    return true;
+  }
   case HeadlessCommandType::Heartbeat: {
     const EditorUserPresence *Presence =
         m_Host.GetHeadlessLayer().GetSession().FindPresence(Client->User);

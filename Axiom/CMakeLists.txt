@@ -329,9 +329,16 @@ if(AXIOM_ENABLE_SCRIPTING)
     VERBATIM
   )
   add_dependencies(AxiomCore WraithEngineManaged)
+
+  if(AXIOM_SCRIPTING_WATCH AND APPLE)
+    target_compile_definitions(AxiomCore PUBLIC AXIOM_SCRIPTING_WATCH=1)
+  else()
+    target_compile_definitions(AxiomCore PUBLIC AXIOM_SCRIPTING_WATCH=0)
+  endif()
 else()
   target_compile_definitions(AxiomCore PUBLIC AXIOM_SCRIPTING_ENABLED=0)
   target_compile_definitions(AxiomCore PUBLIC AXIOM_CORAL_MANAGED_DIR="")
+  target_compile_definitions(AxiomCore PUBLIC AXIOM_SCRIPTING_WATCH=0)
 endif()
 
 if(AXIOM_WEBRTC_COMPILE_OPTIONS)

@@ -46,6 +46,16 @@ HeadlessSessionHost::HeadlessSessionHost(const ApplicationArgs &Args,
 
 bool HeadlessSessionHost::Step() { return Application::Step(); }
 
+void HeadlessSessionHost::LoadUserScripts(
+    const std::filesystem::path &AssemblyPath) {
+  m_ScriptHost.LoadUserAssembly(AssemblyPath);
+  m_ScriptHost.StartFileWatcher();
+}
+
+void HeadlessSessionHost::ReloadUserScripts() {
+  m_ScriptHost.ReloadUserAssembly();
+}
+
 bool HeadlessSessionHost::LoadStartupSceneIntoSession() {
   return m_Layer->LoadStartupSceneIntoSession();
 }

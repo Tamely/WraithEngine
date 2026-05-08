@@ -713,6 +713,9 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
   if (*Type == "save_scene") {
     return HeadlessCommand{.Type = HeadlessCommandType::SaveScene};
   }
+  if (*Type == "reload_scripts") {
+    return HeadlessCommand{.Type = HeadlessCommandType::ReloadScripts};
+  }
   if (*Type == "attach_script") {
     static const std::regex ObjectIdPattern(R"json("objectId"\s*:\s*"([^"]+)")json");
     static const std::regex ClassPattern(R"json("scriptClass"\s*:\s*"([^"]*)")json");
@@ -826,6 +829,7 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::SaveScene:
   case HeadlessCommandType::AttachScript:
   case HeadlessCommandType::DetachScript:
+  case HeadlessCommandType::ReloadScripts:
   case HeadlessCommandType::Heartbeat:
   case HeadlessCommandType::Quit:
     return Command;

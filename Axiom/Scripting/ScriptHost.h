@@ -3,8 +3,10 @@
 #include <Session/EditorEvent.h>
 #include <Session/SessionTypes.h>
 
+#include <atomic>
 #include <filesystem>
 #include <string>
+#include <thread>
 #include <unordered_map>
 
 #if AXIOM_SCRIPTING_ENABLED
@@ -37,6 +39,17 @@ public:
   // OnDestroy() before the ALC is unloaded and re-created.
   void LoadUserAssembly(const std::filesystem::path &AssemblyPath);
 
+  // Unload the "UserScripts" ALC, reload the assembly from the same path it
+  // was originally loaded from, and re-instantiate all scripts that were live
+  // before the reload.  No-op if no user assembly has been loaded yet.
+  void ReloadUserAssembly();
+
+  // Start/stop the kqueue-based file watcher that auto-reloads when the
+  // assembly on disk changes.  Only available when AXIOM_SCRIPTING_WATCH=1
+  // (macOS only).  No-op on other platforms / when the flag is off.
+  void StartFileWatcher();
+  void StopFileWatcher();
+
   // -----------------------------------------------------------------------
   // Per-frame tick — call after EditorSession::Tick() each frame
   // -----------------------------------------------------------------------
@@ -58,6 +71,9 @@ public:
   bool IsInitialized() const { return m_Initialized; }
   bool IsEngineAssemblyLoaded() const { return m_EngineAssemblyLoaded; }
   bool IsUserAssemblyLoaded() const { return m_UserAssemblyLoaded; }
+  const std::filesystem::path &GetUserAssemblyPath() const {
+    return m_UserAssemblyPath;
+  }
 
 #if AXIOM_SCRIPTING_ENABLED
   Coral::HostInstance &GetHost() { return m_Host; }
@@ -87,9 +103,13 @@ private:
   std::unordered_map<std::string, Coral::ManagedObject> m_ScriptInstances;
 #endif
   EditorSession *m_Session{nullptr};
+  std::filesystem::path m_UserAssemblyPath;
   bool m_Initialized{false};
   bool m_EngineAssemblyLoaded{false};
   bool m_UserAssemblyLoaded{false};
+  // File watcher (kqueue, macOS, AXIOM_SCRIPTING_WATCH=1 only)
+  std::thread m_WatcherThread;
+  std::atomic<bool> m_WatcherRunning{false};
 };
 
 } // namespace Axiom

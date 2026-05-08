@@ -8,6 +8,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(BUILD_TESTING "Build tests" OFF)
 option(AXIOM_ENABLE_SCRIPTING
        "Enable the Coral C# scripting host" OFF)
+option(AXIOM_SCRIPTING_WATCH
+       "Auto-reload user scripts when the assembly changes on disk (macOS kqueue)" OFF)
 option(AXIOM_ENABLE_WEBRTC
        "Enable the macOS WebRTC transport integration seam" OFF)
 set(AXIOM_WEBRTC_FRAMEWORK_PATH "" CACHE PATH

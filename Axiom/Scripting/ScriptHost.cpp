@@ -4,6 +4,13 @@
 #include <Core/Log.h>
 #include <Session/EditorSession.h>
 
+#if AXIOM_SCRIPTING_WATCH
+#include <fcntl.h>
+#include <sys/event.h>
+#include <sys/time.h>
+#include <unistd.h>
+#endif
+
 namespace Axiom {
 
 ScriptHost::~ScriptHost() {
@@ -157,6 +164,7 @@ void ScriptHost::LoadUserAssembly(const std::filesystem::path &AssemblyPath) {
   }
 
   m_UserAssembly = &Assembly;
+  m_UserAssemblyPath = AssemblyPath;
   m_UserAssemblyLoaded = true;
   A_CORE_INFO("ScriptHost: user assembly loaded ({})", Assembly.GetName());
 
@@ -173,6 +181,59 @@ void ScriptHost::LoadUserAssembly(const std::filesystem::path &AssemblyPath) {
   }
 #else
   (void)AssemblyPath;
+#endif
+}
+
+void ScriptHost::ReloadUserAssembly() {
+#if AXIOM_SCRIPTING_ENABLED
+  if (!m_UserAssemblyLoaded) {
+    A_CORE_WARN("ScriptHost: reload requested but no user assembly is loaded");
+    return;
+  }
+
+  A_CORE_INFO("ScriptHost: reloading user assembly '{}'",
+              m_UserAssemblyPath.string());
+
+  // 1. Snapshot which objects had scripts — we need to re-instantiate them
+  //    after the ALC is gone (m_ScriptInstances will be cleared).
+  std::vector<std::pair<std::string, std::string>> ToReinstate;
+  if (m_Session != nullptr) {
+    for (const auto &[Id, Details] :
+         m_Session->GetState().Scene.ObjectDetailsById) {
+      if (Details.Kind == EditorSceneItemKind::Actor &&
+          Details.ScriptClass.has_value()) {
+        ToReinstate.emplace_back(Id, *Details.ScriptClass);
+      }
+    }
+  }
+
+  // 2. Call OnDestroy on all live instances and clear them
+  DestroyAllScripts();
+
+  // 3. Unload the old ALC
+  m_Host.UnloadAssemblyLoadContext(m_UserALC);
+  m_UserAssembly = nullptr;
+  m_UserAssemblyLoaded = false;
+
+  // 4. Create a fresh ALC and reload the assembly from the cached path
+  m_UserALC = m_Host.CreateAssemblyLoadContext("UserScripts");
+  auto &Assembly = m_UserALC.LoadAssembly(m_UserAssemblyPath.string());
+
+  if (Assembly.GetLoadStatus() != Coral::AssemblyLoadStatus::Success) {
+    A_CORE_ERROR("ScriptHost: reload failed — could not load '{}' (status {})",
+                 m_UserAssemblyPath.string(),
+                 static_cast<int>(Assembly.GetLoadStatus()));
+    return;
+  }
+
+  m_UserAssembly = &Assembly;
+  m_UserAssemblyLoaded = true;
+  A_CORE_INFO("ScriptHost: user assembly reloaded ({})", Assembly.GetName());
+
+  // 5. Re-instantiate every script that existed before the reload
+  for (const auto &[ObjectId, ClassName] : ToReinstate) {
+    InstantiateScript(ObjectId, ClassName);
+  }
 #endif
 }
 
@@ -229,6 +290,7 @@ void ScriptHost::OnEditorEvent(const PublishedEditorEvent &Event) {
 }
 
 void ScriptHost::Shutdown() {
+  StopFileWatcher();
 #if AXIOM_SCRIPTING_ENABLED
   if (m_Initialized) {
     DestroyAllScripts();
@@ -242,6 +304,95 @@ void ScriptHost::Shutdown() {
     A_CORE_INFO("ScriptHost shutdown");
   }
 #endif
+}
+
+// ---------------------------------------------------------------------------
+// File watcher
+// ---------------------------------------------------------------------------
+
+void ScriptHost::StartFileWatcher() {
+#if AXIOM_SCRIPTING_WATCH
+  if (m_WatcherRunning.load()) {
+    return; // already running
+  }
+  if (m_UserAssemblyPath.empty()) {
+    A_CORE_WARN("ScriptHost: StartFileWatcher called before LoadUserAssembly");
+    return;
+  }
+
+  m_WatcherRunning.store(true);
+  m_WatcherThread = std::thread([this] {
+    const std::filesystem::path WatchPath = m_UserAssemblyPath;
+
+    // Watch the parent directory — the DLL itself may be replaced atomically
+    // (deleted + rewritten) which would invalidate a vnode watch on the file.
+    const std::filesystem::path WatchDir = WatchPath.parent_path();
+
+    const int KQ = kqueue();
+    if (KQ < 0) {
+      A_CORE_ERROR("ScriptHost watcher: kqueue() failed");
+      m_WatcherRunning.store(false);
+      return;
+    }
+
+    const int DirFd = open(WatchDir.c_str(), O_RDONLY | O_EVTONLY);
+    if (DirFd < 0) {
+      close(KQ);
+      A_CORE_ERROR("ScriptHost watcher: could not open '{}' for watching",
+                   WatchDir.string());
+      m_WatcherRunning.store(false);
+      return;
+    }
+
+    struct kevent Change;
+    EV_SET(&Change, DirFd, EVFILT_VNODE,
+           EV_ADD | EV_CLEAR,
+           NOTE_WRITE | NOTE_EXTEND | NOTE_RENAME,
+           0, nullptr);
+    kevent(KQ, &Change, 1, nullptr, 0, nullptr);
+
+    std::filesystem::file_time_type LastMtime{};
+    if (std::filesystem::exists(WatchPath)) {
+      LastMtime = std::filesystem::last_write_time(WatchPath);
+    }
+
+    A_CORE_INFO("ScriptHost watcher: watching '{}' for changes",
+                WatchPath.string());
+
+    while (m_WatcherRunning.load()) {
+      struct kevent Event;
+      struct timespec Timeout{1, 0}; // 1-second timeout so we can check the stop flag
+      const int N = kevent(KQ, nullptr, 0, &Event, 1, &Timeout);
+      if (N <= 0) {
+        continue; // timeout or error — loop back and check stop flag
+      }
+
+      // Directory was modified — check if our DLL's mtime changed
+      if (!std::filesystem::exists(WatchPath)) {
+        continue;
+      }
+      const auto NewMtime = std::filesystem::last_write_time(WatchPath);
+      if (NewMtime != LastMtime) {
+        LastMtime = NewMtime;
+        A_CORE_INFO("ScriptHost watcher: assembly change detected, reloading");
+        ReloadUserAssembly();
+      }
+    }
+
+    close(DirFd);
+    close(KQ);
+    A_CORE_INFO("ScriptHost watcher: stopped");
+  });
+#else
+  A_CORE_WARN("ScriptHost: file watcher not available "
+              "(rebuild with -DAXIOM_SCRIPTING_WATCH=ON)");
+#endif
+}
+
+void ScriptHost::StopFileWatcher() {
+  if (m_WatcherRunning.exchange(false) && m_WatcherThread.joinable()) {
+    m_WatcherThread.join();
+  }
 }
 
 // ---------------------------------------------------------------------------

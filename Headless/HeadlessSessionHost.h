@@ -1,5 +1,7 @@
 #pragma once
 
+#include <filesystem>
+
 #include <Core/Application.h>
 #include <Remote/AxiomSessionEndpoint.h>
 #include <Renderer/VideoEncoding.h>
@@ -35,8 +37,11 @@ public:
   const HeadlessRenderViewState *FindRemoteRenderView(
       std::string_view ClientId) const;
   const HeadlessRenderViewState *FindRenderView(SessionUserId User) const;
+  void LoadUserScripts(const std::filesystem::path &AssemblyPath);
+  void ReloadUserScripts();
   ISessionTransport &GetTransport() { return *m_Endpoint; }
   HeadlessSessionLayer &GetHeadlessLayer() { return *m_Layer; }
+  ScriptHost &GetScriptHost() { return m_ScriptHost; }
   const HeadlessRenderViewRegistry &GetRenderViews() const {
     return m_RenderViews;
   }
