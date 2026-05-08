@@ -6,16 +6,20 @@ namespace WraithEngine;
 /// </summary>
 public abstract class Script
 {
-    // Set by the ScriptHost immediately after instantiation, before OnCreate().
-    internal GameObject? Owner { get; set; }
+    // Set by ScriptHost via ManagedObject.SetFieldValue immediately after
+    // instantiation, before OnCreate() is called. C++ writes the objectId string
+    // directly into this field using Coral's reflection-backed SetFieldValueRaw.
+#pragma warning disable CS0649
+    internal string _ObjectId = string.Empty;
+#pragma warning restore CS0649
+
+    private GameObject? _cachedOwner;
 
     /// <summary>
     /// The scene object this script is attached to.
     /// Always valid during OnCreate / OnTick / OnDestroy.
     /// </summary>
-    protected GameObject GameObject =>
-        Owner ?? throw new InvalidOperationException(
-            "Script.GameObject accessed before the script was attached to an object.");
+    protected GameObject GameObject => _cachedOwner ??= new GameObject(_ObjectId);
 
     // -----------------------------------------------------------------------
     // Lifecycle — override in your script class

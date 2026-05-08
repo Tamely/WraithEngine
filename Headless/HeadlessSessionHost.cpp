@@ -40,6 +40,8 @@ HeadlessSessionHost::HeadlessSessionHost(const ApplicationArgs &Args,
   m_ScriptHost.RegisterInternalCalls(m_Layer->GetSession(),
                                      SessionId{1},
                                      m_Layer->GetLocalUserId());
+  m_Layer->GetSession().Subscribe(&m_ScriptHost);
+  m_Layer->SetScriptHost(&m_ScriptHost);
 }
 
 bool HeadlessSessionHost::Step() { return Application::Step(); }

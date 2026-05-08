@@ -158,6 +158,9 @@ std::string EventPayloadType(const EditorEventPayload &Payload) {
   if (std::holds_alternative<ObjectLockChangedEvent>(Payload)) {
     return "object_lock_changed";
   }
+  if (std::holds_alternative<ScriptClassChangedEvent>(Payload)) {
+    return "script_class_changed";
+  }
   return "object_transform_updated";
 }
 
@@ -952,6 +955,15 @@ std::string SerializeEvent(const PublishedEditorEvent &Event) {
            << "\",\"lockOwnerUserId\":";
     if (LockChanged->LockOwner.has_value()) {
       Stream << LockChanged->LockOwner->Value;
+    } else {
+      Stream << "null";
+    }
+  } else if (const auto *ScriptChanged =
+                 std::get_if<ScriptClassChangedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"objectId\":\"" << EscapeJson(ScriptChanged->ObjectId)
+           << "\",\"scriptClass\":";
+    if (ScriptChanged->ScriptClass.has_value()) {
+      Stream << "\"" << EscapeJson(*ScriptChanged->ScriptClass) << "\"";
     } else {
       Stream << "null";
     }

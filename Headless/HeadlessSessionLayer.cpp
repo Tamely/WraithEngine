@@ -3,6 +3,7 @@
 #include "HeadlessRenderView.h"
 
 #include <Core/Application.h>
+#include <Scripting/ScriptHost.h>
 
 #include <Renderer/Camera.h>
 #include <Renderer/RenderCommand.h>
@@ -88,7 +89,12 @@ void HeadlessSessionLayer::OnAttach() {
   m_PresenceMarkerMesh = Renderer::Get().CreateMesh(BuildPresenceMarkerMeshData());
 }
 
-void HeadlessSessionLayer::OnUpdate() { m_Session.Tick(); }
+void HeadlessSessionLayer::OnUpdate() {
+  m_Session.Tick();
+  if (m_ScriptHost != nullptr) {
+    m_ScriptHost->Tick(Application::Get().GetDeltaTime());
+  }
+}
 
 void HeadlessSessionLayer::OnRender() {
   HeadlessRenderViewState RenderView{

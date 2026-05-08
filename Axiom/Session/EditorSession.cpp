@@ -1289,6 +1289,8 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
   It->second.ScriptClass = Command.ScriptClassName;
   A_CORE_INFO("EditorSession: attached script '{}' to '{}'",
               Command.ScriptClassName, Command.ObjectId);
+  PublishEvent({ScriptClassChangedEvent{.ObjectId = Command.ObjectId,
+                                        .ScriptClass = Command.ScriptClassName}});
 }
 
 void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
@@ -1298,6 +1300,8 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
     return;
   It->second.ScriptClass = std::nullopt;
   A_CORE_INFO("EditorSession: detached script from '{}'", Command.ObjectId);
+  PublishEvent({ScriptClassChangedEvent{.ObjectId = Command.ObjectId,
+                                        .ScriptClass = std::nullopt}});
 }
 
 void EditorSession::PublishEvent(const EditorEvent &Event) {
