@@ -61,6 +61,12 @@ struct ObjectDeletedEvent {
   std::string ObjectId;
 };
 
+struct ObjectReparentedEvent {
+  SessionUserId User;
+  std::string ObjectId;
+  std::string NewParentId;
+};
+
 struct PresenceChangedEvent {
   SessionUserId User;
   std::string DisplayName;
@@ -87,6 +93,7 @@ using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         ObjectVisibilityChangedEvent,
                                         ObjectCreatedEvent,
                                         ObjectDeletedEvent,
+                                        ObjectReparentedEvent,
                                         ObjectTransformUpdatedEvent>;
 
 struct EditorEvent {

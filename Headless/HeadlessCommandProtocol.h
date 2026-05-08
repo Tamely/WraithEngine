@@ -29,6 +29,7 @@ enum class HeadlessCommandType {
   CreateObject,
   DuplicateObject,
   DeleteObject,
+  ReparentObject,
   SetTransform,
   UpdateViewportCamera,
   GizmoHover,

@@ -66,6 +66,9 @@ std::string CommandTypeName(const EditorCommandPayload &Payload) {
   if (std::holds_alternative<DeleteObjectCommand>(Payload)) {
     return "delete_object";
   }
+  if (std::holds_alternative<ReparentObjectCommand>(Payload)) {
+    return "reparent_object";
+  }
   return "set_transform";
 }
 
@@ -787,6 +790,45 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
     }
   }
 
+  if (const auto *ReparentCmd =
+          std::get_if<ReparentObjectCommand>(&QueuedCommand.Command.Payload)) {
+    if (ReparentCmd->ObjectId.empty()) {
+      FailureReason = "Reparent commands require a non-empty object id.";
+      return false;
+    }
+    if (ReparentCmd->NewParentId.empty()) {
+      FailureReason = "Reparent commands require a non-empty new parent id.";
+      return false;
+    }
+    if (FindSceneItem(ReparentCmd->ObjectId) == nullptr) {
+      FailureReason = "Reparent targeted an unknown object.";
+      return false;
+    }
+    if (FindSceneItem(ReparentCmd->NewParentId) == nullptr) {
+      FailureReason = "Reparent new parent is an unknown object.";
+      return false;
+    }
+    if (ReparentCmd->ObjectId == ReparentCmd->NewParentId) {
+      FailureReason = "Cannot reparent an object onto itself.";
+      return false;
+    }
+    if (ReparentCmd->ObjectId == "world") {
+      FailureReason = "The world folder cannot be reparented.";
+      return false;
+    }
+    // Reject if new parent is a descendant of the object (would create cycle)
+    const Instance *Target =
+        FindInstanceById(m_SceneRoot.get(), ReparentCmd->ObjectId);
+    if (Target != nullptr) {
+      for (const std::string &DescId : CollectDescendantIds(Target)) {
+        if (DescId == ReparentCmd->NewParentId) {
+          FailureReason = "Cannot reparent an object onto one of its descendants.";
+          return false;
+        }
+      }
+    }
+  }
+
   return true;
 }
 
@@ -993,6 +1035,23 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
   PublishEvent({.Payload = ObjectDeletedEvent{
                     .User = QueuedCommand.Context.User,
                     .ObjectId = Command.ObjectId,
+                }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const ReparentObjectCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
+  Instance *Target = FindInstanceById(m_SceneRoot.get(), Command.ObjectId);
+  Instance *NewParent = FindInstanceById(m_SceneRoot.get(), Command.NewParentId);
+  if (!Target || !NewParent) return;
+  if (Target->GetParent() == NewParent) return;
+
+  Target->SetParent(NewParent);
+  SyncItemsFromTree();
+  PublishEvent({.Payload = ObjectReparentedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .ObjectId = Command.ObjectId,
+                    .NewParentId = Command.NewParentId,
                 }});
 }
 

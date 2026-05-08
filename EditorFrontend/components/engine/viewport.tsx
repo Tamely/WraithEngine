@@ -139,6 +139,11 @@ type RemoteViewportCommand =
       objectId: string
     }
   | {
+      type: "reparent_object"
+      objectId: string
+      newParentId: string
+    }
+  | {
       type: "gizmo_hover"
       mouseX: number
       mouseY: number
@@ -1380,6 +1385,20 @@ export function Viewport() {
           {
             type: "delete_object",
             objectId,
+          },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
+      reparentObject: async (objectId, newParentId) => {
+        const accepted = await sendCommand(
+          {
+            type: "reparent_object",
+            objectId,
+            newParentId,
           },
           "reliable"
         )

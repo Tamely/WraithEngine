@@ -223,6 +223,8 @@ private:
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const DeleteObjectCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const ReparentObjectCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SetTransformCommand &Command);
   void PublishEvent(const EditorEvent &Event);
 

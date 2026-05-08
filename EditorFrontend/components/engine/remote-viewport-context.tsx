@@ -99,6 +99,7 @@ interface RemoteViewportActions {
   createObject: (templateId: string) => Promise<boolean>
   duplicateObject: (objectId: string) => Promise<boolean>
   deleteObject: (objectId: string) => Promise<boolean>
+  reparentObject: (objectId: string, newParentId: string) => Promise<boolean>
 }
 
 export interface SessionObjectTransformUpdate {
@@ -161,6 +162,7 @@ interface RemoteViewportContextValue {
   createObject: (templateId: string) => Promise<boolean>
   duplicateObject: (objectId: string) => Promise<boolean>
   deleteObject: (objectId: string) => Promise<boolean>
+  reparentObject: (objectId: string, newParentId: string) => Promise<boolean>
 }
 
 interface SessionSnapshot {
@@ -209,6 +211,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     createObject: async () => false,
     duplicateObject: async () => false,
     deleteObject: async () => false,
+    reparentObject: async () => false,
   })
   const [connectionState, setConnectionState] =
     useState<RemoteViewportConnectionState>("idle")
@@ -338,6 +341,10 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     return actionsRef.current.deleteObject(objectId)
   }, [])
 
+  const reparentObject = useCallback(async (objectId: string, newParentId: string) => {
+    return actionsRef.current.reparentObject(objectId, newParentId)
+  }, [])
+
   const selectedObjectId =
     currentUserId !== null
       ? selections.find((selection) => selection.userId === currentUserId)?.objectId ?? null
@@ -395,6 +402,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       createObject,
       duplicateObject,
       deleteObject,
+      reparentObject,
     }),
     [
       appendEventLog,
@@ -438,6 +446,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       createObject,
       duplicateObject,
       deleteObject,
+      reparentObject,
       viewMode,
     ]
   )

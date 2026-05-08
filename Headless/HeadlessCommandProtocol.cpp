@@ -152,6 +152,9 @@ std::string EventPayloadType(const EditorEventPayload &Payload) {
   if (std::holds_alternative<ObjectDeletedEvent>(Payload)) {
     return "object_deleted";
   }
+  if (std::holds_alternative<ObjectReparentedEvent>(Payload)) {
+    return "object_reparented";
+  }
   return "object_transform_updated";
 }
 
@@ -619,6 +622,26 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
              }},
     };
   }
+  if (*Type == "reparent_object") {
+    static const std::regex ObjectIdPattern(
+        R"json("objectId"\s*:\s*"((?:\\.|[^"])*)")json");
+    static const std::regex NewParentIdPattern(
+        R"json("newParentId"\s*:\s*"((?:\\.|[^"])*)")json");
+    const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
+    const auto NewParentId = MatchString(JsonLine, NewParentIdPattern);
+    if (!ObjectId.has_value() || !NewParentId.has_value()) {
+      Error = "`reparent_object` requires `objectId` and `newParentId`.";
+      return std::nullopt;
+    }
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::ReparentObject,
+        .EditorPayload =
+            {.Payload = ReparentObjectCommand{
+                 .ObjectId = UnescapeJsonString(*ObjectId),
+                 .NewParentId = UnescapeJsonString(*NewParentId),
+             }},
+    };
+  }
   if (*Type == "update_viewport_camera") {
     const auto Movement = MatchVec3(JsonLine, MovementPattern);
     if (!Movement.has_value()) {
@@ -709,6 +732,7 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::CreateObject:
   case HeadlessCommandType::DuplicateObject:
   case HeadlessCommandType::DeleteObject:
+  case HeadlessCommandType::ReparentObject:
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::UpdateViewportCamera:
   case HeadlessCommandType::GizmoHover:
@@ -821,6 +845,11 @@ std::string SerializeEvent(const PublishedEditorEvent &Event) {
                  std::get_if<ObjectDeletedEvent>(&Event.Event.Payload)) {
     Stream << ",\"user\":" << Deleted->User.Value << ",\"objectId\":\""
            << EscapeJson(Deleted->ObjectId) << "\"";
+  } else if (const auto *Reparented =
+                 std::get_if<ObjectReparentedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"user\":" << Reparented->User.Value << ",\"objectId\":\""
+           << EscapeJson(Reparented->ObjectId) << "\",\"newParentId\":\""
+           << EscapeJson(Reparented->NewParentId) << "\"";
   } else if (const auto *Transform =
                  std::get_if<ObjectTransformUpdatedEvent>(&Event.Event.Payload)) {
     Stream << ",\"user\":" << Transform->User.Value << ",\"objectId\":\""

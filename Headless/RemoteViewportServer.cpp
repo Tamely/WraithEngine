@@ -807,6 +807,7 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::CreateObject:
   case HeadlessCommandType::DuplicateObject:
   case HeadlessCommandType::DeleteObject:
+  case HeadlessCommandType::ReparentObject:
   case HeadlessCommandType::SetTransform:
     m_Host.SubmitRemoteCommand(*User, Command->EditorPayload);
     break;
@@ -1408,6 +1409,7 @@ bool RemoteViewportServer::HandleWebSocketMessage(std::string_view Payload) {
   case HeadlessCommandType::CreateObject:
   case HeadlessCommandType::DuplicateObject:
   case HeadlessCommandType::DeleteObject:
+  case HeadlessCommandType::ReparentObject:
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::UpdateViewportCamera:
   case HeadlessCommandType::GizmoHover:
@@ -1456,6 +1458,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::CreateObject:
   case HeadlessCommandType::DuplicateObject:
   case HeadlessCommandType::DeleteObject:
+  case HeadlessCommandType::ReparentObject:
   case HeadlessCommandType::SetTransform:
     m_Host.SubmitRemoteCommand(Client->User, Command->EditorPayload);
     return true;
