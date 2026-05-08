@@ -264,7 +264,40 @@ A server-side transform gizmo is now fully implemented on the `scene-editing` br
 ### Coordinate Mapping Fix
 - mouse pixel coordinates sent to the server account for the `object-contain` CSS letterboxing on the video element: the actual content rectangle is computed from the uniform scale factor and centering offsets before mapping to server pixels, so hit-testing is accurate regardless of window aspect ratio
 
+## Collaboration v1
+
+Object locking, selection/lock visibility, presence indicators, and heartbeat-driven idle detection are now fully implemented.
+
+### Object Locking
+
+- `EditorObjectLockState` (`Unlocked` / `Locked`) lives in `Axiom/Session/SessionTypes.h` to avoid a circular header dependency between `EditorSession.h` and `EditorEvent.h`
+- `EditorObjectCollaborationState` carries `LockState` and `LockOwner` per object inside `EditorSessionState`
+- `ObjectLockChangedEvent` is added to the `EditorEventPayload` variant and serialized as `{ "type": "object_lock_changed", "objectId": ..., "lockState": "locked"|"unlocked", "lockOwnerUserId": n|null }`
+- `EditorSession` exposes three public methods: `AcquireLock(ObjectId, UserId)`, `ReleaseLock(ObjectId, UserId)`, and `ReleaseAllLocksForUser(UserId)`; each publishes an `ObjectLockChangedEvent` broadcast to all clients
+- `RemoteViewportServer` calls `AcquireLock` at gizmo drag start and `ReleaseLock` at gizmo drag end, so the dragging user holds an exclusive transform lock for the duration of the interaction
+- `ValidateCommand` in `EditorSession` rejects `SetTransform`, `Rename`, `SetObjectVisibility`, `Delete`, and `Reparent` commands on an object locked by a different user; the command is dropped with a `CommandRejected` event
+
+### Selection and Lock Visibility in the Outliner
+
+- the outliner renders a small avatar chip (colored initial letter) for each other participant whose `selectionObjectId` matches the row's object ID, using `participant.presentationColor` as the background
+- if an object is locked, a lock icon appears in the locking user's presentation color; hovering the icon shows the owner's display name as a tooltip
+- `lockedObjects: Record<string, number>` is maintained in `RemoteViewportContext` and updated by `object_lock_changed` events; both the lock icon and the chip data are read from context with no prop drilling
+
+### Presence Roster
+
+- `EditorFrontend/components/engine/presence-roster.tsx` renders a horizontal strip of avatar chips in the toolbar, one per non-disconnected participant
+- each chip shows the user's initial letter on a `presentationColor` background with a small status dot: green = connected, yellow = away, grey = disconnected
+- the roster reads `participants` from `RemoteViewportContext` and is mounted in the toolbar between the spacer and the play controls
+
+### Heartbeat Protocol
+
+- the browser sends `{ "type": "heartbeat" }` over the reliable WebRTC data channel every 4 seconds while connected
+- the server resets `Client->LastActivity` on each heartbeat; if the client was Away it is promoted back to Connected and the presence update is broadcast
+- a dedicated `PresenceLoop` thread wakes every 2 seconds and checks elapsed time since `LastActivity` for every connected client:
+  - elapsed ≥ 10 s and Connected → `SetPresenceState(Away)`, broadcast
+  - elapsed ≥ 30 s and Away → `SetPresenceState(Disconnected)`, `ReleaseAllLocksForUser`, broadcast
+- the two-threshold design handles hard tab closes: JavaScript cleanup never fires, so the heartbeat simply stops, the client goes Away at 10 s and Disconnected at 30 s, and all locks are released at the Disconnected transition
+
 ## Next Priority
 
-- multi-user gizmo: handle the case where two users attempt to drag the same object simultaneously
 - deeper WebRTC sender/playout latency tuning for the remote viewport stream
