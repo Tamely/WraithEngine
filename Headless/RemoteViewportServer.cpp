@@ -610,6 +610,7 @@ void RemoteViewportServer::OnSessionTransportViewportFrame(
 }
 
 static constexpr int AwayThresholdSeconds = 10;
+static constexpr int DisconnectThresholdSeconds = 30;
 static constexpr int PresenceCheckIntervalMs = 2000;
 
 void RemoteViewportServer::PresenceLoop() {
@@ -633,8 +634,11 @@ void RemoteViewportServer::PresenceLoop() {
         if (Presence == nullptr) {
           continue;
         }
-        if (Elapsed >= AwayThresholdSeconds &&
-            Presence->State == EditorUserPresenceState::Connected) {
+        if (Elapsed >= DisconnectThresholdSeconds &&
+            Presence->State == EditorUserPresenceState::Away) {
+          Transitions.emplace_back(Client.User, EditorUserPresenceState::Disconnected);
+        } else if (Elapsed >= AwayThresholdSeconds &&
+                   Presence->State == EditorUserPresenceState::Connected) {
           Transitions.emplace_back(Client.User, EditorUserPresenceState::Away);
         }
       }
@@ -642,6 +646,9 @@ void RemoteViewportServer::PresenceLoop() {
 
     for (const auto &[User, State] : Transitions) {
       m_Host.GetHeadlessLayer().GetSession().SetPresenceState(User, State);
+      if (State == EditorUserPresenceState::Disconnected) {
+        m_Host.GetHeadlessLayer().GetSession().ReleaseAllLocksForUser(User);
+      }
     }
   }
 }
