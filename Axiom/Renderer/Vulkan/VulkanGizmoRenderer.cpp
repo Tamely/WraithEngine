@@ -19,6 +19,7 @@ struct GizmoPushConstants {
   glm::vec4 StartWorld{0.0f};
   glm::vec4 EndWorld{0.0f};
   glm::vec4 Color{1.0f};
+  glm::vec2 ViewportSize{0.0f};
 };
 static_assert(sizeof(GizmoPushConstants) <= 128,
               "GizmoPushConstants exceeds guaranteed push constant minimum");
@@ -81,7 +82,7 @@ void VulkanGizmoRenderer::Init(const InitInfo &Info,
   VkPipelineInputAssemblyStateCreateInfo InputAssembly{
       .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
       .pNext = VK_NULL_HANDLE,
-      .topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST,
+      .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
       .primitiveRestartEnable = VK_FALSE};
 
   VkPipelineViewportStateCreateInfo ViewportState{
@@ -99,7 +100,7 @@ void VulkanGizmoRenderer::Init(const InitInfo &Info,
       .cullMode = VK_CULL_MODE_NONE,
       .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
       .depthBiasEnable = VK_FALSE,
-      .lineWidth = 40.0f};
+      .lineWidth = 1.0f};
 
   VkPipelineMultisampleStateCreateInfo Multisampling{
       .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
@@ -245,10 +246,11 @@ void VulkanGizmoRenderer::DrawGizmoOverlay(VkCommandBuffer CommandBuffer,
     Push.EndWorld =
         glm::vec4(Gizmo.WorldPosition + Axis.Direction * GizmoScale, 0.0f);
     Push.Color = Axis.Color;
+    Push.ViewportSize = glm::vec2(DrawExtent.width, DrawExtent.height);
     vkCmdPushConstants(CommandBuffer, m_PipelineLayout,
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(GizmoPushConstants), &Push);
-    vkCmdDraw(CommandBuffer, 2, 1, 0, 0);
+    vkCmdDraw(CommandBuffer, 6, 1, 0, 0);
   }
 
   vkCmdEndRendering(CommandBuffer);
