@@ -31,6 +31,7 @@ export type RemoteSessionState =
   | "error"
 
 export type RemoteViewportViewMode = "lit" | "unlit" | "wireframe"
+export type RemoteViewportGizmoMode = "translate" | "scale" | "rotate"
 export type SessionSceneItemKind = "folder" | "mesh" | "light" | "camera" | "actor"
 
 export interface SessionSceneItem {
@@ -88,6 +89,7 @@ interface RemoteViewportActions {
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
+  setGizmoMode: (mode: RemoteViewportGizmoMode) => Promise<void>
   refreshSessionSnapshot: () => Promise<void>
   selectObject: (objectId: string) => Promise<boolean>
   renameObject: (objectId: string, displayName: string) => Promise<boolean>
@@ -115,6 +117,7 @@ interface RemoteViewportContextValue {
   sessionStatusText: string
   sessionDetailText: string
   viewMode: RemoteViewportViewMode
+  gizmoMode: RemoteViewportGizmoMode
   isLooking: boolean
   eventLog: string[]
   serverOrigin: string
@@ -148,6 +151,7 @@ interface RemoteViewportContextValue {
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
+  setGizmoMode: (mode: RemoteViewportGizmoMode) => Promise<void>
   refreshSessionSnapshot: () => Promise<void>
   selectObject: (objectId: string) => Promise<boolean>
   renameObject: (objectId: string, displayName: string) => Promise<boolean>
@@ -195,6 +199,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     reconnect: async () => {},
     toggleLook: async () => {},
     setMode: async () => {},
+    setGizmoMode: async () => {},
     refreshSessionSnapshot: async () => {},
     selectObject: async () => false,
     renameObject: async () => false,
@@ -216,6 +221,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     "Waiting for authoritative session state"
   )
   const [viewMode, setViewMode] = useState<RemoteViewportViewMode>("lit")
+  const [gizmoMode, setGizmoModeState] = useState<RemoteViewportGizmoMode>("translate")
   const [isLooking, setIsLooking] = useState(false)
   const [eventLog, setEventLog] = useState<string[]>([])
   const [serverOrigin, setServerOrigin] = useState("")
@@ -291,6 +297,11 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     await actionsRef.current.setMode(mode)
   }, [])
 
+  const setGizmoModeAction = useCallback(async (mode: RemoteViewportGizmoMode) => {
+    setGizmoModeState(mode)
+    await actionsRef.current.setGizmoMode(mode)
+  }, [])
+
   const refreshSessionSnapshot = useCallback(async () => {
     await actionsRef.current.refreshSessionSnapshot()
   }, [])
@@ -343,6 +354,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       sessionStatusText,
       sessionDetailText,
       viewMode,
+      gizmoMode,
       isLooking,
       eventLog,
       serverOrigin,
@@ -373,6 +385,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       reconnect,
       toggleLook,
       setMode,
+      setGizmoMode: setGizmoModeAction,
       refreshSessionSnapshot,
       selectObject,
       renameObject,
@@ -412,7 +425,9 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       selectedObjectId,
       selections,
       serverOrigin,
+      gizmoMode,
       setMode,
+      setGizmoModeAction,
       setSessionDetailText,
       setSessionState,
       setSessionSnapshot,

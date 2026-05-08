@@ -21,6 +21,7 @@ import {
   type SessionObjectDetails,
   type RemoteViewportConnectionState,
   type RemoteViewportViewMode,
+  type RemoteViewportGizmoMode,
   type SessionParticipant,
   type SessionSceneItem,
   type SessionSelection,
@@ -35,7 +36,7 @@ const SESSION_POLL_INTERVAL_MS = 1500
 const CLIENT_ID_CLAIM_TIMEOUT_MS = 100
 type ConnectionState = RemoteViewportConnectionState
 type ViewMode = RemoteViewportViewMode
-type GizmoMode = "translate" | "scale" | "rotate"
+type GizmoMode = RemoteViewportGizmoMode
 type ChannelPreference = "reliable" | "unreliable"
 
 interface WebRtcVideoStatus {
@@ -205,6 +206,7 @@ export function Viewport() {
   const isLookingRef = useRef(false)
   const viewModeRef = useRef<ViewMode>("lit")
   const gizmoModeRef = useRef<GizmoMode>("translate")
+  const setGizmoModeCtxRef = useRef<(mode: GizmoMode) => Promise<void>>(async () => {})
   const notifyServerOnDestroyRef = useRef(true)
   const connectRef = useRef<() => Promise<void>>(async () => {})
   const sendCommandRef = useRef<
@@ -216,6 +218,7 @@ export function Viewport() {
     detailText,
     frameText,
     viewMode,
+    gizmoMode,
     isLooking,
     participants,
     setConnectionState,
@@ -236,9 +239,11 @@ export function Viewport() {
     sessionStatusText,
     setSessionStatusText,
     setSessionDetailText,
+    setGizmoMode: setGizmoModeCtx,
   } = useRemoteViewport()
   const [serverOrigin] = useState(getServerOrigin)
-  const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate")
+
+  setGizmoModeCtxRef.current = setGizmoModeCtx
 
   const isConnected =
     connectionState === "streaming" || connectionState === "control-ready"
@@ -1397,6 +1402,10 @@ export function Viewport() {
           "reliable"
         )
       },
+      setGizmoMode: async (nextMode) => {
+        gizmoModeRef.current = nextMode
+        await sendCommand({ type: "set_gizmo_mode", mode: nextMode }, "reliable")
+      },
     })
     setServerOrigin(serverOrigin)
     setupClientIdClaimChannel()
@@ -1559,9 +1568,7 @@ export function Viewport() {
         const nextGizmoMode = gizmoShortcuts[event.code]
         if (nextGizmoMode !== undefined && gizmoModeRef.current !== nextGizmoMode) {
           event.preventDefault()
-          gizmoModeRef.current = nextGizmoMode
-          setGizmoMode(nextGizmoMode)
-          void sendCommandRef.current({ type: "set_gizmo_mode", mode: nextGizmoMode }, "reliable")
+          void setGizmoModeCtxRef.current(nextGizmoMode)
         }
       }
       keysRef.current.add(event.code)
@@ -1637,15 +1644,6 @@ export function Viewport() {
       },
       "reliable"
     )
-  }
-
-  async function setGizmoModeCmd(nextMode: GizmoMode) {
-    if (gizmoModeRef.current === nextMode) {
-      return
-    }
-    gizmoModeRef.current = nextMode
-    setGizmoMode(nextMode)
-    await sendCommandRef.current({ type: "set_gizmo_mode", mode: nextMode }, "reliable")
   }
 
   return (
