@@ -141,6 +141,21 @@ type RemoteViewportCommand =
       mouseX: number
       mouseY: number
     }
+  | {
+      type: "gizmo_drag_start"
+      mouseX: number
+      mouseY: number
+    }
+  | {
+      type: "gizmo_drag_update"
+      mouseX: number
+      mouseY: number
+    }
+  | {
+      type: "gizmo_drag_end"
+      mouseX: number
+      mouseY: number
+    }
 
 function getServerOrigin() {
   const configuredOrigin = process.env.NEXT_PUBLIC_AXIOM_SERVER_ORIGIN?.trim()
@@ -178,6 +193,7 @@ export function Viewport() {
   const reconnectingRef = useRef(false)
   const rightMouseDownRef = useRef(false)
   const viewportFocusedRef = useRef(false)
+  const isDraggingGizmoRef = useRef(false)
   const keysRef = useRef(new Set<string>())
   const cursorRef = useRef({ x: 0, y: 0 })
   const pendingLookDeltaRef = useRef({ x: 0, y: 0 })
@@ -602,7 +618,9 @@ export function Viewport() {
 
       if (message.payloadType === "object_transform_updated") {
         setSessionUi("session-ready", "Session ready", "Transform update applied.")
-        void refreshSessionSnapshotSafely("event")
+        if (!isDraggingGizmoRef.current) {
+          void refreshSessionSnapshotSafely("event")
+        }
         return
       }
 
@@ -1401,6 +1419,20 @@ export function Viewport() {
       }
     }
 
+    const toServerCoords = (event: MouseEvent) => {
+      const s = viewportShellRef.current
+      const v = videoRef.current
+      if (!s || !v || !v.videoWidth || !v.videoHeight) return null
+      const rect = s.getBoundingClientRect()
+      const cssX = event.clientX - rect.left
+      const cssY = event.clientY - rect.top
+      if (cssX < 0 || cssY < 0 || cssX > rect.width || cssY > rect.height) return null
+      return {
+        serverX: (cssX / rect.width) * v.videoWidth,
+        serverY: (cssY / rect.height) * v.videoHeight,
+      }
+    }
+
     const handleMouseDown = (event: MouseEvent) => {
       const inViewport = shell?.contains(event.target as Node) ?? false
       if (inViewport) {
@@ -1410,17 +1442,47 @@ export function Viewport() {
         keysRef.current.clear()
       }
 
-      if (event.button !== 2 || !inViewport) return
-      event.preventDefault()
-      rightMouseDownRef.current = true
-      void setLookEnabled(true)
+      if (!inViewport) return
+
+      if (event.button === 2) {
+        event.preventDefault()
+        rightMouseDownRef.current = true
+        void setLookEnabled(true)
+        return
+      }
+
+      if (event.button === 0) {
+        const coords = toServerCoords(event)
+        if (coords) {
+          isDraggingGizmoRef.current = true
+          void sendCommand(
+            { type: "gizmo_drag_start", mouseX: coords.serverX, mouseY: coords.serverY },
+            "reliable"
+          )
+        }
+      }
     }
 
     const handleMouseUp = (event: MouseEvent) => {
-      if (event.button !== 2) return
-      if (!rightMouseDownRef.current) return
-      rightMouseDownRef.current = false
-      void setLookEnabled(false)
+      if (event.button === 2) {
+        if (!rightMouseDownRef.current) return
+        rightMouseDownRef.current = false
+        void setLookEnabled(false)
+        return
+      }
+
+      if (event.button === 0 && isDraggingGizmoRef.current) {
+        isDraggingGizmoRef.current = false
+        const coords = toServerCoords(event)
+        void sendCommand(
+          {
+            type: "gizmo_drag_end",
+            mouseX: coords?.serverX ?? 0,
+            mouseY: coords?.serverY ?? 0,
+          },
+          "reliable"
+        )
+      }
     }
 
     const handleContextMenu = (event: MouseEvent) => {
@@ -1436,17 +1498,25 @@ export function Viewport() {
         sendViewportInputFrame()
         return
       }
+
+      if (isDraggingGizmoRef.current) {
+        const coords = toServerCoords(event)
+        if (coords) {
+          void sendCommand(
+            { type: "gizmo_drag_update", mouseX: coords.serverX, mouseY: coords.serverY },
+            "unreliable"
+          )
+        }
+        return
+      }
+
       const shell = viewportShellRef.current
       const video = videoRef.current
       if (shell && video && video.videoWidth && video.videoHeight) {
-        const rect = shell.getBoundingClientRect()
-        const cssX = event.clientX - rect.left
-        const cssY = event.clientY - rect.top
-        if (cssX >= 0 && cssY >= 0 && cssX <= rect.width && cssY <= rect.height) {
-          const serverX = (cssX / rect.width) * video.videoWidth
-          const serverY = (cssY / rect.height) * video.videoHeight
+        const coords = toServerCoords(event)
+        if (coords) {
           void sendCommand(
-            { type: "gizmo_hover", mouseX: serverX, mouseY: serverY },
+            { type: "gizmo_hover", mouseX: coords.serverX, mouseY: coords.serverY },
             "unreliable"
           )
         }

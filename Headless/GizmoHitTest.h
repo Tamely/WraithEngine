@@ -3,6 +3,7 @@
 #include <Renderer/Camera.h>
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_inverse.hpp>
 
 #include <array>
 #include <optional>
@@ -95,6 +96,96 @@ inline int HitTestGizmoAxes(const Camera &Cam, uint32_t VpWidth,
   }
 
   return BestAxis;
+}
+
+struct GizmoDragState {
+  int Axis{-1};
+  glm::vec3 GizmoOrigin{0.0f};
+  glm::vec3 AxisDir{0.0f};
+  glm::vec3 PlaneNormal{0.0f};
+  glm::vec3 ObjectStartPos{0.0f};
+  float StartT{0.0f};
+};
+
+// Unproject a screen-space pixel through the inverse VP matrix to get a
+// world-space point (used to build a ray from the camera).
+inline glm::vec3 UnprojectMouse(const Camera &Cam, uint32_t VpWidth,
+                                 uint32_t VpHeight, float MouseX,
+                                 float MouseY) {
+  const float NdcX = (MouseX / VpWidth) * 2.0f - 1.0f;
+  const float NdcY = (MouseY / VpHeight) * 2.0f - 1.0f;
+  const glm::vec4 WorldH =
+      glm::inverse(Cam.GetViewProjectionMatrix()) * glm::vec4(NdcX, NdcY, 0.0f, 1.0f);
+  return glm::vec3(WorldH) / WorldH.w;
+}
+
+// Begin a constrained-axis drag. Returns nullopt if the click misses all handles.
+inline std::optional<GizmoDragState>
+BeginGizmoDrag(const Camera &Cam, uint32_t VpWidth, uint32_t VpHeight,
+               glm::vec2 MousePixel, glm::vec3 GizmoWorldPos, float GizmoScale,
+               glm::vec3 ObjectPos) {
+  const int Axis = HitTestGizmoAxes(Cam, VpWidth, VpHeight, MousePixel,
+                                     GizmoWorldPos, GizmoScale);
+  if (Axis < 0) {
+    return std::nullopt;
+  }
+
+  const std::array<glm::vec3, 3> AxisDirs = {{
+      {1.0f, 0.0f, 0.0f},
+      {0.0f, 1.0f, 0.0f},
+      {0.0f, 0.0f, 1.0f},
+  }};
+  const glm::vec3 AxisDir = AxisDirs[Axis];
+
+  // Constraint plane: contains the axis, normal faces the camera as much as
+  // possible (component of camera forward perpendicular to the axis).
+  const glm::vec3 CamFwd = Cam.GetForward();
+  glm::vec3 PlaneNormal = CamFwd - glm::dot(CamFwd, AxisDir) * AxisDir;
+  if (glm::length(PlaneNormal) < 1e-4f) {
+    const glm::vec3 Fallback = (glm::abs(AxisDir.y) < 0.9f)
+                                   ? glm::vec3(0.0f, 1.0f, 0.0f)
+                                   : glm::vec3(1.0f, 0.0f, 0.0f);
+    PlaneNormal = Fallback - glm::dot(Fallback, AxisDir) * AxisDir;
+  }
+  PlaneNormal = glm::normalize(PlaneNormal);
+
+  // Find the axis parameter T at the drag start point.
+  const glm::vec3 WorldPt =
+      UnprojectMouse(Cam, VpWidth, VpHeight, MousePixel.x, MousePixel.y);
+  const glm::vec3 RayDir = glm::normalize(WorldPt - Cam.GetPosition());
+  const float Denom = glm::dot(RayDir, PlaneNormal);
+  float StartT = 0.0f;
+  if (glm::abs(Denom) > 1e-6f) {
+    const float RayT =
+        glm::dot(GizmoWorldPos - Cam.GetPosition(), PlaneNormal) / Denom;
+    StartT = glm::dot((Cam.GetPosition() + RayT * RayDir) - GizmoWorldPos, AxisDir);
+  }
+
+  return GizmoDragState{
+      .Axis = Axis,
+      .GizmoOrigin = GizmoWorldPos,
+      .AxisDir = AxisDir,
+      .PlaneNormal = PlaneNormal,
+      .ObjectStartPos = ObjectPos,
+      .StartT = StartT,
+  };
+}
+
+// Returns the new object position for the current mouse position during a drag.
+inline glm::vec3 UpdateGizmoDrag(const GizmoDragState &State, const Camera &Cam,
+                                  uint32_t VpWidth, uint32_t VpHeight,
+                                  float MouseX, float MouseY) {
+  const glm::vec3 WorldPt = UnprojectMouse(Cam, VpWidth, VpHeight, MouseX, MouseY);
+  const glm::vec3 RayDir = glm::normalize(WorldPt - Cam.GetPosition());
+  const float Denom = glm::dot(RayDir, State.PlaneNormal);
+  if (glm::abs(Denom) < 1e-6f) {
+    return State.ObjectStartPos;
+  }
+  const float RayT =
+      glm::dot(State.GizmoOrigin - Cam.GetPosition(), State.PlaneNormal) / Denom;
+  const glm::vec3 HitPoint = Cam.GetPosition() + RayT * RayDir;
+  const float CurrentT = glm::dot(HitPoint - State.GizmoOrigin, State.AxisDir);
+  return State.ObjectStartPos + (CurrentT - State.StartT) * State.AxisDir;
 }
 
 } // namespace Axiom

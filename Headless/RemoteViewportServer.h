@@ -1,5 +1,6 @@
 #pragma once
 
+#include "GizmoHitTest.h"
 #include "HeadlessSessionHost.h"
 #include "WebRtcSession.h"
 
@@ -50,6 +51,13 @@ private:
     bool IsOpen{true};
   };
 
+  struct ActiveGizmoDrag {
+    GizmoDragState Math;
+    std::string ObjectId;
+    glm::vec3 StartRotDeg{0.0f};
+    glm::vec3 StartScale{1.0f};
+  };
+
   struct RemoteClientSession {
     struct PacketOutput;
 
@@ -59,6 +67,7 @@ private:
     std::unique_ptr<IWebRtcSession> WebRtcSession;
     std::unique_ptr<IVideoEncoder> VideoEncoder;
     std::unique_ptr<PacketOutput> VideoPacketOutput;
+    std::optional<ActiveGizmoDrag> GizmoDrag;
   };
 
   struct ClientSessionResolution {

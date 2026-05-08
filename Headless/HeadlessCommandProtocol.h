@@ -31,6 +31,9 @@ enum class HeadlessCommandType {
   SetTransform,
   UpdateViewportCamera,
   GizmoHover,
+  GizmoDragStart,
+  GizmoDragUpdate,
+  GizmoDragEnd,
   RenderFrame,
   Quit,
 };

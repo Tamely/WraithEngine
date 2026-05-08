@@ -811,6 +811,9 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
     m_Host.SubmitRemoteCommand(*User, Command->EditorPayload);
     break;
   case HeadlessCommandType::GizmoHover:
+  case HeadlessCommandType::GizmoDragStart:
+  case HeadlessCommandType::GizmoDragUpdate:
+  case HeadlessCommandType::GizmoDragEnd:
     break;
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
@@ -1407,6 +1410,9 @@ bool RemoteViewportServer::HandleWebSocketMessage(std::string_view Payload) {
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::UpdateViewportCamera:
   case HeadlessCommandType::GizmoHover:
+  case HeadlessCommandType::GizmoDragStart:
+  case HeadlessCommandType::GizmoDragUpdate:
+  case HeadlessCommandType::GizmoDragEnd:
     return false;
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
@@ -1452,6 +1458,9 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     m_Host.SubmitRemoteCommand(Client->User, Command->EditorPayload);
     return true;
   case HeadlessCommandType::GizmoHover: {
+    if (Client->GizmoDrag.has_value()) {
+      return true;
+    }
     const EditorSession &Session =
         m_Host.GetHeadlessLayer().GetSession();
     const EditorViewportState *Viewport =
@@ -1471,6 +1480,89 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     } else {
       m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
     }
+    return true;
+  }
+  case HeadlessCommandType::GizmoDragStart: {
+    if (Client->GizmoDrag.has_value()) {
+      return true;
+    }
+    const EditorSession &Session =
+        m_Host.GetHeadlessLayer().GetSession();
+    const EditorViewportState *Viewport =
+        Session.FindViewport(Client->User);
+    const EditorObjectDetails *Selected =
+        Session.FindSelectedObjectDetails(Client->User);
+    if (Viewport == nullptr || Selected == nullptr ||
+        !Selected->SupportsTransform || !Selected->Transform.has_value()) {
+      return true;
+    }
+    const glm::vec3 &ObjPos = Selected->Transform->Location;
+    const float GizmoScale = ComputeGizmoScale(
+        Viewport->Camera, ObjPos, m_Options.Width, m_Options.Height);
+    auto DragState = BeginGizmoDrag(
+        Viewport->Camera, m_Options.Width, m_Options.Height,
+        Command->MousePosition, ObjPos, GizmoScale, ObjPos);
+    if (!DragState.has_value()) {
+      return true;
+    }
+    Client->GizmoDrag = ActiveGizmoDrag{
+        .Math = *DragState,
+        .ObjectId = Selected->ObjectId,
+        .StartRotDeg = Selected->Transform->RotationDegrees,
+        .StartScale = Selected->Transform->Scale,
+    };
+    m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, DragState->Axis);
+    return true;
+  }
+  case HeadlessCommandType::GizmoDragUpdate: {
+    if (!Client->GizmoDrag.has_value()) {
+      return true;
+    }
+    const EditorSession &Session =
+        m_Host.GetHeadlessLayer().GetSession();
+    const EditorViewportState *Viewport =
+        Session.FindViewport(Client->User);
+    if (Viewport == nullptr) {
+      return true;
+    }
+    const glm::vec3 NewPos = UpdateGizmoDrag(
+        Client->GizmoDrag->Math, Viewport->Camera,
+        m_Options.Width, m_Options.Height,
+        Command->MousePosition.x, Command->MousePosition.y);
+    EditorCommand Cmd;
+    Cmd.Payload = SetTransformCommand{
+        .ObjectId = Client->GizmoDrag->ObjectId,
+        .Location = NewPos,
+        .RotationDegrees = Client->GizmoDrag->StartRotDeg,
+        .Scale = Client->GizmoDrag->StartScale,
+    };
+    m_Host.SubmitRemoteCommand(Client->User, Cmd);
+    return true;
+  }
+  case HeadlessCommandType::GizmoDragEnd: {
+    if (!Client->GizmoDrag.has_value()) {
+      return true;
+    }
+    const EditorSession &Session =
+        m_Host.GetHeadlessLayer().GetSession();
+    const EditorViewportState *Viewport =
+        Session.FindViewport(Client->User);
+    if (Viewport != nullptr) {
+      const glm::vec3 NewPos = UpdateGizmoDrag(
+          Client->GizmoDrag->Math, Viewport->Camera,
+          m_Options.Width, m_Options.Height,
+          Command->MousePosition.x, Command->MousePosition.y);
+      EditorCommand Cmd;
+      Cmd.Payload = SetTransformCommand{
+          .ObjectId = Client->GizmoDrag->ObjectId,
+          .Location = NewPos,
+          .RotationDegrees = Client->GizmoDrag->StartRotDeg,
+          .Scale = Client->GizmoDrag->StartScale,
+      };
+      m_Host.SubmitRemoteCommand(Client->User, Cmd);
+    }
+    Client->GizmoDrag.reset();
+    m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
     return true;
   }
   case HeadlessCommandType::Quit:

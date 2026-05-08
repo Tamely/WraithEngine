@@ -657,6 +657,24 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
     };
   }
 
+  auto ParseMouseXY = [&](HeadlessCommandType T) -> HeadlessCommand {
+    const auto MX = MatchString(JsonLine, MouseXPattern);
+    const auto MY = MatchString(JsonLine, MouseYPattern);
+    float MouseX = 0.0f;
+    float MouseY = 0.0f;
+    if (MX.has_value()) {
+      if (const auto V = ParseDouble(*MX)) MouseX = static_cast<float>(*V);
+    }
+    if (MY.has_value()) {
+      if (const auto V = ParseDouble(*MY)) MouseY = static_cast<float>(*V);
+    }
+    return HeadlessCommand{.Type = T, .MousePosition = {MouseX, MouseY}};
+  };
+
+  if (*Type == "gizmo_drag_start") return ParseMouseXY(HeadlessCommandType::GizmoDragStart);
+  if (*Type == "gizmo_drag_update") return ParseMouseXY(HeadlessCommandType::GizmoDragUpdate);
+  if (*Type == "gizmo_drag_end") return ParseMouseXY(HeadlessCommandType::GizmoDragEnd);
+
   Error = "Unsupported command type: " + *Type;
   return std::nullopt;
 }
@@ -681,6 +699,9 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::UpdateViewportCamera:
   case HeadlessCommandType::GizmoHover:
+  case HeadlessCommandType::GizmoDragStart:
+  case HeadlessCommandType::GizmoDragUpdate:
+  case HeadlessCommandType::GizmoDragEnd:
   case HeadlessCommandType::Quit:
     return Command;
   case HeadlessCommandType::LoadStartupScene:
