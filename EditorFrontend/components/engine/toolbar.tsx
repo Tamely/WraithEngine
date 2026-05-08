@@ -19,7 +19,7 @@ import {
   Sun,
   Camera,
 } from "lucide-react"
-import { useRemoteViewport } from "./engine/remote-viewport-context"
+import { useRemoteViewport } from "./remote-viewport-context"
 
 export function Toolbar() {
   const { gizmoMode, setGizmoMode } = useRemoteViewport()
