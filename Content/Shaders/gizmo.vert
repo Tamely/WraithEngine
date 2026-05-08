@@ -23,7 +23,7 @@ void main() {
     float len   = length(dirPx);
     vec2 perpPx = (len > 0.001) ? vec2(-dirPx.y, dirPx.x) / len : vec2(0.0, 1.0);
 
-    const float halfWidthPx = 5.0;
+    const float halfWidthPx = 2.0;
     vec2 offsetNDC = (perpPx * halfWidthPx / push.viewportSize) * 2.0;
 
     // Triangle-list quad (6 verts, 2 tris, no primitive restart):

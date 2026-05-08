@@ -197,9 +197,9 @@ void VulkanGizmoRenderer::DrawGizmoOverlay(VkCommandBuffer CommandBuffer,
         VP * glm::vec4(Gizmo.WorldPosition + glm::vec3(0.0f, 1.0f, 0.0f), 1.0f);
     if (OClip.w > 0.001f && TClip.w > 0.001f) {
       const glm::vec2 OScreen((OClip.x / OClip.w * 0.5f + 0.5f) * DrawExtent.width,
-                               (1.0f - (OClip.y / OClip.w * 0.5f + 0.5f)) * DrawExtent.height);
+                               (OClip.y / OClip.w * 0.5f + 0.5f) * DrawExtent.height);
       const glm::vec2 TScreen((TClip.x / TClip.w * 0.5f + 0.5f) * DrawExtent.width,
-                               (1.0f - (TClip.y / TClip.w * 0.5f + 0.5f)) * DrawExtent.height);
+                               (TClip.y / TClip.w * 0.5f + 0.5f) * DrawExtent.height);
       const float PixelsPerUnit = glm::distance(OScreen, TScreen);
       if (PixelsPerUnit > 0.001f) {
         GizmoScale = DesiredPixelLength / PixelsPerUnit;
@@ -238,7 +238,8 @@ void VulkanGizmoRenderer::DrawGizmoOverlay(VkCommandBuffer CommandBuffer,
   for (int AxisIndex = 0; AxisIndex < 3; ++AxisIndex) {
     AxisDef Axis = BaseAxes[AxisIndex];
     if (AxisIndex == Gizmo.HoveredAxis) {
-      Axis.Color = glm::vec4(glm::vec3(Axis.Color) * 1.6f + 0.3f, 1.0f);
+      const glm::vec3 Base(Axis.Color);
+      Axis.Color = glm::vec4(Base + (glm::vec3(1.0f) - Base) * 0.7f, 1.0f);
     }
     GizmoPushConstants Push{};
     Push.ViewProjection = VP;

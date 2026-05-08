@@ -26,9 +26,9 @@ inline float ComputeGizmoScale(const Camera &Cam, glm::vec3 GizmoWorldPos,
     return 0.5f;
   }
   const glm::vec2 OScreen((OClip.x / OClip.w * 0.5f + 0.5f) * VpWidth,
-                           (1.0f - (OClip.y / OClip.w * 0.5f + 0.5f)) * VpHeight);
+                           (OClip.y / OClip.w * 0.5f + 0.5f) * VpHeight);
   const glm::vec2 TScreen((TClip.x / TClip.w * 0.5f + 0.5f) * VpWidth,
-                           (1.0f - (TClip.y / TClip.w * 0.5f + 0.5f)) * VpHeight);
+                           (TClip.y / TClip.w * 0.5f + 0.5f) * VpHeight);
   const float PixelsPerUnit = glm::distance(OScreen, TScreen);
   return PixelsPerUnit > 0.001f ? DesiredPixelLength / PixelsPerUnit : 0.5f;
 }
@@ -55,7 +55,7 @@ inline int HitTestGizmoAxes(const Camera &Cam, uint32_t VpWidth,
     }
     const glm::vec2 Ndc = glm::vec2(Clip.x, Clip.y) / Clip.w;
     return glm::vec2((Ndc.x * 0.5f + 0.5f) * ViewSize.x,
-                     (1.0f - (Ndc.y * 0.5f + 0.5f)) * ViewSize.y);
+                     (Ndc.y * 0.5f + 0.5f) * ViewSize.y);
   };
 
   auto SegDist = [](glm::vec2 P, glm::vec2 A, glm::vec2 B) -> float {
