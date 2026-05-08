@@ -9,6 +9,7 @@
 #include <Session/EditorSession.h>
 
 #include <glm/vec2.hpp>
+#include <glm/vec3.hpp>
 
 #include <filesystem>
 #include <cstdint>
@@ -16,6 +17,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 namespace Axiom {
@@ -40,10 +42,13 @@ enum class HeadlessCommandType {
   SetGizmoMode,
   ListAssets,
   GetSchema,
+  SetProperty,
   Heartbeat,
   RenderFrame,
   Quit,
 };
+
+using PropertyValue = std::variant<std::string, bool, glm::vec3>;
 
 struct HeadlessCommand {
   HeadlessCommandType Type;
@@ -52,6 +57,8 @@ struct HeadlessCommand {
   glm::vec2 MousePosition{0.0f};
   GizmoMode Mode{GizmoMode::Translate};
   std::string ObjectId;
+  std::string PropertyName;
+  std::optional<PropertyValue> PropertyVal;
 };
 
 struct HeadlessAppOptions {

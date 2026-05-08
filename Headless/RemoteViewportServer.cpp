@@ -871,6 +871,7 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
     break;
   case HeadlessCommandType::ListAssets:
   case HeadlessCommandType::GetSchema:
+  case HeadlessCommandType::SetProperty:
     break;
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
@@ -1491,6 +1492,8 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
     }
     return true;
   }
+  case HeadlessCommandType::SetProperty:
+    return false;
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
     m_Host.RequestClose();
@@ -1561,6 +1564,52 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
           SerializeObjectSchema(It->second));
     }
     return true;
+  }
+  case HeadlessCommandType::SetProperty: {
+    if (!Command->PropertyVal.has_value()) {
+      return false;
+    }
+    const auto &Name = Command->PropertyName;
+    const auto &Val = *Command->PropertyVal;
+    const auto &ObjId = Command->ObjectId;
+
+    if (Name == "displayName") {
+      if (const auto *S = std::get_if<std::string>(&Val)) {
+        m_Host.SubmitRemoteCommand(
+            Client->User,
+            EditorCommand{RenameObjectCommand{.ObjectId = ObjId, .DisplayName = *S}});
+        return true;
+      }
+    } else if (Name == "visible") {
+      if (const auto *B = std::get_if<bool>(&Val)) {
+        m_Host.SubmitRemoteCommand(
+            Client->User,
+            EditorCommand{SetObjectVisibilityCommand{.ObjectId = ObjId, .Visible = *B}});
+        return true;
+      }
+    } else if (Name == "location" || Name == "rotationDegrees" || Name == "scale") {
+      if (const auto *V = std::get_if<glm::vec3>(&Val)) {
+        const auto &DetailsById =
+            m_Host.GetHeadlessLayer().GetSession().GetState().ObjectDetailsById;
+        const auto It = DetailsById.find(ObjId);
+        if (It == DetailsById.end() || !It->second.Transform.has_value()) {
+          return false;
+        }
+        const EditorTransformDetails &Current = *It->second.Transform;
+        SetTransformCommand Cmd{
+            .ObjectId = ObjId,
+            .Location = Current.Location,
+            .RotationDegrees = Current.RotationDegrees,
+            .Scale = Current.Scale,
+        };
+        if (Name == "location")        Cmd.Location        = *V;
+        else if (Name == "rotationDegrees") Cmd.RotationDegrees = *V;
+        else                           Cmd.Scale           = *V;
+        m_Host.SubmitRemoteCommand(Client->User, EditorCommand{Cmd});
+        return true;
+      }
+    }
+    return false;
   }
   case HeadlessCommandType::SetGizmoMode:
     Client->CurrentGizmoMode = Command->Mode;

@@ -713,6 +713,42 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
     return HeadlessCommand{.Type = HeadlessCommandType::GetSchema,
                            .ObjectId = ObjectId.value_or("")};
   }
+  if (*Type == "set_property") {
+    static const std::regex ObjectIdPattern(R"json("objectId"\s*:\s*"([^"]+)")json");
+    static const std::regex PropPattern(R"json("property"\s*:\s*"([^"]+)")json");
+    static const std::regex StringValPattern(R"json("value"\s*:\s*"([^"]*)")json");
+    static const std::regex BoolValPattern(R"json("value"\s*:\s*(true|false))json");
+    static const std::regex Vec3ValPattern(
+        R"json("value"\s*:\s*\[\s*(-?[0-9Ee.+-]+)\s*,\s*(-?[0-9Ee.+-]+)\s*,\s*(-?[0-9Ee.+-]+)\s*\])json");
+
+    const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
+    const auto PropName = MatchString(JsonLine, PropPattern);
+
+    std::optional<PropertyValue> Val;
+    if (const auto StrVal = MatchString(JsonLine, StringValPattern)) {
+      Val = PropertyValue{*StrVal};
+    } else if (const auto BoolStr = MatchString(JsonLine, BoolValPattern)) {
+      Val = PropertyValue{*BoolStr == "true"};
+    } else {
+      std::match_results<std::string_view::const_iterator> M;
+      if (std::regex_search(JsonLine.begin(), JsonLine.end(), M, Vec3ValPattern) &&
+          M.size() == 4) {
+        const auto X = ParseDouble(std::string_view(M[1].first, M[1].second));
+        const auto Y = ParseDouble(std::string_view(M[2].first, M[2].second));
+        const auto Z = ParseDouble(std::string_view(M[3].first, M[3].second));
+        if (X && Y && Z) {
+          Val = PropertyValue{glm::vec3{static_cast<float>(*X),
+                                        static_cast<float>(*Y),
+                                        static_cast<float>(*Z)}};
+        }
+      }
+    }
+
+    return HeadlessCommand{.Type = HeadlessCommandType::SetProperty,
+                           .ObjectId = ObjectId.value_or(""),
+                           .PropertyName = PropName.value_or(""),
+                           .PropertyVal = Val};
+  }
   if (*Type == "heartbeat") {
     return HeadlessCommand{.Type = HeadlessCommandType::Heartbeat};
   }
@@ -761,6 +797,7 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::SetGizmoMode:
   case HeadlessCommandType::ListAssets:
   case HeadlessCommandType::GetSchema:
+  case HeadlessCommandType::SetProperty:
   case HeadlessCommandType::Heartbeat:
   case HeadlessCommandType::Quit:
     return Command;
