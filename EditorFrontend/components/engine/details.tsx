@@ -77,8 +77,7 @@ function DetailsContent({
   details: SessionObjectDetails
   schema: SessionObjectSchema | null
 }) {
-  const { participants, renameObject, setObjectVisibility, updateTransform } =
-    useRemoteViewport()
+  const { participants, setProperty, updateTransform } = useRemoteViewport()
   const [draftName, setDraftName] = useState(details.displayName)
   const [draft, setDraft] = useState<DraftTransform>(() => toDraft(details))
   const [isSaving, setIsSaving] = useState(false)
@@ -121,15 +120,12 @@ function DetailsContent({
 
   async function applyIdentity() {
     const nextName = draftName.trim()
-    if (nextName.length === 0) {
+    if (nextName.length === 0 || nextName === details.displayName) {
       return
     }
-
     setIsSaving(true)
     try {
-      if (nextName !== details.displayName) {
-        await renameObject(details.objectId, nextName)
-      }
+      await setProperty(details.objectId, "displayName", nextName)
     } finally {
       setIsSaving(false)
     }
@@ -138,7 +134,7 @@ function DetailsContent({
   async function toggleVisibility() {
     setIsSaving(true)
     try {
-      await setObjectVisibility(details.objectId, !details.visible)
+      await setProperty(details.objectId, "visible", !details.visible)
     } finally {
       setIsSaving(false)
     }

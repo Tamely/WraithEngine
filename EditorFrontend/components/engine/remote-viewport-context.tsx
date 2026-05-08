@@ -121,6 +121,11 @@ interface RemoteViewportActions {
   reparentObject: (objectId: string, newParentId: string) => Promise<boolean>
   listAssets: () => Promise<void>
   getSchema: (objectId: string) => Promise<void>
+  setProperty: (
+    objectId: string,
+    property: string,
+    value: string | boolean | [number, number, number]
+  ) => Promise<boolean>
 }
 
 export interface SessionObjectTransformUpdate {
@@ -182,6 +187,11 @@ interface RemoteViewportContextValue {
   objectSchema: SessionObjectSchema | null
   setObjectSchema: (schema: SessionObjectSchema) => void
   getSchema: (objectId: string) => Promise<void>
+  setProperty: (
+    objectId: string,
+    property: string,
+    value: string | boolean | [number, number, number]
+  ) => Promise<boolean>
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
@@ -247,6 +257,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     reparentObject: async () => false,
     listAssets: async () => {},
     getSchema: async () => {},
+    setProperty: async () => false,
   })
   const [connectionState, setConnectionState] =
     useState<RemoteViewportConnectionState>("idle")
@@ -417,6 +428,15 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     await actionsRef.current.getSchema(objectId)
   }, [])
 
+  const setProperty = useCallback(
+    async (
+      objectId: string,
+      property: string,
+      value: string | boolean | [number, number, number]
+    ) => actionsRef.current.setProperty(objectId, property, value),
+    []
+  )
+
   const selectedObjectId =
     currentUserId !== null
       ? selections.find((selection) => selection.userId === currentUserId)?.objectId ?? null
@@ -451,6 +471,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       objectSchema,
       setObjectSchema,
       getSchema,
+      setProperty,
       setConnectionState,
       setSessionState,
       setStatusText,
@@ -518,6 +539,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       listAssets,
       objectSchema,
       getSchema,
+      setProperty,
       serverOrigin,
       gizmoMode,
       setMode,

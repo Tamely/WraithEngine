@@ -167,6 +167,15 @@ type RemoteViewportCommand =
       type: "set_gizmo_mode"
       mode: GizmoMode
     }
+  | { type: "heartbeat" }
+  | { type: "list_assets" }
+  | { type: "get_schema"; objectId: string }
+  | {
+      type: "set_property"
+      objectId: string
+      property: string
+      value: string | boolean | [number, number, number]
+    }
 
 function getServerOrigin() {
   const configuredOrigin = process.env.NEXT_PUBLIC_AXIOM_SERVER_ORIGIN?.trim()
@@ -1461,6 +1470,9 @@ export function Viewport() {
       },
       getSchema: async (objectId: string) => {
         await sendCommand({ type: "get_schema", objectId }, "reliable")
+      },
+      setProperty: async (objectId, property, value) => {
+        return sendCommand({ type: "set_property", objectId, property, value }, "reliable")
       },
       reparentObject: async (objectId, newParentId) => {
         const accepted = await sendCommand(
