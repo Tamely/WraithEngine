@@ -243,6 +243,7 @@ export function Viewport() {
     applyParticipantCameraUpdate,
     applyObjectLockChanged,
     setAssets,
+    setObjectSchema,
     setSessionState,
     sessionStatusText,
     setSessionStatusText,
@@ -682,6 +683,26 @@ export function Viewport() {
           typeof message.lockOwnerUserId === "number" ? message.lockOwnerUserId : null
         if (objectId) {
           applyObjectLockChanged(objectId, lockState, lockOwnerUserId)
+        }
+        return
+      }
+
+      if (message.type === "object_schema") {
+        const objectId = typeof message.objectId === "string" ? message.objectId : null
+        const className = typeof message.className === "string" ? message.className : "Unknown"
+        const rawProps = Array.isArray(message.properties) ? message.properties : []
+        if (objectId) {
+          setObjectSchema({
+            objectId,
+            className,
+            properties: rawProps
+              .filter((p): p is Record<string, unknown> => !!p && typeof p === "object")
+              .map((p) => ({
+                name: typeof p.name === "string" ? p.name : "",
+                type: p.type === "bool" ? "bool" : p.type === "vec3" ? "vec3" : "string",
+                readOnly: p.readOnly === true,
+              })),
+          })
         }
         return
       }
@@ -1437,6 +1458,9 @@ export function Viewport() {
       },
       listAssets: async () => {
         await sendCommand({ type: "list_assets" }, "reliable")
+      },
+      getSchema: async (objectId: string) => {
+        await sendCommand({ type: "get_schema", objectId }, "reliable")
       },
       reparentObject: async (objectId, newParentId) => {
         const accepted = await sendCommand(

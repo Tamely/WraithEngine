@@ -41,6 +41,18 @@ export interface SessionAssetDescriptor {
   path: string
 }
 
+export interface SessionPropertyDescriptor {
+  name: string
+  type: "string" | "bool" | "vec3"
+  readOnly: boolean
+}
+
+export interface SessionObjectSchema {
+  objectId: string
+  className: string
+  properties: SessionPropertyDescriptor[]
+}
+
 export interface SessionSceneItem {
   id: string
   displayName: string
@@ -108,6 +120,7 @@ interface RemoteViewportActions {
   deleteObject: (objectId: string) => Promise<boolean>
   reparentObject: (objectId: string, newParentId: string) => Promise<boolean>
   listAssets: () => Promise<void>
+  getSchema: (objectId: string) => Promise<void>
 }
 
 export interface SessionObjectTransformUpdate {
@@ -166,6 +179,9 @@ interface RemoteViewportContextValue {
   assets: SessionAssetDescriptor[]
   setAssets: (assets: SessionAssetDescriptor[]) => void
   listAssets: () => Promise<void>
+  objectSchema: SessionObjectSchema | null
+  setObjectSchema: (schema: SessionObjectSchema) => void
+  getSchema: (objectId: string) => Promise<void>
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
@@ -230,6 +246,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     deleteObject: async () => false,
     reparentObject: async () => false,
     listAssets: async () => {},
+    getSchema: async () => {},
   })
   const [connectionState, setConnectionState] =
     useState<RemoteViewportConnectionState>("idle")
@@ -254,6 +271,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     useState<SessionObjectDetails | null>(null)
   const [lockedObjects, setLockedObjects] = useState<Record<string, number>>({})
   const [assets, setAssets] = useState<SessionAssetDescriptor[]>([])
+  const [objectSchema, setObjectSchema] = useState<SessionObjectSchema | null>(null)
 
   const appendEventLog = useCallback((value: string) => {
     setEventLog((current) => [value, ...current].slice(0, MAX_LOG_LINES))
@@ -395,6 +413,10 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     await actionsRef.current.listAssets()
   }, [])
 
+  const getSchema = useCallback(async (objectId: string) => {
+    await actionsRef.current.getSchema(objectId)
+  }, [])
+
   const selectedObjectId =
     currentUserId !== null
       ? selections.find((selection) => selection.userId === currentUserId)?.objectId ?? null
@@ -426,6 +448,9 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       assets,
       setAssets,
       listAssets,
+      objectSchema,
+      setObjectSchema,
+      getSchema,
       setConnectionState,
       setSessionState,
       setStatusText,
@@ -491,6 +516,8 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       lockedObjects,
       assets,
       listAssets,
+      objectSchema,
+      getSchema,
       serverOrigin,
       gizmoMode,
       setMode,
