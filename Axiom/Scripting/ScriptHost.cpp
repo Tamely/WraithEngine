@@ -61,6 +61,37 @@ void ScriptHost::Initialize(const std::filesystem::path &CoralManagedDir) {
 #endif
 }
 
+void ScriptHost::LoadEngineAssembly(const std::filesystem::path &ManagedDir) {
+#if AXIOM_SCRIPTING_ENABLED
+  if (!m_Initialized) {
+    A_CORE_WARN("ScriptHost: cannot load engine assembly — host not initialized");
+    return;
+  }
+
+  const auto DllPath = ManagedDir / "WraithEngine.Managed.dll";
+  if (!std::filesystem::exists(DllPath)) {
+    A_CORE_ERROR("ScriptHost: WraithEngine.Managed.dll not found at '{}'",
+                 DllPath.string());
+    return;
+  }
+
+  m_EngineALC = m_Host.CreateAssemblyLoadContext("WraithEngine");
+  auto &Assembly = m_EngineALC.LoadAssembly(DllPath.string());
+
+  if (Assembly.GetLoadStatus() != Coral::AssemblyLoadStatus::Success) {
+    A_CORE_ERROR("ScriptHost: failed to load WraithEngine.Managed.dll (status {})",
+                 static_cast<int>(Assembly.GetLoadStatus()));
+    return;
+  }
+
+  m_EngineAssembly = &Assembly;
+  m_EngineAssemblyLoaded = true;
+  A_CORE_INFO("ScriptHost: engine assembly loaded ({})", Assembly.GetName());
+#else
+  (void)ManagedDir;
+#endif
+}
+
 void ScriptHost::Shutdown() {
 #if AXIOM_SCRIPTING_ENABLED
   if (m_Initialized) {

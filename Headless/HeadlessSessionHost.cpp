@@ -36,6 +36,7 @@ HeadlessSessionHost::HeadlessSessionHost(const ApplicationArgs &Args,
       });
   SetViewportFrameOutput(m_FrameBridge.get());
   m_ScriptHost.Initialize(AXIOM_CORAL_MANAGED_DIR);
+  m_ScriptHost.LoadEngineAssembly(AXIOM_MANAGED_DIR);
 }
 
 bool HeadlessSessionHost::Step() { return Application::Step(); }

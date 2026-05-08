@@ -42,8 +42,14 @@ jobs:
           key: cmake-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'ThirdParty/**') }}
           restore-keys: cmake-${{ runner.os }}-
 
+      - name: Build Coral.Managed
+        run: dotnet build ThirdParty/Coral/Coral.Managed/Coral.Managed-Static.csproj -c Debug --nologo
+
+      - name: Build WraithEngine.Managed
+        run: dotnet build Scripting/WraithEngine.Managed/WraithEngine.Managed.csproj -c Debug --nologo
+
       - name: Configure
-        run: cmake --preset debug -DBUILD_TESTING=ON
+        run: cmake --preset debug -DBUILD_TESTING=ON -DAXIOM_ENABLE_SCRIPTING=ON
 
       - name: Build
         run: cmake --build build/debug

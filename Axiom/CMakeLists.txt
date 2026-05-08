@@ -304,12 +304,30 @@ endif()
 if(AXIOM_ENABLE_SCRIPTING)
   target_link_libraries(AxiomCore PUBLIC CoralNative)
   target_compile_definitions(AxiomCore PUBLIC AXIOM_SCRIPTING_ENABLED=1)
-  # Default managed dir: Coral.Managed output next to the binary directory
+  # Default managed dir: Coral.Managed output (needed by HostInstance::Initialize)
   set(AXIOM_CORAL_MANAGED_DIR
       "${CMAKE_SOURCE_DIR}/ThirdParty/Coral/Coral.Managed/bin/Debug/net9.0"
       CACHE PATH "Directory containing Coral.Managed.dll and its runtimeconfig")
   target_compile_definitions(AxiomCore PUBLIC
       AXIOM_CORAL_MANAGED_DIR="${AXIOM_CORAL_MANAGED_DIR}")
+
+  # Engine API assembly (WraithEngine.Managed.dll)
+  set(AXIOM_MANAGED_DIR
+      "${CMAKE_SOURCE_DIR}/Scripting/WraithEngine.Managed/bin/Debug"
+      CACHE PATH "Directory containing WraithEngine.Managed.dll")
+  target_compile_definitions(AxiomCore PUBLIC
+      AXIOM_MANAGED_DIR="${AXIOM_MANAGED_DIR}")
+
+  set(WRAITH_MANAGED_CSPROJ
+      "${CMAKE_SOURCE_DIR}/Scripting/WraithEngine.Managed/WraithEngine.Managed.csproj")
+  add_custom_target(WraithEngineManaged
+    COMMAND dotnet build "${WRAITH_MANAGED_CSPROJ}"
+            -c $<IF:$<CONFIG:Debug>,Debug,Release>
+            --nologo -v quiet
+    COMMENT "Building WraithEngine.Managed"
+    VERBATIM
+  )
+  add_dependencies(AxiomCore WraithEngineManaged)
 else()
   target_compile_definitions(AxiomCore PUBLIC AXIOM_SCRIPTING_ENABLED=0)
   target_compile_definitions(AxiomCore PUBLIC AXIOM_CORAL_MANAGED_DIR="")
