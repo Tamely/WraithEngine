@@ -1,0 +1,3 @@
+[submodule "ThirdParty/Coral"]
+	path = ThirdParty/Coral
+	url = https://github.com/StudioCherno/Coral.git

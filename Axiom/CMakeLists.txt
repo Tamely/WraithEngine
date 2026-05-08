@@ -300,6 +300,13 @@ else()
   target_compile_definitions(AxiomCore PUBLIC AXIOM_ENABLE_WEBRTC=0)
 endif()
 
+if(AXIOM_ENABLE_SCRIPTING)
+  target_link_libraries(AxiomCore PUBLIC CoralNative)
+  target_compile_definitions(AxiomCore PUBLIC AXIOM_SCRIPTING_ENABLED=1)
+else()
+  target_compile_definitions(AxiomCore PUBLIC AXIOM_SCRIPTING_ENABLED=0)
+endif()
+
 if(AXIOM_WEBRTC_COMPILE_OPTIONS)
   target_compile_options(AxiomCore PUBLIC ${AXIOM_WEBRTC_COMPILE_OPTIONS})
 endif()
