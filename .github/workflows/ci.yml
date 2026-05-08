@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  cpp:
+    name: C++ Build & Test
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Homebrew packages
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: brew-${{ runner.os }}-ninja-cmake
+          restore-keys: brew-${{ runner.os }}-
+
+      - name: Install build tools
+        run: brew install ninja cmake
+
+      - name: Install Vulkan SDK
+        run: brew install --cask vulkan-sdk
+
+      - name: Set Vulkan environment
+        run: |
+          VULKAN_SDK_DIR=$(ls -d /usr/local/VulkanSDK/*/macOS 2>/dev/null | tail -1)
+          echo "VULKAN_SDK=$VULKAN_SDK_DIR" >> $GITHUB_ENV
+          echo "$VULKAN_SDK_DIR/bin" >> $GITHUB_PATH
+
+      - name: Cache CMake build
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/debug/_deps
+            build/debug/ThirdParty
+          key: cmake-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'ThirdParty/**') }}
+          restore-keys: cmake-${{ runner.os }}-
+
+      - name: Configure
+        run: cmake --preset debug -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build/debug
+
+      - name: Test
+        run: ctest --test-dir build/debug --output-on-failure
+
+  frontend:
+    name: Frontend Lint & Build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: EditorFrontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: latest
+          run_install: false
+
+      - name: Get pnpm store path
+        id: pnpm-cache
+        run: echo "store=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('EditorFrontend/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_AXIOM_SERVER_ORIGIN: http://localhost:8080
