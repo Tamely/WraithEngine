@@ -34,7 +34,7 @@ export function PresenceRoster() {
   }
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-2">
       {visible.map((participant) => (
         <span
           key={participant.userId}
