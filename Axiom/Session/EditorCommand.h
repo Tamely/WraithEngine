@@ -72,13 +72,23 @@ struct SetTransformCommand {
   glm::vec3 Scale{1.0f};
 };
 
+struct AttachScriptCommand {
+  std::string ObjectId;
+  std::string ScriptClassName; // fully-qualified C# class name, e.g. "MyGame.RotatorScript"
+};
+
+struct DetachScriptCommand {
+  std::string ObjectId;
+};
+
 using EditorCommandPayload =
     std::variant<UpdateViewportCameraCommand, SetViewportCameraPoseCommand,
                  SetLookActiveCommand, SelectObjectCommand,
                  RenameObjectCommand, SetObjectVisibilityCommand,
                  CreateObjectCommand, DuplicateObjectCommand,
                  DeleteObjectCommand, ReparentObjectCommand,
-                 SetTransformCommand>;
+                 SetTransformCommand, AttachScriptCommand,
+                 DetachScriptCommand>;
 
 struct EditorCommand {
   EditorCommandPayload Payload;

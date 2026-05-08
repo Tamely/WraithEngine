@@ -45,6 +45,8 @@ enum class HeadlessCommandType {
   GetSchema,
   SetProperty,
   SaveScene,
+  AttachScript,
+  DetachScript,
   Heartbeat,
   RenderFrame,
   Quit,

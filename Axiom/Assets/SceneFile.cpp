@@ -105,6 +105,9 @@ bool SaveSceneToFile(const std::filesystem::path &Path,
           << ",\"rotationDegrees\":" << SerializeVec3(Details.Transform->RotationDegrees)
           << ",\"scale\":" << SerializeVec3(Details.Transform->Scale);
     }
+    if (Details.ScriptClass.has_value()) {
+      Out << ",\"scriptClass\":" << EscStr(*Details.ScriptClass);
+    }
     Out << "}";
   }
   Out << "\n  ],\n";
@@ -321,6 +324,7 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
     bool SupportsTransform{false};
     bool TransformReadOnly{true};
     std::optional<EditorTransformDetails> Transform;
+    std::optional<std::string> ScriptClass;
   };
 
   std::string MeshAsset;
@@ -381,6 +385,11 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
               if (!Data.Transform) Data.Transform = EditorTransformDetails{};
               Data.Transform->Scale = *V;
             }
+            return true;
+          }
+          if (K == "scriptClass") {
+            P.SkipWs();
+            if (P.Peek() == 'n') { P.ParseNull(); } else { auto V = P.ParseString(); if (V) Data.ScriptClass = *V; }
             return true;
           }
           return false;
@@ -452,6 +461,7 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
     Details.SupportsTransform = Data.SupportsTransform;
     Details.TransformReadOnly = Data.TransformReadOnly;
     Details.Transform       = Data.Transform;
+    Details.ScriptClass     = Data.ScriptClass;
     State.ObjectDetailsById[Id] = std::move(Details);
   }
 

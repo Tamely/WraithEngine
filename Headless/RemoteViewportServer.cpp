@@ -861,6 +861,8 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::DeleteObject:
   case HeadlessCommandType::ReparentObject:
   case HeadlessCommandType::SetTransform:
+  case HeadlessCommandType::AttachScript:
+  case HeadlessCommandType::DetachScript:
     m_Host.SubmitRemoteCommand(*User, Command->EditorPayload);
     break;
   case HeadlessCommandType::GizmoHover:
@@ -1472,6 +1474,8 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   case HeadlessCommandType::DeleteObject:
   case HeadlessCommandType::ReparentObject:
   case HeadlessCommandType::SetTransform:
+  case HeadlessCommandType::AttachScript:
+  case HeadlessCommandType::DetachScript:
   case HeadlessCommandType::UpdateViewportCamera:
   case HeadlessCommandType::GizmoHover:
   case HeadlessCommandType::GizmoDragStart:
@@ -1547,6 +1551,8 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::DeleteObject:
   case HeadlessCommandType::ReparentObject:
   case HeadlessCommandType::SetTransform:
+  case HeadlessCommandType::AttachScript:
+  case HeadlessCommandType::DetachScript:
     m_Host.SubmitRemoteCommand(Client->User, Command->EditorPayload);
     return true;
   case HeadlessCommandType::Heartbeat: {
@@ -1607,6 +1613,20 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
         m_Host.SubmitRemoteCommand(
             Client->User,
             EditorCommand{SetObjectVisibilityCommand{.ObjectId = ObjId, .Visible = *B}});
+        return true;
+      }
+    } else if (Name == "scriptClass") {
+      if (const auto *S = std::get_if<std::string>(&Val)) {
+        if (S->empty()) {
+          m_Host.SubmitRemoteCommand(
+              Client->User,
+              EditorCommand{DetachScriptCommand{.ObjectId = ObjId}});
+        } else {
+          m_Host.SubmitRemoteCommand(
+              Client->User,
+              EditorCommand{AttachScriptCommand{.ObjectId = ObjId,
+                                               .ScriptClassName = *S}});
+        }
         return true;
       }
     } else if (Name == "location" || Name == "rotationDegrees" || Name == "scale") {
