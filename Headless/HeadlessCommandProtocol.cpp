@@ -707,6 +707,9 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
   if (*Type == "list_assets") {
     return HeadlessCommand{.Type = HeadlessCommandType::ListAssets};
   }
+  if (*Type == "save_scene") {
+    return HeadlessCommand{.Type = HeadlessCommandType::SaveScene};
+  }
   if (*Type == "get_schema") {
     static const std::regex ObjectIdPattern(R"json("objectId"\s*:\s*"([^"]+)")json");
     const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
@@ -798,6 +801,7 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::ListAssets:
   case HeadlessCommandType::GetSchema:
   case HeadlessCommandType::SetProperty:
+  case HeadlessCommandType::SaveScene:
   case HeadlessCommandType::Heartbeat:
   case HeadlessCommandType::Quit:
     return Command;
@@ -1271,6 +1275,11 @@ std::string SerializeObjectSchema(const EditorObjectDetails &Details) {
 
   Stream << "]}";
   return Stream.str();
+}
+
+std::string SerializeSaveResult(bool Success) {
+  return Success ? "{\"type\":\"scene_saved\"}"
+                 : "{\"type\":\"scene_save_failed\"}";
 }
 
 std::string SerializeError(std::string_view Message) {
