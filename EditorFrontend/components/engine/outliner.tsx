@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import {
   ChevronRight,
   ChevronDown,
@@ -69,6 +69,7 @@ export function Outliner() {
     duplicateObject,
     deleteObject,
     renameObject,
+    reparentObject,
     participants,
     sessionState,
   } = useRemoteViewport()
@@ -77,6 +78,8 @@ export function Outliner() {
     new Set(["world", "lighting", "geometry"])
   )
   const [editing, setEditing] = useState<EditingState>(null)
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null)
+  const draggedIdRef = useRef<string | null>(null)
 
   const visibleTree = useMemo(() => {
     const collaboratorItems: SessionSceneItem[] = participants
@@ -162,11 +165,41 @@ export function Outliner() {
       setEditing(null)
     }
 
+    const isDragTarget = dropTargetId === item.id
     const row = (
       <div
         className={`group flex cursor-pointer items-center gap-1 px-2 py-1 hover:bg-neutral-800 ${
           isSelected ? "bg-neutral-700" : ""
-        }`}
+        } ${isDragTarget ? "outline outline-1 outline-blue-500" : ""}`}
+        draggable={!isParticipantCamera && !isEditing}
+        onDragStart={(e) => {
+          if (isParticipantCamera) return
+          draggedIdRef.current = item.id
+          e.dataTransfer.effectAllowed = "move"
+        }}
+        onDragOver={(e) => {
+          if (draggedIdRef.current === null || draggedIdRef.current === item.id) return
+          if (isParticipantCamera) return
+          e.preventDefault()
+          e.dataTransfer.dropEffect = "move"
+          setDropTargetId(item.id)
+        }}
+        onDragLeave={() => {
+          setDropTargetId(null)
+        }}
+        onDrop={(e) => {
+          e.preventDefault()
+          setDropTargetId(null)
+          const sourceId = draggedIdRef.current
+          draggedIdRef.current = null
+          if (sourceId === null || sourceId === item.id) return
+          if (isParticipantCamera) return
+          void reparentObject(sourceId, item.id)
+        }}
+        onDragEnd={() => {
+          draggedIdRef.current = null
+          setDropTargetId(null)
+        }}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
         onClick={() => {
           if (isParticipantCamera || isEditing) return

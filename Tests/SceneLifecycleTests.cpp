@@ -593,3 +593,139 @@ TEST(SceneLifecycleTests, SnapshotRehydrationRestoresTreeAndAllowsCreate) {
   EXPECT_EQ(Session.FindObjectDetails(Created->ObjectId), nullptr);
   EXPECT_EQ(World->GetChildren().size(), 0u);
 }
+
+// ---------------------------------------------------------------------------
+// Reparent
+// ---------------------------------------------------------------------------
+
+// Helper: create a session with "world" folder and a sub-folder "group" inside it.
+Axiom::EditorSession MakeSessionWithFolder() {
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  Session.SetSceneItems({{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {{
+          .Id = "group",
+          .DisplayName = "Group",
+          .Kind = Axiom::EditorSceneItemKind::Folder,
+          .Visible = true,
+          .Children = {},
+      }},
+  }});
+  Session.SetObjectDetails({
+      {.ObjectId = "world",
+       .DisplayName = "World",
+       .Kind = Axiom::EditorSceneItemKind::Folder,
+       .Visible = true,
+       .SupportsTransform = false,
+       .TransformReadOnly = true},
+      {.ObjectId = "group",
+       .DisplayName = "Group",
+       .Kind = Axiom::EditorSceneItemKind::Folder,
+       .Visible = true,
+       .SupportsTransform = false,
+       .TransformReadOnly = true},
+  });
+  return Session;
+}
+
+TEST(SceneLifecycleTests, ReparentMovesObjectToNewParent) {
+  Axiom::EditorSession Session = MakeSessionWithFolder();
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  // Create a mesh under "world"
+  Session.Submit(MakeContext(1),
+                 {.Payload = Axiom::CreateObjectCommand{.TemplateId = "Mesh"}});
+  Session.Tick();
+  const auto *Created = FindEvent<Axiom::ObjectCreatedEvent>(Subscriber.Events);
+  ASSERT_NE(Created, nullptr);
+  const std::string MeshId = Created->ObjectId;
+  Subscriber.Events.clear();
+
+  // Reparent the mesh into "group"
+  Session.Submit(MakeContext(2),
+                 {.Payload = Axiom::ReparentObjectCommand{
+                      .ObjectId = MeshId,
+                      .NewParentId = "group",
+                  }});
+  Session.Tick();
+
+  // Event published
+  const auto *Reparented =
+      FindEvent<Axiom::ObjectReparentedEvent>(Subscriber.Events);
+  ASSERT_NE(Reparented, nullptr);
+  EXPECT_EQ(Reparented->ObjectId, MeshId);
+  EXPECT_EQ(Reparented->NewParentId, "group");
+
+  // Tree reflects new parent
+  const Axiom::EditorSceneItem *GroupItem = Session.FindSceneItem("group");
+  ASSERT_NE(GroupItem, nullptr);
+  ASSERT_EQ(GroupItem->Children.size(), 1u);
+  EXPECT_EQ(GroupItem->Children.front().Id, MeshId);
+
+  // Old parent no longer contains the item
+  const Axiom::EditorSceneItem *WorldItem = Session.FindSceneItem("world");
+  ASSERT_NE(WorldItem, nullptr);
+  for (const auto &Child : WorldItem->Children) {
+    EXPECT_NE(Child.Id, MeshId);
+  }
+}
+
+TEST(SceneLifecycleTests, ReparentToDescendantIsRejected) {
+  Axiom::EditorSession Session = MakeSessionWithFolder();
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  // "group" is a child of "world" — reparenting "world" into "group" would
+  // create a cycle.
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::ReparentObjectCommand{
+                      .ObjectId = "world",
+                      .NewParentId = "group",
+                  }});
+  Session.Tick();
+
+  ASSERT_NE(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+  ASSERT_NE(Session.FindSceneItem("world"), nullptr);
+  ASSERT_NE(Session.FindSceneItem("group"), nullptr);
+}
+
+TEST(SceneLifecycleTests, ReparentToUnknownParentIsRejected) {
+  Axiom::EditorSession Session = MakeSessionWithFolder();
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(1),
+                 {.Payload = Axiom::CreateObjectCommand{.TemplateId = "Mesh"}});
+  Session.Tick();
+  const auto *Created = FindEvent<Axiom::ObjectCreatedEvent>(Subscriber.Events);
+  ASSERT_NE(Created, nullptr);
+  Subscriber.Events.clear();
+
+  Session.Submit(MakeContext(2),
+                 {.Payload = Axiom::ReparentObjectCommand{
+                      .ObjectId = Created->ObjectId,
+                      .NewParentId = "nonexistent",
+                  }});
+  Session.Tick();
+
+  ASSERT_NE(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+}
+
+TEST(SceneLifecycleTests, ReparentToSelfIsRejected) {
+  Axiom::EditorSession Session = MakeSessionWithFolder();
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::ReparentObjectCommand{
+                      .ObjectId = "group",
+                      .NewParentId = "group",
+                  }});
+  Session.Tick();
+
+  ASSERT_NE(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+}

@@ -130,10 +130,15 @@ void HeadlessSessionLayer::OnRender() {
 
   const EditorObjectDetails *Selected =
       m_Session.FindSelectedObjectDetails(RenderUser);
-  if (Selected != nullptr && Selected->SupportsTransform &&
-      Selected->Transform.has_value()) {
+  const auto *EffTransform = Selected != nullptr
+      ? (Selected->WorldTransform.has_value() ? &*Selected->WorldTransform
+                                              : (Selected->Transform.has_value()
+                                                     ? &*Selected->Transform
+                                                     : nullptr))
+      : nullptr;
+  if (EffTransform != nullptr && Selected->SupportsTransform) {
     RenderCommand::SetGizmoOverlay({
-        .WorldPosition = Selected->Transform->Location,
+        .WorldPosition = EffTransform->Location,
         .Scale = 0.5f,
         .HoveredAxis = GetGizmoHoveredAxis(RenderUser),
         .Mode = GetGizmoMode(RenderUser),

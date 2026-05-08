@@ -60,6 +60,11 @@ struct DeleteObjectCommand {
   std::string ObjectId;
 };
 
+struct ReparentObjectCommand {
+  std::string ObjectId;
+  std::string NewParentId;
+};
+
 struct SetTransformCommand {
   std::string ObjectId;
   glm::vec3 Location{0.0f};
@@ -72,7 +77,7 @@ using EditorCommandPayload =
                  SetLookActiveCommand, SelectObjectCommand,
                  RenameObjectCommand, SetObjectVisibilityCommand,
                  CreateObjectCommand, DuplicateObjectCommand,
-                 DeleteObjectCommand,
+                 DeleteObjectCommand, ReparentObjectCommand,
                  SetTransformCommand>;
 
 struct EditorCommand {

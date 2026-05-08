@@ -3,6 +3,7 @@
 #include <glm/common.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/geometric.hpp>
+#include <glm/gtc/matrix_inverse.hpp>
 #include <glm/trigonometric.hpp>
 
 #include <algorithm>
@@ -65,6 +66,9 @@ std::string CommandTypeName(const EditorCommandPayload &Payload) {
   }
   if (std::holds_alternative<DeleteObjectCommand>(Payload)) {
     return "delete_object";
+  }
+  if (std::holds_alternative<ReparentObjectCommand>(Payload)) {
+    return "reparent_object";
   }
   return "set_transform";
 }
@@ -186,6 +190,7 @@ void EditorSession::SetSceneState(EditorSceneState SceneState) {
   m_State.Scene = std::move(SceneState);
   RebuildInstanceTree(m_State.Scene.Items, m_SceneRoot.get());
   PruneInvalidSelections();
+  RecomputeAllWorldTransforms();
 }
 
 void EditorSession::SetSceneMeshInstances(
@@ -197,11 +202,13 @@ void EditorSession::SetSceneItems(std::vector<EditorSceneItem> SceneItems) {
   m_State.Scene.Items = std::move(SceneItems);
   RebuildInstanceTree(m_State.Scene.Items, m_SceneRoot.get());
   PruneInvalidSelections();
+  RecomputeAllWorldTransforms();
 }
 
 void EditorSession::SetObjectDetails(
     std::vector<EditorObjectDetails> ObjectDetails) {
   m_State.Scene.ObjectDetailsById = BuildObjectDetailsMap(std::move(ObjectDetails));
+  RecomputeAllWorldTransforms();
 }
 
 void EditorSession::SetPresence(std::vector<EditorUserPresence> Presence) {
@@ -418,8 +425,10 @@ void EditorSession::DeepCloneSubtree(const Instance *Source, Instance *DestParen
     BaseDisplayName = ExistIt->second.DisplayName;
     NewDetails.Visible = ExistIt->second.Visible;
     NewDetails.Transform = ExistIt->second.Transform;
+    NewDetails.WorldTransform = ExistIt->second.WorldTransform;
   } else if (NewDetails.SupportsTransform) {
     NewDetails.Transform = EditorTransformDetails{};
+    NewDetails.WorldTransform = EditorTransformDetails{};
   }
 
   NewDetails.ObjectId = NewId;
@@ -561,14 +570,70 @@ void EditorSession::PruneInvalidSelections() {
   }
 }
 
-void EditorSession::UpdateSubmissionTransform(
-    std::string_view ObjectId, const EditorTransformDetails &Transform) {
-  const glm::mat4 Matrix = BuildTransformMatrix(Transform);
-  for (EditorSceneMeshInstance &Instance : m_State.Scene.MeshInstances) {
-    if (Instance.ObjectId == ObjectId) {
-      Instance.Transform = Matrix;
+glm::mat4 EditorSession::ComputeWorldTransformMatrix(const Instance *Node) const {
+  if (!Node) return glm::mat4(1.0f);
+  std::vector<const Instance *> Chain;
+  const Instance *Cur = Node;
+  while (Cur && Cur != m_SceneRoot.get()) {
+    Chain.push_back(Cur);
+    Cur = Cur->GetParent();
+  }
+  glm::mat4 World(1.0f);
+  for (auto It = Chain.rbegin(); It != Chain.rend(); ++It) {
+    const auto DetailsIt = m_State.Scene.ObjectDetailsById.find((*It)->GetName());
+    if (DetailsIt != m_State.Scene.ObjectDetailsById.end() &&
+        DetailsIt->second.Transform.has_value()) {
+      World = World * BuildTransformMatrix(*DetailsIt->second.Transform);
     }
   }
+  return World;
+}
+
+EditorTransformDetails EditorSession::DecomposeMatrix(const glm::mat4 &Matrix) const {
+  const glm::vec3 Location = glm::vec3(Matrix[3]);
+  glm::vec3 Col0 = glm::vec3(Matrix[0]);
+  glm::vec3 Col1 = glm::vec3(Matrix[1]);
+  glm::vec3 Col2 = glm::vec3(Matrix[2]);
+  const float ScaleX = glm::length(Col0);
+  const float ScaleY = glm::length(Col1);
+  const float ScaleZ = glm::length(Col2);
+  if (ScaleX > 0.0f) Col0 /= ScaleX;
+  if (ScaleY > 0.0f) Col1 /= ScaleY;
+  if (ScaleZ > 0.0f) Col2 /= ScaleZ;
+  // YXZ Euler decomposition matching BuildTransformMatrix order (Ry * Rx * Rz)
+  const float AngleX = glm::degrees(glm::asin(glm::clamp(-Col2.y, -1.0f, 1.0f)));
+  const float AngleY = glm::degrees(glm::atan(Col2.x, Col2.z));
+  const float AngleZ = glm::degrees(glm::atan(Col0.y, Col1.y));
+  return EditorTransformDetails{
+      .Location = Location,
+      .RotationDegrees = {AngleX, AngleY, AngleZ},
+      .Scale = {ScaleX, ScaleY, ScaleZ},
+  };
+}
+
+void EditorSession::RecomputeSubtreeWorldTransforms(const Instance *Node) {
+  if (!Node) return;
+  const std::string &Id = Node->GetName();
+  const auto DetailsIt = m_State.Scene.ObjectDetailsById.find(Id);
+  if (DetailsIt != m_State.Scene.ObjectDetailsById.end() &&
+      DetailsIt->second.Transform.has_value()) {
+    const glm::mat4 WorldMatrix = ComputeWorldTransformMatrix(Node);
+    DetailsIt->second.WorldTransform = DecomposeMatrix(WorldMatrix);
+    for (EditorSceneMeshInstance &Inst : m_State.Scene.MeshInstances) {
+      if (Inst.ObjectId == Id) {
+        Inst.Transform = WorldMatrix;
+        break;
+      }
+    }
+  }
+  for (const Instance *Child : Node->GetChildren())
+    RecomputeSubtreeWorldTransforms(Child);
+}
+
+void EditorSession::RecomputeAllWorldTransforms() {
+  if (!m_SceneRoot) return;
+  for (const Instance *Child : m_SceneRoot->GetChildren())
+    RecomputeSubtreeWorldTransforms(Child);
 }
 
 void EditorSession::PublishPresenceChangedEvent(SessionUserId User) {
@@ -787,6 +852,45 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
     }
   }
 
+  if (const auto *ReparentCmd =
+          std::get_if<ReparentObjectCommand>(&QueuedCommand.Command.Payload)) {
+    if (ReparentCmd->ObjectId.empty()) {
+      FailureReason = "Reparent commands require a non-empty object id.";
+      return false;
+    }
+    if (ReparentCmd->NewParentId.empty()) {
+      FailureReason = "Reparent commands require a non-empty new parent id.";
+      return false;
+    }
+    if (FindSceneItem(ReparentCmd->ObjectId) == nullptr) {
+      FailureReason = "Reparent targeted an unknown object.";
+      return false;
+    }
+    if (FindSceneItem(ReparentCmd->NewParentId) == nullptr) {
+      FailureReason = "Reparent new parent is an unknown object.";
+      return false;
+    }
+    if (ReparentCmd->ObjectId == ReparentCmd->NewParentId) {
+      FailureReason = "Cannot reparent an object onto itself.";
+      return false;
+    }
+    if (ReparentCmd->ObjectId == "world") {
+      FailureReason = "The world folder cannot be reparented.";
+      return false;
+    }
+    // Reject if new parent is a descendant of the object (would create cycle)
+    const Instance *Target =
+        FindInstanceById(m_SceneRoot.get(), ReparentCmd->ObjectId);
+    if (Target != nullptr) {
+      for (const std::string &DescId : CollectDescendantIds(Target)) {
+        if (DescId == ReparentCmd->NewParentId) {
+          FailureReason = "Cannot reparent an object onto one of its descendants.";
+          return false;
+        }
+      }
+    }
+  }
+
   return true;
 }
 
@@ -931,6 +1035,9 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
   const std::string ObjectId = BuildUniqueObjectId(Command.TemplateId);
   const std::string DisplayName = BuildUniqueDisplayName(Command.TemplateId);
 
+  const bool Transformable = SupportsTransformForKind(Kind);
+  const std::optional<EditorTransformDetails> InitTransform =
+      Transformable ? std::optional{EditorTransformDetails{}} : std::nullopt;
   m_State.Scene.ObjectDetailsById.emplace(
       ObjectId,
       EditorObjectDetails{
@@ -938,11 +1045,10 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
           .DisplayName = DisplayName,
           .Kind = Kind,
           .Visible = true,
-          .SupportsTransform = SupportsTransformForKind(Kind),
+          .SupportsTransform = Transformable,
           .TransformReadOnly = false,
-          .Transform = SupportsTransformForKind(Kind)
-                           ? std::optional{EditorTransformDetails{}}
-                           : std::nullopt,
+          .Transform = InitTransform,
+          .WorldTransform = InitTransform,
       });
 
   if (Instance *Node = CreateInstanceForTemplate(Command.TemplateId, ObjectId))
@@ -997,6 +1103,24 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
 }
 
 void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const ReparentObjectCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
+  Instance *Target = FindInstanceById(m_SceneRoot.get(), Command.ObjectId);
+  Instance *NewParent = FindInstanceById(m_SceneRoot.get(), Command.NewParentId);
+  if (!Target || !NewParent) return;
+  if (Target->GetParent() == NewParent) return;
+
+  Target->SetParent(NewParent);
+  SyncItemsFromTree();
+  RecomputeSubtreeWorldTransforms(Target);
+  PublishEvent({.Payload = ObjectReparentedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .ObjectId = Command.ObjectId,
+                    .NewParentId = Command.NewParentId,
+                }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                   const SetTransformCommand &Command) {
   EnsurePresence(QueuedCommand.Context.User);
   auto DetailsIt = m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
@@ -1004,12 +1128,36 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
     return;
   }
 
-  DetailsIt->second.Transform = EditorTransformDetails{
+  const EditorTransformDetails WorldTD{
       .Location = Command.Location,
       .RotationDegrees = Command.RotationDegrees,
       .Scale = Command.Scale,
   };
-  UpdateSubmissionTransform(Command.ObjectId, *DetailsIt->second.Transform);
+  const glm::mat4 WorldMatrix = BuildTransformMatrix(WorldTD);
+
+  // Convert world-space command to local-space for storage
+  EditorTransformDetails LocalTD = WorldTD;
+  const Instance *Node = FindInstanceById(m_SceneRoot.get(), Command.ObjectId);
+  if (Node && Node->GetParent() && Node->GetParent() != m_SceneRoot.get()) {
+    const glm::mat4 ParentWorld = ComputeWorldTransformMatrix(Node->GetParent());
+    LocalTD = DecomposeMatrix(glm::inverse(ParentWorld) * WorldMatrix);
+  }
+
+  DetailsIt->second.Transform = LocalTD;
+  DetailsIt->second.WorldTransform = WorldTD;
+
+  for (EditorSceneMeshInstance &Inst : m_State.Scene.MeshInstances) {
+    if (Inst.ObjectId == Command.ObjectId) {
+      Inst.Transform = WorldMatrix;
+      break;
+    }
+  }
+
+  // Propagate to children whose world positions depend on this object
+  if (Node) {
+    for (const Instance *Child : Node->GetChildren())
+      RecomputeSubtreeWorldTransforms(Child);
+  }
 
   PublishEvent({.Payload = ObjectTransformUpdatedEvent{
                     .User = QueuedCommand.Context.User,
