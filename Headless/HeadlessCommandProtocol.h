@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Assets/IAssetSource.h>
+#include <Assets/SceneFile.h>
 #include <Renderer/RendererBackend.h>
 #include <Renderer/RenderScene.h>
 #include <Renderer/VideoEncoding.h>
@@ -43,6 +44,7 @@ enum class HeadlessCommandType {
   ListAssets,
   GetSchema,
   SetProperty,
+  SaveScene,
   Heartbeat,
   RenderFrame,
   Quit,
@@ -140,6 +142,7 @@ std::string SerializeWebRtcStatus(bool Enabled, bool Available,
                                   const WebRtcVideoStatus &VideoStatus);
 std::string SerializeAssetList(const std::vector<Assets::AssetDescriptor> &Assets);
 std::string SerializeObjectSchema(const EditorObjectDetails &Details);
+std::string SerializeSaveResult(bool Success);
 std::string SerializeError(std::string_view Message);
 std::string SerializeShutdown();
 std::optional<HeadlessCommand>

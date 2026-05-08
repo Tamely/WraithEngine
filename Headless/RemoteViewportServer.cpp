@@ -873,6 +873,7 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::ListAssets:
   case HeadlessCommandType::GetSchema:
   case HeadlessCommandType::SetProperty:
+  case HeadlessCommandType::SaveScene:
     break;
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
@@ -1495,6 +1496,15 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   }
   case HeadlessCommandType::SetProperty:
     return false;
+  case HeadlessCommandType::SaveScene: {
+    const Assets::LocalAssetSource ContentDir{AXIOM_CONTENT_DIR};
+    const auto ScenePath = ContentDir.ResolveRelative("scene.json");
+    const bool Ok = Assets::SaveSceneToFile(
+        ScenePath,
+        m_Host.GetHeadlessLayer().GetSession().GetState().Scene);
+    SendTextMessage(ClientSocketValue, SerializeSaveResult(Ok));
+    return true;
+  }
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
     m_Host.RequestClose();
@@ -1563,6 +1573,17 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     if (It != DetailsById.end() && Client->WebRtcSession != nullptr) {
       Client->WebRtcSession->SendReliableMessage(
           SerializeObjectSchema(It->second));
+    }
+    return true;
+  }
+  case HeadlessCommandType::SaveScene: {
+    const Assets::LocalAssetSource ContentDir{AXIOM_CONTENT_DIR};
+    const auto ScenePath = ContentDir.ResolveRelative("scene.json");
+    const bool Ok = Assets::SaveSceneToFile(
+        ScenePath,
+        m_Host.GetHeadlessLayer().GetSession().GetState().Scene);
+    if (Client->WebRtcSession != nullptr) {
+      Client->WebRtcSession->SendReliableMessage(SerializeSaveResult(Ok));
     }
     return true;
   }

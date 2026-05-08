@@ -121,6 +121,7 @@ interface RemoteViewportActions {
   reparentObject: (objectId: string, newParentId: string) => Promise<boolean>
   listAssets: () => Promise<void>
   getSchema: (objectId: string) => Promise<void>
+  saveScene: () => Promise<void>
   setProperty: (
     objectId: string,
     property: string,
@@ -187,6 +188,9 @@ interface RemoteViewportContextValue {
   objectSchema: SessionObjectSchema | null
   setObjectSchema: (schema: SessionObjectSchema) => void
   getSchema: (objectId: string) => Promise<void>
+  saveScene: () => Promise<void>
+  saveStatus: "idle" | "saving" | "saved" | "failed"
+  setSaveStatus: (status: "idle" | "saving" | "saved" | "failed") => void
   setProperty: (
     objectId: string,
     property: string,
@@ -257,6 +261,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     reparentObject: async () => false,
     listAssets: async () => {},
     getSchema: async () => {},
+    saveScene: async () => {},
     setProperty: async () => false,
   })
   const [connectionState, setConnectionState] =
@@ -283,6 +288,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
   const [lockedObjects, setLockedObjects] = useState<Record<string, number>>({})
   const [assets, setAssets] = useState<SessionAssetDescriptor[]>([])
   const [objectSchema, setObjectSchema] = useState<SessionObjectSchema | null>(null)
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle")
 
   const appendEventLog = useCallback((value: string) => {
     setEventLog((current) => [value, ...current].slice(0, MAX_LOG_LINES))
@@ -428,6 +434,11 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     await actionsRef.current.getSchema(objectId)
   }, [])
 
+  const saveScene = useCallback(async () => {
+    setSaveStatus("saving")
+    await actionsRef.current.saveScene()
+  }, [])
+
   const setProperty = useCallback(
     async (
       objectId: string,
@@ -471,6 +482,9 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       objectSchema,
       setObjectSchema,
       getSchema,
+      saveScene,
+      saveStatus,
+      setSaveStatus,
       setProperty,
       setConnectionState,
       setSessionState,
@@ -539,6 +553,8 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       listAssets,
       objectSchema,
       getSchema,
+      saveScene,
+      saveStatus,
       setProperty,
       serverOrigin,
       gizmoMode,

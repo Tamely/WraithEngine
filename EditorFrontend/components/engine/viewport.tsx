@@ -170,6 +170,7 @@ type RemoteViewportCommand =
   | { type: "heartbeat" }
   | { type: "list_assets" }
   | { type: "get_schema"; objectId: string }
+  | { type: "save_scene" }
   | {
       type: "set_property"
       objectId: string
@@ -253,6 +254,7 @@ export function Viewport() {
     applyObjectLockChanged,
     setAssets,
     setObjectSchema,
+    setSaveStatus,
     setSessionState,
     sessionStatusText,
     setSessionStatusText,
@@ -728,6 +730,18 @@ export function Viewport() {
               path: typeof a.path === "string" ? a.path : String(a.path ?? ""),
             }))
         )
+        return
+      }
+
+      if (message.type === "scene_saved") {
+        setSaveStatus("saved")
+        setSessionUi("session-ready", "Session ready", "Scene saved successfully.")
+        return
+      }
+
+      if (message.type === "scene_save_failed") {
+        setSaveStatus("failed")
+        setSessionUi("error", "Save failed", "The scene could not be saved.")
         return
       }
 
@@ -1470,6 +1484,9 @@ export function Viewport() {
       },
       getSchema: async (objectId: string) => {
         await sendCommand({ type: "get_schema", objectId }, "reliable")
+      },
+      saveScene: async () => {
+        await sendCommand({ type: "save_scene" }, "reliable")
       },
       setProperty: async (objectId, property, value) => {
         return sendCommand({ type: "set_property", objectId, property, value }, "reliable")
