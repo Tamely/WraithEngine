@@ -2,6 +2,10 @@
 
 #include <Core/Platform.h>
 
+#ifndef AXIOM_CONTENT_DIR
+#define AXIOM_CONTENT_DIR "Content"
+#endif
+
 #include "GizmoHitTest.h"
 #include "HeadlessCommandProtocol.h"
 #include <Renderer/VideoEncoderFactory.h>
@@ -865,6 +869,8 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::GizmoDragEnd:
   case HeadlessCommandType::SetGizmoMode:
     break;
+  case HeadlessCommandType::ListAssets:
+    break;
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
     m_Host.RequestClose();
@@ -1431,7 +1437,7 @@ void RemoteViewportServer::RunWebSocketSession(uintptr_t ClientSocketValue) {
     }
 
     const std::string TextPayload(Payload.begin(), Payload.end());
-    if (!HandleWebSocketMessage(TextPayload)) {
+    if (!HandleWebSocketMessage(ClientSocketValue, TextPayload)) {
       SendTextMessage(ClientSocketValue,
                       SerializeError("Invalid WebSocket command payload."));
     }
@@ -1440,7 +1446,8 @@ void RemoteViewportServer::RunWebSocketSession(uintptr_t ClientSocketValue) {
   RemoveWebSocketClient(ClientSocketValue);
 }
 
-bool RemoteViewportServer::HandleWebSocketMessage(std::string_view Payload) {
+bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
+                                                  std::string_view Payload) {
   std::string Error;
   const auto Command = ParseRemoteViewportCommand(Payload, Error);
   if (!Command.has_value()) {
@@ -1469,6 +1476,11 @@ bool RemoteViewportServer::HandleWebSocketMessage(std::string_view Payload) {
   case HeadlessCommandType::SetGizmoMode:
   case HeadlessCommandType::Heartbeat:
     return false;
+  case HeadlessCommandType::ListAssets: {
+    const Assets::LocalAssetSource ContentDir{AXIOM_CONTENT_DIR};
+    SendTextMessage(ClientSocketValue, SerializeAssetList(ContentDir.List()));
+    return true;
+  }
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
     m_Host.RequestClose();
@@ -1519,6 +1531,14 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     if (Presence != nullptr && Presence->State == EditorUserPresenceState::Away) {
       m_Host.GetHeadlessLayer().GetSession().SetPresenceState(
           Client->User, EditorUserPresenceState::Connected);
+    }
+    return true;
+  }
+  case HeadlessCommandType::ListAssets: {
+    const Assets::LocalAssetSource ContentDir{AXIOM_CONTENT_DIR};
+    if (Client->WebRtcSession != nullptr) {
+      Client->WebRtcSession->SendReliableMessage(
+          SerializeAssetList(ContentDir.List()));
     }
     return true;
   }

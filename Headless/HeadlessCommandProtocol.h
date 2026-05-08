@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Assets/IAssetSource.h>
 #include <Renderer/RendererBackend.h>
 #include <Renderer/RenderScene.h>
 #include <Renderer/VideoEncoding.h>
@@ -37,6 +38,7 @@ enum class HeadlessCommandType {
   GizmoDragUpdate,
   GizmoDragEnd,
   SetGizmoMode,
+  ListAssets,
   Heartbeat,
   RenderFrame,
   Quit,
@@ -127,6 +129,7 @@ std::string SerializeWebRtcStatus(bool Enabled, bool Available,
                                   std::string_view SessionId,
                                   size_t PendingLocalIceCandidateCount,
                                   const WebRtcVideoStatus &VideoStatus);
+std::string SerializeAssetList(const std::vector<Assets::AssetDescriptor> &Assets);
 std::string SerializeError(std::string_view Message);
 std::string SerializeShutdown();
 std::optional<HeadlessCommand>

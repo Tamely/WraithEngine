@@ -704,6 +704,9 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
   if (*Type == "gizmo_drag_start") return ParseMouseXY(HeadlessCommandType::GizmoDragStart);
   if (*Type == "gizmo_drag_update") return ParseMouseXY(HeadlessCommandType::GizmoDragUpdate);
   if (*Type == "gizmo_drag_end") return ParseMouseXY(HeadlessCommandType::GizmoDragEnd);
+  if (*Type == "list_assets") {
+    return HeadlessCommand{.Type = HeadlessCommandType::ListAssets};
+  }
   if (*Type == "heartbeat") {
     return HeadlessCommand{.Type = HeadlessCommandType::Heartbeat};
   }
@@ -750,6 +753,7 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::GizmoDragUpdate:
   case HeadlessCommandType::GizmoDragEnd:
   case HeadlessCommandType::SetGizmoMode:
+  case HeadlessCommandType::ListAssets:
   case HeadlessCommandType::Heartbeat:
   case HeadlessCommandType::Quit:
     return Command;
@@ -1166,6 +1170,24 @@ std::string SerializeWebRtcStatus(bool Enabled, bool Available,
             "\"maxRetransmits\":null},"
          << "{\"label\":\"viewport-input\",\"ordered\":false,"
             "\"maxRetransmits\":0}]}";
+  return Stream.str();
+}
+
+std::string
+SerializeAssetList(const std::vector<Assets::AssetDescriptor> &Assets) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"asset_list\",\"assets\":[";
+  for (size_t I = 0; I < Assets.size(); ++I) {
+    const auto &Desc = Assets[I];
+    if (I > 0)
+      Stream << ",";
+    const std::string_view Kind =
+        Desc.Kind == Assets::AssetKind::Mesh ? "mesh" : "texture";
+    Stream << "{\"id\":" << Desc.Id.Value << ",\"name\":\""
+           << EscapeJson(Desc.Name) << "\",\"kind\":\"" << Kind
+           << "\",\"path\":\"" << EscapeJson(Desc.RelativePath) << "\"}";
+  }
+  Stream << "]}";
   return Stream.str();
 }
 
