@@ -41,6 +41,12 @@
 - The object lifecycle commands are now fully wired through the browser editor shell: `HeadlessCommandType` and `ParseRemoteViewportCommand` were extended for `create_object`, `duplicate_object`, and `delete_object`; `object_created` and `object_deleted` events are now serialized and broadcast to all connected clients
 - The outliner gained an Add dropdown (Folder, Mesh, Light, Camera, Actor templates), a Delete toolbar button active when an object is selected, and right-click context menus on every scene item with Duplicate and Delete entries; all three operations dispatch through the same authoritative command/event path
 - The `RemoteViewportCommand` TypeScript union was extended for the three new command types; the event dispatch block in `viewport.tsx` handles `object_created` and `object_deleted` by triggering a session snapshot refresh so the outliner updates automatically
+- A server-side transform gizmo is now implemented end-to-end: the engine renders colored axis handles as a Vulkan overlay pass on top of the selected object in the captured frame, and the browser forwards mouse input so the server can hit-test and drag those handles to drive `SetTransformCommand`
+- `GizmoMode` (Translate / Scale / Rotate) is now a first-class per-client concept; the toolbar Move, Rotate, and Scale buttons switch modes with active-state feedback, and Q/E/R keyboard shortcuts work while the viewport is focused
+- Translate mode constrains drag to the clicked axis via ray-plane intersection; Scale mode applies a proportional delta to the clicked axis scale component; Rotate mode projects the mouse onto each ring's plane and converts the angle delta to degrees
+- `VulkanGizmoRenderer` draws mode-appropriate handles: arrows for translate, arrows with perpendicular cross-caps for scale, and 24-segment screen-space rings for rotate; the hovered handle brightens in all modes
+- Gizmo mouse coordinates are forwarded using the correct `object-contain` content rect mapping so hit-testing is accurate regardless of the viewport aspect ratio or window size
+- `gizmoMode` state lives in `RemoteViewportContext` so the toolbar and viewport share a single source of truth without prop drilling
 
 ## 1. Executive Summary
 WraithEngine will evolve from a single-process native editor into a distributed platform with one shared C++ engine runtime that supports two execution styles:
@@ -1057,7 +1063,8 @@ Progress update:
 - in-outliner inline rename is now implemented: double-clicking any object name in the outliner opens an in-place input that commits on Enter or blur and cancels on Escape; it drives the existing `rename_object` command path without any new C++ or protocol work
 - the details panel supports rename and transform editing; drafts are scoped to the selected object's ID so periodic server snapshot polls do not clobber edits in progress
 - viewport keyboard input (WASD, Space, Shift) is now gated on pointer lock state; keys are only consumed while the viewport has pointer lock and are cleared immediately when it releases, so other UI elements (inputs, the outliner) receive input normally
-- the next authoring steps are binding transform gizmos to the authoritative `SetTransform` path and implementing reparent
+- a server-side transform gizmo is now implemented across all three modes (Translate, Scale, Rotate); the toolbar Move/Rotate/Scale buttons and Q/E/R shortcuts switch modes with active-state feedback; dragging any handle drives `SetTransformCommand` through the same authoritative command path
+- the next authoring steps are reparent and multi-user gizmo collision handling
 - multi-client validation, transport tuning, and deeper collaboration surfaces should continue afterward through that same command/event path instead of becoming the lead implementation track
 
 That slice proves the core thesis:

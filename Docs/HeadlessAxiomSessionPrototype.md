@@ -213,13 +213,44 @@ The authoritative scene-authoring loop has advanced on the `scene-editing` branc
 - delete removes the entire subtree from the Instance tree, `ObjectDetailsById`, `MeshInstances`, and any active user selections
 - 16 focused tests cover creation, duplication, deletion, all rejection cases, uniqueness generation, and snapshot rehydration
 
+## Gizmo System
+
+A server-side transform gizmo is now fully implemented on the `scene-editing` branch:
+
+### Rendering (`VulkanGizmoRenderer`)
+- a dedicated Vulkan pipeline draws gizmo handles as billboard line-segment quads inserted between mesh rendering and the offscreen capture step
+- **Translate mode**: three colored axis arrows (X=red, Y=green, Z=blue)
+- **Scale mode**: same arrows with perpendicular cross-caps at the tips to distinguish them visually
+- **Rotate mode**: three 24-segment rings, one per axis, drawn in the plane perpendicular to each axis direction
+- the hovered handle brightens in all modes; the gizmo is invisible when no object is selected
+- handle size is screen-space-constant: arm length is computed each frame so the gizmo appears at a fixed pixel size regardless of camera distance
+
+### Hit Testing and Drag Math (`Headless/GizmoHitTest.h`)
+- `HitTestGizmoAxes`: projects each arrow to screen space and tests 2D point-to-segment distance
+- `HitTestGizmoRings`: projects 24 ring segments per axis and tests against each, returning the closest axis within threshold
+- `BeginGizmoDrag` / `UpdateGizmoDrag`: axis-constrained drag using a camera-facing constraint plane and ray-plane intersection; returns new world position
+- `BeginGizmoRotateDrag` / `UpdateGizmoRotateDrag`: projects mouse onto the ring plane, computes angle delta via `atan2`, returns degrees; wraps to `[-π, π]`
+- scale drag reuses the translate constraint plane but converts the axis displacement to a scale multiplier relative to the gizmo arm length at drag start
+
+### Protocol
+- `gizmo_hover` (unreliable channel): sent on every `mousemove` that is not a camera drag; server updates the highlighted handle each frame
+- `gizmo_drag_start` / `gizmo_drag_end` (reliable): bracket the drag; drag start resolves the hit handle and captures object state; drag end commits the final transform
+- `gizmo_drag_update` (unreliable): sent every `mousemove` during drag; server applies the current drag math and dispatches `SetTransformCommand`
+- `set_gizmo_mode`: switches the per-client gizmo mode (`translate` / `scale` / `rotate`); server updates hit-test and rendering for subsequent frames
+- snapshot refresh is suppressed while a gizmo drag is active to prevent server state polls from fighting the in-progress drag position
+
+### Mode Switching
+- `GizmoMode` enum (Translate / Scale / Rotate) lives in `RenderScene.h` and is passed through `GizmoOverlayData` to the renderer
+- per-client mode is stored in `RemoteClientSession::CurrentGizmoMode` and in `HeadlessSessionLayer` for the render path
+- the toolbar Move, Rotate, and Scale buttons are now wired to `setGizmoMode` from `RemoteViewportContext`; active-state styling reflects the current mode
+- Q = Translate, E = Scale, R = Rotate keyboard shortcuts fire when the viewport is focused and not in camera look mode
+- `gizmoMode` state lives in `RemoteViewportContext` so toolbar and viewport share a single source of truth
+
+### Coordinate Mapping Fix
+- mouse pixel coordinates sent to the server account for the `object-contain` CSS letterboxing on the video element: the actual content rectangle is computed from the uniform scale factor and centering offsets before mapping to server pixels, so hit-testing is accurate regardless of window aspect ratio
+
 ## Next Priority
 
-The next milestone should connect the new object-lifecycle commands to the browser editor shell:
-
-- wire `CreateObjectCommand` to an "Add Object" flow in the `EditorFrontend` outliner (context menu or toolbar button)
-- wire `DeleteObjectCommand` to the outliner delete action and keyboard shortcut
-- wire `DuplicateObjectCommand` to an outliner duplicate action
-- continued hardening of the `EditorFrontend/components/engine/viewport.tsx` client around selection, inspection, and transform-authoring workflows
-- expose transform gizmo interactions through the authoritative `SetTransformCommand` path rather than local client state
-- full manual browser validation of create/delete round-trips before widening to collaboration surfaces
+- reparent: move objects between parent folders in the outliner
+- multi-user gizmo: handle the case where two users attempt to drag the same object simultaneously
+- deeper WebRTC sender/playout latency tuning for the remote viewport stream
