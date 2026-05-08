@@ -5,6 +5,7 @@ import { useEffect, useState } from "react"
 import {
   useRemoteViewport,
   type SessionObjectDetails,
+  type SessionObjectSchema,
   type SessionObjectTransformUpdate,
 } from "./remote-viewport-context"
 
@@ -19,8 +20,18 @@ type DraftTransform = {
 }
 
 export function Details() {
-  const { selectedObjectDetails, selectedObjectId } = useRemoteViewport()
+  const { selectedObjectDetails, selectedObjectId, objectSchema, getSchema } =
+    useRemoteViewport()
   const [isLocked, setIsLocked] = useState(false)
+
+  useEffect(() => {
+    if (selectedObjectId) {
+      void getSchema(selectedObjectId)
+    }
+  }, [selectedObjectId, getSchema])
+
+  const schema =
+    objectSchema?.objectId === selectedObjectId ? objectSchema : null
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -28,6 +39,11 @@ export function Details() {
         <div className="flex items-center gap-1">
           <Settings className="h-4 w-4 text-neutral-400" />
           <span className="text-xs font-medium text-neutral-300">Details</span>
+          {schema && (
+            <span className="ml-1 rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-400">
+              {schema.className}
+            </span>
+          )}
         </div>
         <button
           className="rounded p-1 hover:bg-neutral-800"
@@ -47,16 +63,21 @@ export function Details() {
         ) : !selectedObjectDetails ? (
           <EmptyState text="No authoritative details are available for this object yet" />
         ) : (
-          <DetailsContent details={selectedObjectDetails} />
+          <DetailsContent details={selectedObjectDetails} schema={schema} />
         )}
       </div>
     </div>
   )
 }
 
-function DetailsContent({ details }: { details: SessionObjectDetails }) {
-  const { participants, renameObject, setObjectVisibility, updateTransform } =
-    useRemoteViewport()
+function DetailsContent({
+  details,
+  schema,
+}: {
+  details: SessionObjectDetails
+  schema: SessionObjectSchema | null
+}) {
+  const { participants, setProperty, updateTransform } = useRemoteViewport()
   const [draftName, setDraftName] = useState(details.displayName)
   const [draft, setDraft] = useState<DraftTransform>(() => toDraft(details))
   const [isSaving, setIsSaving] = useState(false)
@@ -66,7 +87,13 @@ function DetailsContent({ details }: { details: SessionObjectDetails }) {
     setDraft(toDraft(details))
   }, [details.objectId])
 
-  const canEdit = details.capabilities.supportsTransform && !details.capabilities.transformReadOnly
+  const schemaTransformReadOnly =
+    schema?.properties.find((p) => p.name === "location")?.readOnly ?? null
+  const canEdit =
+    details.capabilities.supportsTransform &&
+    (schemaTransformReadOnly !== null
+      ? !schemaTransformReadOnly
+      : !details.capabilities.transformReadOnly)
   const selectedByNames = details.collaboration.selectedByUserIds.map((userId) => {
     const collaborator = participants.find((entry) => entry.userId === userId)
     return collaborator?.displayName ?? fallbackUserLabel(userId)
@@ -93,15 +120,12 @@ function DetailsContent({ details }: { details: SessionObjectDetails }) {
 
   async function applyIdentity() {
     const nextName = draftName.trim()
-    if (nextName.length === 0) {
+    if (nextName.length === 0 || nextName === details.displayName) {
       return
     }
-
     setIsSaving(true)
     try {
-      if (nextName !== details.displayName) {
-        await renameObject(details.objectId, nextName)
-      }
+      await setProperty(details.objectId, "displayName", nextName)
     } finally {
       setIsSaving(false)
     }
@@ -110,7 +134,7 @@ function DetailsContent({ details }: { details: SessionObjectDetails }) {
   async function toggleVisibility() {
     setIsSaving(true)
     try {
-      await setObjectVisibility(details.objectId, !details.visible)
+      await setProperty(details.objectId, "visible", !details.visible)
     } finally {
       setIsSaving(false)
     }

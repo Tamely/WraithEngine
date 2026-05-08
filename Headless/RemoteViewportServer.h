@@ -4,6 +4,7 @@
 #include "HeadlessSessionHost.h"
 #include "WebRtcSession.h"
 
+#include <Assets/IAssetSource.h>
 #include <Remote/SessionTransport.h>
 #include <Renderer/RendererBackend.h>
 #include <Renderer/RenderScene.h>
@@ -111,7 +112,8 @@ private:
                               std::string_view HeaderBlock,
                               std::string_view Path);
   void RunWebSocketSession(uintptr_t ClientSocketValue);
-  bool HandleWebSocketMessage(std::string_view Payload);
+  bool HandleWebSocketMessage(uintptr_t ClientSocketValue,
+                              std::string_view Payload);
   bool HandleClientWebRtcMessage(std::string_view ClientId,
                                  std::string_view Payload);
   void HandleClientEncodedVideoPacket(std::string_view ClientId,

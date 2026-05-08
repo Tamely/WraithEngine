@@ -34,6 +34,25 @@ export type RemoteViewportViewMode = "lit" | "unlit" | "wireframe"
 export type RemoteViewportGizmoMode = "translate" | "scale" | "rotate"
 export type SessionSceneItemKind = "folder" | "mesh" | "light" | "camera" | "actor"
 
+export interface SessionAssetDescriptor {
+  id: number
+  name: string
+  kind: "mesh" | "texture"
+  path: string
+}
+
+export interface SessionPropertyDescriptor {
+  name: string
+  type: "string" | "bool" | "vec3"
+  readOnly: boolean
+}
+
+export interface SessionObjectSchema {
+  objectId: string
+  className: string
+  properties: SessionPropertyDescriptor[]
+}
+
 export interface SessionSceneItem {
   id: string
   displayName: string
@@ -100,6 +119,13 @@ interface RemoteViewportActions {
   duplicateObject: (objectId: string) => Promise<boolean>
   deleteObject: (objectId: string) => Promise<boolean>
   reparentObject: (objectId: string, newParentId: string) => Promise<boolean>
+  listAssets: () => Promise<void>
+  getSchema: (objectId: string) => Promise<void>
+  setProperty: (
+    objectId: string,
+    property: string,
+    value: string | boolean | [number, number, number]
+  ) => Promise<boolean>
 }
 
 export interface SessionObjectTransformUpdate {
@@ -155,6 +181,17 @@ interface RemoteViewportContextValue {
     lockOwnerUserId: number | null
   ) => void
   lockedObjects: Record<string, number>
+  assets: SessionAssetDescriptor[]
+  setAssets: (assets: SessionAssetDescriptor[]) => void
+  listAssets: () => Promise<void>
+  objectSchema: SessionObjectSchema | null
+  setObjectSchema: (schema: SessionObjectSchema) => void
+  getSchema: (objectId: string) => Promise<void>
+  setProperty: (
+    objectId: string,
+    property: string,
+    value: string | boolean | [number, number, number]
+  ) => Promise<boolean>
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
@@ -218,6 +255,9 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     duplicateObject: async () => false,
     deleteObject: async () => false,
     reparentObject: async () => false,
+    listAssets: async () => {},
+    getSchema: async () => {},
+    setProperty: async () => false,
   })
   const [connectionState, setConnectionState] =
     useState<RemoteViewportConnectionState>("idle")
@@ -241,6 +281,8 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
   const [selectedObjectDetails, setSelectedObjectDetails] =
     useState<SessionObjectDetails | null>(null)
   const [lockedObjects, setLockedObjects] = useState<Record<string, number>>({})
+  const [assets, setAssets] = useState<SessionAssetDescriptor[]>([])
+  const [objectSchema, setObjectSchema] = useState<SessionObjectSchema | null>(null)
 
   const appendEventLog = useCallback((value: string) => {
     setEventLog((current) => [value, ...current].slice(0, MAX_LOG_LINES))
@@ -378,6 +420,23 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     return actionsRef.current.reparentObject(objectId, newParentId)
   }, [])
 
+  const listAssets = useCallback(async () => {
+    await actionsRef.current.listAssets()
+  }, [])
+
+  const getSchema = useCallback(async (objectId: string) => {
+    await actionsRef.current.getSchema(objectId)
+  }, [])
+
+  const setProperty = useCallback(
+    async (
+      objectId: string,
+      property: string,
+      value: string | boolean | [number, number, number]
+    ) => actionsRef.current.setProperty(objectId, property, value),
+    []
+  )
+
   const selectedObjectId =
     currentUserId !== null
       ? selections.find((selection) => selection.userId === currentUserId)?.objectId ?? null
@@ -406,6 +465,13 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       selectedObjectDetails,
       selections,
       lockedObjects,
+      assets,
+      setAssets,
+      listAssets,
+      objectSchema,
+      setObjectSchema,
+      getSchema,
+      setProperty,
       setConnectionState,
       setSessionState,
       setStatusText,
@@ -469,6 +535,11 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       selectedObjectId,
       selections,
       lockedObjects,
+      assets,
+      listAssets,
+      objectSchema,
+      getSchema,
+      setProperty,
       serverOrigin,
       gizmoMode,
       setMode,

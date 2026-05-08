@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Assets/IAssetSource.h>
 #include <Renderer/RendererBackend.h>
 #include <Renderer/RenderScene.h>
 #include <Renderer/VideoEncoding.h>
@@ -8,6 +9,7 @@
 #include <Session/EditorSession.h>
 
 #include <glm/vec2.hpp>
+#include <glm/vec3.hpp>
 
 #include <filesystem>
 #include <cstdint>
@@ -15,6 +17,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 namespace Axiom {
@@ -37,10 +40,15 @@ enum class HeadlessCommandType {
   GizmoDragUpdate,
   GizmoDragEnd,
   SetGizmoMode,
+  ListAssets,
+  GetSchema,
+  SetProperty,
   Heartbeat,
   RenderFrame,
   Quit,
 };
+
+using PropertyValue = std::variant<std::string, bool, glm::vec3>;
 
 struct HeadlessCommand {
   HeadlessCommandType Type;
@@ -48,6 +56,9 @@ struct HeadlessCommand {
   RendererViewMode ViewMode{RendererViewMode::Lit};
   glm::vec2 MousePosition{0.0f};
   GizmoMode Mode{GizmoMode::Translate};
+  std::string ObjectId;
+  std::string PropertyName;
+  std::optional<PropertyValue> PropertyVal;
 };
 
 struct HeadlessAppOptions {
@@ -127,6 +138,8 @@ std::string SerializeWebRtcStatus(bool Enabled, bool Available,
                                   std::string_view SessionId,
                                   size_t PendingLocalIceCandidateCount,
                                   const WebRtcVideoStatus &VideoStatus);
+std::string SerializeAssetList(const std::vector<Assets::AssetDescriptor> &Assets);
+std::string SerializeObjectSchema(const EditorObjectDetails &Details);
 std::string SerializeError(std::string_view Message);
 std::string SerializeShutdown();
 std::optional<HeadlessCommand>

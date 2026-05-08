@@ -31,5 +31,16 @@ struct SessionUserIdHash {
   }
 };
 
+struct AssetId {
+  uint64_t Value{0};
+  auto operator<=>(const AssetId &) const = default;
+};
+
+struct AssetIdHash {
+  size_t operator()(const AssetId &Id) const noexcept {
+    return static_cast<size_t>(Id.Value);
+  }
+};
+
 enum class EditorObjectLockState { Unlocked, Locked };
 } // namespace Axiom

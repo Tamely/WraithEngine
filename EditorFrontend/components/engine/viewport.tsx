@@ -167,6 +167,15 @@ type RemoteViewportCommand =
       type: "set_gizmo_mode"
       mode: GizmoMode
     }
+  | { type: "heartbeat" }
+  | { type: "list_assets" }
+  | { type: "get_schema"; objectId: string }
+  | {
+      type: "set_property"
+      objectId: string
+      property: string
+      value: string | boolean | [number, number, number]
+    }
 
 function getServerOrigin() {
   const configuredOrigin = process.env.NEXT_PUBLIC_AXIOM_SERVER_ORIGIN?.trim()
@@ -242,6 +251,8 @@ export function Viewport() {
     applySelectionChanged,
     applyParticipantCameraUpdate,
     applyObjectLockChanged,
+    setAssets,
+    setObjectSchema,
     setSessionState,
     sessionStatusText,
     setSessionStatusText,
@@ -682,6 +693,41 @@ export function Viewport() {
         if (objectId) {
           applyObjectLockChanged(objectId, lockState, lockOwnerUserId)
         }
+        return
+      }
+
+      if (message.type === "object_schema") {
+        const objectId = typeof message.objectId === "string" ? message.objectId : null
+        const className = typeof message.className === "string" ? message.className : "Unknown"
+        const rawProps = Array.isArray(message.properties) ? message.properties : []
+        if (objectId) {
+          setObjectSchema({
+            objectId,
+            className,
+            properties: rawProps
+              .filter((p): p is Record<string, unknown> => !!p && typeof p === "object")
+              .map((p) => ({
+                name: typeof p.name === "string" ? p.name : "",
+                type: p.type === "bool" ? "bool" : p.type === "vec3" ? "vec3" : "string",
+                readOnly: p.readOnly === true,
+              })),
+          })
+        }
+        return
+      }
+
+      if (message.type === "asset_list") {
+        const raw = Array.isArray(message.assets) ? message.assets : []
+        setAssets(
+          raw
+            .filter((a): a is Record<string, unknown> => !!a && typeof a === "object")
+            .map((a) => ({
+              id: typeof a.id === "number" ? a.id : Number(a.id),
+              name: typeof a.name === "string" ? a.name : String(a.name ?? ""),
+              kind: a.kind === "texture" ? ("texture" as const) : ("mesh" as const),
+              path: typeof a.path === "string" ? a.path : String(a.path ?? ""),
+            }))
+        )
         return
       }
 
@@ -1418,6 +1464,15 @@ export function Viewport() {
           await refreshSessionSnapshotSafely("command")
         }
         return accepted
+      },
+      listAssets: async () => {
+        await sendCommand({ type: "list_assets" }, "reliable")
+      },
+      getSchema: async (objectId: string) => {
+        await sendCommand({ type: "get_schema", objectId }, "reliable")
+      },
+      setProperty: async (objectId, property, value) => {
+        return sendCommand({ type: "set_property", objectId, property, value }, "reliable")
       },
       reparentObject: async (objectId, newParentId) => {
         const accepted = await sendCommand(

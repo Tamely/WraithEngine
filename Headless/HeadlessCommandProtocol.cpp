@@ -704,6 +704,51 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
   if (*Type == "gizmo_drag_start") return ParseMouseXY(HeadlessCommandType::GizmoDragStart);
   if (*Type == "gizmo_drag_update") return ParseMouseXY(HeadlessCommandType::GizmoDragUpdate);
   if (*Type == "gizmo_drag_end") return ParseMouseXY(HeadlessCommandType::GizmoDragEnd);
+  if (*Type == "list_assets") {
+    return HeadlessCommand{.Type = HeadlessCommandType::ListAssets};
+  }
+  if (*Type == "get_schema") {
+    static const std::regex ObjectIdPattern(R"json("objectId"\s*:\s*"([^"]+)")json");
+    const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
+    return HeadlessCommand{.Type = HeadlessCommandType::GetSchema,
+                           .ObjectId = ObjectId.value_or("")};
+  }
+  if (*Type == "set_property") {
+    static const std::regex ObjectIdPattern(R"json("objectId"\s*:\s*"([^"]+)")json");
+    static const std::regex PropPattern(R"json("property"\s*:\s*"([^"]+)")json");
+    static const std::regex StringValPattern(R"json("value"\s*:\s*"([^"]*)")json");
+    static const std::regex BoolValPattern(R"json("value"\s*:\s*(true|false))json");
+    static const std::regex Vec3ValPattern(
+        R"json("value"\s*:\s*\[\s*(-?[0-9Ee.+-]+)\s*,\s*(-?[0-9Ee.+-]+)\s*,\s*(-?[0-9Ee.+-]+)\s*\])json");
+
+    const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
+    const auto PropName = MatchString(JsonLine, PropPattern);
+
+    std::optional<PropertyValue> Val;
+    if (const auto StrVal = MatchString(JsonLine, StringValPattern)) {
+      Val = PropertyValue{*StrVal};
+    } else if (const auto BoolStr = MatchString(JsonLine, BoolValPattern)) {
+      Val = PropertyValue{*BoolStr == "true"};
+    } else {
+      std::match_results<std::string_view::const_iterator> M;
+      if (std::regex_search(JsonLine.begin(), JsonLine.end(), M, Vec3ValPattern) &&
+          M.size() == 4) {
+        const auto X = ParseDouble(std::string_view(M[1].first, M[1].second));
+        const auto Y = ParseDouble(std::string_view(M[2].first, M[2].second));
+        const auto Z = ParseDouble(std::string_view(M[3].first, M[3].second));
+        if (X && Y && Z) {
+          Val = PropertyValue{glm::vec3{static_cast<float>(*X),
+                                        static_cast<float>(*Y),
+                                        static_cast<float>(*Z)}};
+        }
+      }
+    }
+
+    return HeadlessCommand{.Type = HeadlessCommandType::SetProperty,
+                           .ObjectId = ObjectId.value_or(""),
+                           .PropertyName = PropName.value_or(""),
+                           .PropertyVal = Val};
+  }
   if (*Type == "heartbeat") {
     return HeadlessCommand{.Type = HeadlessCommandType::Heartbeat};
   }
@@ -750,6 +795,9 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::GizmoDragUpdate:
   case HeadlessCommandType::GizmoDragEnd:
   case HeadlessCommandType::SetGizmoMode:
+  case HeadlessCommandType::ListAssets:
+  case HeadlessCommandType::GetSchema:
+  case HeadlessCommandType::SetProperty:
   case HeadlessCommandType::Heartbeat:
   case HeadlessCommandType::Quit:
     return Command;
@@ -1166,6 +1214,62 @@ std::string SerializeWebRtcStatus(bool Enabled, bool Available,
             "\"maxRetransmits\":null},"
          << "{\"label\":\"viewport-input\",\"ordered\":false,"
             "\"maxRetransmits\":0}]}";
+  return Stream.str();
+}
+
+std::string
+SerializeAssetList(const std::vector<Assets::AssetDescriptor> &Assets) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"asset_list\",\"assets\":[";
+  for (size_t I = 0; I < Assets.size(); ++I) {
+    const auto &Desc = Assets[I];
+    if (I > 0)
+      Stream << ",";
+    const std::string_view Kind =
+        Desc.Kind == Assets::AssetKind::Mesh ? "mesh" : "texture";
+    Stream << "{\"id\":" << Desc.Id.Value << ",\"name\":\""
+           << EscapeJson(Desc.Name) << "\",\"kind\":\"" << Kind
+           << "\",\"path\":\"" << EscapeJson(Desc.RelativePath) << "\"}";
+  }
+  Stream << "]}";
+  return Stream.str();
+}
+
+std::string SerializeObjectSchema(const EditorObjectDetails &Details) {
+  std::ostringstream Stream;
+
+  const char *ClassName = "Unknown";
+  switch (Details.Kind) {
+  case EditorSceneItemKind::Folder:   ClassName = "Folder";  break;
+  case EditorSceneItemKind::Mesh:     ClassName = "Mesh";    break;
+  case EditorSceneItemKind::Light:    ClassName = "Light";   break;
+  case EditorSceneItemKind::Camera:   ClassName = "Camera";  break;
+  case EditorSceneItemKind::Actor:    ClassName = "Actor";   break;
+  }
+
+  Stream << "{\"type\":\"object_schema\",\"objectId\":\""
+         << EscapeJson(Details.ObjectId) << "\",\"className\":\"" << ClassName
+         << "\",\"properties\":[";
+
+  bool First = true;
+  auto AppendProp = [&](std::string_view Name, std::string_view Type, bool ReadOnly) {
+    if (!First) Stream << ",";
+    First = false;
+    Stream << "{\"name\":\"" << Name << "\",\"type\":\"" << Type
+           << "\",\"readOnly\":" << (ReadOnly ? "true" : "false") << "}";
+  };
+
+  AppendProp("displayName", "string", false);
+  AppendProp("visible", "bool", false);
+
+  if (Details.SupportsTransform) {
+    const bool RO = Details.TransformReadOnly;
+    AppendProp("location",        "vec3", RO);
+    AppendProp("rotationDegrees", "vec3", RO);
+    AppendProp("scale",           "vec3", RO);
+  }
+
+  Stream << "]}";
   return Stream.str();
 }
 

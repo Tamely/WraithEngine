@@ -2,6 +2,10 @@
 
 #include <Core/Platform.h>
 
+#ifndef AXIOM_CONTENT_DIR
+#define AXIOM_CONTENT_DIR "Content"
+#endif
+
 #include "GizmoHitTest.h"
 #include "HeadlessCommandProtocol.h"
 #include <Renderer/VideoEncoderFactory.h>
@@ -865,6 +869,11 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::GizmoDragEnd:
   case HeadlessCommandType::SetGizmoMode:
     break;
+  case HeadlessCommandType::Heartbeat:
+  case HeadlessCommandType::ListAssets:
+  case HeadlessCommandType::GetSchema:
+  case HeadlessCommandType::SetProperty:
+    break;
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
     m_Host.RequestClose();
@@ -1431,7 +1440,7 @@ void RemoteViewportServer::RunWebSocketSession(uintptr_t ClientSocketValue) {
     }
 
     const std::string TextPayload(Payload.begin(), Payload.end());
-    if (!HandleWebSocketMessage(TextPayload)) {
+    if (!HandleWebSocketMessage(ClientSocketValue, TextPayload)) {
       SendTextMessage(ClientSocketValue,
                       SerializeError("Invalid WebSocket command payload."));
     }
@@ -1440,7 +1449,8 @@ void RemoteViewportServer::RunWebSocketSession(uintptr_t ClientSocketValue) {
   RemoveWebSocketClient(ClientSocketValue);
 }
 
-bool RemoteViewportServer::HandleWebSocketMessage(std::string_view Payload) {
+bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
+                                                  std::string_view Payload) {
   std::string Error;
   const auto Command = ParseRemoteViewportCommand(Payload, Error);
   if (!Command.has_value()) {
@@ -1468,6 +1478,22 @@ bool RemoteViewportServer::HandleWebSocketMessage(std::string_view Payload) {
   case HeadlessCommandType::GizmoDragEnd:
   case HeadlessCommandType::SetGizmoMode:
   case HeadlessCommandType::Heartbeat:
+    return false;
+  case HeadlessCommandType::ListAssets: {
+    const Assets::LocalAssetSource ContentDir{AXIOM_CONTENT_DIR};
+    SendTextMessage(ClientSocketValue, SerializeAssetList(ContentDir.List()));
+    return true;
+  }
+  case HeadlessCommandType::GetSchema: {
+    const auto &DetailsById =
+        m_Host.GetHeadlessLayer().GetSession().GetState().Scene.ObjectDetailsById;
+    const auto It = DetailsById.find(Command->ObjectId);
+    if (It != DetailsById.end()) {
+      SendTextMessage(ClientSocketValue, SerializeObjectSchema(It->second));
+    }
+    return true;
+  }
+  case HeadlessCommandType::SetProperty:
     return false;
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
@@ -1521,6 +1547,70 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
           Client->User, EditorUserPresenceState::Connected);
     }
     return true;
+  }
+  case HeadlessCommandType::ListAssets: {
+    const Assets::LocalAssetSource ContentDir{AXIOM_CONTENT_DIR};
+    if (Client->WebRtcSession != nullptr) {
+      Client->WebRtcSession->SendReliableMessage(
+          SerializeAssetList(ContentDir.List()));
+    }
+    return true;
+  }
+  case HeadlessCommandType::GetSchema: {
+    const auto &DetailsById =
+        m_Host.GetHeadlessLayer().GetSession().GetState().Scene.ObjectDetailsById;
+    const auto It = DetailsById.find(Command->ObjectId);
+    if (It != DetailsById.end() && Client->WebRtcSession != nullptr) {
+      Client->WebRtcSession->SendReliableMessage(
+          SerializeObjectSchema(It->second));
+    }
+    return true;
+  }
+  case HeadlessCommandType::SetProperty: {
+    if (!Command->PropertyVal.has_value()) {
+      return false;
+    }
+    const auto &Name = Command->PropertyName;
+    const auto &Val = *Command->PropertyVal;
+    const auto &ObjId = Command->ObjectId;
+
+    if (Name == "displayName") {
+      if (const auto *S = std::get_if<std::string>(&Val)) {
+        m_Host.SubmitRemoteCommand(
+            Client->User,
+            EditorCommand{RenameObjectCommand{.ObjectId = ObjId, .DisplayName = *S}});
+        return true;
+      }
+    } else if (Name == "visible") {
+      if (const auto *B = std::get_if<bool>(&Val)) {
+        m_Host.SubmitRemoteCommand(
+            Client->User,
+            EditorCommand{SetObjectVisibilityCommand{.ObjectId = ObjId, .Visible = *B}});
+        return true;
+      }
+    } else if (Name == "location" || Name == "rotationDegrees" || Name == "scale") {
+      if (const auto *V = std::get_if<glm::vec3>(&Val)) {
+        const auto &DetailsById =
+            m_Host.GetHeadlessLayer().GetSession().GetState().Scene.ObjectDetailsById;
+        const auto It = DetailsById.find(ObjId);
+        if (It == DetailsById.end() || !It->second.Transform.has_value()) {
+          return false;
+        }
+        const EditorTransformDetails &Current = *It->second.Transform;
+        SetTransformCommand Cmd{
+            .ObjectId = ObjId,
+            .Location = Current.Location,
+            .RotationDegrees = Current.RotationDegrees,
+            .Scale = Current.Scale,
+        };
+        if (Name == "location")        Cmd.Location        = *V;
+        else if (Name == "rotationDegrees") Cmd.RotationDegrees = *V;
+        else                           Cmd.Scale           = *V;
+        m_Host.SubmitRemoteCommand(Client->User, EditorCommand{Cmd});
+        return true;
+      }
+    }
+    return false;
   }
   case HeadlessCommandType::SetGizmoMode:
     Client->CurrentGizmoMode = Command->Mode;

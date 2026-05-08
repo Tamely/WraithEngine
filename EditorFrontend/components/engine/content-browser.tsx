@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useCallback } from "react"
+import { useState, useRef, useCallback, useEffect } from "react"
 import {
   Search,
   Plus,
@@ -8,93 +8,88 @@ import {
   ChevronRight,
   ChevronDown,
   Folder,
-  FileImage,
   Box,
-  Settings,
+  ImageIcon,
   Filter,
   Grid3X3,
   List,
 } from "lucide-react"
+import { useRemoteViewport, type SessionAssetDescriptor } from "./remote-viewport-context"
+
+type AssetKindFilter = "all" | "mesh" | "texture"
 
 interface FolderItem {
-  id: string
+  id: AssetKindFilter
   name: string
   children?: FolderItem[]
 }
 
-interface Asset {
-  id: string
-  name: string
-  type: "material" | "texture" | "mesh" | "blueprint"
-  color?: string
-  thumbnail?: string
-}
-
 const folderStructure: FolderItem[] = [
   {
-    id: "content",
+    id: "all",
     name: "Content",
     children: [
-      {
-        id: "materials",
-        name: "Materials",
-        children: [
-          { id: "metals", name: "Metals" },
-          { id: "fabrics", name: "Fabrics" },
-        ],
-      },
-      { id: "meshes", name: "Meshes" },
-      { id: "textures", name: "Textures" },
-      { id: "blueprints", name: "Blueprints" },
+      { id: "mesh", name: "Meshes" },
+      { id: "texture", name: "Textures" },
     ],
   },
 ]
 
-const assets: Asset[] = [
-  { id: "m1", name: "M_Chrome", type: "material", color: "#888888" },
-  { id: "m2", name: "M_Gold", type: "material", color: "#FFD700" },
-  { id: "m3", name: "M_Copper", type: "material", color: "#B87333" },
-  { id: "m4", name: "M_Silver", type: "material", color: "#C0C0C0" },
-  { id: "m5", name: "M_Brushed", type: "material", color: "#A8A8A8" },
-  { id: "m6", name: "M_Plastic_Red", type: "material", color: "#E74C3C" },
-  { id: "m7", name: "M_Plastic_Green", type: "material", color: "#2ECC71" },
-  { id: "m8", name: "M_Plastic_Blue", type: "material", color: "#3498DB" },
-  { id: "m9", name: "M_Ceramic", type: "material", color: "#ECF0F1" },
-  { id: "m10", name: "M_Glass", type: "material", color: "#85C1E9" },
-  { id: "m11", name: "M_Rubber", type: "material", color: "#2C3E50" },
-  { id: "m12", name: "M_Wood", type: "material", color: "#8B4513" },
-]
+function AssetIcon({ kind }: { kind: SessionAssetDescriptor["kind"] }) {
+  if (kind === "texture") return <ImageIcon className="w-8 h-8 text-blue-400" />
+  return <Box className="w-8 h-8 text-orange-400" />
+}
 
 export function ContentBrowser() {
+  const { assets, listAssets, connectionState } = useRemoteViewport()
   const [searchQuery, setSearchQuery] = useState("")
-  const [selectedFolder, setSelectedFolder] = useState("materials")
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(["content", "materials"]))
+  const [selectedFolder, setSelectedFolder] = useState<AssetKindFilter>("all")
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
+    new Set(["all"])
+  )
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid")
-  const [selectedAsset, setSelectedAsset] = useState<string | null>(null)
+  const [selectedAsset, setSelectedAsset] = useState<number | null>(null)
   const [folderWidth, setFolderWidth] = useState(192)
   const isDraggingFolderRef = useRef(false)
   const startXRef = useRef(0)
   const startWidthRef = useRef(0)
 
-  const onFolderSplitterMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    isDraggingFolderRef.current = true
-    startXRef.current = e.clientX
-    startWidthRef.current = folderWidth
+  useEffect(() => {
+    if (connectionState === "control-ready" || connectionState === "streaming") {
+      void listAssets()
+    }
+  }, [connectionState, listAssets])
 
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!isDraggingFolderRef.current) return
-      const delta = ev.clientX - startXRef.current
-      setFolderWidth(Math.max(100, Math.min(400, startWidthRef.current + delta)))
-    }
-    const onMouseUp = () => {
-      isDraggingFolderRef.current = false
-      window.removeEventListener("mousemove", onMouseMove)
-      window.removeEventListener("mouseup", onMouseUp)
-    }
-    window.addEventListener("mousemove", onMouseMove)
-    window.addEventListener("mouseup", onMouseUp)
-  }, [folderWidth])
+  const filteredAssets = assets.filter((a) => {
+    const matchesFolder = selectedFolder === "all" || a.kind === selectedFolder
+    const matchesSearch =
+      searchQuery === "" ||
+      a.name.toLowerCase().includes(searchQuery.toLowerCase())
+    return matchesFolder && matchesSearch
+  })
+
+  const onFolderSplitterMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      isDraggingFolderRef.current = true
+      startXRef.current = e.clientX
+      startWidthRef.current = folderWidth
+
+      const onMouseMove = (ev: MouseEvent) => {
+        if (!isDraggingFolderRef.current) return
+        const delta = ev.clientX - startXRef.current
+        setFolderWidth(Math.max(100, Math.min(400, startWidthRef.current + delta)))
+      }
+      const onMouseUp = () => {
+        isDraggingFolderRef.current = false
+        window.removeEventListener("mousemove", onMouseMove)
+        window.removeEventListener("mouseup", onMouseUp)
+      }
+      window.addEventListener("mousemove", onMouseMove)
+      window.addEventListener("mouseup", onMouseUp)
+    },
+    [folderWidth]
+  )
 
   const toggleFolder = (id: string) => {
     setExpandedFolders((prev) => {
@@ -111,13 +106,14 @@ export function ContentBrowser() {
   const renderFolder = (folder: FolderItem, depth = 0) => {
     const isExpanded = expandedFolders.has(folder.id)
     const isSelected = selectedFolder === folder.id
-    const hasChildren = folder.children && folder.children.length > 0
+    const hasChildren = !!folder.children?.length
 
     return (
       <div key={folder.id}>
         <div
-          className={`flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-neutral-800 ${isSelected ? "bg-neutral-700" : ""
-            }`}
+          className={`flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-neutral-800 ${
+            isSelected ? "bg-neutral-700" : ""
+          }`}
           style={{ paddingLeft: `${depth * 12 + 8}px` }}
           onClick={() => setSelectedFolder(folder.id)}
         >
@@ -141,7 +137,9 @@ export function ContentBrowser() {
           <Folder className="w-4 h-4 text-yellow-500" />
           <span className="text-xs text-neutral-300">{folder.name}</span>
         </div>
-        {hasChildren && isExpanded && folder.children!.map((child) => renderFolder(child, depth + 1))}
+        {hasChildren &&
+          isExpanded &&
+          folder.children!.map((child) => renderFolder(child, depth + 1))}
       </div>
     )
   }
@@ -157,14 +155,21 @@ export function ContentBrowser() {
           <FolderOpen className="w-3 h-3" />
           Import
         </button>
-        <button className="flex items-center gap-1 px-2 py-1 text-xs hover:bg-neutral-800 text-neutral-400 rounded">
-          Save All
+        <button
+          onClick={() => void listAssets()}
+          className="flex items-center gap-1 px-2 py-1 text-xs hover:bg-neutral-800 text-neutral-400 rounded"
+        >
+          Refresh
         </button>
         <div className="flex-1" />
         <div className="flex items-center gap-1 text-xs text-neutral-500">
           <span>Content</span>
-          <ChevronRight className="w-3 h-3" />
-          <span>Materials</span>
+          {selectedFolder !== "all" && (
+            <>
+              <ChevronRight className="w-3 h-3" />
+              <span className="capitalize">{selectedFolder}s</span>
+            </>
+          )}
         </div>
       </div>
       <div className="flex flex-1 overflow-hidden">
@@ -174,7 +179,6 @@ export function ContentBrowser() {
         >
           {folderStructure.map((folder) => renderFolder(folder))}
         </div>
-        {/* Folder tree resize handle */}
         <div
           className="w-1 shrink-0 bg-transparent hover:bg-white/20 active:bg-white/30 cursor-col-resize transition-colors relative group"
           onMouseDown={onFolderSplitterMouseDown}
@@ -210,27 +214,59 @@ export function ContentBrowser() {
             </button>
           </div>
           <div className="flex-1 overflow-y-auto p-2">
-            <div className="grid grid-cols-8 gap-2">
-              {assets.map((asset) => (
-                <div
-                  key={asset.id}
-                  onClick={() => setSelectedAsset(asset.id)}
-                  className={`flex flex-col items-center p-1 rounded cursor-pointer hover:bg-neutral-800 ${selectedAsset === asset.id ? "bg-neutral-700 ring-1 ring-white/30" : ""
-                    }`}
-                >
+            {filteredAssets.length === 0 ? (
+              <div className="flex items-center justify-center h-full text-xs text-neutral-600">
+                {assets.length === 0 ? "No assets loaded" : "No results"}
+              </div>
+            ) : viewMode === "grid" ? (
+              <div className="grid grid-cols-8 gap-2">
+                {filteredAssets.map((asset) => (
                   <div
-                    className="w-12 h-12 rounded-full mb-1 border border-neutral-700"
-                    style={{
-                      background: `radial-gradient(circle at 30% 30%, ${asset.color}, ${asset.color}88)`,
-                      boxShadow: `inset -4px -4px 8px rgba(0,0,0,0.4), inset 2px 2px 4px rgba(255,255,255,0.2)`,
-                    }}
-                  />
-                  <span className="text-[10px] text-neutral-400 text-center truncate w-full">
-                    {asset.name}
-                  </span>
-                </div>
-              ))}
-            </div>
+                    key={asset.id}
+                    onClick={() => setSelectedAsset(asset.id)}
+                    className={`flex flex-col items-center p-1 rounded cursor-pointer hover:bg-neutral-800 ${
+                      selectedAsset === asset.id
+                        ? "bg-neutral-700 ring-1 ring-white/30"
+                        : ""
+                    }`}
+                  >
+                    <div className="w-12 h-12 flex items-center justify-center mb-1">
+                      <AssetIcon kind={asset.kind} />
+                    </div>
+                    <span className="text-[10px] text-neutral-400 text-center truncate w-full">
+                      {asset.name}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col gap-0.5">
+                {filteredAssets.map((asset) => (
+                  <div
+                    key={asset.id}
+                    onClick={() => setSelectedAsset(asset.id)}
+                    className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-neutral-800 ${
+                      selectedAsset === asset.id
+                        ? "bg-neutral-700 ring-1 ring-white/30"
+                        : ""
+                    }`}
+                  >
+                    <AssetIcon kind={asset.kind} />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs text-neutral-300 truncate">
+                        {asset.name}
+                      </div>
+                      <div className="text-[10px] text-neutral-600 truncate">
+                        {asset.path}
+                      </div>
+                    </div>
+                    <span className="text-[10px] text-neutral-600 capitalize shrink-0">
+                      {asset.kind}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
