@@ -6,6 +6,8 @@
 #include <Session/EditorEvent.h>
 #include <Session/EditorSession.h>
 
+#include <glm/vec2.hpp>
+
 #include <filesystem>
 #include <cstdint>
 #include <optional>
@@ -28,6 +30,7 @@ enum class HeadlessCommandType {
   DeleteObject,
   SetTransform,
   UpdateViewportCamera,
+  GizmoHover,
   RenderFrame,
   Quit,
 };
@@ -36,6 +39,7 @@ struct HeadlessCommand {
   HeadlessCommandType Type;
   EditorCommand EditorPayload;
   RendererViewMode ViewMode{RendererViewMode::Lit};
+  glm::vec2 MousePosition{0.0f};
 };
 
 struct HeadlessAppOptions {

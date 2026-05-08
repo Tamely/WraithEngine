@@ -208,13 +208,17 @@ void VulkanGizmoRenderer::DrawGizmoOverlay(VkCommandBuffer CommandBuffer,
     glm::vec3 Direction;
     glm::vec4 Color;
   };
-  const std::array<AxisDef, 3> Axes = {{
+  const std::array<AxisDef, 3> BaseAxes = {{
       {{1.0f, 0.0f, 0.0f}, {1.0f, 0.15f, 0.15f, 1.0f}},
       {{0.0f, 1.0f, 0.0f}, {0.15f, 1.0f, 0.15f, 1.0f}},
       {{0.0f, 0.0f, 1.0f}, {0.15f, 0.15f, 1.0f, 1.0f}},
   }};
 
-  for (const auto &Axis : Axes) {
+  for (int AxisIndex = 0; AxisIndex < 3; ++AxisIndex) {
+    AxisDef Axis = BaseAxes[AxisIndex];
+    if (AxisIndex == Gizmo.HoveredAxis) {
+      Axis.Color = glm::vec4(glm::vec3(Axis.Color) * 1.6f + 0.3f, 1.0f);
+    }
     GizmoPushConstants Push{};
     Push.ViewProjection = VP;
     Push.StartWorld = glm::vec4(Gizmo.WorldPosition, 0.0f);

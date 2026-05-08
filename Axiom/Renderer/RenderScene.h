@@ -15,6 +15,7 @@ class Camera;
 struct GizmoOverlayData {
   glm::vec3 WorldPosition{0.0f};
   float Scale{0.5f};
+  int HoveredAxis{-1};
 };
 
 class RenderScene {

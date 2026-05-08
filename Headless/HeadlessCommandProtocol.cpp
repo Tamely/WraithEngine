@@ -400,6 +400,10 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
       R"json("yawDegrees"\s*:\s*([-+0-9.eE]+))json");
   static const std::regex PitchPattern(
       R"json("pitchDegrees"\s*:\s*([-+0-9.eE]+))json");
+  static const std::regex MouseXPattern(
+      R"json("mouseX"\s*:\s*([-+0-9.eE]+))json");
+  static const std::regex MouseYPattern(
+      R"json("mouseY"\s*:\s*([-+0-9.eE]+))json");
 
   const auto Type = MatchString(JsonLine, TypePattern);
   if (!Type.has_value()) {
@@ -632,6 +636,27 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
     };
   }
 
+  if (*Type == "gizmo_hover") {
+    const auto MX = MatchString(JsonLine, MouseXPattern);
+    const auto MY = MatchString(JsonLine, MouseYPattern);
+    float MouseX = 0.0f;
+    float MouseY = 0.0f;
+    if (MX.has_value()) {
+      if (const auto V = ParseDouble(*MX)) {
+        MouseX = static_cast<float>(*V);
+      }
+    }
+    if (MY.has_value()) {
+      if (const auto V = ParseDouble(*MY)) {
+        MouseY = static_cast<float>(*V);
+      }
+    }
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::GizmoHover,
+        .MousePosition = {MouseX, MouseY},
+    };
+  }
+
   Error = "Unsupported command type: " + *Type;
   return std::nullopt;
 }
@@ -655,6 +680,7 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::DeleteObject:
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::UpdateViewportCamera:
+  case HeadlessCommandType::GizmoHover:
   case HeadlessCommandType::Quit:
     return Command;
   case HeadlessCommandType::LoadStartupScene:

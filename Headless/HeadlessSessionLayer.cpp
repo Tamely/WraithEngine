@@ -132,9 +132,23 @@ void HeadlessSessionLayer::OnRender() {
       m_Session.FindSelectedObjectDetails(RenderUser);
   if (Selected != nullptr && Selected->SupportsTransform &&
       Selected->Transform.has_value()) {
-    RenderCommand::SetGizmoOverlay(
-        {.WorldPosition = Selected->Transform->Location, .Scale = 0.5f});
+    RenderCommand::SetGizmoOverlay({
+        .WorldPosition = Selected->Transform->Location,
+        .Scale = 0.5f,
+        .HoveredAxis = GetGizmoHoveredAxis(RenderUser),
+    });
   }
+}
+
+void HeadlessSessionLayer::SetGizmoHoveredAxis(SessionUserId User, int Axis) {
+  std::lock_guard Lock(m_GizmoHoverMutex);
+  m_GizmoHoveredAxisByUser[User.Value] = Axis;
+}
+
+int HeadlessSessionLayer::GetGizmoHoveredAxis(SessionUserId User) const {
+  std::lock_guard Lock(m_GizmoHoverMutex);
+  const auto It = m_GizmoHoveredAxisByUser.find(User.Value);
+  return It != m_GizmoHoveredAxisByUser.end() ? It->second : -1;
 }
 
 bool HeadlessSessionLayer::LoadStartupSceneIntoSession() {

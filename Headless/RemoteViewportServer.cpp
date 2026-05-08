@@ -2,6 +2,7 @@
 
 #include <Core/Platform.h>
 
+#include "GizmoHitTest.h"
 #include "HeadlessCommandProtocol.h"
 #include <Renderer/VideoEncoderFactory.h>
 #include <algorithm>
@@ -809,6 +810,8 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetTransform:
     m_Host.SubmitRemoteCommand(*User, Command->EditorPayload);
     break;
+  case HeadlessCommandType::GizmoHover:
+    break;
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
     m_Host.RequestClose();
@@ -1403,6 +1406,7 @@ bool RemoteViewportServer::HandleWebSocketMessage(std::string_view Payload) {
   case HeadlessCommandType::DeleteObject:
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::UpdateViewportCamera:
+  case HeadlessCommandType::GizmoHover:
     return false;
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
@@ -1447,6 +1451,25 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::SetTransform:
     m_Host.SubmitRemoteCommand(Client->User, Command->EditorPayload);
     return true;
+  case HeadlessCommandType::GizmoHover: {
+    const EditorSession &Session =
+        m_Host.GetHeadlessLayer().GetSession();
+    const EditorViewportState *Viewport =
+        Session.FindViewport(Client->User);
+    const EditorObjectDetails *Selected =
+        Session.FindSelectedObjectDetails(Client->User);
+    if (Viewport != nullptr && Selected != nullptr &&
+        Selected->SupportsTransform && Selected->Transform.has_value()) {
+      const int Axis =
+          HitTestGizmoAxes(Viewport->Camera, m_Options.Width, m_Options.Height,
+                           Command->MousePosition,
+                           Selected->Transform->Location, 0.5f);
+      m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, Axis);
+    } else {
+      m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
+    }
+    return true;
+  }
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
     m_Host.RequestClose();

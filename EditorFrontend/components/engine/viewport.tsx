@@ -136,6 +136,11 @@ type RemoteViewportCommand =
       type: "delete_object"
       objectId: string
     }
+  | {
+      type: "gizmo_hover"
+      mouseX: number
+      mouseY: number
+    }
 
 function getServerOrigin() {
   const configuredOrigin = process.env.NEXT_PUBLIC_AXIOM_SERVER_ORIGIN?.trim()
@@ -1418,6 +1423,21 @@ export function Viewport() {
 
     const handleMouseMove = (event: MouseEvent) => {
       if (!pointerLockedRef.current) {
+        const shell = viewportShellRef.current
+        const video = videoRef.current
+        if (shell && video && video.videoWidth && video.videoHeight) {
+          const rect = shell.getBoundingClientRect()
+          const cssX = event.clientX - rect.left
+          const cssY = event.clientY - rect.top
+          if (cssX >= 0 && cssY >= 0 && cssX <= rect.width && cssY <= rect.height) {
+            const serverX = (cssX / rect.width) * video.videoWidth
+            const serverY = (cssY / rect.height) * video.videoHeight
+            void sendCommand(
+              { type: "gizmo_hover", mouseX: serverX, mouseY: serverY },
+              "unreliable"
+            )
+          }
+        }
         return
       }
       pendingLookDeltaRef.current.x += event.movementX
