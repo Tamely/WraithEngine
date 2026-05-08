@@ -20,5 +20,11 @@ void RenderCommand::Submit(const RenderMeshSubmission &Submission) {
   }
 }
 
+void RenderCommand::SetGizmoOverlay(const GizmoOverlayData &Gizmo) {
+  if (s_ActiveScene) {
+    s_ActiveScene->GizmoOverlay = Gizmo;
+  }
+}
+
 void RenderCommand::EndScene() { s_ActiveScene = nullptr; }
 } // namespace Axiom

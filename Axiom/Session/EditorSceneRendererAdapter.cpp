@@ -9,12 +9,18 @@ std::vector<RenderMeshSubmission>
 EditorSceneRendererAdapter::BuildRenderSubmissions(const EditorSession &Session) {
   const EditorSessionState &State = Session.GetState();
   std::unordered_set<std::string> LiveObjectIds;
-  LiveObjectIds.reserve(State.SceneMeshInstances.size());
+  LiveObjectIds.reserve(State.Scene.MeshInstances.size());
 
   std::vector<RenderMeshSubmission> Submissions;
-  Submissions.reserve(State.SceneMeshInstances.size());
-  for (const EditorSceneMeshInstance &Instance : State.SceneMeshInstances) {
+  Submissions.reserve(State.Scene.MeshInstances.size());
+  for (const EditorSceneMeshInstance &Instance : State.Scene.MeshInstances) {
     LiveObjectIds.insert(Instance.ObjectId);
+
+    const auto DetailsIt = State.Scene.ObjectDetailsById.find(Instance.ObjectId);
+    if (DetailsIt != State.Scene.ObjectDetailsById.end() &&
+        !DetailsIt->second.Visible) {
+      continue;
+    }
 
     auto &Cached = m_MeshesByObjectId[Instance.ObjectId];
     if (Cached.Mesh == nullptr) {

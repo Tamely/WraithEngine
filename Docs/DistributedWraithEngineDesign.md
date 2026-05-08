@@ -2,7 +2,7 @@
 
 ## Document Status
 - Status: Draft
-- Date: 2026-05-06
+- Date: 2026-05-07
 - Audience: Engine, tools, networking, web, and infrastructure contributors
 - Intended outcome: Establish the target architecture for evolving WraithEngine into a distributed game engine and browser-based collaborative editor
 
@@ -28,7 +28,25 @@
 - the headless remote viewport path now uses per-client render views rendered sequentially in one engine tick instead of a single-frame ownership splitter
 - remote view mode is now per client
 - a delayed-readback frame attribution bug in multi-pass headless rendering was fixed by stamping each offscreen capture with the submitting `SessionUserId` at submission time
-- The next browser-facing step after the migration is transport-quality tuning and broader editor-shell integration, not more work on a server-hosted prototype page
+- The next browser-facing step after the migration is turning the browser shell plus authoritative session into a real single-user scene editor, not more work on a server-hosted prototype page
+- Collaboration should continue to follow that same authoritative command/event path after the single-user authoring loop is stable, rather than leading the roadmap ahead of core editor behavior
+- `scene-editing` branch introduces the first authoritative object-lifecycle commands: `CreateObjectCommand`, `DuplicateObjectCommand`, and `DeleteObjectCommand`, with matching `ObjectCreatedEvent` and `ObjectDeletedEvent` authoritative events
+- All scene objects are now backed by an Instance-class hierarchy rooted at a `DataModel` node, mimicking the Roblox object model; `EditorSession` owns the live `DataModel` tree and keeps `EditorSceneState::Items` synchronized as a derived projection
+- Concrete scene Instance subclasses introduced: `SceneFolder`, `SceneMeshObject`, `SceneLight`, `SceneCamera`, and `SceneActor` under `Axiom/CoreInstance/SceneInstances.h`
+- `SetSceneState` and `SetSceneItems` now rebuild the Instance tree from snapshot data, enabling round-trip snapshot rehydration
+- Deep subtree duplication is supported: duplicating a folder clones all descendant Instances and their `ObjectDetails` entries with fresh unique IDs and display names
+- Delete removes the entire Instance subtree, strips all descendant entries from `ObjectDetailsById` and `MeshInstances`, and clears any selections pointing at deleted objects
+- New object creation always parents to the "world" `SceneFolder` (direct child of `DataModel`); valid built-in templates are `Folder`, `Mesh`, `Light`, `Camera`, and `Actor`
+- Added 16 focused tests in `Tests/SceneLifecycleTests.cpp` covering create, duplicate, delete, all rejection cases, uniqueness generation, and snapshot rehydration
+- The object lifecycle commands are now fully wired through the browser editor shell: `HeadlessCommandType` and `ParseRemoteViewportCommand` were extended for `create_object`, `duplicate_object`, and `delete_object`; `object_created` and `object_deleted` events are now serialized and broadcast to all connected clients
+- The outliner gained an Add dropdown (Folder, Mesh, Light, Camera, Actor templates), a Delete toolbar button active when an object is selected, and right-click context menus on every scene item with Duplicate and Delete entries; all three operations dispatch through the same authoritative command/event path
+- The `RemoteViewportCommand` TypeScript union was extended for the three new command types; the event dispatch block in `viewport.tsx` handles `object_created` and `object_deleted` by triggering a session snapshot refresh so the outliner updates automatically
+- A server-side transform gizmo is now implemented end-to-end: the engine renders colored axis handles as a Vulkan overlay pass on top of the selected object in the captured frame, and the browser forwards mouse input so the server can hit-test and drag those handles to drive `SetTransformCommand`
+- `GizmoMode` (Translate / Scale / Rotate) is now a first-class per-client concept; the toolbar Move, Rotate, and Scale buttons switch modes with active-state feedback, and Q/E/R keyboard shortcuts work while the viewport is focused
+- Translate mode constrains drag to the clicked axis via ray-plane intersection; Scale mode applies a proportional delta to the clicked axis scale component; Rotate mode projects the mouse onto each ring's plane and converts the angle delta to degrees
+- `VulkanGizmoRenderer` draws mode-appropriate handles: arrows for translate, arrows with perpendicular cross-caps for scale, and 24-segment screen-space rings for rotate; the hovered handle brightens in all modes
+- Gizmo mouse coordinates are forwarded using the correct `object-contain` content rect mapping so hit-testing is accurate regardless of the viewport aspect ratio or window size
+- `gizmoMode` state lives in `RemoteViewportContext` so the toolbar and viewport share a single source of truth without prop drilling
 
 ## 1. Executive Summary
 WraithEngine will evolve from a single-process native editor into a distributed platform with one shared C++ engine runtime that supports two execution styles:
@@ -372,6 +390,8 @@ Current implementation note:
 
 - the current slice covers per-user viewport camera state, look/cursor-capture state, last cursor position bookkeeping, presence state, startup-scene logical mesh instances, selection state, and object transform authority for the startup scene
 - renderer-owned `RenderMeshSubmission` objects are no longer authoritative session state; they are now rebuilt from logical session scene data through an adapter at render time
+- all scene objects are now backed by an Instance hierarchy rooted at `DataModel`; `EditorSession` owns a `std::unique_ptr<DataModel>` and keeps `EditorSceneState::Items` synchronized as a projection of the live tree
+- `SetSceneState` and `SetSceneItems` rebuild the Instance tree from the provided snapshot, enabling rehydration and round-trip restore
 - entity/component/object registries, locks, presence, and asset editing state remain future work
 
 ### 11.3 Why This Matters
@@ -446,6 +466,8 @@ Current implementation note:
 
 - `UpdateViewportCamera` is implemented as the first authoritative viewport command
 - `SetLookActive` is implemented locally as an editor-session command to control cursor-capture / mouselook authority
+- `CreateObject` (with `TemplateId`), `DuplicateObject`, and `DeleteObject` are now implemented as the first authoritative object-lifecycle commands; valid built-in templates are `Folder`, `Mesh`, `Light`, `Camera`, and `Actor`
+- `RenameObject`, `SetObjectVisibility`, `SelectObject`, and `SetTransform` are implemented as the core per-object mutation commands
 
 ### 13.2 Events
 Events represent authoritative outcomes or state broadcasts. Initial event set:
@@ -470,11 +492,9 @@ Events represent authoritative outcomes or state broadcasts. Initial event set:
 
 Current implementation note:
 
-- `ViewportCameraUpdated`
-- `LookStateChanged`
-- `CommandRejected`
-
-are now implemented locally as the first authoritative session events
+- `ViewportCameraUpdated`, `LookStateChanged`, `CommandRejected`, `CommandAcknowledged` are implemented as the first authoritative session events
+- `SelectionChanged`, `ObjectRenamed`, `ObjectVisibilityChanged`, `ObjectTransformUpdated` are implemented as per-object mutation events
+- `ObjectCreated` and `ObjectDeleted` are now implemented as the first authoritative object-lifecycle events; `ObjectCreated` carries the new object's stable ID and display name
 
 ### 13.3 Validation Rules
 Commands should be validated against:
@@ -936,6 +956,16 @@ Current implementation note:
 - add `EditorSessionState`
 - support selection, transform, rename, reparent, component/property edits
 
+Progress update:
+
+- command/event model is in place and proven through 30+ focused tests
+- `EditorSessionState` covers viewport camera, look state, selection, presence, scene items, object details, mesh instances, and object collaboration state
+- selection, transform, rename, and visibility are all implemented as validated authoritative commands
+- object lifecycle (create/duplicate/delete) is now implemented for a narrow built-in type set (`Folder`, `Mesh`, `Light`, `Camera`, `Actor`) in-memory without asset-browser integration
+- all scene objects are now backed by a `DataModel`-rooted Instance hierarchy; the `EditorSession` owns the live tree and keeps the serializable `Items` projection in sync
+- deep subtree duplication generates unique IDs and display names for every descendant
+- reparent and component/property edits remain future work
+
 ### Phase 4: Collaboration v1
 - presence
 - user cameras/avatars
@@ -1027,7 +1057,15 @@ Progress update:
 - item 6 is now implemented locally
 - items 1 through 5 now exist in prototype form and are wired through the same session authority seam rather than bypassing it
 - the remote viewport prototype has already pivoted from shared-frame multiplexing to per-client render views with WebRTC-only streaming
-- the immediate priority is now finalizing multi-client browser validation, then continuing WebRTC latency-quality tuning and broader browser-editor integration
+- the authoritative scene-authoring loop has advanced: selection, transform, rename, visibility, and full object lifecycle (create/duplicate/delete) are all command-driven with event publication, test coverage, and end-to-end wiring through the browser editor shell
+- all scene objects are now backed by a Roblox-inspired `DataModel`-rooted Instance hierarchy; the session owns the live tree and exposes a serializable snapshot projection for consumers
+- the outliner exposes the full object lifecycle to the user: an Add dropdown with built-in templates, a Delete toolbar button, and a right-click context menu with Duplicate and Delete; the three operations travel the same WebRTC/HTTP → `ParseRemoteViewportCommand` → `EditorSession::Tick` → event broadcast path as every other authoritative command
+- in-outliner inline rename is now implemented: double-clicking any object name in the outliner opens an in-place input that commits on Enter or blur and cancels on Escape; it drives the existing `rename_object` command path without any new C++ or protocol work
+- the details panel supports rename and transform editing; drafts are scoped to the selected object's ID so periodic server snapshot polls do not clobber edits in progress
+- viewport keyboard input (WASD, Space, Shift) is now gated on pointer lock state; keys are only consumed while the viewport has pointer lock and are cleared immediately when it releases, so other UI elements (inputs, the outliner) receive input normally
+- a server-side transform gizmo is now implemented across all three modes (Translate, Scale, Rotate); the toolbar Move/Rotate/Scale buttons and Q/E/R shortcuts switch modes with active-state feedback; dragging any handle drives `SetTransformCommand` through the same authoritative command path
+- the next authoring steps are reparent and multi-user gizmo collision handling
+- multi-client validation, transport tuning, and deeper collaboration surfaces should continue afterward through that same command/event path instead of becoming the lead implementation track
 
 That slice proves the core thesis:
 
@@ -1045,6 +1083,7 @@ The first milestone should stay disciplined:
 - browser-based editor shell
 - streamed native viewport
 - authoritative engine session
+- single-user authoritative scene authoring before broader collaboration depth
 - collaboration via presence and locking
 - clear trust boundaries
 

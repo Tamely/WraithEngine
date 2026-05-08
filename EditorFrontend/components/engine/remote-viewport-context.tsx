@@ -31,6 +31,7 @@ export type RemoteSessionState =
   | "error"
 
 export type RemoteViewportViewMode = "lit" | "unlit" | "wireframe"
+export type RemoteViewportGizmoMode = "translate" | "scale" | "rotate"
 export type SessionSceneItemKind = "folder" | "mesh" | "light" | "camera" | "actor"
 
 export interface SessionSceneItem {
@@ -88,10 +89,16 @@ interface RemoteViewportActions {
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
+  setGizmoMode: (mode: RemoteViewportGizmoMode) => Promise<void>
   refreshSessionSnapshot: () => Promise<void>
   selectObject: (objectId: string) => Promise<boolean>
+  renameObject: (objectId: string, displayName: string) => Promise<boolean>
+  setObjectVisibility: (objectId: string, visible: boolean) => Promise<boolean>
   goToParticipantCamera: (userId: number) => Promise<boolean>
   updateTransform: (details: SessionObjectTransformUpdate) => Promise<boolean>
+  createObject: (templateId: string) => Promise<boolean>
+  duplicateObject: (objectId: string) => Promise<boolean>
+  deleteObject: (objectId: string) => Promise<boolean>
 }
 
 export interface SessionObjectTransformUpdate {
@@ -110,6 +117,7 @@ interface RemoteViewportContextValue {
   sessionStatusText: string
   sessionDetailText: string
   viewMode: RemoteViewportViewMode
+  gizmoMode: RemoteViewportGizmoMode
   isLooking: boolean
   eventLog: string[]
   serverOrigin: string
@@ -143,10 +151,16 @@ interface RemoteViewportContextValue {
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
+  setGizmoMode: (mode: RemoteViewportGizmoMode) => Promise<void>
   refreshSessionSnapshot: () => Promise<void>
   selectObject: (objectId: string) => Promise<boolean>
+  renameObject: (objectId: string, displayName: string) => Promise<boolean>
+  setObjectVisibility: (objectId: string, visible: boolean) => Promise<boolean>
   goToParticipantCamera: (userId: number) => Promise<boolean>
   updateTransform: (details: SessionObjectTransformUpdate) => Promise<boolean>
+  createObject: (templateId: string) => Promise<boolean>
+  duplicateObject: (objectId: string) => Promise<boolean>
+  deleteObject: (objectId: string) => Promise<boolean>
 }
 
 interface SessionSnapshot {
@@ -185,10 +199,16 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     reconnect: async () => {},
     toggleLook: async () => {},
     setMode: async () => {},
+    setGizmoMode: async () => {},
     refreshSessionSnapshot: async () => {},
     selectObject: async () => false,
+    renameObject: async () => false,
+    setObjectVisibility: async () => false,
     goToParticipantCamera: async () => false,
     updateTransform: async () => false,
+    createObject: async () => false,
+    duplicateObject: async () => false,
+    deleteObject: async () => false,
   })
   const [connectionState, setConnectionState] =
     useState<RemoteViewportConnectionState>("idle")
@@ -201,6 +221,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     "Waiting for authoritative session state"
   )
   const [viewMode, setViewMode] = useState<RemoteViewportViewMode>("lit")
+  const [gizmoMode, setGizmoModeState] = useState<RemoteViewportGizmoMode>("translate")
   const [isLooking, setIsLooking] = useState(false)
   const [eventLog, setEventLog] = useState<string[]>([])
   const [serverOrigin, setServerOrigin] = useState("")
@@ -276,6 +297,11 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     await actionsRef.current.setMode(mode)
   }, [])
 
+  const setGizmoModeAction = useCallback(async (mode: RemoteViewportGizmoMode) => {
+    setGizmoModeState(mode)
+    await actionsRef.current.setGizmoMode(mode)
+  }, [])
+
   const refreshSessionSnapshot = useCallback(async () => {
     await actionsRef.current.refreshSessionSnapshot()
   }, [])
@@ -288,8 +314,28 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     return actionsRef.current.goToParticipantCamera(userId)
   }, [])
 
+  const renameObject = useCallback(async (objectId: string, displayName: string) => {
+    return actionsRef.current.renameObject(objectId, displayName)
+  }, [])
+
+  const setObjectVisibility = useCallback(async (objectId: string, visible: boolean) => {
+    return actionsRef.current.setObjectVisibility(objectId, visible)
+  }, [])
+
   const updateTransform = useCallback(async (details: SessionObjectTransformUpdate) => {
     return actionsRef.current.updateTransform(details)
+  }, [])
+
+  const createObject = useCallback(async (templateId: string) => {
+    return actionsRef.current.createObject(templateId)
+  }, [])
+
+  const duplicateObject = useCallback(async (objectId: string) => {
+    return actionsRef.current.duplicateObject(objectId)
+  }, [])
+
+  const deleteObject = useCallback(async (objectId: string) => {
+    return actionsRef.current.deleteObject(objectId)
   }, [])
 
   const selectedObjectId =
@@ -308,6 +354,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       sessionStatusText,
       sessionDetailText,
       viewMode,
+      gizmoMode,
       isLooking,
       eventLog,
       serverOrigin,
@@ -338,10 +385,16 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       reconnect,
       toggleLook,
       setMode,
+      setGizmoMode: setGizmoModeAction,
       refreshSessionSnapshot,
       selectObject,
+      renameObject,
+      setObjectVisibility,
       goToParticipantCamera,
       updateTransform,
+      createObject,
+      duplicateObject,
+      deleteObject,
     }),
     [
       appendEventLog,
@@ -362,15 +415,19 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       reconnect,
       refreshSessionSnapshot,
       registerActions,
+      renameObject,
       sceneTree,
       selectObject,
+      setObjectVisibility,
       goToParticipantCamera,
       selectedObject,
       selectedObjectDetails,
       selectedObjectId,
       selections,
       serverOrigin,
+      gizmoMode,
       setMode,
+      setGizmoModeAction,
       setSessionDetailText,
       setSessionState,
       setSessionSnapshot,
@@ -378,6 +435,9 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       statusText,
       toggleLook,
       updateTransform,
+      createObject,
+      duplicateObject,
+      deleteObject,
       viewMode,
     ]
   )

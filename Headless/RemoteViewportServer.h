@@ -1,10 +1,12 @@
 #pragma once
 
+#include "GizmoHitTest.h"
 #include "HeadlessSessionHost.h"
 #include "WebRtcSession.h"
 
 #include <Remote/SessionTransport.h>
 #include <Renderer/RendererBackend.h>
+#include <Renderer/RenderScene.h>
 #include <Renderer/VideoEncoding.h>
 
 #include <atomic>
@@ -50,6 +52,15 @@ private:
     bool IsOpen{true};
   };
 
+  struct ActiveGizmoDrag {
+    GizmoDragState Math;
+    std::string ObjectId;
+    glm::vec3 StartRotDeg{0.0f};
+    glm::vec3 StartScale{1.0f};
+    GizmoMode Mode{GizmoMode::Translate};
+    float GizmoScaleAtDragStart{1.0f};
+  };
+
   struct RemoteClientSession {
     struct PacketOutput;
 
@@ -59,6 +70,8 @@ private:
     std::unique_ptr<IWebRtcSession> WebRtcSession;
     std::unique_ptr<IVideoEncoder> VideoEncoder;
     std::unique_ptr<PacketOutput> VideoPacketOutput;
+    std::optional<ActiveGizmoDrag> GizmoDrag;
+    GizmoMode CurrentGizmoMode{GizmoMode::Translate};
   };
 
   struct ClientSessionResolution {

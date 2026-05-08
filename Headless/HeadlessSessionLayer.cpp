@@ -127,6 +127,40 @@ void HeadlessSessionLayer::OnRender() {
   for (const auto &Submission : BuildPresenceOverlaySubmissions(RenderUser)) {
     RenderCommand::Submit(Submission);
   }
+
+  const EditorObjectDetails *Selected =
+      m_Session.FindSelectedObjectDetails(RenderUser);
+  if (Selected != nullptr && Selected->SupportsTransform &&
+      Selected->Transform.has_value()) {
+    RenderCommand::SetGizmoOverlay({
+        .WorldPosition = Selected->Transform->Location,
+        .Scale = 0.5f,
+        .HoveredAxis = GetGizmoHoveredAxis(RenderUser),
+        .Mode = GetGizmoMode(RenderUser),
+    });
+  }
+}
+
+void HeadlessSessionLayer::SetGizmoHoveredAxis(SessionUserId User, int Axis) {
+  std::lock_guard Lock(m_GizmoHoverMutex);
+  m_GizmoHoveredAxisByUser[User.Value] = Axis;
+}
+
+int HeadlessSessionLayer::GetGizmoHoveredAxis(SessionUserId User) const {
+  std::lock_guard Lock(m_GizmoHoverMutex);
+  const auto It = m_GizmoHoveredAxisByUser.find(User.Value);
+  return It != m_GizmoHoveredAxisByUser.end() ? It->second : -1;
+}
+
+void HeadlessSessionLayer::SetGizmoMode(SessionUserId User, GizmoMode Mode) {
+  std::lock_guard Lock(m_GizmoModeMutex);
+  m_GizmoModeByUser[User.Value] = Mode;
+}
+
+GizmoMode HeadlessSessionLayer::GetGizmoMode(SessionUserId User) const {
+  std::lock_guard Lock(m_GizmoModeMutex);
+  const auto It = m_GizmoModeByUser.find(User.Value);
+  return It != m_GizmoModeByUser.end() ? It->second : GizmoMode::Translate;
 }
 
 bool HeadlessSessionLayer::LoadStartupSceneIntoSession() {

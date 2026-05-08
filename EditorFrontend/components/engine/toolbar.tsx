@@ -19,8 +19,11 @@ import {
   Sun,
   Camera,
 } from "lucide-react"
+import { useRemoteViewport } from "./remote-viewport-context"
 
 export function Toolbar() {
+  const { gizmoMode, setGizmoMode } = useRemoteViewport()
+
   return (
     <div className="flex items-center h-10 bg-neutral-950 border-b border-neutral-800 px-2 gap-1">
       <ToolbarGroup>
@@ -38,9 +41,24 @@ export function Toolbar() {
       <ToolbarDivider />
 
       <ToolbarGroup>
-        <ToolbarButton icon={Move} tooltip="Move" active />
-        <ToolbarButton icon={RotateCcw} tooltip="Rotate" />
-        <ToolbarButton icon={Maximize2} tooltip="Scale" />
+        <ToolbarButton
+          icon={Move}
+          tooltip="Move (Q)"
+          active={gizmoMode === "translate"}
+          onClick={() => void setGizmoMode("translate")}
+        />
+        <ToolbarButton
+          icon={RotateCcw}
+          tooltip="Rotate (R)"
+          active={gizmoMode === "rotate"}
+          onClick={() => void setGizmoMode("rotate")}
+        />
+        <ToolbarButton
+          icon={Maximize2}
+          tooltip="Scale (E)"
+          active={gizmoMode === "scale"}
+          onClick={() => void setGizmoMode("scale")}
+        />
       </ToolbarGroup>
 
       <ToolbarDivider />
@@ -80,15 +98,18 @@ function ToolbarButton({
   tooltip,
   active,
   className,
+  onClick,
 }: {
   icon: React.ElementType
   tooltip: string
   active?: boolean
   className?: string
+  onClick?: () => void
 }) {
   return (
     <button
       title={tooltip}
+      onClick={onClick}
       className={`p-2 rounded hover:bg-neutral-800 transition-colors ${
         active ? "bg-neutral-700 text-white" : "text-neutral-400"
       } ${className || ""}`}

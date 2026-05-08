@@ -38,6 +38,28 @@ struct SelectObjectCommand {
   std::string ObjectId;
 };
 
+struct RenameObjectCommand {
+  std::string ObjectId;
+  std::string DisplayName;
+};
+
+struct SetObjectVisibilityCommand {
+  std::string ObjectId;
+  bool Visible{true};
+};
+
+struct CreateObjectCommand {
+  std::string TemplateId;
+};
+
+struct DuplicateObjectCommand {
+  std::string ObjectId;
+};
+
+struct DeleteObjectCommand {
+  std::string ObjectId;
+};
+
 struct SetTransformCommand {
   std::string ObjectId;
   glm::vec3 Location{0.0f};
@@ -47,8 +69,11 @@ struct SetTransformCommand {
 
 using EditorCommandPayload =
     std::variant<UpdateViewportCameraCommand, SetViewportCameraPoseCommand,
-                 SetLookActiveCommand,
-                 SelectObjectCommand, SetTransformCommand>;
+                 SetLookActiveCommand, SelectObjectCommand,
+                 RenameObjectCommand, SetObjectVisibilityCommand,
+                 CreateObjectCommand, DuplicateObjectCommand,
+                 DeleteObjectCommand,
+                 SetTransformCommand>;
 
 struct EditorCommand {
   EditorCommandPayload Payload;

@@ -484,6 +484,13 @@ void VulkanRendererBackend::InitTextureResources() {
 void VulkanRendererBackend::InitPipelines() {
   InitBackgroundPipelines();
   InitMeshPipelines();
+  InitGizmoPipeline();
+}
+
+void VulkanRendererBackend::InitGizmoPipeline() {
+  m_GizmoRenderer.Init({.Device = m_Device.Device,
+                         .DrawImageFormat = m_DrawImage.ImageFormat},
+                        m_MainDeletionQueue);
 }
 
 void VulkanRendererBackend::InitBackgroundPipelines() {
@@ -1301,6 +1308,11 @@ void VulkanRendererBackend::Draw() {
   vkCmdWriteTimestamp2(CommandBuffer,
                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                        MeshFrame.TimestampQueryPool, 3);
+
+  if (m_ActiveScene != nullptr && m_GizmoRenderer.IsInitialized()) {
+    m_GizmoRenderer.DrawGizmoOverlay(CommandBuffer, m_DrawExtent,
+                                     m_DrawImage.ImageView, *m_ActiveScene);
+  }
 
   VkUtil::TransitionImage(CommandBuffer, m_DrawImage.Image,
                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,

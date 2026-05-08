@@ -21,6 +21,7 @@ import {
   type SessionObjectDetails,
   type RemoteViewportConnectionState,
   type RemoteViewportViewMode,
+  type RemoteViewportGizmoMode,
   type SessionParticipant,
   type SessionSceneItem,
   type SessionSelection,
@@ -35,6 +36,7 @@ const SESSION_POLL_INTERVAL_MS = 1500
 const CLIENT_ID_CLAIM_TIMEOUT_MS = 100
 type ConnectionState = RemoteViewportConnectionState
 type ViewMode = RemoteViewportViewMode
+type GizmoMode = RemoteViewportGizmoMode
 type ChannelPreference = "reliable" | "unreliable"
 
 interface WebRtcVideoStatus {
@@ -111,9 +113,55 @@ type RemoteViewportCommand =
       type: "select_object"
       objectId: string
     }
+  | {
+      type: "rename_object"
+      objectId: string
+      displayName: string
+    }
+  | {
+      type: "set_object_visibility"
+      objectId: string
+      visible: boolean
+    }
   | ({
       type: "set_transform"
     } & SessionObjectTransformUpdate)
+  | {
+      type: "create_object"
+      templateId: string
+    }
+  | {
+      type: "duplicate_object"
+      objectId: string
+    }
+  | {
+      type: "delete_object"
+      objectId: string
+    }
+  | {
+      type: "gizmo_hover"
+      mouseX: number
+      mouseY: number
+    }
+  | {
+      type: "gizmo_drag_start"
+      mouseX: number
+      mouseY: number
+    }
+  | {
+      type: "gizmo_drag_update"
+      mouseX: number
+      mouseY: number
+    }
+  | {
+      type: "gizmo_drag_end"
+      mouseX: number
+      mouseY: number
+    }
+  | {
+      type: "set_gizmo_mode"
+      mode: GizmoMode
+    }
 
 function getServerOrigin() {
   const configuredOrigin = process.env.NEXT_PUBLIC_AXIOM_SERVER_ORIGIN?.trim()
@@ -149,12 +197,16 @@ export function Viewport() {
   const participantsRef = useRef<SessionParticipant[]>([])
   const sessionReadyRef = useRef(false)
   const reconnectingRef = useRef(false)
-  const pointerLockedRef = useRef(false)
+  const rightMouseDownRef = useRef(false)
+  const viewportFocusedRef = useRef(false)
+  const isDraggingGizmoRef = useRef(false)
   const keysRef = useRef(new Set<string>())
   const cursorRef = useRef({ x: 0, y: 0 })
   const pendingLookDeltaRef = useRef({ x: 0, y: 0 })
   const isLookingRef = useRef(false)
   const viewModeRef = useRef<ViewMode>("lit")
+  const gizmoModeRef = useRef<GizmoMode>("translate")
+  const setGizmoModeCtxRef = useRef<(mode: GizmoMode) => Promise<void>>(async () => {})
   const notifyServerOnDestroyRef = useRef(true)
   const connectRef = useRef<() => Promise<void>>(async () => {})
   const sendCommandRef = useRef<
@@ -166,6 +218,7 @@ export function Viewport() {
     detailText,
     frameText,
     viewMode,
+    gizmoMode,
     isLooking,
     participants,
     setConnectionState,
@@ -186,8 +239,11 @@ export function Viewport() {
     sessionStatusText,
     setSessionStatusText,
     setSessionDetailText,
+    setGizmoMode: setGizmoModeCtx,
   } = useRemoteViewport()
   const [serverOrigin] = useState(getServerOrigin)
+
+  setGizmoModeCtxRef.current = setGizmoModeCtx
 
   const isConnected =
     connectionState === "streaming" || connectionState === "control-ready"
@@ -574,6 +630,32 @@ export function Viewport() {
 
       if (message.payloadType === "object_transform_updated") {
         setSessionUi("session-ready", "Session ready", "Transform update applied.")
+        if (!isDraggingGizmoRef.current) {
+          void refreshSessionSnapshotSafely("event")
+        }
+        return
+      }
+
+      if (message.payloadType === "object_renamed") {
+        setSessionUi("session-ready", "Session ready", "Object rename applied.")
+        void refreshSessionSnapshotSafely("event")
+        return
+      }
+
+      if (message.payloadType === "object_visibility_changed") {
+        setSessionUi("session-ready", "Session ready", "Visibility update applied.")
+        void refreshSessionSnapshotSafely("event")
+        return
+      }
+
+      if (message.payloadType === "object_created") {
+        setSessionUi("session-ready", "Session ready", "Object created.")
+        void refreshSessionSnapshotSafely("event")
+        return
+      }
+
+      if (message.payloadType === "object_deleted") {
+        setSessionUi("session-ready", "Session ready", "Object deleted.")
         void refreshSessionSnapshotSafely("event")
         return
       }
@@ -1207,6 +1289,34 @@ export function Viewport() {
         }
         return accepted
       },
+      renameObject: async (objectId, displayName) => {
+        const accepted = await sendCommand(
+          {
+            type: "rename_object",
+            objectId,
+            displayName,
+          },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
+      setObjectVisibility: async (objectId, visible) => {
+        const accepted = await sendCommand(
+          {
+            type: "set_object_visibility",
+            objectId,
+            visible,
+          },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
       goToParticipantCamera: async (userId) => {
         const participant = participantsRef.current.find((entry) => entry.userId === userId)
         if (!participant?.camera) {
@@ -1239,6 +1349,45 @@ export function Viewport() {
         }
         return accepted
       },
+      createObject: async (templateId) => {
+        const accepted = await sendCommand(
+          {
+            type: "create_object",
+            templateId,
+          },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
+      duplicateObject: async (objectId) => {
+        const accepted = await sendCommand(
+          {
+            type: "duplicate_object",
+            objectId,
+          },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
+      deleteObject: async (objectId) => {
+        const accepted = await sendCommand(
+          {
+            type: "delete_object",
+            objectId,
+          },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
       setMode: async (nextMode) => {
         if (viewModeRef.current === nextMode) {
           return
@@ -1252,6 +1401,10 @@ export function Viewport() {
           },
           "reliable"
         )
+      },
+      setGizmoMode: async (nextMode) => {
+        gizmoModeRef.current = nextMode
+        await sendCommand({ type: "set_gizmo_mode", mode: nextMode }, "reliable")
       },
     })
     setServerOrigin(serverOrigin)
@@ -1282,38 +1435,118 @@ export function Viewport() {
       }
     }
 
-    const handleShellClick = async () => {
-      if (!shell || pointerLockedRef.current) {
-        return
-      }
-      try {
-        await shell.requestPointerLock()
-      } catch (error) {
-        appendLog(`pointer lock failed: ${String(error)}`)
+    const toServerCoords = (event: MouseEvent) => {
+      const s = viewportShellRef.current
+      const v = videoRef.current
+      if (!s || !v || !v.videoWidth || !v.videoHeight) return null
+      const rect = s.getBoundingClientRect()
+      // object-contain: uniform scale, centered — compute the actual content rect
+      const scale = Math.min(rect.width / v.videoWidth, rect.height / v.videoHeight)
+      const contentW = v.videoWidth * scale
+      const contentH = v.videoHeight * scale
+      const offsetX = (rect.width - contentW) / 2
+      const offsetY = (rect.height - contentH) / 2
+      const cssX = event.clientX - rect.left - offsetX
+      const cssY = event.clientY - rect.top - offsetY
+      if (cssX < 0 || cssY < 0 || cssX > contentW || cssY > contentH) return null
+      return {
+        serverX: (cssX / contentW) * v.videoWidth,
+        serverY: (cssY / contentH) * v.videoHeight,
       }
     }
 
-    const handlePointerLockChange = () => {
-      pointerLockedRef.current = document.pointerLockElement === shell
-      if (!pointerLockedRef.current && isLookingRef.current) {
-        void setLookEnabled(false)
-      } else if (pointerLockedRef.current && !isLookingRef.current) {
+    const handleMouseDown = (event: MouseEvent) => {
+      const inViewport = shell?.contains(event.target as Node) ?? false
+      if (inViewport) {
+        viewportFocusedRef.current = true
+      } else if (viewportFocusedRef.current) {
+        viewportFocusedRef.current = false
+        keysRef.current.clear()
+      }
+
+      if (!inViewport) return
+
+      if (event.button === 2) {
+        event.preventDefault()
+        rightMouseDownRef.current = true
         void setLookEnabled(true)
+        return
+      }
+
+      if (event.button === 0) {
+        const coords = toServerCoords(event)
+        if (coords) {
+          isDraggingGizmoRef.current = true
+          void sendCommand(
+            { type: "gizmo_drag_start", mouseX: coords.serverX, mouseY: coords.serverY },
+            "reliable"
+          )
+        }
+      }
+    }
+
+    const handleMouseUp = (event: MouseEvent) => {
+      if (event.button === 2) {
+        if (!rightMouseDownRef.current) return
+        rightMouseDownRef.current = false
+        void setLookEnabled(false)
+        return
+      }
+
+      if (event.button === 0 && isDraggingGizmoRef.current) {
+        isDraggingGizmoRef.current = false
+        const coords = toServerCoords(event)
+        void sendCommand(
+          {
+            type: "gizmo_drag_end",
+            mouseX: coords?.serverX ?? 0,
+            mouseY: coords?.serverY ?? 0,
+          },
+          "reliable"
+        )
+      }
+    }
+
+    const handleContextMenu = (event: MouseEvent) => {
+      if (shell?.contains(event.target as Node)) {
+        event.preventDefault()
       }
     }
 
     const handleMouseMove = (event: MouseEvent) => {
-      if (!pointerLockedRef.current) {
+      if (rightMouseDownRef.current) {
+        pendingLookDeltaRef.current.x += event.movementX
+        pendingLookDeltaRef.current.y += event.movementY
+        sendViewportInputFrame()
         return
       }
-      pendingLookDeltaRef.current.x += event.movementX
-      pendingLookDeltaRef.current.y += event.movementY
-      if (isLookingRef.current) {
-        sendViewportInputFrame()
+
+      if (isDraggingGizmoRef.current) {
+        const coords = toServerCoords(event)
+        if (coords) {
+          void sendCommand(
+            { type: "gizmo_drag_update", mouseX: coords.serverX, mouseY: coords.serverY },
+            "unreliable"
+          )
+        }
+        return
+      }
+
+      const shell = viewportShellRef.current
+      const video = videoRef.current
+      if (shell && video && video.videoWidth && video.videoHeight) {
+        const coords = toServerCoords(event)
+        if (coords) {
+          void sendCommand(
+            { type: "gizmo_hover", mouseX: coords.serverX, mouseY: coords.serverY },
+            "unreliable"
+          )
+        }
       }
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (!viewportFocusedRef.current) return
       if (
         event.code === "Space" ||
         event.code === "ShiftLeft" ||
@@ -1324,22 +1557,24 @@ export function Viewport() {
         event.code === "KeyD"
       ) {
         event.preventDefault()
+      }
+      // Gizmo mode shortcuts (only when not in camera look mode)
+      if (!rightMouseDownRef.current && !isDraggingGizmoRef.current) {
+        const gizmoShortcuts: Partial<Record<string, GizmoMode>> = {
+          KeyQ: "translate",
+          KeyE: "scale",
+          KeyR: "rotate",
+        }
+        const nextGizmoMode = gizmoShortcuts[event.code]
+        if (nextGizmoMode !== undefined && gizmoModeRef.current !== nextGizmoMode) {
+          event.preventDefault()
+          void setGizmoModeCtxRef.current(nextGizmoMode)
+        }
       }
       keysRef.current.add(event.code)
     }
 
     const handleKeyUp = (event: KeyboardEvent) => {
-      if (
-        event.code === "Space" ||
-        event.code === "ShiftLeft" ||
-        event.code === "ShiftRight" ||
-        event.code === "KeyW" ||
-        event.code === "KeyA" ||
-        event.code === "KeyS" ||
-        event.code === "KeyD"
-      ) {
-        event.preventDefault()
-      }
       keysRef.current.delete(event.code)
     }
 
@@ -1352,8 +1587,9 @@ export function Viewport() {
 
     video?.addEventListener("loadedmetadata", handleLoadedMetadata)
     video?.addEventListener("resize", handleResize)
-    shell?.addEventListener("click", handleShellClick)
-    document.addEventListener("pointerlockchange", handlePointerLockChange)
+    document.addEventListener("mousedown", handleMouseDown)
+    document.addEventListener("mouseup", handleMouseUp)
+    document.addEventListener("contextmenu", handleContextMenu)
     document.addEventListener("mousemove", handleMouseMove)
     document.addEventListener("keydown", handleKeyDown)
     document.addEventListener("keyup", handleKeyUp)
@@ -1367,8 +1603,9 @@ export function Viewport() {
       stopViewportInputPump()
       video?.removeEventListener("loadedmetadata", handleLoadedMetadata)
       video?.removeEventListener("resize", handleResize)
-      shell?.removeEventListener("click", handleShellClick)
-      document.removeEventListener("pointerlockchange", handlePointerLockChange)
+      document.removeEventListener("mousedown", handleMouseDown)
+      document.removeEventListener("mouseup", handleMouseUp)
+      document.removeEventListener("contextmenu", handleContextMenu)
       document.removeEventListener("mousemove", handleMouseMove)
       document.removeEventListener("keydown", handleKeyDown)
       document.removeEventListener("keyup", handleKeyUp)

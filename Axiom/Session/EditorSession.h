@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CoreInstance/SceneInstances.h"
 #include "Renderer/Camera.h"
 #include "Renderer/Mesh.h"
 #include "Session/EditorCommand.h"
@@ -9,6 +10,7 @@
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -102,17 +104,21 @@ struct EditorSceneMeshInstance {
   glm::mat4 Transform{1.0f};
 };
 
+struct EditorSceneState {
+  std::vector<EditorSceneMeshInstance> MeshInstances;
+  std::vector<EditorSceneItem> Items;
+  std::unordered_map<std::string, EditorObjectDetails> ObjectDetailsById;
+  std::unordered_map<std::string, EditorObjectCollaborationState>
+      CollaborationByObjectId;
+};
+
 struct EditorSessionState {
   SessionId Session;
   std::unordered_map<SessionUserId, EditorViewportState, SessionUserIdHash>
       Viewports;
   std::unordered_map<SessionUserId, EditorUserPresence, SessionUserIdHash>
       PresenceByUser;
-  std::vector<EditorSceneMeshInstance> SceneMeshInstances;
-  std::vector<EditorSceneItem> SceneItems;
-  std::unordered_map<std::string, EditorObjectDetails> ObjectDetailsById;
-  std::unordered_map<std::string, EditorObjectCollaborationState>
-      CollaborationByObjectId;
+  EditorSceneState Scene;
   std::unordered_map<SessionUserId, std::string, SessionUserIdHash>
       SelectedObjectIds;
 };
@@ -131,6 +137,7 @@ public:
 
   void EnsureViewportState(SessionUserId User);
   void SetPresenceState(SessionUserId User, EditorUserPresenceState State);
+  void SetSceneState(EditorSceneState SceneState);
   void SetSceneMeshInstances(
       std::vector<EditorSceneMeshInstance> SceneMeshInstances);
   void SetSceneItems(std::vector<EditorSceneItem> SceneItems);
@@ -141,6 +148,7 @@ public:
 
   const EditorSessionState &GetState() const { return m_State; }
   const EditorSessionConfig &GetConfig() const { return m_Config; }
+  const DataModel *GetSceneRoot() const { return m_SceneRoot.get(); }
   const EditorViewportState *FindViewport(SessionUserId User) const;
   const EditorSceneItem *FindSceneItem(std::string_view ObjectId) const;
   const std::string *FindSelectedObjectId(SessionUserId User) const;
@@ -153,6 +161,39 @@ public:
       std::string_view ObjectId) const;
 
 private:
+  static std::unordered_map<std::string, EditorObjectDetails>
+  BuildObjectDetailsMap(std::vector<EditorObjectDetails> ObjectDetails);
+  static bool IsBlankString(std::string_view Value);
+  std::string BuildUniqueObjectId(std::string_view BaseObjectId) const;
+  std::string BuildUniqueDisplayName(std::string_view BaseDisplayName) const;
+  bool IsSceneObjectIdInUse(std::string_view ObjectId) const;
+  bool IsSceneDisplayNameInUse(std::string_view DisplayName) const;
+  bool UpdateSceneItemDisplayName(std::vector<EditorSceneItem> &Items,
+                                  std::string_view ObjectId,
+                                  std::string_view DisplayName);
+  bool UpdateSceneItemVisibility(std::vector<EditorSceneItem> &Items,
+                                 std::string_view ObjectId, bool Visible);
+  bool RemoveSceneItem(std::vector<EditorSceneItem> &Items,
+                       std::string_view ObjectId);
+  EditorSceneItem *FindSceneItemMutable(std::vector<EditorSceneItem> &Items,
+                                        std::string_view ObjectId);
+  void RemoveSceneObject(std::string_view ObjectId);
+  void ClearSelectionsForObject(std::string_view ObjectId);
+  void PruneInvalidSelections();
+  // Instance tree management
+  void InitSceneRoot();
+  Instance *FindWorldFolder() const;
+  void RebuildInstanceTree(const std::vector<EditorSceneItem> &Items,
+                           Instance *Parent);
+  void SyncItemsFromTree();
+  EditorSceneItem BuildItemFromInstance(const Instance *Node) const;
+  Instance *CreateInstanceForTemplate(const std::string &TemplateId,
+                                      const std::string &ObjectId);
+  void DeepCloneSubtree(const Instance *Source, Instance *DestParent,
+                        std::vector<EditorObjectDetails> &OutNewDetails);
+  std::vector<std::string> CollectDescendantIds(const Instance *Root) const;
+  EditorSceneItemKind KindForInstance(const Instance *Node) const;
+  bool IsValidTemplateId(const std::string &TemplateId) const;
   void UpdateSubmissionTransform(std::string_view ObjectId,
                                  const EditorTransformDetails &Transform);
   void PublishPresenceChangedEvent(SessionUserId User);
@@ -172,6 +213,16 @@ private:
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SelectObjectCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const RenameObjectCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const SetObjectVisibilityCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const CreateObjectCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const DuplicateObjectCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const DeleteObjectCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SetTransformCommand &Command);
   void PublishEvent(const EditorEvent &Event);
 
@@ -179,5 +230,6 @@ private:
   EditorSessionConfig m_Config;
   EditorSessionState m_State;
   EditorMessageBus m_MessageBus;
+  std::unique_ptr<DataModel> m_SceneRoot;
 };
 } // namespace Axiom

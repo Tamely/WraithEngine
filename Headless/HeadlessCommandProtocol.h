@@ -1,10 +1,13 @@
 #pragma once
 
 #include <Renderer/RendererBackend.h>
+#include <Renderer/RenderScene.h>
 #include <Renderer/VideoEncoding.h>
 #include <Session/EditorCommand.h>
 #include <Session/EditorEvent.h>
 #include <Session/EditorSession.h>
+
+#include <glm/vec2.hpp>
 
 #include <filesystem>
 #include <cstdint>
@@ -21,8 +24,18 @@ enum class HeadlessCommandType {
   SetLookActive,
   SetViewportCameraPose,
   SelectObject,
+  RenameObject,
+  SetObjectVisibility,
+  CreateObject,
+  DuplicateObject,
+  DeleteObject,
   SetTransform,
   UpdateViewportCamera,
+  GizmoHover,
+  GizmoDragStart,
+  GizmoDragUpdate,
+  GizmoDragEnd,
+  SetGizmoMode,
   RenderFrame,
   Quit,
 };
@@ -31,6 +44,8 @@ struct HeadlessCommand {
   HeadlessCommandType Type;
   EditorCommand EditorPayload;
   RendererViewMode ViewMode{RendererViewMode::Lit};
+  glm::vec2 MousePosition{0.0f};
+  GizmoMode Mode{GizmoMode::Translate};
 };
 
 struct HeadlessAppOptions {

@@ -13,14 +13,34 @@ import {
   Camera,
   User,
   Layers,
+  Plus,
+  Trash2,
+  Copy,
 } from "lucide-react"
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { useRemoteViewport, type SessionSceneItem, type SessionSceneItemKind } from "./remote-viewport-context"
+
+type EditingState = { id: string; name: string } | null
+
+const OBJECT_TEMPLATES = [
+  { id: "Folder", label: "Folder", Icon: Folder },
+  { id: "Mesh", label: "Mesh", Icon: Box },
+  { id: "Light", label: "Light", Icon: Lightbulb },
+  { id: "Camera", label: "Camera", Icon: Camera },
+  { id: "Actor", label: "Actor", Icon: User },
+] as const
 
 function matchesSearch(item: SessionSceneItem, query: string): boolean {
   if (query.length === 0) {
@@ -39,12 +59,24 @@ function matchesSearch(item: SessionSceneItem, query: string): boolean {
 }
 
 export function Outliner() {
-  const { sceneTree, selectedObjectId, selectObject, goToParticipantCamera, participants, sessionState } =
-    useRemoteViewport()
+  const {
+    sceneTree,
+    selectedObjectId,
+    selectObject,
+    setObjectVisibility,
+    goToParticipantCamera,
+    createObject,
+    duplicateObject,
+    deleteObject,
+    renameObject,
+    participants,
+    sessionState,
+  } = useRemoteViewport()
   const [searchQuery, setSearchQuery] = useState("")
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
     new Set(["world", "lighting", "geometry"])
   )
+  const [editing, setEditing] = useState<EditingState>(null)
 
   const visibleTree = useMemo(() => {
     const collaboratorItems: SessionSceneItem[] = participants
@@ -110,6 +142,26 @@ export function Outliner() {
       ? Number(item.id.replace("participant-camera-", ""))
       : null
 
+    const isEditing = editing !== null && editing.id === item.id
+    const isParticipantCamera = participantCameraUserId !== null && Number.isFinite(participantCameraUserId)
+
+    function startEditing() {
+      setEditing({ id: item.id, name: item.displayName })
+    }
+
+    function commitEdit() {
+      if (editing === null || editing.id !== item.id) return
+      const trimmed = editing.name.trim()
+      if (trimmed.length > 0 && trimmed !== item.displayName) {
+        void renameObject(item.id, trimmed)
+      }
+      setEditing(null)
+    }
+
+    function cancelEdit() {
+      setEditing(null)
+    }
+
     const row = (
       <div
         className={`group flex cursor-pointer items-center gap-1 px-2 py-1 hover:bg-neutral-800 ${
@@ -117,9 +169,7 @@ export function Outliner() {
         }`}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
         onClick={() => {
-          if (participantCameraUserId !== null && Number.isFinite(participantCameraUserId)) {
-            return
-          }
+          if (isParticipantCamera || isEditing) return
           void selectObject(item.id)
         }}
       >
@@ -142,16 +192,50 @@ export function Outliner() {
           <div className="w-4" />
         )}
         <Icon className="h-4 w-4 text-neutral-400" />
-        <span className="flex-1 truncate text-xs text-neutral-300">
-          {item.displayName}
-        </span>
-        {selectedBy.length > 0 && (
+        {isEditing ? (
+          <input
+            autoFocus
+            className="flex-1 rounded bg-neutral-900 px-1 text-xs text-neutral-100 outline outline-1 outline-blue-500"
+            onBlur={commitEdit}
+            onChange={(e) => setEditing({ id: item.id, name: e.target.value })}
+            onClick={(e) => e.stopPropagation()}
+            onFocus={(e) => e.target.select()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                commitEdit()
+              } else if (e.key === "Escape") {
+                e.preventDefault()
+                cancelEdit()
+              }
+            }}
+            type="text"
+            value={editing.name}
+          />
+        ) : (
+          <span
+            className="flex-1 truncate text-xs text-neutral-300"
+            onDoubleClick={(e) => {
+              if (isParticipantCamera) return
+              e.stopPropagation()
+              startEditing()
+            }}
+          >
+            {item.displayName}
+          </span>
+        )}
+        {!isEditing && selectedBy.length > 0 && (
           <span className="max-w-28 truncate text-[10px] text-amber-300/80">
             {selectedBy.join(", ")}
           </span>
         )}
         <button
           className="rounded p-0.5 opacity-0 hover:bg-neutral-700 group-hover:opacity-100"
+          onClick={(event) => {
+            event.stopPropagation()
+            if (isParticipantCamera) return
+            void setObjectVisibility(item.id, !item.visible)
+          }}
           type="button"
         >
           {item.visible ? (
@@ -165,10 +249,10 @@ export function Outliner() {
 
     return (
       <div key={item.id}>
-        {participantCameraUserId !== null && Number.isFinite(participantCameraUserId) ? (
-          <ContextMenu>
-            <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-            <ContextMenuContent className="border-neutral-800 bg-neutral-950 text-neutral-200">
+        <ContextMenu>
+          <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+          <ContextMenuContent className="border-neutral-800 bg-neutral-950 text-neutral-200">
+            {participantCameraUserId !== null && Number.isFinite(participantCameraUserId) ? (
               <ContextMenuItem
                 onClick={() => {
                   void goToParticipantCamera(participantCameraUserId)
@@ -176,11 +260,30 @@ export function Outliner() {
               >
                 Go to Camera
               </ContextMenuItem>
-            </ContextMenuContent>
-          </ContextMenu>
-        ) : (
-          row
-        )}
+            ) : (
+              <>
+                <ContextMenuItem
+                  onClick={() => {
+                    void duplicateObject(item.id)
+                  }}
+                >
+                  <Copy className="mr-2 h-3.5 w-3.5" />
+                  Duplicate
+                </ContextMenuItem>
+                <ContextMenuSeparator className="bg-neutral-800" />
+                <ContextMenuItem
+                  className="text-red-400 focus:text-red-400"
+                  onClick={() => {
+                    void deleteObject(item.id)
+                  }}
+                >
+                  <Trash2 className="mr-2 h-3.5 w-3.5" />
+                  Delete
+                </ContextMenuItem>
+              </>
+            )}
+          </ContextMenuContent>
+        </ContextMenu>
         {hasChildren && isExpanded && item.children.map((child) => renderItem(child, depth + 1))}
       </div>
     )
@@ -192,6 +295,45 @@ export function Outliner() {
         <div className="flex items-center gap-1">
           <Layers className="h-4 w-4 text-neutral-400" />
           <span className="text-xs font-medium text-neutral-300">Outliner</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
+                type="button"
+              >
+                <Plus className="h-3 w-3" />
+                Add
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="border-neutral-800 bg-neutral-950 text-neutral-200">
+              {OBJECT_TEMPLATES.map(({ id, label, Icon }) => (
+                <DropdownMenuItem
+                  key={id}
+                  onClick={() => {
+                    void createObject(id)
+                  }}
+                >
+                  <Icon className="mr-2 h-3.5 w-3.5 text-neutral-400" />
+                  {label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <button
+            className="rounded p-0.5 text-neutral-400 hover:bg-neutral-800 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-30"
+            disabled={selectedObjectId === null}
+            onClick={() => {
+              if (selectedObjectId !== null) {
+                void deleteObject(selectedObjectId)
+              }
+            }}
+            title="Delete selected"
+            type="button"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
         </div>
       </div>
       <div className="p-2">

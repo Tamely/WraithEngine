@@ -140,6 +140,18 @@ std::string EventPayloadType(const EditorEventPayload &Payload) {
   if (std::holds_alternative<SelectionChangedEvent>(Payload)) {
     return "selection_changed";
   }
+  if (std::holds_alternative<ObjectRenamedEvent>(Payload)) {
+    return "object_renamed";
+  }
+  if (std::holds_alternative<ObjectVisibilityChangedEvent>(Payload)) {
+    return "object_visibility_changed";
+  }
+  if (std::holds_alternative<ObjectCreatedEvent>(Payload)) {
+    return "object_created";
+  }
+  if (std::holds_alternative<ObjectDeletedEvent>(Payload)) {
+    return "object_deleted";
+  }
   return "object_transform_updated";
 }
 
@@ -293,8 +305,9 @@ void SerializeObjectDetails(std::ostringstream &Stream,
     Stream << Participant.User.Value;
   }
   Stream << "],\"lockState\":\"";
-  const auto CollaborationIt = State.CollaborationByObjectId.find(Details.ObjectId);
-  if (CollaborationIt != State.CollaborationByObjectId.end()) {
+  const auto CollaborationIt =
+      State.Scene.CollaborationByObjectId.find(Details.ObjectId);
+  if (CollaborationIt != State.Scene.CollaborationByObjectId.end()) {
     Stream << LockStateToString(CollaborationIt->second.LockState)
            << "\",\"lockOwnerUserId\":";
     if (CollaborationIt->second.LockOwner.has_value()) {
@@ -387,6 +400,10 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
       R"json("yawDegrees"\s*:\s*([-+0-9.eE]+))json");
   static const std::regex PitchPattern(
       R"json("pitchDegrees"\s*:\s*([-+0-9.eE]+))json");
+  static const std::regex MouseXPattern(
+      R"json("mouseX"\s*:\s*([-+0-9.eE]+))json");
+  static const std::regex MouseYPattern(
+      R"json("mouseY"\s*:\s*([-+0-9.eE]+))json");
 
   const auto Type = MatchString(JsonLine, TypePattern);
   if (!Type.has_value()) {
@@ -484,6 +501,46 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
             {.Payload = SelectObjectCommand{.ObjectId = UnescapeJsonString(*ObjectId)}},
     };
   }
+  if (*Type == "rename_object") {
+    static const std::regex ObjectIdPattern(
+        R"json("objectId"\s*:\s*"((?:\\.|[^"])*)")json");
+    static const std::regex DisplayNamePattern(
+        R"json("displayName"\s*:\s*"((?:\\.|[^"])*)")json");
+    const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
+    const auto DisplayName = MatchString(JsonLine, DisplayNamePattern);
+    if (!ObjectId.has_value() || !DisplayName.has_value()) {
+      Error = "`rename_object` requires `objectId` and `displayName`.";
+      return std::nullopt;
+    }
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::RenameObject,
+        .EditorPayload =
+            {.Payload = RenameObjectCommand{
+                 .ObjectId = UnescapeJsonString(*ObjectId),
+                 .DisplayName = UnescapeJsonString(*DisplayName),
+             }},
+    };
+  }
+  if (*Type == "set_object_visibility") {
+    static const std::regex ObjectIdPattern(
+        R"json("objectId"\s*:\s*"((?:\\.|[^"])*)")json");
+    static const std::regex VisiblePattern(
+        R"json("visible"\s*:\s*(true|false))json");
+    const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
+    const auto Visible = MatchString(JsonLine, VisiblePattern);
+    if (!ObjectId.has_value() || !Visible.has_value()) {
+      Error = "`set_object_visibility` requires `objectId` and `visible`.";
+      return std::nullopt;
+    }
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::SetObjectVisibility,
+        .EditorPayload =
+            {.Payload = SetObjectVisibilityCommand{
+                 .ObjectId = UnescapeJsonString(*ObjectId),
+                 .Visible = *Visible == "true",
+             }},
+    };
+  }
   if (*Type == "set_transform") {
     static const std::regex ObjectIdPattern(
         R"json("objectId"\s*:\s*"((?:\\.|[^"])*)")json");
@@ -514,6 +571,54 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
              }},
     };
   }
+  if (*Type == "create_object") {
+    static const std::regex TemplateIdPattern(
+        R"json("templateId"\s*:\s*"((?:\\.|[^"])*)")json");
+    const auto TemplateId = MatchString(JsonLine, TemplateIdPattern);
+    if (!TemplateId.has_value()) {
+      Error = "`create_object` requires `templateId`.";
+      return std::nullopt;
+    }
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::CreateObject,
+        .EditorPayload =
+            {.Payload = CreateObjectCommand{
+                 .TemplateId = UnescapeJsonString(*TemplateId),
+             }},
+    };
+  }
+  if (*Type == "duplicate_object") {
+    static const std::regex ObjectIdPattern(
+        R"json("objectId"\s*:\s*"((?:\\.|[^"])*)")json");
+    const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
+    if (!ObjectId.has_value()) {
+      Error = "`duplicate_object` requires `objectId`.";
+      return std::nullopt;
+    }
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::DuplicateObject,
+        .EditorPayload =
+            {.Payload = DuplicateObjectCommand{
+                 .ObjectId = UnescapeJsonString(*ObjectId),
+             }},
+    };
+  }
+  if (*Type == "delete_object") {
+    static const std::regex ObjectIdPattern(
+        R"json("objectId"\s*:\s*"((?:\\.|[^"])*)")json");
+    const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
+    if (!ObjectId.has_value()) {
+      Error = "`delete_object` requires `objectId`.";
+      return std::nullopt;
+    }
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::DeleteObject,
+        .EditorPayload =
+            {.Payload = DeleteObjectCommand{
+                 .ObjectId = UnescapeJsonString(*ObjectId),
+             }},
+    };
+  }
   if (*Type == "update_viewport_camera") {
     const auto Movement = MatchVec3(JsonLine, MovementPattern);
     if (!Movement.has_value()) {
@@ -529,6 +634,58 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
                  .CursorPosition = Cursor,
              }},
     };
+  }
+
+  if (*Type == "gizmo_hover") {
+    const auto MX = MatchString(JsonLine, MouseXPattern);
+    const auto MY = MatchString(JsonLine, MouseYPattern);
+    float MouseX = 0.0f;
+    float MouseY = 0.0f;
+    if (MX.has_value()) {
+      if (const auto V = ParseDouble(*MX)) {
+        MouseX = static_cast<float>(*V);
+      }
+    }
+    if (MY.has_value()) {
+      if (const auto V = ParseDouble(*MY)) {
+        MouseY = static_cast<float>(*V);
+      }
+    }
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::GizmoHover,
+        .MousePosition = {MouseX, MouseY},
+    };
+  }
+
+  auto ParseMouseXY = [&](HeadlessCommandType T) -> HeadlessCommand {
+    const auto MX = MatchString(JsonLine, MouseXPattern);
+    const auto MY = MatchString(JsonLine, MouseYPattern);
+    float MouseX = 0.0f;
+    float MouseY = 0.0f;
+    if (MX.has_value()) {
+      if (const auto V = ParseDouble(*MX)) MouseX = static_cast<float>(*V);
+    }
+    if (MY.has_value()) {
+      if (const auto V = ParseDouble(*MY)) MouseY = static_cast<float>(*V);
+    }
+    return HeadlessCommand{.Type = T, .MousePosition = {MouseX, MouseY}};
+  };
+
+  if (*Type == "gizmo_drag_start") return ParseMouseXY(HeadlessCommandType::GizmoDragStart);
+  if (*Type == "gizmo_drag_update") return ParseMouseXY(HeadlessCommandType::GizmoDragUpdate);
+  if (*Type == "gizmo_drag_end") return ParseMouseXY(HeadlessCommandType::GizmoDragEnd);
+  if (*Type == "set_gizmo_mode") {
+    static const std::regex ModePattern(R"json("mode"\s*:\s*"([^"]+)")json");
+    const auto ModeStr = MatchString(JsonLine, ModePattern);
+    GizmoMode Mode = GizmoMode::Translate;
+    if (ModeStr.has_value()) {
+      if (*ModeStr == "scale") {
+        Mode = GizmoMode::Scale;
+      } else if (*ModeStr == "rotate") {
+        Mode = GizmoMode::Rotate;
+      }
+    }
+    return HeadlessCommand{.Type = HeadlessCommandType::SetGizmoMode, .Mode = Mode};
   }
 
   Error = "Unsupported command type: " + *Type;
@@ -547,8 +704,18 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
   case HeadlessCommandType::SelectObject:
+  case HeadlessCommandType::RenameObject:
+  case HeadlessCommandType::SetObjectVisibility:
+  case HeadlessCommandType::CreateObject:
+  case HeadlessCommandType::DuplicateObject:
+  case HeadlessCommandType::DeleteObject:
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::UpdateViewportCamera:
+  case HeadlessCommandType::GizmoHover:
+  case HeadlessCommandType::GizmoDragStart:
+  case HeadlessCommandType::GizmoDragUpdate:
+  case HeadlessCommandType::GizmoDragEnd:
+  case HeadlessCommandType::SetGizmoMode:
   case HeadlessCommandType::Quit:
     return Command;
   case HeadlessCommandType::LoadStartupScene:
@@ -635,6 +802,25 @@ std::string SerializeEvent(const PublishedEditorEvent &Event) {
     } else {
       Stream << "null";
     }
+  } else if (const auto *Rename =
+                 std::get_if<ObjectRenamedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"user\":" << Rename->User.Value << ",\"objectId\":\""
+           << EscapeJson(Rename->ObjectId) << "\",\"displayName\":\""
+           << EscapeJson(Rename->DisplayName) << "\"";
+  } else if (const auto *Visibility =
+                 std::get_if<ObjectVisibilityChangedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"user\":" << Visibility->User.Value << ",\"objectId\":\""
+           << EscapeJson(Visibility->ObjectId) << "\",\"visible\":"
+           << (Visibility->Visible ? "true" : "false");
+  } else if (const auto *Created =
+                 std::get_if<ObjectCreatedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"user\":" << Created->User.Value << ",\"objectId\":\""
+           << EscapeJson(Created->ObjectId) << "\",\"displayName\":\""
+           << EscapeJson(Created->DisplayName) << "\"";
+  } else if (const auto *Deleted =
+                 std::get_if<ObjectDeletedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"user\":" << Deleted->User.Value << ",\"objectId\":\""
+           << EscapeJson(Deleted->ObjectId) << "\"";
   } else if (const auto *Transform =
                  std::get_if<ObjectTransformUpdatedEvent>(&Event.Event.Payload)) {
     Stream << ",\"user\":" << Transform->User.Value << ",\"objectId\":\""
@@ -831,11 +1017,11 @@ std::string SerializeSessionSnapshot(const EditorSessionState &State,
   }
 
   Stream << "],\"sceneTree\":[";
-  for (size_t Index = 0; Index < State.SceneItems.size(); ++Index) {
+  for (size_t Index = 0; Index < State.Scene.Items.size(); ++Index) {
     if (Index != 0) {
       Stream << ",";
     }
-    SerializeSceneItem(Stream, State.SceneItems[Index]);
+    SerializeSceneItem(Stream, State.Scene.Items[Index]);
   }
   Stream << "],\"selectedObjectDetails\":";
   if (const EditorObjectDetails *Details =
@@ -845,9 +1031,10 @@ std::string SerializeSessionSnapshot(const EditorSessionState &State,
               return nullptr;
             }
             const auto DetailsIt =
-                State.ObjectDetailsById.find(SelectionIt->second);
-            return DetailsIt != State.ObjectDetailsById.end() ? &DetailsIt->second
-                                                              : nullptr;
+                State.Scene.ObjectDetailsById.find(SelectionIt->second);
+            return DetailsIt != State.Scene.ObjectDetailsById.end()
+                       ? &DetailsIt->second
+                       : nullptr;
           }();
       Details != nullptr) {
     SerializeObjectDetails(Stream, State, *Details);
