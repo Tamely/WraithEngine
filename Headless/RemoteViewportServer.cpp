@@ -869,6 +869,7 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::GizmoDragEnd:
   case HeadlessCommandType::SetGizmoMode:
     break;
+  case HeadlessCommandType::Heartbeat:
   case HeadlessCommandType::ListAssets:
   case HeadlessCommandType::GetSchema:
   case HeadlessCommandType::SetProperty:
@@ -1485,7 +1486,7 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   }
   case HeadlessCommandType::GetSchema: {
     const auto &DetailsById =
-        m_Host.GetHeadlessLayer().GetSession().GetState().ObjectDetailsById;
+        m_Host.GetHeadlessLayer().GetSession().GetState().Scene.ObjectDetailsById;
     const auto It = DetailsById.find(Command->ObjectId);
     if (It != DetailsById.end()) {
       SendTextMessage(ClientSocketValue, SerializeObjectSchema(It->second));
@@ -1557,7 +1558,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   }
   case HeadlessCommandType::GetSchema: {
     const auto &DetailsById =
-        m_Host.GetHeadlessLayer().GetSession().GetState().ObjectDetailsById;
+        m_Host.GetHeadlessLayer().GetSession().GetState().Scene.ObjectDetailsById;
     const auto It = DetailsById.find(Command->ObjectId);
     if (It != DetailsById.end() && Client->WebRtcSession != nullptr) {
       Client->WebRtcSession->SendReliableMessage(
@@ -1590,7 +1591,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     } else if (Name == "location" || Name == "rotationDegrees" || Name == "scale") {
       if (const auto *V = std::get_if<glm::vec3>(&Val)) {
         const auto &DetailsById =
-            m_Host.GetHeadlessLayer().GetSession().GetState().ObjectDetailsById;
+            m_Host.GetHeadlessLayer().GetSession().GetState().Scene.ObjectDetailsById;
         const auto It = DetailsById.find(ObjId);
         if (It == DetailsById.end() || !It->second.Transform.has_value()) {
           return false;
