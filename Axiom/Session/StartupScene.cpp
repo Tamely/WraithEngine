@@ -1,5 +1,6 @@
 #include "Session/StartupScene.h"
 
+#include "Assets/IAssetSource.h"
 #include "Assets/MeshAsset.h"
 #include "Core/Log.h"
 
@@ -236,8 +237,8 @@ std::unordered_map<std::string, EditorObjectDetails> BuildObjectDetailsMap(
 } // namespace
 
 std::vector<EditorSceneMeshInstance> BuildStartupSceneMeshInstances() {
-  const auto MeshPath =
-      std::filesystem::path(AXIOM_CONTENT_DIR) / "basicmesh.glb";
+  const Assets::LocalAssetSource ContentDir{AXIOM_CONTENT_DIR};
+  const auto MeshPath = ContentDir.ResolveRelative("basicmesh.glb");
   const auto SceneData = Assets::LoadBasicMeshAsset(MeshPath);
   if (!SceneData.has_value()) {
     A_CORE_ERROR("Failed to load startup mesh asset scene: {0}",
