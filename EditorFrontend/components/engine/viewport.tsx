@@ -254,6 +254,7 @@ export function Viewport() {
     applyObjectLockChanged,
     setAssets,
     setObjectSchema,
+    setSaveStatus,
     setSessionState,
     sessionStatusText,
     setSessionStatusText,
@@ -733,11 +734,13 @@ export function Viewport() {
       }
 
       if (message.type === "scene_saved") {
+        setSaveStatus("saved")
         setSessionUi("session-ready", "Session ready", "Scene saved successfully.")
         return
       }
 
       if (message.type === "scene_save_failed") {
+        setSaveStatus("failed")
         setSessionUi("error", "Save failed", "The scene could not be saved.")
         return
       }

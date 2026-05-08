@@ -1,7 +1,10 @@
 "use client"
 
+import { useEffect } from "react"
 import {
   Save,
+  Check,
+  X,
   FolderOpen,
   Undo,
   Redo,
@@ -23,12 +26,31 @@ import { useRemoteViewport } from "./remote-viewport-context"
 import { PresenceRoster } from "./presence-roster"
 
 export function Toolbar() {
-  const { gizmoMode, setGizmoMode, saveScene } = useRemoteViewport()
+  const { gizmoMode, setGizmoMode, saveScene, saveStatus, setSaveStatus } = useRemoteViewport()
+
+  useEffect(() => {
+    if (saveStatus !== "saved" && saveStatus !== "failed") return
+    const timer = window.setTimeout(() => setSaveStatus("idle"), 2500)
+    return () => window.clearTimeout(timer)
+  }, [saveStatus, setSaveStatus])
 
   return (
     <div className="flex items-center h-10 bg-neutral-950 border-b border-neutral-800 px-2 gap-1">
       <ToolbarGroup>
-        <ToolbarButton icon={Save} tooltip="Save" onClick={() => void saveScene()} />
+        <ToolbarButton
+          icon={saveStatus === "saved" ? Check : saveStatus === "failed" ? X : Save}
+          tooltip="Save"
+          onClick={() => void saveScene()}
+          className={
+            saveStatus === "saved"
+              ? "text-green-400"
+              : saveStatus === "failed"
+              ? "text-red-400"
+              : saveStatus === "saving"
+              ? "opacity-50"
+              : undefined
+          }
+        />
         <ToolbarButton icon={FolderOpen} tooltip="Open" />
       </ToolbarGroup>
 
