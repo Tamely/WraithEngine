@@ -47,6 +47,13 @@
 - `VulkanGizmoRenderer` draws mode-appropriate handles: arrows for translate, arrows with perpendicular cross-caps for scale, and 24-segment screen-space rings for rotate; the hovered handle brightens in all modes
 - Gizmo mouse coordinates are forwarded using the correct `object-contain` content rect mapping so hit-testing is accurate regardless of the viewport aspect ratio or window size
 - `gizmoMode` state lives in `RemoteViewportContext` so the toolbar and viewport share a single source of truth without prop drilling
+- Collaboration v1 is now implemented: object locking, selection/lock visibility, presence roster, heartbeat-driven idle detection, and two-threshold disconnect (Away at 10 s, Disconnected at 30 s with lock release)
+- `EditorObjectLockState` (`Unlocked` / `Locked`) and `EditorObjectCollaborationState` live in `EditorSessionState`; `AcquireLock`, `ReleaseLock`, and `ReleaseAllLocksForUser` are public `EditorSession` methods
+- `ValidateCommand` rejects any mutating command (`SetTransform`, `Rename`, `SetObjectVisibility`, `Delete`, `Reparent`) on an object locked by a different user
+- gizmo drag start/end bracket lock acquisition and release in `RemoteViewportServer`; hard disconnect and presence timeout release all locks for the departing user
+- `ObjectLockChangedEvent` is serialized as `object_lock_changed` and consumed by the browser to keep a `lockedObjects` map in `RemoteViewportContext`
+- the outliner renders per-row avatar chips for selecting users and a lock icon in the locking user's color; the `PresenceRoster` component shows participant chips with green/yellow/grey status dots in the toolbar
+- heartbeat: browser sends `{ "type": "heartbeat" }` on the reliable data channel every 4 s; `PresenceLoop` background thread transitions Connected → Away at 10 s and Away → Disconnected at 30 s of inactivity
 
 ## 1. Executive Summary
 WraithEngine will evolve from a single-process native editor into a distributed platform with one shared C++ engine runtime that supports two execution styles:
@@ -972,6 +979,19 @@ Progress update:
 - selection visibility
 - object/asset locking
 
+Progress update:
+
+- `EditorObjectLockState` (`Unlocked` / `Locked`) and `EditorObjectCollaborationState` are now part of `EditorSessionState`; lock state is per-object and per-user
+- `AcquireLock`, `ReleaseLock`, and `ReleaseAllLocksForUser` are implemented as public `EditorSession` methods that publish `ObjectLockChangedEvent` to all clients on every state change
+- gizmo drag start acquires the lock for the dragging user; drag end releases it; hard disconnect and presence timeout both call `ReleaseAllLocksForUser` so stale locks cannot persist
+- `ValidateCommand` rejects `SetTransform`, `Rename`, `SetObjectVisibility`, `Delete`, and `Reparent` on any object locked by a different user
+- `ObjectLockChangedEvent` is serialized as `object_lock_changed` and handled in the browser to maintain a `lockedObjects` map in `RemoteViewportContext`
+- the outliner shows per-row avatar chips for each user whose selection matches that object, and a lock icon in the locking user's color when the object is locked
+- `PresenceRoster` component renders a strip of avatar chips with colored presence-state dots (green / yellow / grey) mounted in the editor toolbar
+- heartbeat protocol: the browser sends `{ "type": "heartbeat" }` every 4 s; the server resets `LastActivity` and promotes Away → Connected on receipt
+- `PresenceLoop` background thread transitions Connected → Away at 10 s and Away → Disconnected at 30 s of inactivity, releasing all locks at the Disconnected transition
+- `presentationColor` is assigned server-side per `SessionUserId` and used consistently for avatar chips, lock icons, and the presence roster
+
 ### Phase 5: Reflection and Asset Evolution
 - property metadata system
 - asset IDs
@@ -1064,8 +1084,9 @@ Progress update:
 - the details panel supports rename and transform editing; drafts are scoped to the selected object's ID so periodic server snapshot polls do not clobber edits in progress
 - viewport keyboard input (WASD, Space, Shift) is now gated on pointer lock state; keys are only consumed while the viewport has pointer lock and are cleared immediately when it releases, so other UI elements (inputs, the outliner) receive input normally
 - a server-side transform gizmo is now implemented across all three modes (Translate, Scale, Rotate); the toolbar Move/Rotate/Scale buttons and Q/E/R shortcuts switch modes with active-state feedback; dragging any handle drives `SetTransformCommand` through the same authoritative command path
-- the next authoring steps are reparent and multi-user gizmo collision handling
-- multi-client validation, transport tuning, and deeper collaboration surfaces should continue afterward through that same command/event path instead of becoming the lead implementation track
+- reparent is implemented: any object can be dragged onto any other in the outliner; transforms are stored in local space and world transforms are recomputed for the entire moved subtree
+- Collaboration v1 is complete: object locking prevents simultaneous gizmo conflicts, presence roster shows connected users, and the heartbeat/timeout loop handles hard tab closes
+- the next step is deeper WebRTC sender/playout latency tuning for the remote viewport stream
 
 That slice proves the core thesis:
 
