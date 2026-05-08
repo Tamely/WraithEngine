@@ -58,5 +58,13 @@ void GlfwEditorLayer::OnRender() {
   for (const auto &Submission : m_RendererAdapter.BuildRenderSubmissions(m_Session)) {
     RenderCommand::Submit(Submission);
   }
+
+  const EditorObjectDetails *Selected =
+      m_Session.FindSelectedObjectDetails(m_LocalUserId);
+  if (Selected != nullptr && Selected->SupportsTransform &&
+      Selected->Transform.has_value()) {
+    RenderCommand::SetGizmoOverlay(
+        {.WorldPosition = Selected->Transform->Location, .Scale = 0.5f});
+  }
 }
 } // namespace Axiom

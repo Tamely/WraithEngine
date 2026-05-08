@@ -7,6 +7,7 @@
 #include "Renderer/Vulkan/VulkanDeletionQueue.h"
 #include "Renderer/Vulkan/VulkanDescriptors.h"
 #include "Renderer/Vulkan/VulkanDevice.h"
+#include "Renderer/Vulkan/VulkanGizmoRenderer.h"
 #include "Renderer/Vulkan/VulkanImGuiRenderer.h"
 #include "Renderer/Vulkan/VulkanMaterialResources.h"
 #include "Renderer/Vulkan/VulkanOcclusionCulling.h"
@@ -55,6 +56,7 @@ private:
   void InitPipelines();
   void InitBackgroundPipelines();
   void InitMeshPipelines();
+  void InitGizmoPipeline();
   void InitMeshFrameResources();
 
   void InitHzbResources();
@@ -146,6 +148,7 @@ private:
   VkImageLayout m_HzbImageLayout{VK_IMAGE_LAYOUT_UNDEFINED};
 
   std::array<MeshFrameResources, FRAME_OVERLAP> m_MeshFrames{};
+  VulkanGizmoRenderer m_GizmoRenderer;
   VulkanImGuiRenderer m_ImGuiRenderer;
   VulkanMaterialResources m_MaterialResources;
   VulkanOcclusionCulling m_OcclusionCulling;

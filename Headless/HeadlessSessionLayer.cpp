@@ -127,6 +127,14 @@ void HeadlessSessionLayer::OnRender() {
   for (const auto &Submission : BuildPresenceOverlaySubmissions(RenderUser)) {
     RenderCommand::Submit(Submission);
   }
+
+  const EditorObjectDetails *Selected =
+      m_Session.FindSelectedObjectDetails(RenderUser);
+  if (Selected != nullptr && Selected->SupportsTransform &&
+      Selected->Transform.has_value()) {
+    RenderCommand::SetGizmoOverlay(
+        {.WorldPosition = Selected->Transform->Location, .Scale = 0.5f});
+  }
 }
 
 bool HeadlessSessionLayer::LoadStartupSceneIntoSession() {
