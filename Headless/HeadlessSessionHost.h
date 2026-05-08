@@ -3,6 +3,7 @@
 #include <Core/Application.h>
 #include <Remote/AxiomSessionEndpoint.h>
 #include <Renderer/VideoEncoding.h>
+#include <Scripting/ScriptHost.h>
 #include <Session/EditorSceneRendererAdapter.h>
 
 #include "HeadlessRenderView.h"
@@ -53,5 +54,6 @@ private:
   HeadlessRenderViewRegistry m_RenderViews;
   std::vector<HeadlessRenderViewState> m_ActiveRenderPassViews;
   size_t m_CurrentRenderPassIndex{0};
+  ScriptHost m_ScriptHost;
 };
 } // namespace Axiom

@@ -1,4 +1,5 @@
 set(ENGINE_SOURCES
+  Scripting/ScriptHost.cpp
   Assets/IAssetSource.cpp
   Assets/MeshAsset.cpp
   Assets/SceneFile.cpp
@@ -303,8 +304,15 @@ endif()
 if(AXIOM_ENABLE_SCRIPTING)
   target_link_libraries(AxiomCore PUBLIC CoralNative)
   target_compile_definitions(AxiomCore PUBLIC AXIOM_SCRIPTING_ENABLED=1)
+  # Default managed dir: Coral.Managed output next to the binary directory
+  set(AXIOM_CORAL_MANAGED_DIR
+      "${CMAKE_SOURCE_DIR}/ThirdParty/Coral/Coral.Managed/bin/Debug/net9.0"
+      CACHE PATH "Directory containing Coral.Managed.dll and its runtimeconfig")
+  target_compile_definitions(AxiomCore PUBLIC
+      AXIOM_CORAL_MANAGED_DIR="${AXIOM_CORAL_MANAGED_DIR}")
 else()
   target_compile_definitions(AxiomCore PUBLIC AXIOM_SCRIPTING_ENABLED=0)
+  target_compile_definitions(AxiomCore PUBLIC AXIOM_CORAL_MANAGED_DIR="")
 endif()
 
 if(AXIOM_WEBRTC_COMPILE_OPTIONS)

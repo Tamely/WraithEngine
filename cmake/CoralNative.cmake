@@ -42,3 +42,19 @@ if(UNIX)
 endif()
 
 set_target_properties(CoralNative PROPERTIES CXX_STANDARD 20)
+
+# Build Coral.Managed.dll (the C# bridge assembly Coral.Native requires)
+set(CORAL_MANAGED_CSPROJ
+    "${CORAL_ROOT}/Coral.Managed/Coral.Managed-Static.csproj")
+set(CORAL_MANAGED_OUT_DIR
+    "${CORAL_ROOT}/Coral.Managed/bin/$<IF:$<CONFIG:Debug>,Debug,Release>/net9.0")
+set(CORAL_MANAGED_DLL "${CORAL_ROOT}/Coral.Managed/bin/Debug/net9.0/Coral.Managed.dll")
+
+add_custom_target(CoralManaged
+  COMMAND dotnet build "${CORAL_MANAGED_CSPROJ}"
+          -c $<IF:$<CONFIG:Debug>,Debug,Release>
+          --nologo -v quiet
+  COMMENT "Building Coral.Managed"
+  VERBATIM
+)
+add_dependencies(CoralNative CoralManaged)
