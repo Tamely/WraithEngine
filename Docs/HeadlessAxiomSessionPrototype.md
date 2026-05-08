@@ -213,6 +213,21 @@ The authoritative scene-authoring loop has advanced on the `scene-editing` branc
 - delete removes the entire subtree from the Instance tree, `ObjectDetailsById`, `MeshInstances`, and any active user selections
 - 16 focused tests cover creation, duplication, deletion, all rejection cases, uniqueness generation, and snapshot rehydration
 
+### Reparent and Hierarchical Transforms
+
+- `ReparentObjectCommand` / `ObjectReparentedEvent` are now implemented: any object can be dragged onto any other object in the outliner and becomes a logical child of it
+- `Instance::SetParent` cycle prevention is complemented by explicit validation that rejects reparenting an object onto itself or any of its descendants
+- the outliner drag-and-drop targets are no longer limited to folder items; any scene item (mesh, light, camera, actor, folder) can receive a drop
+- transforms are now stored in two layers: `EditorObjectDetails::Transform` holds local-space L/R/S; `WorldTransform` holds computed world-space L/R/S
+- `ComputeWorldTransformMatrix` walks the instance parent chain and multiplies each ancestor's local matrix to produce the object's world matrix
+- `DecomposeMatrix` extracts position, YXZ Euler angles (matching `BuildTransformMatrix` rotation order), and scale from a world matrix
+- `RecomputeSubtreeWorldTransforms` recomputes `WorldTransform` and updates the renderer mesh instance matrix for a moved object and all its descendants in one pass
+- reparenting a child object preserves its stored local `Transform` values unchanged; the rendered world position shifts to be relative to the new parent's world transform
+- `SetTransformCommand` (gizmo drag output) arrives in world space; the handler inverts the parent's world matrix to derive local-space storage, then propagates new world transforms to any children
+- `SerializeObjectDetails` serializes `WorldTransform` to the browser so the properties panel and gizmo always work in world space regardless of hierarchy depth
+- the gizmo overlay position, hit-test, and drag-start all read `WorldTransform->Location` so the gizmo tracks the object's actual rendered position
+- 4 reparent-specific tests cover the happy path, cycle rejection, unknown-parent rejection, and self-reparent rejection
+
 ## Gizmo System
 
 A server-side transform gizmo is now fully implemented on the `scene-editing` branch:
@@ -251,6 +266,5 @@ A server-side transform gizmo is now fully implemented on the `scene-editing` br
 
 ## Next Priority
 
-- reparent: move objects between parent folders in the outliner
 - multi-user gizmo: handle the case where two users attempt to drag the same object simultaneously
 - deeper WebRTC sender/playout latency tuning for the remote viewport stream
