@@ -870,6 +870,7 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetGizmoMode:
     break;
   case HeadlessCommandType::ListAssets:
+  case HeadlessCommandType::GetSchema:
     break;
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
@@ -1481,6 +1482,15 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
     SendTextMessage(ClientSocketValue, SerializeAssetList(ContentDir.List()));
     return true;
   }
+  case HeadlessCommandType::GetSchema: {
+    const auto &DetailsById =
+        m_Host.GetHeadlessLayer().GetSession().GetState().ObjectDetailsById;
+    const auto It = DetailsById.find(Command->ObjectId);
+    if (It != DetailsById.end()) {
+      SendTextMessage(ClientSocketValue, SerializeObjectSchema(It->second));
+    }
+    return true;
+  }
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
     m_Host.RequestClose();
@@ -1539,6 +1549,16 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     if (Client->WebRtcSession != nullptr) {
       Client->WebRtcSession->SendReliableMessage(
           SerializeAssetList(ContentDir.List()));
+    }
+    return true;
+  }
+  case HeadlessCommandType::GetSchema: {
+    const auto &DetailsById =
+        m_Host.GetHeadlessLayer().GetSession().GetState().ObjectDetailsById;
+    const auto It = DetailsById.find(Command->ObjectId);
+    if (It != DetailsById.end() && Client->WebRtcSession != nullptr) {
+      Client->WebRtcSession->SendReliableMessage(
+          SerializeObjectSchema(It->second));
     }
     return true;
   }

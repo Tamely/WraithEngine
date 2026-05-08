@@ -707,6 +707,12 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
   if (*Type == "list_assets") {
     return HeadlessCommand{.Type = HeadlessCommandType::ListAssets};
   }
+  if (*Type == "get_schema") {
+    static const std::regex ObjectIdPattern(R"json("objectId"\s*:\s*"([^"]+)")json");
+    const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
+    return HeadlessCommand{.Type = HeadlessCommandType::GetSchema,
+                           .ObjectId = ObjectId.value_or("")};
+  }
   if (*Type == "heartbeat") {
     return HeadlessCommand{.Type = HeadlessCommandType::Heartbeat};
   }
@@ -754,6 +760,7 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::GizmoDragEnd:
   case HeadlessCommandType::SetGizmoMode:
   case HeadlessCommandType::ListAssets:
+  case HeadlessCommandType::GetSchema:
   case HeadlessCommandType::Heartbeat:
   case HeadlessCommandType::Quit:
     return Command;
@@ -1187,6 +1194,44 @@ SerializeAssetList(const std::vector<Assets::AssetDescriptor> &Assets) {
            << EscapeJson(Desc.Name) << "\",\"kind\":\"" << Kind
            << "\",\"path\":\"" << EscapeJson(Desc.RelativePath) << "\"}";
   }
+  Stream << "]}";
+  return Stream.str();
+}
+
+std::string SerializeObjectSchema(const EditorObjectDetails &Details) {
+  std::ostringstream Stream;
+
+  const char *ClassName = "Unknown";
+  switch (Details.Kind) {
+  case EditorSceneItemKind::Folder:   ClassName = "Folder";  break;
+  case EditorSceneItemKind::Mesh:     ClassName = "Mesh";    break;
+  case EditorSceneItemKind::Light:    ClassName = "Light";   break;
+  case EditorSceneItemKind::Camera:   ClassName = "Camera";  break;
+  case EditorSceneItemKind::Actor:    ClassName = "Actor";   break;
+  }
+
+  Stream << "{\"type\":\"object_schema\",\"objectId\":\""
+         << EscapeJson(Details.ObjectId) << "\",\"className\":\"" << ClassName
+         << "\",\"properties\":[";
+
+  bool First = true;
+  auto AppendProp = [&](std::string_view Name, std::string_view Type, bool ReadOnly) {
+    if (!First) Stream << ",";
+    First = false;
+    Stream << "{\"name\":\"" << Name << "\",\"type\":\"" << Type
+           << "\",\"readOnly\":" << (ReadOnly ? "true" : "false") << "}";
+  };
+
+  AppendProp("displayName", "string", false);
+  AppendProp("visible", "bool", false);
+
+  if (Details.SupportsTransform) {
+    const bool RO = Details.TransformReadOnly;
+    AppendProp("location",        "vec3", RO);
+    AppendProp("rotationDegrees", "vec3", RO);
+    AppendProp("scale",           "vec3", RO);
+  }
+
   Stream << "]}";
   return Stream.str();
 }

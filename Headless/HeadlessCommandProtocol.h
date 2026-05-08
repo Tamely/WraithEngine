@@ -39,6 +39,7 @@ enum class HeadlessCommandType {
   GizmoDragEnd,
   SetGizmoMode,
   ListAssets,
+  GetSchema,
   Heartbeat,
   RenderFrame,
   Quit,
@@ -50,6 +51,7 @@ struct HeadlessCommand {
   RendererViewMode ViewMode{RendererViewMode::Lit};
   glm::vec2 MousePosition{0.0f};
   GizmoMode Mode{GizmoMode::Translate};
+  std::string ObjectId;
 };
 
 struct HeadlessAppOptions {
@@ -130,6 +132,7 @@ std::string SerializeWebRtcStatus(bool Enabled, bool Available,
                                   size_t PendingLocalIceCandidateCount,
                                   const WebRtcVideoStatus &VideoStatus);
 std::string SerializeAssetList(const std::vector<Assets::AssetDescriptor> &Assets);
+std::string SerializeObjectSchema(const EditorObjectDetails &Details);
 std::string SerializeError(std::string_view Message);
 std::string SerializeShutdown();
 std::optional<HeadlessCommand>
