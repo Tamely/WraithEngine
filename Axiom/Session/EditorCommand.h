@@ -1,0 +1,99 @@
+#pragma once
+
+#include "Session/SessionTypes.h"
+
+#include <glm/vec2.hpp>
+#include <glm/vec3.hpp>
+
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <variant>
+
+namespace Axiom {
+struct CommandContext {
+  SessionId Session;
+  SessionUserId User;
+  uint64_t FrameIndex{0};
+  float DeltaTimeSeconds{0.0f};
+};
+
+struct UpdateViewportCameraCommand {
+  glm::vec3 WorldMovement{0.0f};
+  std::optional<glm::dvec2> CursorPosition;
+};
+
+struct SetViewportCameraPoseCommand {
+  glm::vec3 Position{0.0f};
+  float YawDegrees{0.0f};
+  float PitchDegrees{0.0f};
+};
+
+struct SetLookActiveCommand {
+  bool IsLooking{false};
+  std::optional<glm::dvec2> CursorPosition;
+};
+
+struct SelectObjectCommand {
+  std::string ObjectId;
+};
+
+struct RenameObjectCommand {
+  std::string ObjectId;
+  std::string DisplayName;
+};
+
+struct SetObjectVisibilityCommand {
+  std::string ObjectId;
+  bool Visible{true};
+};
+
+struct CreateObjectCommand {
+  std::string TemplateId;
+};
+
+struct DuplicateObjectCommand {
+  std::string ObjectId;
+};
+
+struct DeleteObjectCommand {
+  std::string ObjectId;
+};
+
+struct ReparentObjectCommand {
+  std::string ObjectId;
+  std::string NewParentId;
+};
+
+struct SetTransformCommand {
+  std::string ObjectId;
+  glm::vec3 Location{0.0f};
+  glm::vec3 RotationDegrees{0.0f};
+  glm::vec3 Scale{1.0f};
+};
+
+using EditorCommandPayload =
+    std::variant<UpdateViewportCameraCommand, SetViewportCameraPoseCommand,
+                 SetLookActiveCommand, SelectObjectCommand,
+                 RenameObjectCommand, SetObjectVisibilityCommand,
+                 CreateObjectCommand, DuplicateObjectCommand,
+                 DeleteObjectCommand, ReparentObjectCommand,
+                 SetTransformCommand>;
+
+struct EditorCommand {
+  EditorCommandPayload Payload;
+};
+
+struct QueuedEditorCommand {
+  CommandId Id;
+  CommandContext Context;
+  EditorCommand Command;
+};
+
+class IEditorCommandSink {
+public:
+  virtual ~IEditorCommandSink() = default;
+  virtual void Submit(const CommandContext &Context,
+                      const EditorCommand &Command) = 0;
+};
+} // namespace Axiom

@@ -1,125 +1,117 @@
-# Wraith Engine
-
-![Wraith Engine Logo](Resources/Wraith-Logo.png)
-
-Wraith Engine is a C++ / OpenGL–based game engine inspired by **Unreal Engine**, **Hazel**, and concepts from mathematics and physics resources. The project is built with **C++**, uses **OpenGL** for rendering (with future plans for Vulkan), and leverages **Premake** for build automation.
-
----
-
-## Current State of the Engine
-
-![Current Engine State](Resources/Git/CurrentEngineState.gif)
-Currently Working On: A node-based material system to increase accessibility for non-programmers.
+<div align="center">
+  <img src="EditorFrontend/public/apple-icon.png" width="120" alt="Wraith Engine" />
+  <h1>Wraith Engine</h1>
+  <p>A distributed game engine with a browser-based collaborative editor</p>
+</div>
 
 ---
 
-## Current Features
+## Overview
 
-### Editor & Camera
+Wraith Engine is a C++/Vulkan game engine runtime paired with a browser-based editor shell. The engine runs headless on a server, streams rendered viewports to browser clients via WebRTC with H.264, and processes editing commands through an authoritative command/event model. One shared runtime supports both local native editing and remotely hosted collaborative sessions.
 
-* Editor camera with movement (`W`, `A`, `S`, `D`, `Space`, `Left Shift`), panning (Middle Mouse), rotation (Right Mouse), and zoom (Scroll Wheel).
-* Mouse picking for selecting entities directly in the viewport.
+## Architecture
 
-### Rendering & Graphics
+```
+Browser (React / Next.js)
+  ├─ Editor UI  (outliner, inspector, toolbar, content browser)
+  └─ WebRTC Viewport Client
+          ↕  commands  /  H.264 video
+AxiomRemoteViewportServer  (C++)
+  └─ EditorSession  (authoritative scene state)
+          └─ Vulkan Renderer  (offscreen, per-client)
+```
 
-* OpenGL rendering pipeline with multiple render targets.
-* Shaders updated to **SPIR-V**.
-* Real-time scene rendering with dynamic lighting and basic shading.
-* 2D texture support and gizmos for transformations.
+## Features
 
-### Scene & Entity Management
+**Engine**
+- Vulkan rendering backend with MoltenVK on macOS
+- Headless offscreen rendering with H.264 encoding (VideoToolbox on macOS)
+- Authoritative command/event model for scene mutations
+- DataModel scene hierarchy — folders, meshes, lights, cameras, actors
+- Transform gizmos (translate / scale / rotate) with server-side hit-testing
+- Multi-client rendering: each connected user gets their own viewport
+- WebRTC streaming to browser
 
-* Component-based entity system (ECS).
-* Dynamic creation and deletion of entities.
-* Scene serialization and deserialization for persistence.
+**Browser editor**
+- Dockable panels: outliner, details/property inspector, content browser, toolbar
+- Scene outliner with drag-drop reparenting, inline rename, right-click context menus
+- Object lifecycle: create, duplicate, delete
+- Per-client gizmo mode (Q / E / R shortcuts)
+- User presence and camera visualization
 
-### Engine Architecture
+## Prerequisites
 
-* Modular engine core separated from the editor.
-* Public **Wraith API** for game development.
-* Native scripting support.
-* Organized folder structure with Premake build automation.
+- CMake 3.10+
+- C++20 compiler (Clang or MSVC)
+- Vulkan SDK / MoltenVK (macOS)
+- Node.js 18+ and [pnpm](https://pnpm.io)
+- macOS: Xcode command-line tools (required for VideoToolbox / WebRTC)
 
-### User Interface
+## Build & Run
 
-* Integrated editor UI with **ImGui**.
-* Scene hierarchy and inspector panels.
-* New **Content Browser** for managing assets.
+### C++ engine
 
-### Project Management
+```bash
+cmake --preset debug
+cmake --build build/debug
+```
 
-* Development tracked with **Kanban methodology** in JIRA.
-* Clear workflow for ongoing tasks and milestones.
+### Remote viewport server
 
----
+```bash
+./build/debug/AxiomRemoteViewportServer --host 127.0.0.1 --port 8080 --width 1280 --height 720
+```
 
-## Roadmap
+### Browser editor
 
-Wraith Engine is still in early development, but the focus is on building a solid foundation first before layering in advanced features. Here’s a breakdown of what’s coming next:
+```bash
+cd EditorFrontend
+pnpm install
+NEXT_PUBLIC_AXIOM_SERVER_ORIGIN=http://127.0.0.1:8080 pnpm dev
+```
 
-### Short-Term Goals (Next 1–2 Months)
+Open `http://localhost:3000` in your browser.
 
-* Vulkan backend implementation.
-* Basic 3D mesh support (models and simple animations).
-* Prefabs for reusable entity setups.
-* Asset importer for textures and models.
+### Local native editor (no browser required)
 
-### Mid-Term Goals (2–6 Months)
+```bash
+./build/debug/AxiomEditor
+```
 
-* Advanced rendering features: PBR, HDR, shadows, and post-processing (bloom, SSAO, tone mapping).
-* Physics integration with rigidbodies, collisions, and triggers.
-* Particle system for effects.
-* Sound engine integration (with spatial audio).
+### Tests
 
-### Long-Term Goals (6+ Months)
+```bash
+cmake --preset debug -DBUILD_TESTING=ON
+cmake --build build/debug
+ctest --test-dir build/debug
+```
 
-* Networking support: client/server model, multiplayer sync, and entity replication.
-* Cross-platform builds (Linux/macOS) with potential for console support.
-* In-editor debugging tools and hot-reloading.
-* Expanded gameplay systems and scripting.
+## Project Structure
 
----
+| Path | Contents |
+|------|----------|
+| `Axiom/` | Engine library — core, session, renderer, remote transport |
+| `Editor/` | Native GLFW + ImGui editor executable |
+| `Headless/` | Headless runtime and `AxiomRemoteViewportServer` |
+| `EditorFrontend/` | React / Next.js browser editor shell |
+| `Content/` | Shaders and demo assets (.glb) |
+| `Tests/` | Google Test suite |
+| `Docs/` | Architecture design documents |
+| `ThirdParty/` | Vendored dependencies |
 
-## Building Wraith Engine
+## Tech Stack
 
-### Prerequisites
+| Layer | Technology |
+|-------|------------|
+| Engine | C++20, CMake, Vulkan |
+| Windowing | GLFW, MoltenVK |
+| Asset loading | fastgltf (glTF / glb) |
+| Streaming | WebRTC, H.264 (VideoToolbox) |
+| Browser editor | React 19, Next.js, TypeScript |
+| Styling | Tailwind CSS, Radix UI |
+| Testing | Google Test |
 
-* [Git](https://git-scm.com/) or [GitHub Desktop](https://desktop.github.com/)
-* [Visual Studio 2022](https://visualstudio.microsoft.com/) (v17.8+ recommended, Community Edition supported)
+## License
 
-### Steps
-
-1. Clone the repository:
-
-   ```bash
-   git clone https://github.com/Tamely/WraithEngine.git
-   ```
-
-   Or download as `.zip` and extract (be sure to **Unblock** on Windows before extracting).
-
-2. Run the setup script:
-
-   * Navigate to `Scripts/` and run `Setup.bat`.
-   * Installs dependencies and generates Visual Studio solution files.
-
-3. Open `WraithEngine.sln` in Visual Studio.
-
-   * Set configuration to `Dist` and platform to `x64`.
-
-4. Build the editor:
-
-   * Right-click **Wraith-Editor** → **Build**.
-
-5. Run the engine:
-
-   * Set **Wraith-Editor** as the startup project.
-   * Press `F5` to launch.
-
----
-
-## Project Management
-
-Wraith Engine is actively maintained using **Kanban methodology** in **JIRA**, ensuring a structured workflow and clear task tracking.
-
-![Kanban Board](Resources/Git/KanbanBoard.png)
-![Kanban Summary](Resources/Git/KanbanSummary.png)
+MIT — see [LICENSE](LICENSE).

@@ -1,0 +1,1174 @@
+#include "Session/EditorSession.h"
+
+#include <glm/common.hpp>
+#include <glm/ext/matrix_transform.hpp>
+#include <glm/geometric.hpp>
+#include <glm/gtc/matrix_inverse.hpp>
+#include <glm/trigonometric.hpp>
+
+#include <algorithm>
+#include <utility>
+
+namespace Axiom {
+namespace {
+std::string DefaultUserDisplayName(SessionUserId User) {
+  if (User.Value == 1) {
+    return "Host";
+  }
+  return "User " + std::to_string(User.Value - 1);
+}
+
+std::string PresenceStateName(EditorUserPresenceState State) {
+  switch (State) {
+  case EditorUserPresenceState::Connected:
+    return "connected";
+  case EditorUserPresenceState::Away:
+    return "away";
+  case EditorUserPresenceState::Disconnected:
+    return "disconnected";
+  }
+
+  return "connected";
+}
+
+std::string DefaultPresentationColor(SessionUserId User) {
+  static constexpr const char *Palette[] = {
+      "#F97316", "#22C55E", "#0EA5E9", "#F59E0B",
+      "#EF4444", "#14B8A6", "#8B5CF6", "#84CC16",
+  };
+  return Palette[User.Value % (sizeof(Palette) / sizeof(Palette[0]))];
+}
+
+std::string CommandTypeName(const EditorCommandPayload &Payload) {
+  if (std::holds_alternative<UpdateViewportCameraCommand>(Payload)) {
+    return "update_viewport_camera";
+  }
+  if (std::holds_alternative<SetViewportCameraPoseCommand>(Payload)) {
+    return "set_viewport_camera_pose";
+  }
+  if (std::holds_alternative<SetLookActiveCommand>(Payload)) {
+    return "set_look_active";
+  }
+  if (std::holds_alternative<SelectObjectCommand>(Payload)) {
+    return "select_object";
+  }
+  if (std::holds_alternative<RenameObjectCommand>(Payload)) {
+    return "rename_object";
+  }
+  if (std::holds_alternative<SetObjectVisibilityCommand>(Payload)) {
+    return "set_object_visibility";
+  }
+  if (std::holds_alternative<CreateObjectCommand>(Payload)) {
+    return "create_object";
+  }
+  if (std::holds_alternative<DuplicateObjectCommand>(Payload)) {
+    return "duplicate_object";
+  }
+  if (std::holds_alternative<DeleteObjectCommand>(Payload)) {
+    return "delete_object";
+  }
+  if (std::holds_alternative<ReparentObjectCommand>(Payload)) {
+    return "reparent_object";
+  }
+  return "set_transform";
+}
+
+EditorSceneItemKind KindForClassName(std::string_view ClassName) {
+  if (ClassName == "SceneMeshObject") return EditorSceneItemKind::Mesh;
+  if (ClassName == "SceneLight")      return EditorSceneItemKind::Light;
+  if (ClassName == "SceneCamera")     return EditorSceneItemKind::Camera;
+  if (ClassName == "SceneActor")      return EditorSceneItemKind::Actor;
+  return EditorSceneItemKind::Folder;
+}
+
+EditorSceneItemKind KindForTemplateId(std::string_view TemplateId) {
+  if (TemplateId == "Mesh")   return EditorSceneItemKind::Mesh;
+  if (TemplateId == "Light")  return EditorSceneItemKind::Light;
+  if (TemplateId == "Camera") return EditorSceneItemKind::Camera;
+  if (TemplateId == "Actor")  return EditorSceneItemKind::Actor;
+  return EditorSceneItemKind::Folder;
+}
+
+std::string_view TemplateIdForKind(EditorSceneItemKind Kind) {
+  switch (Kind) {
+  case EditorSceneItemKind::Mesh:   return "Mesh";
+  case EditorSceneItemKind::Light:  return "Light";
+  case EditorSceneItemKind::Camera: return "Camera";
+  case EditorSceneItemKind::Actor:  return "Actor";
+  default:                          return "Folder";
+  }
+}
+
+bool SupportsTransformForKind(EditorSceneItemKind Kind) {
+  return Kind != EditorSceneItemKind::Folder;
+}
+
+Instance *FindInstanceById(Instance *Root, std::string_view Id) {
+  if (!Root) return nullptr;
+  if (Root->GetName() == Id) return Root;
+  for (Instance *Child : Root->GetChildren()) {
+    if (Instance *Found = FindInstanceById(Child, Id))
+      return Found;
+  }
+  return nullptr;
+}
+
+bool ShouldPublishCommandAcknowledgedEvent(const EditorCommandPayload &Payload) {
+  return !std::holds_alternative<UpdateViewportCameraCommand>(Payload);
+}
+
+bool IsNearlyZero(const glm::vec3 &Value) {
+  return glm::dot(Value, Value) <= 0.0f;
+}
+
+bool IsWhitespace(char Value) {
+  return Value == ' ' || Value == '\t' || Value == '\n' || Value == '\r' ||
+         Value == '\f' || Value == '\v';
+}
+
+glm::mat4 BuildTransformMatrix(const EditorTransformDetails &Transform) {
+  glm::mat4 Matrix(1.0f);
+  Matrix = glm::translate(Matrix, Transform.Location);
+  Matrix = glm::rotate(Matrix, glm::radians(Transform.RotationDegrees.y),
+                       glm::vec3(0.0f, 1.0f, 0.0f));
+  Matrix = glm::rotate(Matrix, glm::radians(Transform.RotationDegrees.x),
+                       glm::vec3(1.0f, 0.0f, 0.0f));
+  Matrix = glm::rotate(Matrix, glm::radians(Transform.RotationDegrees.z),
+                       glm::vec3(0.0f, 0.0f, 1.0f));
+  Matrix = glm::scale(Matrix, Transform.Scale);
+  return Matrix;
+}
+} // namespace
+
+EditorSession::EditorSession(SessionId Session, EditorSessionConfig Config)
+    : m_Config(Config), m_State({.Session = Session}) {
+  InitSceneRoot();
+}
+
+void EditorSession::Submit(const CommandContext &Context,
+                           const EditorCommand &Command) {
+  m_MessageBus.EnqueueCommand(Context, Command);
+}
+
+void EditorSession::Tick() {
+  m_MessageBus.DispatchQueuedCommands(
+      [this](const QueuedEditorCommand &QueuedCommand) {
+        ProcessCommand(QueuedCommand);
+      });
+}
+
+void EditorSession::Subscribe(IEditorEventSubscriber *Subscriber) {
+  m_MessageBus.Subscribe(Subscriber);
+}
+
+void EditorSession::Unsubscribe(IEditorEventSubscriber *Subscriber) {
+  m_MessageBus.Unsubscribe(Subscriber);
+}
+
+void EditorSession::EnsureViewportState(SessionUserId User) {
+  EnsureViewport(User);
+}
+
+void EditorSession::SetPresenceState(SessionUserId User,
+                                     EditorUserPresenceState State) {
+  const auto [It, Inserted] = m_State.PresenceByUser.try_emplace(User);
+  EditorUserPresence &Presence = It->second;
+  if (Inserted) {
+    Presence.User = User;
+    Presence.DisplayName = DefaultUserDisplayName(User);
+    Presence.IsLocal = User.Value == 1;
+  }
+  if (!Inserted && Presence.State == State) {
+    return;
+  }
+
+  Presence.State = State;
+  PublishPresenceChangedEvent(User);
+}
+
+void EditorSession::SetSceneState(EditorSceneState SceneState) {
+  m_State.Scene = std::move(SceneState);
+  RebuildInstanceTree(m_State.Scene.Items, m_SceneRoot.get());
+  PruneInvalidSelections();
+  RecomputeAllWorldTransforms();
+}
+
+void EditorSession::SetSceneMeshInstances(
+    std::vector<EditorSceneMeshInstance> SceneMeshInstances) {
+  m_State.Scene.MeshInstances = std::move(SceneMeshInstances);
+}
+
+void EditorSession::SetSceneItems(std::vector<EditorSceneItem> SceneItems) {
+  m_State.Scene.Items = std::move(SceneItems);
+  RebuildInstanceTree(m_State.Scene.Items, m_SceneRoot.get());
+  PruneInvalidSelections();
+  RecomputeAllWorldTransforms();
+}
+
+void EditorSession::SetObjectDetails(
+    std::vector<EditorObjectDetails> ObjectDetails) {
+  m_State.Scene.ObjectDetailsById = BuildObjectDetailsMap(std::move(ObjectDetails));
+  RecomputeAllWorldTransforms();
+}
+
+void EditorSession::SetPresence(std::vector<EditorUserPresence> Presence) {
+  m_State.PresenceByUser.clear();
+  for (EditorUserPresence &Entry : Presence) {
+    m_State.PresenceByUser.emplace(Entry.User, std::move(Entry));
+  }
+}
+
+void EditorSession::SetObjectCollaborationStates(
+    std::vector<EditorObjectCollaborationState> CollaborationStates) {
+  m_State.Scene.CollaborationByObjectId.clear();
+  for (EditorObjectCollaborationState &Entry : CollaborationStates) {
+    m_State.Scene.CollaborationByObjectId.emplace(Entry.ObjectId,
+                                                  std::move(Entry));
+  }
+}
+
+const EditorViewportState *EditorSession::FindViewport(SessionUserId User) const {
+  const auto It = m_State.Viewports.find(User);
+  return It != m_State.Viewports.end() ? &It->second : nullptr;
+}
+
+const EditorSceneItem *EditorSession::FindSceneItem(std::string_view ObjectId) const {
+  return FindSceneItemRecursive(m_State.Scene.Items, ObjectId);
+}
+
+const std::string *EditorSession::FindSelectedObjectId(SessionUserId User) const {
+  const auto It = m_State.SelectedObjectIds.find(User);
+  return It != m_State.SelectedObjectIds.end() ? &It->second : nullptr;
+}
+
+const EditorObjectDetails *EditorSession::FindObjectDetails(
+    std::string_view ObjectId) const {
+  const auto It = m_State.Scene.ObjectDetailsById.find(std::string(ObjectId));
+  return It != m_State.Scene.ObjectDetailsById.end() ? &It->second : nullptr;
+}
+
+const EditorObjectDetails *EditorSession::FindSelectedObjectDetails(
+    SessionUserId User) const {
+  const std::string *SelectedObjectId = FindSelectedObjectId(User);
+  return SelectedObjectId != nullptr ? FindObjectDetails(*SelectedObjectId) : nullptr;
+}
+
+const EditorUserPresence *EditorSession::FindPresence(SessionUserId User) const {
+  const auto It = m_State.PresenceByUser.find(User);
+  return It != m_State.PresenceByUser.end() ? &It->second : nullptr;
+}
+
+EditorParticipant EditorSession::BuildParticipant(SessionUserId User) const {
+  EditorParticipant Participant{};
+  Participant.User = User;
+  Participant.DisplayName = DefaultUserDisplayName(User);
+  Participant.PresentationColor = DefaultPresentationColor(User);
+
+  if (const EditorUserPresence *Presence = FindPresence(User); Presence != nullptr) {
+    Participant.DisplayName = Presence->DisplayName;
+    Participant.State = Presence->State;
+    Participant.IsLocal = Presence->IsLocal;
+  }
+
+  if (const std::string *SelectedObjectId = FindSelectedObjectId(User);
+      SelectedObjectId != nullptr) {
+    Participant.SelectedObjectId = *SelectedObjectId;
+  }
+
+  if (const EditorViewportState *Viewport = FindViewport(User);
+      Viewport != nullptr) {
+    Participant.Camera = EditorParticipant::CameraState{
+        .Position = Viewport->Camera.GetPosition(),
+        .YawDegrees = Viewport->Camera.GetYawDegrees(),
+        .PitchDegrees = Viewport->Camera.GetPitchDegrees(),
+    };
+  }
+
+  return Participant;
+}
+
+std::vector<EditorParticipant> EditorSession::BuildParticipants(
+    SessionUserId CurrentUser) const {
+  std::vector<EditorParticipant> Participants;
+  Participants.reserve(m_State.PresenceByUser.size());
+
+  for (const auto &[User, Presence] : m_State.PresenceByUser) {
+    (void)Presence;
+    EditorParticipant Participant = BuildParticipant(User);
+    Participant.IsLocal = User.Value == CurrentUser.Value;
+    Participants.push_back(std::move(Participant));
+  }
+
+  return Participants;
+}
+
+const EditorObjectCollaborationState *EditorSession::FindCollaborationState(
+    std::string_view ObjectId) const {
+  const auto It =
+      m_State.Scene.CollaborationByObjectId.find(std::string(ObjectId));
+  return It != m_State.Scene.CollaborationByObjectId.end() ? &It->second
+                                                           : nullptr;
+}
+
+std::unordered_map<std::string, EditorObjectDetails>
+EditorSession::BuildObjectDetailsMap(
+    std::vector<EditorObjectDetails> ObjectDetails) {
+  std::unordered_map<std::string, EditorObjectDetails> DetailsByObjectId;
+  DetailsByObjectId.reserve(ObjectDetails.size());
+  for (EditorObjectDetails &Details : ObjectDetails) {
+    DetailsByObjectId.emplace(Details.ObjectId, std::move(Details));
+  }
+  return DetailsByObjectId;
+}
+
+void EditorSession::InitSceneRoot() {
+  m_SceneRoot = std::make_unique<DataModel>();
+  Instance::Create<SceneFolder>("world")->SetParent(m_SceneRoot.get());
+}
+
+Instance *EditorSession::FindWorldFolder() const {
+  if (!m_SceneRoot) return nullptr;
+  for (Instance *Child : m_SceneRoot->GetChildren()) {
+    if (Child->IsA<SceneFolder>() && Child->GetName() == "world")
+      return Child;
+  }
+  return nullptr;
+}
+
+void EditorSession::RebuildInstanceTree(const std::vector<EditorSceneItem> &Items,
+                                        Instance *Parent) {
+  if (!Parent) return;
+  std::vector<Instance *> OldChildren = Parent->GetChildren();
+  for (Instance *Child : OldChildren)
+    Child->Destroy();
+  for (const EditorSceneItem &Item : Items) {
+    Instance *Node = CreateInstanceForTemplate(
+        std::string(TemplateIdForKind(Item.Kind)), Item.Id);
+    if (!Node) continue;
+    Node->SetParent(Parent);
+    if (!Item.Children.empty())
+      RebuildInstanceTree(Item.Children, Node);
+  }
+}
+
+void EditorSession::SyncItemsFromTree() {
+  m_State.Scene.Items.clear();
+  if (!m_SceneRoot) return;
+  for (const Instance *Child : m_SceneRoot->GetChildren())
+    m_State.Scene.Items.push_back(BuildItemFromInstance(Child));
+}
+
+EditorSceneItem EditorSession::BuildItemFromInstance(const Instance *Node) const {
+  EditorSceneItem Item;
+  Item.Id = Node->GetName();
+  Item.Kind = KindForInstance(Node);
+  Item.Visible = true;
+  Item.DisplayName = Node->GetName();
+  const auto It = m_State.Scene.ObjectDetailsById.find(Node->GetName());
+  if (It != m_State.Scene.ObjectDetailsById.end()) {
+    Item.DisplayName = It->second.DisplayName;
+    Item.Visible = It->second.Visible;
+    Item.Kind = It->second.Kind;
+  }
+  for (const Instance *Child : Node->GetChildren())
+    Item.Children.push_back(BuildItemFromInstance(Child));
+  return Item;
+}
+
+Instance *EditorSession::CreateInstanceForTemplate(const std::string &TemplateId,
+                                                   const std::string &ObjectId) {
+  if (TemplateId == "Folder")  return Instance::Create<SceneFolder>(ObjectId);
+  if (TemplateId == "Mesh")    return Instance::Create<SceneMeshObject>(ObjectId);
+  if (TemplateId == "Light")   return Instance::Create<SceneLight>(ObjectId);
+  if (TemplateId == "Camera")  return Instance::Create<SceneCamera>(ObjectId);
+  if (TemplateId == "Actor")   return Instance::Create<SceneActor>(ObjectId);
+  return nullptr;
+}
+
+EditorSceneItemKind EditorSession::KindForInstance(const Instance *Node) const {
+  return KindForClassName(Node->GetClassName());
+}
+
+bool EditorSession::IsValidTemplateId(const std::string &TemplateId) const {
+  return TemplateId == "Folder" || TemplateId == "Mesh" ||
+         TemplateId == "Light"  || TemplateId == "Camera" ||
+         TemplateId == "Actor";
+}
+
+std::vector<std::string> EditorSession::CollectDescendantIds(
+    const Instance *Root) const {
+  std::vector<std::string> Ids;
+  std::vector<const Instance *> Stack{Root};
+  while (!Stack.empty()) {
+    const Instance *Cur = Stack.back();
+    Stack.pop_back();
+    Ids.push_back(Cur->GetName());
+    for (const Instance *Child : Cur->GetChildren())
+      Stack.push_back(Child);
+  }
+  return Ids;
+}
+
+void EditorSession::DeepCloneSubtree(const Instance *Source, Instance *DestParent,
+                                     std::vector<EditorObjectDetails> &OutNewDetails) {
+  const std::string NewId = BuildUniqueObjectId(Source->GetName());
+  const EditorSceneItemKind Kind = KindForInstance(Source);
+  std::string BaseDisplayName = Source->GetName();
+  EditorObjectDetails NewDetails;
+  NewDetails.Kind = Kind;
+  NewDetails.Visible = true;
+  NewDetails.SupportsTransform = SupportsTransformForKind(Kind);
+  NewDetails.TransformReadOnly = false;
+
+  const auto ExistIt = m_State.Scene.ObjectDetailsById.find(Source->GetName());
+  if (ExistIt != m_State.Scene.ObjectDetailsById.end()) {
+    BaseDisplayName = ExistIt->second.DisplayName;
+    NewDetails.Visible = ExistIt->second.Visible;
+    NewDetails.Transform = ExistIt->second.Transform;
+    NewDetails.WorldTransform = ExistIt->second.WorldTransform;
+  } else if (NewDetails.SupportsTransform) {
+    NewDetails.Transform = EditorTransformDetails{};
+    NewDetails.WorldTransform = EditorTransformDetails{};
+  }
+
+  NewDetails.ObjectId = NewId;
+  NewDetails.DisplayName = BuildUniqueDisplayName(BaseDisplayName);
+
+  m_State.Scene.ObjectDetailsById.emplace(NewId, NewDetails);
+  OutNewDetails.push_back(NewDetails);
+
+  Instance *Clone = CreateInstanceForTemplate(
+      std::string(TemplateIdForKind(Kind)), NewId);
+  if (Clone) {
+    Clone->SetParent(DestParent);
+    for (const Instance *Child : Source->GetChildren())
+      DeepCloneSubtree(Child, Clone, OutNewDetails);
+  }
+}
+
+bool EditorSession::IsBlankString(std::string_view Value) {
+  for (const char Character : Value) {
+    if (!IsWhitespace(Character)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::string EditorSession::BuildUniqueObjectId(std::string_view Base) const {
+  if (!IsSceneObjectIdInUse(Base)) return std::string(Base);
+  for (int N = 2; ; ++N) {
+    std::string C = std::string(Base) + "_" + std::to_string(N);
+    if (!IsSceneObjectIdInUse(C)) return C;
+  }
+}
+
+std::string EditorSession::BuildUniqueDisplayName(std::string_view Base) const {
+  if (!IsSceneDisplayNameInUse(Base)) return std::string(Base);
+  for (int N = 2; ; ++N) {
+    std::string C = std::string(Base) + " " + std::to_string(N);
+    if (!IsSceneDisplayNameInUse(C)) return C;
+  }
+}
+
+bool EditorSession::IsSceneObjectIdInUse(std::string_view ObjectId) const {
+  return m_State.Scene.ObjectDetailsById.count(std::string(ObjectId)) > 0;
+}
+
+bool EditorSession::IsSceneDisplayNameInUse(std::string_view DisplayName) const {
+  for (const auto &[Id, D] : m_State.Scene.ObjectDetailsById) {
+    if (D.DisplayName == DisplayName) return true;
+  }
+  return false;
+}
+
+bool EditorSession::UpdateSceneItemDisplayName(std::vector<EditorSceneItem> &Items,
+                                               std::string_view ObjectId,
+                                               std::string_view DisplayName) {
+  for (EditorSceneItem &Item : Items) {
+    if (Item.Id == ObjectId) {
+      Item.DisplayName = std::string(DisplayName);
+      return true;
+    }
+
+    if (UpdateSceneItemDisplayName(Item.Children, ObjectId, DisplayName)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool EditorSession::UpdateSceneItemVisibility(std::vector<EditorSceneItem> &Items,
+                                              std::string_view ObjectId,
+                                              bool Visible) {
+  for (EditorSceneItem &Item : Items) {
+    if (Item.Id == ObjectId) {
+      Item.Visible = Visible;
+      return true;
+    }
+
+    if (UpdateSceneItemVisibility(Item.Children, ObjectId, Visible)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool EditorSession::RemoveSceneItem(std::vector<EditorSceneItem> &Items,
+                                    std::string_view ObjectId) {
+  for (auto It = Items.begin(); It != Items.end(); ++It) {
+    if (It->Id == ObjectId) {
+      Items.erase(It);
+      return true;
+    }
+    if (RemoveSceneItem(It->Children, ObjectId)) return true;
+  }
+  return false;
+}
+
+EditorSceneItem *EditorSession::FindSceneItemMutable(
+    std::vector<EditorSceneItem> &Items, std::string_view ObjectId) {
+  for (EditorSceneItem &Item : Items) {
+    if (Item.Id == ObjectId) return &Item;
+    if (EditorSceneItem *Found = FindSceneItemMutable(Item.Children, ObjectId))
+      return Found;
+  }
+  return nullptr;
+}
+
+void EditorSession::RemoveSceneObject(std::string_view ObjectId) {
+  const std::string Id(ObjectId);
+  m_State.Scene.ObjectDetailsById.erase(Id);
+  m_State.Scene.CollaborationByObjectId.erase(Id);
+  m_State.Scene.MeshInstances.erase(
+      std::remove_if(m_State.Scene.MeshInstances.begin(),
+                     m_State.Scene.MeshInstances.end(),
+                     [&Id](const EditorSceneMeshInstance &M) {
+                       return M.ObjectId == Id;
+                     }),
+      m_State.Scene.MeshInstances.end());
+}
+
+void EditorSession::ClearSelectionsForObject(std::string_view ObjectId) {
+  for (auto It = m_State.SelectedObjectIds.begin();
+       It != m_State.SelectedObjectIds.end();) {
+    It = (It->second == ObjectId) ? m_State.SelectedObjectIds.erase(It)
+                                  : std::next(It);
+  }
+}
+
+void EditorSession::PruneInvalidSelections() {
+  for (auto It = m_State.SelectedObjectIds.begin();
+       It != m_State.SelectedObjectIds.end();) {
+    if (FindSceneItem(It->second) == nullptr) {
+      It = m_State.SelectedObjectIds.erase(It);
+    } else {
+      ++It;
+    }
+  }
+}
+
+glm::mat4 EditorSession::ComputeWorldTransformMatrix(const Instance *Node) const {
+  if (!Node) return glm::mat4(1.0f);
+  std::vector<const Instance *> Chain;
+  const Instance *Cur = Node;
+  while (Cur && Cur != m_SceneRoot.get()) {
+    Chain.push_back(Cur);
+    Cur = Cur->GetParent();
+  }
+  glm::mat4 World(1.0f);
+  for (auto It = Chain.rbegin(); It != Chain.rend(); ++It) {
+    const auto DetailsIt = m_State.Scene.ObjectDetailsById.find((*It)->GetName());
+    if (DetailsIt != m_State.Scene.ObjectDetailsById.end() &&
+        DetailsIt->second.Transform.has_value()) {
+      World = World * BuildTransformMatrix(*DetailsIt->second.Transform);
+    }
+  }
+  return World;
+}
+
+EditorTransformDetails EditorSession::DecomposeMatrix(const glm::mat4 &Matrix) const {
+  const glm::vec3 Location = glm::vec3(Matrix[3]);
+  glm::vec3 Col0 = glm::vec3(Matrix[0]);
+  glm::vec3 Col1 = glm::vec3(Matrix[1]);
+  glm::vec3 Col2 = glm::vec3(Matrix[2]);
+  const float ScaleX = glm::length(Col0);
+  const float ScaleY = glm::length(Col1);
+  const float ScaleZ = glm::length(Col2);
+  if (ScaleX > 0.0f) Col0 /= ScaleX;
+  if (ScaleY > 0.0f) Col1 /= ScaleY;
+  if (ScaleZ > 0.0f) Col2 /= ScaleZ;
+  // YXZ Euler decomposition matching BuildTransformMatrix order (Ry * Rx * Rz)
+  const float AngleX = glm::degrees(glm::asin(glm::clamp(-Col2.y, -1.0f, 1.0f)));
+  const float AngleY = glm::degrees(glm::atan(Col2.x, Col2.z));
+  const float AngleZ = glm::degrees(glm::atan(Col0.y, Col1.y));
+  return EditorTransformDetails{
+      .Location = Location,
+      .RotationDegrees = {AngleX, AngleY, AngleZ},
+      .Scale = {ScaleX, ScaleY, ScaleZ},
+  };
+}
+
+void EditorSession::RecomputeSubtreeWorldTransforms(const Instance *Node) {
+  if (!Node) return;
+  const std::string &Id = Node->GetName();
+  const auto DetailsIt = m_State.Scene.ObjectDetailsById.find(Id);
+  if (DetailsIt != m_State.Scene.ObjectDetailsById.end() &&
+      DetailsIt->second.Transform.has_value()) {
+    const glm::mat4 WorldMatrix = ComputeWorldTransformMatrix(Node);
+    DetailsIt->second.WorldTransform = DecomposeMatrix(WorldMatrix);
+    for (EditorSceneMeshInstance &Inst : m_State.Scene.MeshInstances) {
+      if (Inst.ObjectId == Id) {
+        Inst.Transform = WorldMatrix;
+        break;
+      }
+    }
+  }
+  for (const Instance *Child : Node->GetChildren())
+    RecomputeSubtreeWorldTransforms(Child);
+}
+
+void EditorSession::RecomputeAllWorldTransforms() {
+  if (!m_SceneRoot) return;
+  for (const Instance *Child : m_SceneRoot->GetChildren())
+    RecomputeSubtreeWorldTransforms(Child);
+}
+
+void EditorSession::PublishPresenceChangedEvent(SessionUserId User) {
+  const EditorParticipant Participant = BuildParticipant(User);
+  PublishEvent({.Payload = PresenceChangedEvent{
+                    .User = User,
+                    .DisplayName = Participant.DisplayName,
+                    .IsLocal = Participant.IsLocal,
+                    .PresenceState = PresenceStateName(Participant.State),
+                    .SelectedObjectId = Participant.SelectedObjectId,
+                }});
+}
+
+EditorUserPresence &EditorSession::EnsurePresence(SessionUserId User) {
+  const auto [It, Inserted] = m_State.PresenceByUser.try_emplace(User);
+  if (Inserted) {
+    It->second.User = User;
+    It->second.DisplayName = DefaultUserDisplayName(User);
+    It->second.State = EditorUserPresenceState::Connected;
+    It->second.IsLocal = User.Value == 1;
+  } else {
+    It->second.State = EditorUserPresenceState::Connected;
+  }
+
+  return It->second;
+}
+
+EditorViewportState &EditorSession::EnsureViewport(SessionUserId User) {
+  EnsurePresence(User);
+  const auto [It, Inserted] = m_State.Viewports.try_emplace(User);
+  if (Inserted) {
+    It->second.Camera.LookAt(m_Config.InitialCameraPosition,
+                             m_Config.InitialCameraTarget);
+    It->second.Camera.SetPerspective(
+        m_Config.CameraVerticalFovDegrees, m_Config.CameraAspectRatio,
+        m_Config.CameraNearPlane, m_Config.CameraFarPlane);
+  }
+
+  return It->second;
+}
+
+const EditorSceneItem *EditorSession::FindSceneItemRecursive(
+    const std::vector<EditorSceneItem> &Items, std::string_view ObjectId) const {
+  for (const EditorSceneItem &Item : Items) {
+    if (Item.Id == ObjectId) {
+      return &Item;
+    }
+
+    if (const EditorSceneItem *Child =
+            FindSceneItemRecursive(Item.Children, ObjectId);
+        Child != nullptr) {
+      return Child;
+    }
+  }
+
+  return nullptr;
+}
+
+void EditorSession::ProcessCommand(const QueuedEditorCommand &QueuedCommand) {
+  std::string FailureReason;
+  if (!ValidateCommand(QueuedCommand, FailureReason)) {
+    PublishEvent({.Payload = CommandRejectedEvent{
+                      .User = QueuedCommand.Context.User,
+                      .RejectedCommand = QueuedCommand.Id,
+                      .Reason = FailureReason,
+                  }});
+    return;
+  }
+
+  EnsureViewport(QueuedCommand.Context.User);
+  std::visit(
+      [this, &QueuedCommand](const auto &Command) {
+        HandleCommand(QueuedCommand, Command);
+      },
+      QueuedCommand.Command.Payload);
+
+  if (ShouldPublishCommandAcknowledgedEvent(QueuedCommand.Command.Payload)) {
+    PublishEvent({.Payload = CommandAcknowledgedEvent{
+                      .User = QueuedCommand.Context.User,
+                      .AcknowledgedCommand = QueuedCommand.Id,
+                      .CommandType =
+                          CommandTypeName(QueuedCommand.Command.Payload),
+                  }});
+  }
+}
+
+bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
+                                    std::string &FailureReason) {
+  if (QueuedCommand.Context.Session != m_State.Session) {
+    FailureReason = "Command targeted a different session.";
+    return false;
+  }
+
+  const EditorViewportState &Viewport =
+      const_cast<EditorSession *>(this)->EnsureViewport(QueuedCommand.Context.User);
+
+  if (const auto *CameraCommand =
+          std::get_if<UpdateViewportCameraCommand>(
+              &QueuedCommand.Command.Payload)) {
+    if (Viewport.IsLooking && !CameraCommand->CursorPosition.has_value()) {
+      FailureReason = "Look-enabled camera updates require cursor position.";
+      return false;
+    }
+  }
+
+  if (const auto *SelectionCommand =
+          std::get_if<SelectObjectCommand>(&QueuedCommand.Command.Payload)) {
+    if (SelectionCommand->ObjectId.empty()) {
+      FailureReason = "Selection commands require a non-empty object id.";
+      return false;
+    }
+    if (FindSceneItem(SelectionCommand->ObjectId) == nullptr) {
+      FailureReason = "Selection targeted an unknown object.";
+      return false;
+    }
+  }
+
+  if (const auto *TransformCommand =
+          std::get_if<SetTransformCommand>(&QueuedCommand.Command.Payload)) {
+    if (TransformCommand->ObjectId.empty()) {
+      FailureReason = "Transform commands require a non-empty object id.";
+      return false;
+    }
+
+    const EditorObjectDetails *Details = FindObjectDetails(TransformCommand->ObjectId);
+    if (Details == nullptr) {
+      FailureReason = "Transform targeted an unknown object.";
+      return false;
+    }
+    if (!Details->SupportsTransform || !Details->Transform.has_value()) {
+      FailureReason = "This object does not support transform edits.";
+      return false;
+    }
+    if (Details->TransformReadOnly) {
+      FailureReason = "This object is read-only.";
+      return false;
+    }
+    if (TransformCommand->Scale.x <= 0.0f || TransformCommand->Scale.y <= 0.0f ||
+        TransformCommand->Scale.z <= 0.0f) {
+      FailureReason = "Scale values must be greater than zero.";
+      return false;
+    }
+  }
+
+  if (const auto *RenameCommand =
+          std::get_if<RenameObjectCommand>(&QueuedCommand.Command.Payload)) {
+    if (RenameCommand->ObjectId.empty()) {
+      FailureReason = "Rename commands require a non-empty object id.";
+      return false;
+    }
+    if (FindSceneItem(RenameCommand->ObjectId) == nullptr) {
+      FailureReason = "Rename targeted an unknown object.";
+      return false;
+    }
+    if (RenameCommand->DisplayName.empty() ||
+        IsBlankString(RenameCommand->DisplayName)) {
+      FailureReason = "Rename commands require a non-empty display name.";
+      return false;
+    }
+  }
+
+  if (const auto *VisibilityCommand =
+          std::get_if<SetObjectVisibilityCommand>(
+              &QueuedCommand.Command.Payload)) {
+    if (VisibilityCommand->ObjectId.empty()) {
+      FailureReason = "Visibility commands require a non-empty object id.";
+      return false;
+    }
+    if (FindSceneItem(VisibilityCommand->ObjectId) == nullptr) {
+      FailureReason = "Visibility targeted an unknown object.";
+      return false;
+    }
+  }
+
+  if (const auto *CreateCmd =
+          std::get_if<CreateObjectCommand>(&QueuedCommand.Command.Payload)) {
+    if (CreateCmd->TemplateId.empty()) {
+      FailureReason = "Create commands require a non-empty TemplateId.";
+      return false;
+    }
+    if (!IsValidTemplateId(CreateCmd->TemplateId)) {
+      FailureReason = "Unknown TemplateId: " + CreateCmd->TemplateId + ".";
+      return false;
+    }
+    if (FindWorldFolder() == nullptr) {
+      FailureReason = "No world folder found in scene root.";
+      return false;
+    }
+  }
+
+  if (const auto *DupCmd =
+          std::get_if<DuplicateObjectCommand>(&QueuedCommand.Command.Payload)) {
+    if (DupCmd->ObjectId.empty()) {
+      FailureReason = "Duplicate commands require a non-empty object id.";
+      return false;
+    }
+    if (FindSceneItem(DupCmd->ObjectId) == nullptr) {
+      FailureReason = "Duplicate targeted an unknown object.";
+      return false;
+    }
+  }
+
+  if (const auto *DelCmd =
+          std::get_if<DeleteObjectCommand>(&QueuedCommand.Command.Payload)) {
+    if (DelCmd->ObjectId.empty()) {
+      FailureReason = "Delete commands require a non-empty object id.";
+      return false;
+    }
+    if (FindSceneItem(DelCmd->ObjectId) == nullptr) {
+      FailureReason = "Delete targeted an unknown object.";
+      return false;
+    }
+    if (DelCmd->ObjectId == "world") {
+      FailureReason = "The world folder cannot be deleted.";
+      return false;
+    }
+  }
+
+  if (const auto *ReparentCmd =
+          std::get_if<ReparentObjectCommand>(&QueuedCommand.Command.Payload)) {
+    if (ReparentCmd->ObjectId.empty()) {
+      FailureReason = "Reparent commands require a non-empty object id.";
+      return false;
+    }
+    if (ReparentCmd->NewParentId.empty()) {
+      FailureReason = "Reparent commands require a non-empty new parent id.";
+      return false;
+    }
+    if (FindSceneItem(ReparentCmd->ObjectId) == nullptr) {
+      FailureReason = "Reparent targeted an unknown object.";
+      return false;
+    }
+    if (FindSceneItem(ReparentCmd->NewParentId) == nullptr) {
+      FailureReason = "Reparent new parent is an unknown object.";
+      return false;
+    }
+    if (ReparentCmd->ObjectId == ReparentCmd->NewParentId) {
+      FailureReason = "Cannot reparent an object onto itself.";
+      return false;
+    }
+    if (ReparentCmd->ObjectId == "world") {
+      FailureReason = "The world folder cannot be reparented.";
+      return false;
+    }
+    // Reject if new parent is a descendant of the object (would create cycle)
+    const Instance *Target =
+        FindInstanceById(m_SceneRoot.get(), ReparentCmd->ObjectId);
+    if (Target != nullptr) {
+      for (const std::string &DescId : CollectDescendantIds(Target)) {
+        if (DescId == ReparentCmd->NewParentId) {
+          FailureReason = "Cannot reparent an object onto one of its descendants.";
+          return false;
+        }
+      }
+    }
+  }
+
+  return true;
+}
+
+void EditorSession::HandleCommand(
+    const QueuedEditorCommand &QueuedCommand,
+    const UpdateViewportCameraCommand &Command) {
+  EditorViewportState &Viewport = EnsureViewport(QueuedCommand.Context.User);
+
+  bool CameraChanged = false;
+  if (!IsNearlyZero(Command.WorldMovement)) {
+    Viewport.Camera.MoveLocal(Command.WorldMovement);
+    CameraChanged = true;
+  }
+
+  if (Viewport.IsLooking && Command.CursorPosition.has_value()) {
+    if (Viewport.HasLastCursorPosition) {
+      const glm::dvec2 Delta = *Command.CursorPosition - Viewport.LastCursorPosition;
+      if (Delta.x != 0.0 || Delta.y != 0.0) {
+        Viewport.Camera.SetRotation(
+            Viewport.Camera.GetYawDegrees() +
+                static_cast<float>(Delta.x) * m_Config.MouseSensitivity,
+            Viewport.Camera.GetPitchDegrees() -
+                static_cast<float>(Delta.y) * m_Config.MouseSensitivity);
+        CameraChanged = true;
+      }
+    }
+
+    Viewport.LastCursorPosition = *Command.CursorPosition;
+    Viewport.HasLastCursorPosition = true;
+  }
+
+  if (CameraChanged) {
+    PublishEvent({.Payload = ViewportCameraUpdatedEvent{
+                      .User = QueuedCommand.Context.User,
+                      .Position = Viewport.Camera.GetPosition(),
+                      .YawDegrees = Viewport.Camera.GetYawDegrees(),
+                      .PitchDegrees = Viewport.Camera.GetPitchDegrees(),
+                  }});
+  }
+}
+
+void EditorSession::HandleCommand(
+    const QueuedEditorCommand &QueuedCommand,
+    const SetViewportCameraPoseCommand &Command) {
+  EditorViewportState &Viewport = EnsureViewport(QueuedCommand.Context.User);
+  Viewport.Camera.SetPosition(Command.Position);
+  Viewport.Camera.SetRotation(Command.YawDegrees, Command.PitchDegrees);
+  PublishEvent({.Payload = ViewportCameraUpdatedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .Position = Viewport.Camera.GetPosition(),
+                    .YawDegrees = Viewport.Camera.GetYawDegrees(),
+                    .PitchDegrees = Viewport.Camera.GetPitchDegrees(),
+                }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const SetLookActiveCommand &Command) {
+  EditorViewportState &Viewport = EnsureViewport(QueuedCommand.Context.User);
+  const bool StateChanged = Viewport.IsLooking != Command.IsLooking;
+  Viewport.IsLooking = Command.IsLooking;
+
+  if (Command.IsLooking && Command.CursorPosition.has_value()) {
+    Viewport.LastCursorPosition = *Command.CursorPosition;
+    Viewport.HasLastCursorPosition = true;
+  } else if (!Command.IsLooking) {
+    Viewport.HasLastCursorPosition = false;
+  }
+
+  if (StateChanged) {
+    PublishEvent({.Payload = LookStateChangedEvent{
+                      .User = QueuedCommand.Context.User,
+                      .IsLooking = Viewport.IsLooking,
+                  }});
+  }
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const SelectObjectCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
+  const auto Existing = m_State.SelectedObjectIds.find(QueuedCommand.Context.User);
+  if (Existing != m_State.SelectedObjectIds.end() &&
+      Existing->second == Command.ObjectId) {
+    return;
+  }
+
+  m_State.SelectedObjectIds[QueuedCommand.Context.User] = Command.ObjectId;
+  PublishEvent({.Payload = SelectionChangedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .ObjectId = Command.ObjectId,
+                }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const RenameObjectCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
+  auto DetailsIt = m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
+  if (DetailsIt == m_State.Scene.ObjectDetailsById.end()) {
+    return;
+  }
+
+  if (DetailsIt->second.DisplayName == Command.DisplayName) {
+    return;
+  }
+
+  DetailsIt->second.DisplayName = Command.DisplayName;
+  UpdateSceneItemDisplayName(m_State.Scene.Items, Command.ObjectId,
+                             Command.DisplayName);
+
+  PublishEvent({.Payload = ObjectRenamedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .ObjectId = Command.ObjectId,
+                    .DisplayName = Command.DisplayName,
+                }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const SetObjectVisibilityCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
+  auto DetailsIt = m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
+  if (DetailsIt == m_State.Scene.ObjectDetailsById.end()) {
+    return;
+  }
+
+  if (DetailsIt->second.Visible == Command.Visible) {
+    return;
+  }
+
+  DetailsIt->second.Visible = Command.Visible;
+  UpdateSceneItemVisibility(m_State.Scene.Items, Command.ObjectId, Command.Visible);
+
+  PublishEvent({.Payload = ObjectVisibilityChangedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .ObjectId = Command.ObjectId,
+                    .Visible = Command.Visible,
+                }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const CreateObjectCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
+  const EditorSceneItemKind Kind = KindForTemplateId(Command.TemplateId);
+  const std::string ObjectId = BuildUniqueObjectId(Command.TemplateId);
+  const std::string DisplayName = BuildUniqueDisplayName(Command.TemplateId);
+
+  const bool Transformable = SupportsTransformForKind(Kind);
+  const std::optional<EditorTransformDetails> InitTransform =
+      Transformable ? std::optional{EditorTransformDetails{}} : std::nullopt;
+  m_State.Scene.ObjectDetailsById.emplace(
+      ObjectId,
+      EditorObjectDetails{
+          .ObjectId = ObjectId,
+          .DisplayName = DisplayName,
+          .Kind = Kind,
+          .Visible = true,
+          .SupportsTransform = Transformable,
+          .TransformReadOnly = false,
+          .Transform = InitTransform,
+          .WorldTransform = InitTransform,
+      });
+
+  if (Instance *Node = CreateInstanceForTemplate(Command.TemplateId, ObjectId))
+    Node->SetParent(FindWorldFolder());
+
+  SyncItemsFromTree();
+  PublishEvent({.Payload = ObjectCreatedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .ObjectId = ObjectId,
+                    .DisplayName = DisplayName,
+                }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const DuplicateObjectCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
+  Instance *Source = FindInstanceById(m_SceneRoot.get(), Command.ObjectId);
+  if (!Source) return;
+  Instance *Parent = Source->GetParent();
+  if (!Parent) return;
+
+  std::vector<EditorObjectDetails> NewDetails;
+  DeepCloneSubtree(Source, Parent, NewDetails);
+  SyncItemsFromTree();
+
+  if (!NewDetails.empty()) {
+    PublishEvent({.Payload = ObjectCreatedEvent{
+                      .User = QueuedCommand.Context.User,
+                      .ObjectId = NewDetails.front().ObjectId,
+                      .DisplayName = NewDetails.front().DisplayName,
+                  }});
+  }
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const DeleteObjectCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
+  Instance *Target = FindInstanceById(m_SceneRoot.get(), Command.ObjectId);
+  if (!Target) return;
+
+  for (const std::string &Id : CollectDescendantIds(Target)) {
+    RemoveSceneObject(Id);
+    ClearSelectionsForObject(Id);
+  }
+
+  Target->Destroy();
+  SyncItemsFromTree();
+  PublishEvent({.Payload = ObjectDeletedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .ObjectId = Command.ObjectId,
+                }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const ReparentObjectCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
+  Instance *Target = FindInstanceById(m_SceneRoot.get(), Command.ObjectId);
+  Instance *NewParent = FindInstanceById(m_SceneRoot.get(), Command.NewParentId);
+  if (!Target || !NewParent) return;
+  if (Target->GetParent() == NewParent) return;
+
+  Target->SetParent(NewParent);
+  SyncItemsFromTree();
+  RecomputeSubtreeWorldTransforms(Target);
+  PublishEvent({.Payload = ObjectReparentedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .ObjectId = Command.ObjectId,
+                    .NewParentId = Command.NewParentId,
+                }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const SetTransformCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
+  auto DetailsIt = m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
+  if (DetailsIt == m_State.Scene.ObjectDetailsById.end()) {
+    return;
+  }
+
+  const EditorTransformDetails WorldTD{
+      .Location = Command.Location,
+      .RotationDegrees = Command.RotationDegrees,
+      .Scale = Command.Scale,
+  };
+  const glm::mat4 WorldMatrix = BuildTransformMatrix(WorldTD);
+
+  // Convert world-space command to local-space for storage
+  EditorTransformDetails LocalTD = WorldTD;
+  const Instance *Node = FindInstanceById(m_SceneRoot.get(), Command.ObjectId);
+  if (Node && Node->GetParent() && Node->GetParent() != m_SceneRoot.get()) {
+    const glm::mat4 ParentWorld = ComputeWorldTransformMatrix(Node->GetParent());
+    LocalTD = DecomposeMatrix(glm::inverse(ParentWorld) * WorldMatrix);
+  }
+
+  DetailsIt->second.Transform = LocalTD;
+  DetailsIt->second.WorldTransform = WorldTD;
+
+  for (EditorSceneMeshInstance &Inst : m_State.Scene.MeshInstances) {
+    if (Inst.ObjectId == Command.ObjectId) {
+      Inst.Transform = WorldMatrix;
+      break;
+    }
+  }
+
+  // Propagate to children whose world positions depend on this object
+  if (Node) {
+    for (const Instance *Child : Node->GetChildren())
+      RecomputeSubtreeWorldTransforms(Child);
+  }
+
+  PublishEvent({.Payload = ObjectTransformUpdatedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .ObjectId = Command.ObjectId,
+                    .Location = Command.Location,
+                    .RotationDegrees = Command.RotationDegrees,
+                    .Scale = Command.Scale,
+                }});
+}
+
+void EditorSession::PublishEvent(const EditorEvent &Event) {
+  m_MessageBus.PublishEvent(Event);
+}
+} // namespace Axiom

@@ -1,0 +1,36 @@
+#version 460
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(r32f, set = 0, binding = 0) uniform writeonly image2D destinationImage;
+layout(set = 0, binding = 1) uniform sampler2D sourceImage;
+
+layout(push_constant) uniform HzbReducePushConstants {
+    uvec4 dimensions;
+} pushConstants;
+
+void main() {
+    ivec2 destinationCoord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 destinationSize = ivec2(pushConstants.dimensions.zw);
+    if (destinationCoord.x >= destinationSize.x || destinationCoord.y >= destinationSize.y) {
+        return;
+    }
+
+    ivec2 sourceSize = ivec2(pushConstants.dimensions.xy);
+    float maxDepth = 0.0;
+
+    if (all(equal(sourceSize, destinationSize))) {
+        maxDepth = texelFetch(sourceImage, destinationCoord, 0).r;
+    } else {
+        ivec2 baseCoord = destinationCoord * 2;
+        for (int offsetY = 0; offsetY < 2; ++offsetY) {
+            for (int offsetX = 0; offsetX < 2; ++offsetX) {
+                ivec2 sampleCoord =
+                    clamp(baseCoord + ivec2(offsetX, offsetY), ivec2(0), sourceSize - ivec2(1));
+                maxDepth = max(maxDepth, texelFetch(sourceImage, sampleCoord, 0).r);
+            }
+        }
+    }
+
+    imageStore(destinationImage, destinationCoord, vec4(maxDepth, 0.0, 0.0, 1.0));
+}
