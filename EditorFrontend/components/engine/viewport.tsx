@@ -1424,12 +1424,18 @@ export function Viewport() {
       const v = videoRef.current
       if (!s || !v || !v.videoWidth || !v.videoHeight) return null
       const rect = s.getBoundingClientRect()
-      const cssX = event.clientX - rect.left
-      const cssY = event.clientY - rect.top
-      if (cssX < 0 || cssY < 0 || cssX > rect.width || cssY > rect.height) return null
+      // object-contain: uniform scale, centered — compute the actual content rect
+      const scale = Math.min(rect.width / v.videoWidth, rect.height / v.videoHeight)
+      const contentW = v.videoWidth * scale
+      const contentH = v.videoHeight * scale
+      const offsetX = (rect.width - contentW) / 2
+      const offsetY = (rect.height - contentH) / 2
+      const cssX = event.clientX - rect.left - offsetX
+      const cssY = event.clientY - rect.top - offsetY
+      if (cssX < 0 || cssY < 0 || cssX > contentW || cssY > contentH) return null
       return {
-        serverX: (cssX / rect.width) * v.videoWidth,
-        serverY: (cssY / rect.height) * v.videoHeight,
+        serverX: (cssX / contentW) * v.videoWidth,
+        serverY: (cssY / contentH) * v.videoHeight,
       }
     }
 
