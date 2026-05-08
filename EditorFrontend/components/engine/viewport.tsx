@@ -188,6 +188,7 @@ export function Viewport() {
   const statusPollHandleRef = useRef<number | null>(null)
   const icePollHandleRef = useRef<number | null>(null)
   const sessionPollHandleRef = useRef<number | null>(null)
+  const heartbeatIntervalRef = useRef<number | null>(null)
   const inputFrameHandleRef = useRef<number | null>(null)
   const claimChannelRef = useRef<BroadcastChannel | null>(null)
   const localIceQueueRef = useRef<IceCandidatePayload[]>([])
@@ -325,6 +326,10 @@ export function Viewport() {
       if (sessionPollHandleRef.current !== null) {
         window.clearInterval(sessionPollHandleRef.current)
         sessionPollHandleRef.current = null
+      }
+      if (heartbeatIntervalRef.current !== null) {
+        window.clearInterval(heartbeatIntervalRef.current)
+        heartbeatIntervalRef.current = null
       }
     }
 
@@ -966,6 +971,12 @@ export function Viewport() {
               "Reliable editor channel is open."
             )
           }
+          if (heartbeatIntervalRef.current !== null) {
+            window.clearInterval(heartbeatIntervalRef.current)
+          }
+          heartbeatIntervalRef.current = window.setInterval(() => {
+            reliableChannelRef.current?.send(JSON.stringify({ type: "heartbeat" }))
+          }, 4000)
         }
       })
       channel.addEventListener("close", () => {

@@ -538,6 +538,7 @@ bool RemoteViewportServer::Start(std::string &Error) {
   m_StopRequested.store(false);
   m_Host.GetTransport().Connect(this);
   m_AcceptThread = std::thread([this]() { AcceptLoop(); });
+  m_PresenceThread = std::thread([this]() { PresenceLoop(); });
   return true;
 }
 
@@ -553,6 +554,9 @@ void RemoteViewportServer::Stop() {
   CloseAllClients();
   if (m_AcceptThread.joinable()) {
     m_AcceptThread.join();
+  }
+  if (m_PresenceThread.joinable()) {
+    m_PresenceThread.join();
   }
 
   m_Host.GetTransport().Disconnect(this);
@@ -601,6 +605,43 @@ void RemoteViewportServer::OnSessionTransportViewportFrame(
           });
         }
       }
+    }
+  }
+}
+
+static constexpr int AwayThresholdSeconds = 10;
+static constexpr int PresenceCheckIntervalMs = 2000;
+
+void RemoteViewportServer::PresenceLoop() {
+  while (!m_StopRequested.load()) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(PresenceCheckIntervalMs));
+    if (m_StopRequested.load()) {
+      break;
+    }
+
+    const auto Now = std::chrono::steady_clock::now();
+    std::vector<std::pair<SessionUserId, EditorUserPresenceState>> Transitions;
+
+    {
+      std::scoped_lock Lock(m_ClientMutex);
+      for (const auto &[ClientId, Client] : m_RemoteClientsById) {
+        const auto Elapsed =
+            std::chrono::duration_cast<std::chrono::seconds>(Now - Client.LastActivity)
+                .count();
+        const EditorUserPresence *Presence =
+            m_Host.GetHeadlessLayer().GetSession().FindPresence(Client.User);
+        if (Presence == nullptr) {
+          continue;
+        }
+        if (Elapsed >= AwayThresholdSeconds &&
+            Presence->State == EditorUserPresenceState::Connected) {
+          Transitions.emplace_back(Client.User, EditorUserPresenceState::Away);
+        }
+      }
+    }
+
+    for (const auto &[User, State] : Transitions) {
+      m_Host.GetHeadlessLayer().GetSession().SetPresenceState(User, State);
     }
   }
 }
@@ -1419,6 +1460,7 @@ bool RemoteViewportServer::HandleWebSocketMessage(std::string_view Payload) {
   case HeadlessCommandType::GizmoDragUpdate:
   case HeadlessCommandType::GizmoDragEnd:
   case HeadlessCommandType::SetGizmoMode:
+  case HeadlessCommandType::Heartbeat:
     return false;
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
@@ -1464,6 +1506,15 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::SetTransform:
     m_Host.SubmitRemoteCommand(Client->User, Command->EditorPayload);
     return true;
+  case HeadlessCommandType::Heartbeat: {
+    const EditorUserPresence *Presence =
+        m_Host.GetHeadlessLayer().GetSession().FindPresence(Client->User);
+    if (Presence != nullptr && Presence->State == EditorUserPresenceState::Away) {
+      m_Host.GetHeadlessLayer().GetSession().SetPresenceState(
+          Client->User, EditorUserPresenceState::Connected);
+    }
+    return true;
+  }
   case HeadlessCommandType::SetGizmoMode:
     Client->CurrentGizmoMode = Command->Mode;
     m_Host.GetHeadlessLayer().SetGizmoMode(Client->User, Command->Mode);

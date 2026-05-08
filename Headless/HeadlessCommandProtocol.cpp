@@ -704,6 +704,9 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
   if (*Type == "gizmo_drag_start") return ParseMouseXY(HeadlessCommandType::GizmoDragStart);
   if (*Type == "gizmo_drag_update") return ParseMouseXY(HeadlessCommandType::GizmoDragUpdate);
   if (*Type == "gizmo_drag_end") return ParseMouseXY(HeadlessCommandType::GizmoDragEnd);
+  if (*Type == "heartbeat") {
+    return HeadlessCommand{.Type = HeadlessCommandType::Heartbeat};
+  }
   if (*Type == "set_gizmo_mode") {
     static const std::regex ModePattern(R"json("mode"\s*:\s*"([^"]+)")json");
     const auto ModeStr = MatchString(JsonLine, ModePattern);
@@ -747,6 +750,7 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::GizmoDragUpdate:
   case HeadlessCommandType::GizmoDragEnd:
   case HeadlessCommandType::SetGizmoMode:
+  case HeadlessCommandType::Heartbeat:
   case HeadlessCommandType::Quit:
     return Command;
   case HeadlessCommandType::LoadStartupScene:
