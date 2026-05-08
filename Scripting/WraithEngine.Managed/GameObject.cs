@@ -17,7 +17,8 @@ public sealed class GameObject
     // CS0649 suppressed: fields are set via reflection by Coral at runtime.
     // -----------------------------------------------------------------------
 #pragma warning disable CS0649
-    private static unsafe delegate* unmanaged<NativeString, NativeString> s_GetName;
+    // GetName writes into an out NativeString to avoid struct-return ABI ambiguity.
+    private static unsafe delegate* unmanaged<NativeString, NativeString*, void> s_GetName;
     private static unsafe delegate* unmanaged<NativeString, Transform*, void> s_GetTransform;
     private static unsafe delegate* unmanaged<NativeString, Transform*, void> s_SetTransform;
     private static unsafe delegate* unmanaged<NativeString, Bool32> s_GetVisible;
@@ -43,8 +44,11 @@ public sealed class GameObject
             return m_ObjectId;
 
         using NativeString id = m_ObjectId;
-        using NativeString result = s_GetName(id);
-        return (string?)result ?? m_ObjectId;
+        NativeString result = NativeString.Null();
+        s_GetName(id, &result);
+        string name = (string?)result ?? m_ObjectId;
+        result.Dispose();
+        return name;
     }
 
     /// <summary>Returns the object's local-space transform.</summary>

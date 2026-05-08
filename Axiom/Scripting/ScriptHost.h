@@ -2,6 +2,12 @@
 
 #include <filesystem>
 
+#include <Session/SessionTypes.h>
+
+namespace Axiom {
+class EditorSession;
+}
+
 #if AXIOM_SCRIPTING_ENABLED
 #include <Coral/HostInstance.hpp>
 #include <Coral/Assembly.hpp>
@@ -19,6 +25,8 @@ public:
 
   void Initialize(const std::filesystem::path &CoralManagedDir);
   void LoadEngineAssembly(const std::filesystem::path &ManagedDir);
+  void RegisterInternalCalls(EditorSession &Session, SessionId Id,
+                             SessionUserId UserId);
   void Shutdown();
 
   bool IsInitialized() const { return m_Initialized; }

@@ -1,6 +1,8 @@
 #include "ScriptHost.h"
+#include "InternalCalls.h"
 
 #include <Core/Log.h>
+#include <Session/EditorSession.h>
 
 namespace Axiom {
 
@@ -89,6 +91,42 @@ void ScriptHost::LoadEngineAssembly(const std::filesystem::path &ManagedDir) {
   A_CORE_INFO("ScriptHost: engine assembly loaded ({})", Assembly.GetName());
 #else
   (void)ManagedDir;
+#endif
+}
+
+void ScriptHost::RegisterInternalCalls(EditorSession &Session, SessionId Id,
+                                       SessionUserId UserId) {
+#if AXIOM_SCRIPTING_ENABLED
+  if (!m_EngineAssemblyLoaded) {
+    A_CORE_WARN("ScriptHost: cannot register internal calls — engine assembly "
+                "not loaded");
+    return;
+  }
+
+  // Bind the session pointer used by the call implementations
+  InternalCalls::Bind(Session, Id, UserId);
+
+  // AddInternalCall(className, fieldName, ptr)
+  // The assembly name is appended automatically from the loaded assembly.
+  m_EngineAssembly->AddInternalCall(
+      "WraithEngine.GameObject", "s_GetName",
+      reinterpret_cast<void *>(&InternalCalls::GameObject_GetName));
+  m_EngineAssembly->AddInternalCall(
+      "WraithEngine.GameObject", "s_GetTransform",
+      reinterpret_cast<void *>(&InternalCalls::GameObject_GetTransform));
+  m_EngineAssembly->AddInternalCall(
+      "WraithEngine.GameObject", "s_SetTransform",
+      reinterpret_cast<void *>(&InternalCalls::GameObject_SetTransform));
+  m_EngineAssembly->AddInternalCall(
+      "WraithEngine.GameObject", "s_GetVisible",
+      reinterpret_cast<void *>(&InternalCalls::GameObject_GetVisible));
+
+  m_EngineAssembly->UploadInternalCalls();
+  A_CORE_INFO("ScriptHost: internal calls registered");
+#else
+  (void)Session;
+  (void)Id;
+  (void)UserId;
 #endif
 }
 

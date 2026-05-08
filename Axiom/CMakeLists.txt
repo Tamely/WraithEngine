@@ -1,5 +1,6 @@
 set(ENGINE_SOURCES
   Scripting/ScriptHost.cpp
+  Scripting/InternalCalls.cpp
   Assets/IAssetSource.cpp
   Assets/MeshAsset.cpp
   Assets/SceneFile.cpp

@@ -37,6 +37,9 @@ HeadlessSessionHost::HeadlessSessionHost(const ApplicationArgs &Args,
   SetViewportFrameOutput(m_FrameBridge.get());
   m_ScriptHost.Initialize(AXIOM_CORAL_MANAGED_DIR);
   m_ScriptHost.LoadEngineAssembly(AXIOM_MANAGED_DIR);
+  m_ScriptHost.RegisterInternalCalls(m_Layer->GetSession(),
+                                     SessionId{1},
+                                     m_Layer->GetLocalUserId());
 }
 
 bool HeadlessSessionHost::Step() { return Application::Step(); }
