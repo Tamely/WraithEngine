@@ -283,14 +283,18 @@ void SerializeObjectDetails(std::ostringstream &Stream,
          << (Details.SupportsTransform ? "true" : "false")
          << ",\"transformReadOnly\":"
          << (Details.TransformReadOnly ? "true" : "false") << "},\"transform\":";
-  if (Details.Transform.has_value()) {
-    Stream << "{\"location\":[" << Details.Transform->Location.x << ","
-           << Details.Transform->Location.y << "," << Details.Transform->Location.z
-           << "],\"rotationDegrees\":[" << Details.Transform->RotationDegrees.x
-           << "," << Details.Transform->RotationDegrees.y << ","
-           << Details.Transform->RotationDegrees.z << "],\"scale\":["
-           << Details.Transform->Scale.x << "," << Details.Transform->Scale.y
-           << "," << Details.Transform->Scale.z << "]}";
+  // Serialize WorldTransform (world-space) so the frontend works in world space.
+  // Fall back to Transform for objects that predate world-transform computation.
+  const auto &T = Details.WorldTransform.has_value() ? Details.WorldTransform
+                                                      : Details.Transform;
+  if (T.has_value()) {
+    Stream << "{\"location\":[" << T->Location.x << ","
+           << T->Location.y << "," << T->Location.z
+           << "],\"rotationDegrees\":[" << T->RotationDegrees.x
+           << "," << T->RotationDegrees.y << ","
+           << T->RotationDegrees.z << "],\"scale\":["
+           << T->Scale.x << "," << T->Scale.y
+           << "," << T->Scale.z << "]}";
   } else {
     Stream << "null";
   }

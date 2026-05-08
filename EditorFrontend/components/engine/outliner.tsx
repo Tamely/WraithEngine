@@ -179,7 +179,7 @@ export function Outliner() {
         }}
         onDragOver={(e) => {
           if (draggedIdRef.current === null || draggedIdRef.current === item.id) return
-          if (item.kind !== "folder") return
+          if (isParticipantCamera) return
           e.preventDefault()
           e.dataTransfer.dropEffect = "move"
           setDropTargetId(item.id)
@@ -193,7 +193,7 @@ export function Outliner() {
           const sourceId = draggedIdRef.current
           draggedIdRef.current = null
           if (sourceId === null || sourceId === item.id) return
-          if (item.kind !== "folder") return
+          if (isParticipantCamera) return
           void reparentObject(sourceId, item.id)
         }}
         onDragEnd={() => {

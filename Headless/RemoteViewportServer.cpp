@@ -1476,19 +1476,22 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
         Session.FindViewport(Client->User);
     const EditorObjectDetails *Selected =
         Session.FindSelectedObjectDetails(Client->User);
-    if (Viewport != nullptr && Selected != nullptr &&
-        Selected->SupportsTransform && Selected->Transform.has_value()) {
+    const auto *HoverTD = (Selected != nullptr && Selected->SupportsTransform)
+        ? (Selected->WorldTransform.has_value() ? &*Selected->WorldTransform
+               : (Selected->Transform.has_value() ? &*Selected->Transform : nullptr))
+        : nullptr;
+    if (Viewport != nullptr && HoverTD != nullptr) {
       const float GizmoScale = ComputeGizmoScale(
-          Viewport->Camera, Selected->Transform->Location,
+          Viewport->Camera, HoverTD->Location,
           m_Options.Width, m_Options.Height);
       const int Axis =
           (Client->CurrentGizmoMode == GizmoMode::Rotate)
               ? HitTestGizmoRings(Viewport->Camera, m_Options.Width,
                                   m_Options.Height, Command->MousePosition,
-                                  Selected->Transform->Location, GizmoScale)
+                                  HoverTD->Location, GizmoScale)
               : HitTestGizmoAxes(Viewport->Camera, m_Options.Width,
                                  m_Options.Height, Command->MousePosition,
-                                 Selected->Transform->Location, GizmoScale);
+                                 HoverTD->Location, GizmoScale);
       m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, Axis);
     } else {
       m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
@@ -1505,11 +1508,14 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
         Session.FindViewport(Client->User);
     const EditorObjectDetails *Selected =
         Session.FindSelectedObjectDetails(Client->User);
-    if (Viewport == nullptr || Selected == nullptr ||
-        !Selected->SupportsTransform || !Selected->Transform.has_value()) {
+    const auto *DragTD = (Selected != nullptr && Selected->SupportsTransform)
+        ? (Selected->WorldTransform.has_value() ? &*Selected->WorldTransform
+               : (Selected->Transform.has_value() ? &*Selected->Transform : nullptr))
+        : nullptr;
+    if (Viewport == nullptr || DragTD == nullptr) {
       return true;
     }
-    const glm::vec3 &ObjPos = Selected->Transform->Location;
+    const glm::vec3 &ObjPos = DragTD->Location;
     const float GizmoScale = ComputeGizmoScale(
         Viewport->Camera, ObjPos, m_Options.Width, m_Options.Height);
     if (Client->CurrentGizmoMode == GizmoMode::Rotate) {
@@ -1522,8 +1528,8 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
       Client->GizmoDrag = ActiveGizmoDrag{
           .Math = *DragState,
           .ObjectId = Selected->ObjectId,
-          .StartRotDeg = Selected->Transform->RotationDegrees,
-          .StartScale = Selected->Transform->Scale,
+          .StartRotDeg = DragTD->RotationDegrees,
+          .StartScale = DragTD->Scale,
           .Mode = GizmoMode::Rotate,
           .GizmoScaleAtDragStart = GizmoScale,
       };
@@ -1538,8 +1544,8 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
       Client->GizmoDrag = ActiveGizmoDrag{
           .Math = *DragState,
           .ObjectId = Selected->ObjectId,
-          .StartRotDeg = Selected->Transform->RotationDegrees,
-          .StartScale = Selected->Transform->Scale,
+          .StartRotDeg = DragTD->RotationDegrees,
+          .StartScale = DragTD->Scale,
           .Mode = Client->CurrentGizmoMode,
           .GizmoScaleAtDragStart = GizmoScale,
       };

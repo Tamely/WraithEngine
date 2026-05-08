@@ -59,7 +59,8 @@ struct EditorObjectDetails {
   bool Visible{true};
   bool SupportsTransform{false};
   bool TransformReadOnly{true};
-  std::optional<EditorTransformDetails> Transform;
+  std::optional<EditorTransformDetails> Transform;      // local-space
+  std::optional<EditorTransformDetails> WorldTransform; // world-space (computed)
 };
 
 enum class EditorUserPresenceState { Connected, Away, Disconnected };
@@ -194,8 +195,10 @@ private:
   std::vector<std::string> CollectDescendantIds(const Instance *Root) const;
   EditorSceneItemKind KindForInstance(const Instance *Node) const;
   bool IsValidTemplateId(const std::string &TemplateId) const;
-  void UpdateSubmissionTransform(std::string_view ObjectId,
-                                 const EditorTransformDetails &Transform);
+  glm::mat4 ComputeWorldTransformMatrix(const Instance *Node) const;
+  EditorTransformDetails DecomposeMatrix(const glm::mat4 &Matrix) const;
+  void RecomputeSubtreeWorldTransforms(const Instance *Node);
+  void RecomputeAllWorldTransforms();
   void PublishPresenceChangedEvent(SessionUserId User);
   EditorUserPresence &EnsurePresence(SessionUserId User);
   EditorViewportState &EnsureViewport(SessionUserId User);
