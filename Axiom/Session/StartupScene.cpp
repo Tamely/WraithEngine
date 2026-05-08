@@ -2,6 +2,7 @@
 
 #include "Assets/IAssetSource.h"
 #include "Assets/MeshAsset.h"
+#include "Assets/SceneFile.h"
 #include "Core/Log.h"
 
 #include <filesystem>
@@ -298,6 +299,21 @@ EditorSceneState BuildStartupSceneState() {
 }
 
 bool LoadStartupScene(EditorSession &Session) {
+  const Assets::LocalAssetSource ContentDir{AXIOM_CONTENT_DIR};
+  const auto SceneFilePath = ContentDir.ResolveRelative("scene.json");
+
+  if (std::filesystem::exists(SceneFilePath)) {
+    auto Loaded = Assets::LoadSceneFromFile(SceneFilePath);
+    if (Loaded.has_value() && !Loaded->MeshInstances.empty()) {
+      A_CORE_INFO("StartupScene: loaded saved scene from {0}",
+                  SceneFilePath.string());
+      Session.SetSceneState(std::move(*Loaded));
+      return true;
+    }
+    A_CORE_WARN("StartupScene: scene file found but failed to load, "
+                "falling back to defaults");
+  }
+
   EditorSceneState SceneState = BuildStartupSceneState();
   if (SceneState.MeshInstances.empty()) {
     return false;
