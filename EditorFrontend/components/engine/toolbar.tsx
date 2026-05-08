@@ -20,6 +20,7 @@ import {
   Camera,
 } from "lucide-react"
 import { useRemoteViewport } from "./remote-viewport-context"
+import { PresenceRoster } from "./presence-roster"
 
 export function Toolbar() {
   const { gizmoMode, setGizmoMode } = useRemoteViewport()
@@ -69,6 +70,10 @@ export function Toolbar() {
       </ToolbarGroup>
 
       <div className="flex-1" />
+
+      <PresenceRoster />
+
+      <ToolbarDivider />
 
       <ToolbarGroup>
         <ToolbarButton icon={Play} tooltip="Play" className="text-green-500 hover:text-green-400" />

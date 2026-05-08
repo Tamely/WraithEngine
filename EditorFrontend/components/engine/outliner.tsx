@@ -16,6 +16,7 @@ import {
   Plus,
   Trash2,
   Copy,
+  Lock,
 } from "lucide-react"
 import {
   ContextMenu,
@@ -30,7 +31,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { useRemoteViewport, type SessionSceneItem, type SessionSceneItemKind } from "./remote-viewport-context"
+import { useRemoteViewport, type SessionParticipant, type SessionSceneItem, type SessionSceneItemKind } from "./remote-viewport-context"
 
 type EditingState = { id: string; name: string } | null
 
@@ -62,6 +63,7 @@ export function Outliner() {
   const {
     sceneTree,
     selectedObjectId,
+    currentUserId,
     selectObject,
     setObjectVisibility,
     goToParticipantCamera,
@@ -71,6 +73,7 @@ export function Outliner() {
     renameObject,
     reparentObject,
     participants,
+    lockedObjects,
     sessionState,
   } = useRemoteViewport()
   const [searchQuery, setSearchQuery] = useState("")
@@ -131,11 +134,15 @@ export function Outliner() {
     const isExpanded = expandedFolders.has(item.id)
     const isSelected = selectedObjectId === item.id
     const hasChildren = item.children.length > 0
-    const selectedBy = participants
-      .filter((participant) => participant.selectionObjectId === item.id)
-      .map((participant) => {
-        return participant.displayName
-      })
+    const selectingParticipants = participants.filter(
+      (participant) =>
+        participant.selectionObjectId === item.id && participant.userId !== currentUserId
+    )
+    const lockOwnerUserId = lockedObjects[item.id] ?? null
+    const lockOwner: SessionParticipant | null =
+      lockOwnerUserId !== null
+        ? (participants.find((p) => p.userId === lockOwnerUserId) ?? null)
+        : null
 
     if (searchQuery.length > 0 && !matchesSearch(item, searchQuery)) {
       return null
@@ -257,10 +264,24 @@ export function Outliner() {
             {item.displayName}
           </span>
         )}
-        {!isEditing && selectedBy.length > 0 && (
-          <span className="max-w-28 truncate text-[10px] text-amber-300/80">
-            {selectedBy.join(", ")}
-          </span>
+        {!isEditing && (
+          <div className="flex items-center gap-0.5">
+            {lockOwner !== null && (
+              <span title={`Locked by ${lockOwner.displayName}`}>
+                <Lock className="h-3 w-3" style={{ color: lockOwner.presentationColor }} />
+              </span>
+            )}
+            {selectingParticipants.map((participant) => (
+              <span
+                key={participant.userId}
+                className="flex h-3.5 w-3.5 items-center justify-center rounded-full text-[8px] font-bold text-white"
+                style={{ backgroundColor: participant.presentationColor }}
+                title={participant.displayName}
+              >
+                {participant.displayName.charAt(0).toUpperCase()}
+              </span>
+            ))}
+          </div>
         )}
         <button
           className="rounded p-0.5 opacity-0 hover:bg-neutral-700 group-hover:opacity-100"

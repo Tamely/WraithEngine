@@ -81,6 +81,7 @@ private:
 
 private:
   void AcceptLoop();
+  void PresenceLoop();
   void HandleClient(uintptr_t ClientSocketValue);
   void BroadcastTextMessage(std::string Message);
   void CloseAllClients();
@@ -132,6 +133,7 @@ private:
   std::atomic<bool> m_TransportConnected{false};
   uintptr_t m_ListenSocket{static_cast<uintptr_t>(~0ull)};
   std::thread m_AcceptThread;
+  std::thread m_PresenceThread;
 
   mutable std::mutex m_ClientMutex;
   std::vector<WebSocketClient> m_WebSocketClients;

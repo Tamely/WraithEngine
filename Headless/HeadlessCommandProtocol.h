@@ -37,6 +37,7 @@ enum class HeadlessCommandType {
   GizmoDragUpdate,
   GizmoDragEnd,
   SetGizmoMode,
+  Heartbeat,
   RenderFrame,
   Quit,
 };

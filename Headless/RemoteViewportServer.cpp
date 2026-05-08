@@ -538,6 +538,7 @@ bool RemoteViewportServer::Start(std::string &Error) {
   m_StopRequested.store(false);
   m_Host.GetTransport().Connect(this);
   m_AcceptThread = std::thread([this]() { AcceptLoop(); });
+  m_PresenceThread = std::thread([this]() { PresenceLoop(); });
   return true;
 }
 
@@ -553,6 +554,9 @@ void RemoteViewportServer::Stop() {
   CloseAllClients();
   if (m_AcceptThread.joinable()) {
     m_AcceptThread.join();
+  }
+  if (m_PresenceThread.joinable()) {
+    m_PresenceThread.join();
   }
 
   m_Host.GetTransport().Disconnect(this);
@@ -600,6 +604,50 @@ void RemoteViewportServer::OnSessionTransportViewportFrame(
               .Pixels = Frame.Pixels,
           });
         }
+      }
+    }
+  }
+}
+
+static constexpr int AwayThresholdSeconds = 10;
+static constexpr int DisconnectThresholdSeconds = 30;
+static constexpr int PresenceCheckIntervalMs = 2000;
+
+void RemoteViewportServer::PresenceLoop() {
+  while (!m_StopRequested.load()) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(PresenceCheckIntervalMs));
+    if (m_StopRequested.load()) {
+      break;
+    }
+
+    const auto Now = std::chrono::steady_clock::now();
+    std::vector<std::pair<SessionUserId, EditorUserPresenceState>> Transitions;
+
+    {
+      std::scoped_lock Lock(m_ClientMutex);
+      for (const auto &[ClientId, Client] : m_RemoteClientsById) {
+        const auto Elapsed =
+            std::chrono::duration_cast<std::chrono::seconds>(Now - Client.LastActivity)
+                .count();
+        const EditorUserPresence *Presence =
+            m_Host.GetHeadlessLayer().GetSession().FindPresence(Client.User);
+        if (Presence == nullptr) {
+          continue;
+        }
+        if (Elapsed >= DisconnectThresholdSeconds &&
+            Presence->State == EditorUserPresenceState::Away) {
+          Transitions.emplace_back(Client.User, EditorUserPresenceState::Disconnected);
+        } else if (Elapsed >= AwayThresholdSeconds &&
+                   Presence->State == EditorUserPresenceState::Connected) {
+          Transitions.emplace_back(Client.User, EditorUserPresenceState::Away);
+        }
+      }
+    }
+
+    for (const auto &[User, State] : Transitions) {
+      m_Host.GetHeadlessLayer().GetSession().SetPresenceState(User, State);
+      if (State == EditorUserPresenceState::Disconnected) {
+        m_Host.GetHeadlessLayer().GetSession().ReleaseAllLocksForUser(User);
       }
     }
   }
@@ -1128,8 +1176,10 @@ bool RemoteViewportServer::HandleWebRtcCloseRequest(
       }
     }
     if (DisconnectedUser.has_value()) {
-      m_Host.GetHeadlessLayer().GetSession().SetPresenceState(
-          *DisconnectedUser, EditorUserPresenceState::Disconnected);
+      EditorSession &DisconnectSession = m_Host.GetHeadlessLayer().GetSession();
+      DisconnectSession.ReleaseAllLocksForUser(*DisconnectedUser);
+      DisconnectSession.SetPresenceState(*DisconnectedUser,
+                                         EditorUserPresenceState::Disconnected);
     }
     m_Host.RemoveRemoteRenderView(*ClientId);
   }
@@ -1417,6 +1467,7 @@ bool RemoteViewportServer::HandleWebSocketMessage(std::string_view Payload) {
   case HeadlessCommandType::GizmoDragUpdate:
   case HeadlessCommandType::GizmoDragEnd:
   case HeadlessCommandType::SetGizmoMode:
+  case HeadlessCommandType::Heartbeat:
     return false;
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
@@ -1462,6 +1513,15 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::SetTransform:
     m_Host.SubmitRemoteCommand(Client->User, Command->EditorPayload);
     return true;
+  case HeadlessCommandType::Heartbeat: {
+    const EditorUserPresence *Presence =
+        m_Host.GetHeadlessLayer().GetSession().FindPresence(Client->User);
+    if (Presence != nullptr && Presence->State == EditorUserPresenceState::Away) {
+      m_Host.GetHeadlessLayer().GetSession().SetPresenceState(
+          Client->User, EditorUserPresenceState::Connected);
+    }
+    return true;
+  }
   case HeadlessCommandType::SetGizmoMode:
     Client->CurrentGizmoMode = Command->Mode;
     m_Host.GetHeadlessLayer().SetGizmoMode(Client->User, Command->Mode);
@@ -1502,7 +1562,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     if (Client->GizmoDrag.has_value()) {
       return true;
     }
-    const EditorSession &Session =
+    EditorSession &Session =
         m_Host.GetHeadlessLayer().GetSession();
     const EditorViewportState *Viewport =
         Session.FindViewport(Client->User);
@@ -1533,6 +1593,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
           .Mode = GizmoMode::Rotate,
           .GizmoScaleAtDragStart = GizmoScale,
       };
+      Session.AcquireLock(Selected->ObjectId, Client->User);
       m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, DragState->Axis);
     } else {
       auto DragState = BeginGizmoDrag(
@@ -1549,6 +1610,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
           .Mode = Client->CurrentGizmoMode,
           .GizmoScaleAtDragStart = GizmoScale,
       };
+      Session.AcquireLock(Selected->ObjectId, Client->User);
       m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, DragState->Axis);
     }
     return true;
@@ -1602,7 +1664,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     if (!Client->GizmoDrag.has_value()) {
       return true;
     }
-    const EditorSession &Session =
+    EditorSession &Session =
         m_Host.GetHeadlessLayer().GetSession();
     const EditorViewportState *Viewport =
         Session.FindViewport(Client->User);
@@ -1640,7 +1702,9 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
       };
       m_Host.SubmitRemoteCommand(Client->User, Cmd);
     }
+    const std::string DragObjectId = Client->GizmoDrag->ObjectId;
     Client->GizmoDrag.reset();
+    Session.ReleaseLock(DragObjectId, Client->User);
     m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
     return true;
   }

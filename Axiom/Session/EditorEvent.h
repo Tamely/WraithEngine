@@ -83,6 +83,12 @@ struct ObjectTransformUpdatedEvent {
   glm::vec3 Scale{1.0f};
 };
 
+struct ObjectLockChangedEvent {
+  std::string ObjectId;
+  EditorObjectLockState LockState{EditorObjectLockState::Unlocked};
+  std::optional<SessionUserId> LockOwner;
+};
+
 using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         LookStateChangedEvent,
                                         CommandAcknowledgedEvent,
@@ -94,7 +100,8 @@ using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         ObjectCreatedEvent,
                                         ObjectDeletedEvent,
                                         ObjectReparentedEvent,
-                                        ObjectTransformUpdatedEvent>;
+                                        ObjectTransformUpdatedEvent,
+                                        ObjectLockChangedEvent>;
 
 struct EditorEvent {
   EditorEventPayload Payload;

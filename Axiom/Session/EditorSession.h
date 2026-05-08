@@ -89,8 +89,6 @@ struct EditorParticipant {
   std::optional<CameraState> Camera;
 };
 
-enum class EditorObjectLockState { Unlocked, Placeholder };
-
 struct EditorObjectCollaborationState {
   std::string ObjectId;
   EditorObjectLockState LockState{EditorObjectLockState::Unlocked};
@@ -160,6 +158,10 @@ public:
   std::vector<EditorParticipant> BuildParticipants(SessionUserId CurrentUser) const;
   const EditorObjectCollaborationState *FindCollaborationState(
       std::string_view ObjectId) const;
+
+  void AcquireLock(const std::string &ObjectId, SessionUserId User);
+  void ReleaseLock(const std::string &ObjectId, SessionUserId User);
+  void ReleaseAllLocksForUser(SessionUserId User);
 
 private:
   static std::unordered_map<std::string, EditorObjectDetails>

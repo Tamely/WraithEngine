@@ -155,6 +155,9 @@ std::string EventPayloadType(const EditorEventPayload &Payload) {
   if (std::holds_alternative<ObjectReparentedEvent>(Payload)) {
     return "object_reparented";
   }
+  if (std::holds_alternative<ObjectLockChangedEvent>(Payload)) {
+    return "object_lock_changed";
+  }
   return "object_transform_updated";
 }
 
@@ -192,8 +195,8 @@ std::string LockStateToString(EditorObjectLockState State) {
   switch (State) {
   case EditorObjectLockState::Unlocked:
     return "unlocked";
-  case EditorObjectLockState::Placeholder:
-    return "placeholder";
+  case EditorObjectLockState::Locked:
+    return "locked";
   }
 
   return "unlocked";
@@ -701,6 +704,9 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
   if (*Type == "gizmo_drag_start") return ParseMouseXY(HeadlessCommandType::GizmoDragStart);
   if (*Type == "gizmo_drag_update") return ParseMouseXY(HeadlessCommandType::GizmoDragUpdate);
   if (*Type == "gizmo_drag_end") return ParseMouseXY(HeadlessCommandType::GizmoDragEnd);
+  if (*Type == "heartbeat") {
+    return HeadlessCommand{.Type = HeadlessCommandType::Heartbeat};
+  }
   if (*Type == "set_gizmo_mode") {
     static const std::regex ModePattern(R"json("mode"\s*:\s*"([^"]+)")json");
     const auto ModeStr = MatchString(JsonLine, ModePattern);
@@ -744,6 +750,7 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::GizmoDragUpdate:
   case HeadlessCommandType::GizmoDragEnd:
   case HeadlessCommandType::SetGizmoMode:
+  case HeadlessCommandType::Heartbeat:
   case HeadlessCommandType::Quit:
     return Command;
   case HeadlessCommandType::LoadStartupScene:
@@ -865,6 +872,16 @@ std::string SerializeEvent(const PublishedEditorEvent &Event) {
            << Transform->RotationDegrees.z << "],\"scale\":["
            << Transform->Scale.x << "," << Transform->Scale.y << ","
            << Transform->Scale.z << "]";
+  } else if (const auto *LockChanged =
+                 std::get_if<ObjectLockChangedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"objectId\":\"" << EscapeJson(LockChanged->ObjectId)
+           << "\",\"lockState\":\"" << LockStateToString(LockChanged->LockState)
+           << "\",\"lockOwnerUserId\":";
+    if (LockChanged->LockOwner.has_value()) {
+      Stream << LockChanged->LockOwner->Value;
+    } else {
+      Stream << "null";
+    }
   }
   Stream << "}";
   return Stream.str();
