@@ -636,6 +636,52 @@ void EditorSession::RecomputeAllWorldTransforms() {
     RecomputeSubtreeWorldTransforms(Child);
 }
 
+void EditorSession::AcquireLock(const std::string &ObjectId, SessionUserId User) {
+  auto &Collab = m_State.Scene.CollaborationByObjectId[ObjectId];
+  if (Collab.LockState == EditorObjectLockState::Locked && Collab.LockOwner != User) {
+    return;
+  }
+  Collab.ObjectId = ObjectId;
+  Collab.LockState = EditorObjectLockState::Locked;
+  Collab.LockOwner = User;
+  PublishEvent({.Payload = ObjectLockChangedEvent{
+                    .ObjectId = ObjectId,
+                    .LockState = EditorObjectLockState::Locked,
+                    .LockOwner = User,
+                }});
+}
+
+void EditorSession::ReleaseLock(const std::string &ObjectId, SessionUserId User) {
+  const auto It = m_State.Scene.CollaborationByObjectId.find(ObjectId);
+  if (It == m_State.Scene.CollaborationByObjectId.end()) {
+    return;
+  }
+  if (It->second.LockOwner != User) {
+    return;
+  }
+  It->second.LockState = EditorObjectLockState::Unlocked;
+  It->second.LockOwner = std::nullopt;
+  PublishEvent({.Payload = ObjectLockChangedEvent{
+                    .ObjectId = ObjectId,
+                    .LockState = EditorObjectLockState::Unlocked,
+                    .LockOwner = std::nullopt,
+                }});
+}
+
+void EditorSession::ReleaseAllLocksForUser(SessionUserId User) {
+  for (auto &[ObjectId, Collab] : m_State.Scene.CollaborationByObjectId) {
+    if (Collab.LockOwner == User && Collab.LockState == EditorObjectLockState::Locked) {
+      Collab.LockState = EditorObjectLockState::Unlocked;
+      Collab.LockOwner = std::nullopt;
+      PublishEvent({.Payload = ObjectLockChangedEvent{
+                        .ObjectId = ObjectId,
+                        .LockState = EditorObjectLockState::Unlocked,
+                        .LockOwner = std::nullopt,
+                    }});
+    }
+  }
+}
+
 void EditorSession::PublishPresenceChangedEvent(SessionUserId User) {
   const EditorParticipant Participant = BuildParticipant(User);
   PublishEvent({.Payload = PresenceChangedEvent{
@@ -748,6 +794,32 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
     if (FindSceneItem(SelectionCommand->ObjectId) == nullptr) {
       FailureReason = "Selection targeted an unknown object.";
       return false;
+    }
+  }
+
+  // Lock guard: reject mutating commands if another user owns the lock.
+  {
+    const std::string *LockedObjectId = nullptr;
+    std::string SingleId;
+    if (const auto *C = std::get_if<SetTransformCommand>(&QueuedCommand.Command.Payload))
+      SingleId = C->ObjectId;
+    else if (const auto *C = std::get_if<RenameObjectCommand>(&QueuedCommand.Command.Payload))
+      SingleId = C->ObjectId;
+    else if (const auto *C = std::get_if<SetObjectVisibilityCommand>(&QueuedCommand.Command.Payload))
+      SingleId = C->ObjectId;
+    else if (const auto *C = std::get_if<DeleteObjectCommand>(&QueuedCommand.Command.Payload))
+      SingleId = C->ObjectId;
+    else if (const auto *C = std::get_if<ReparentObjectCommand>(&QueuedCommand.Command.Payload))
+      SingleId = C->ObjectId;
+    if (!SingleId.empty()) {
+      const auto CollabIt = m_State.Scene.CollaborationByObjectId.find(SingleId);
+      if (CollabIt != m_State.Scene.CollaborationByObjectId.end() &&
+          CollabIt->second.LockState == EditorObjectLockState::Locked &&
+          CollabIt->second.LockOwner.has_value() &&
+          *CollabIt->second.LockOwner != QueuedCommand.Context.User) {
+        FailureReason = "Object is locked by another user.";
+        return false;
+      }
     }
   }
 

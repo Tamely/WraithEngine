@@ -240,6 +240,7 @@ export function Viewport() {
     clearSessionSnapshot,
     applySelectionChanged,
     applyParticipantCameraUpdate,
+    applyObjectLockChanged,
     setSessionState,
     sessionStatusText,
     setSessionStatusText,
@@ -662,6 +663,20 @@ export function Viewport() {
       if (message.payloadType === "object_deleted") {
         setSessionUi("session-ready", "Session ready", "Object deleted.")
         void refreshSessionSnapshotSafely("event")
+        return
+      }
+
+      if (message.payloadType === "object_lock_changed") {
+        const objectId = typeof message.objectId === "string" ? message.objectId : null
+        const lockState =
+          message.lockState === "locked" || message.lockState === "unlocked"
+            ? message.lockState
+            : "unlocked"
+        const lockOwnerUserId =
+          typeof message.lockOwnerUserId === "number" ? message.lockOwnerUserId : null
+        if (objectId) {
+          applyObjectLockChanged(objectId, lockState, lockOwnerUserId)
+        }
         return
       }
 

@@ -340,7 +340,7 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
                   "PlayerCharacter",
                   Axiom::EditorObjectCollaborationState{
                       .ObjectId = "PlayerCharacter",
-                      .LockState = Axiom::EditorObjectLockState::Placeholder,
+                      .LockState = Axiom::EditorObjectLockState::Locked,
                       .LockOwner = Axiom::SessionUserId{1},
                   },
               }},
@@ -368,7 +368,7 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
   EXPECT_NE(Json.find("\"transformReadOnly\":true"), std::string::npos);
   EXPECT_NE(Json.find("\"location\":[1,2,3]"), std::string::npos);
   EXPECT_NE(Json.find("\"selectedByUserIds\":[1]"), std::string::npos);
-  EXPECT_NE(Json.find("\"lockState\":\"placeholder\""), std::string::npos);
+  EXPECT_NE(Json.find("\"lockState\":\"locked\""), std::string::npos);
   EXPECT_NE(Json.find("\"lockOwnerUserId\":1"), std::string::npos);
 }
 

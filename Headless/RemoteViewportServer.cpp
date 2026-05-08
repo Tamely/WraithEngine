@@ -1128,8 +1128,10 @@ bool RemoteViewportServer::HandleWebRtcCloseRequest(
       }
     }
     if (DisconnectedUser.has_value()) {
-      m_Host.GetHeadlessLayer().GetSession().SetPresenceState(
-          *DisconnectedUser, EditorUserPresenceState::Disconnected);
+      EditorSession &DisconnectSession = m_Host.GetHeadlessLayer().GetSession();
+      DisconnectSession.ReleaseAllLocksForUser(*DisconnectedUser);
+      DisconnectSession.SetPresenceState(*DisconnectedUser,
+                                         EditorUserPresenceState::Disconnected);
     }
     m_Host.RemoveRemoteRenderView(*ClientId);
   }
@@ -1502,7 +1504,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     if (Client->GizmoDrag.has_value()) {
       return true;
     }
-    const EditorSession &Session =
+    EditorSession &Session =
         m_Host.GetHeadlessLayer().GetSession();
     const EditorViewportState *Viewport =
         Session.FindViewport(Client->User);
@@ -1533,6 +1535,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
           .Mode = GizmoMode::Rotate,
           .GizmoScaleAtDragStart = GizmoScale,
       };
+      Session.AcquireLock(Selected->ObjectId, Client->User);
       m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, DragState->Axis);
     } else {
       auto DragState = BeginGizmoDrag(
@@ -1549,6 +1552,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
           .Mode = Client->CurrentGizmoMode,
           .GizmoScaleAtDragStart = GizmoScale,
       };
+      Session.AcquireLock(Selected->ObjectId, Client->User);
       m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, DragState->Axis);
     }
     return true;
@@ -1602,7 +1606,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     if (!Client->GizmoDrag.has_value()) {
       return true;
     }
-    const EditorSession &Session =
+    EditorSession &Session =
         m_Host.GetHeadlessLayer().GetSession();
     const EditorViewportState *Viewport =
         Session.FindViewport(Client->User);
@@ -1640,7 +1644,9 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
       };
       m_Host.SubmitRemoteCommand(Client->User, Cmd);
     }
+    const std::string DragObjectId = Client->GizmoDrag->ObjectId;
     Client->GizmoDrag.reset();
+    Session.ReleaseLock(DragObjectId, Client->User);
     m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
     return true;
   }

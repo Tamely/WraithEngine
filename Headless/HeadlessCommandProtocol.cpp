@@ -155,6 +155,9 @@ std::string EventPayloadType(const EditorEventPayload &Payload) {
   if (std::holds_alternative<ObjectReparentedEvent>(Payload)) {
     return "object_reparented";
   }
+  if (std::holds_alternative<ObjectLockChangedEvent>(Payload)) {
+    return "object_lock_changed";
+  }
   return "object_transform_updated";
 }
 
@@ -192,8 +195,8 @@ std::string LockStateToString(EditorObjectLockState State) {
   switch (State) {
   case EditorObjectLockState::Unlocked:
     return "unlocked";
-  case EditorObjectLockState::Placeholder:
-    return "placeholder";
+  case EditorObjectLockState::Locked:
+    return "locked";
   }
 
   return "unlocked";
@@ -865,6 +868,16 @@ std::string SerializeEvent(const PublishedEditorEvent &Event) {
            << Transform->RotationDegrees.z << "],\"scale\":["
            << Transform->Scale.x << "," << Transform->Scale.y << ","
            << Transform->Scale.z << "]";
+  } else if (const auto *LockChanged =
+                 std::get_if<ObjectLockChangedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"objectId\":\"" << EscapeJson(LockChanged->ObjectId)
+           << "\",\"lockState\":\"" << LockStateToString(LockChanged->LockState)
+           << "\",\"lockOwnerUserId\":";
+    if (LockChanged->LockOwner.has_value()) {
+      Stream << LockChanged->LockOwner->Value;
+    } else {
+      Stream << "null";
+    }
   }
   Stream << "}";
   return Stream.str();

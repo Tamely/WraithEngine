@@ -80,7 +80,7 @@ export interface SessionObjectDetails {
   transform: SessionTransformDetails | null
   collaboration: {
     selectedByUserIds: number[]
-    lockState: "unlocked" | "placeholder"
+    lockState: "unlocked" | "locked"
     lockOwnerUserId: number | null
   }
 }
@@ -148,6 +148,11 @@ interface RemoteViewportContextValue {
   applyParticipantCameraUpdate: (
     userId: number,
     camera: SessionParticipant["camera"]
+  ) => void
+  applyObjectLockChanged: (
+    objectId: string,
+    lockState: "unlocked" | "locked",
+    lockOwnerUserId: number | null
   ) => void
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
@@ -288,6 +293,23 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     []
   )
 
+  const applyObjectLockChanged = useCallback(
+    (objectId: string, lockState: "unlocked" | "locked", lockOwnerUserId: number | null) => {
+      setSelectedObjectDetails((current) => {
+        if (!current || current.objectId !== objectId) return current
+        return {
+          ...current,
+          collaboration: {
+            ...current.collaboration,
+            lockState,
+            lockOwnerUserId,
+          },
+        }
+      })
+    },
+    []
+  )
+
   const reconnect = useCallback(async () => {
     await actionsRef.current.reconnect()
   }, [])
@@ -389,6 +411,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       clearSessionSnapshot,
       applySelectionChanged,
       applyParticipantCameraUpdate,
+      applyObjectLockChanged,
       reconnect,
       toggleLook,
       setMode,
@@ -407,6 +430,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     [
       appendEventLog,
       applySelectionChanged,
+      applyObjectLockChanged,
       applyParticipantCameraUpdate,
       clearEventLog,
       connectionState,

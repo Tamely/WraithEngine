@@ -30,4 +30,6 @@ struct SessionUserIdHash {
     return static_cast<size_t>(Id.Value);
   }
 };
+
+enum class EditorObjectLockState { Unlocked, Locked };
 } // namespace Axiom
