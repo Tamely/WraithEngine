@@ -154,6 +154,7 @@ interface RemoteViewportContextValue {
     lockState: "unlocked" | "locked",
     lockOwnerUserId: number | null
   ) => void
+  lockedObjects: Record<string, number>
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
@@ -239,6 +240,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
   const [selections, setSelections] = useState<SessionSelection[]>([])
   const [selectedObjectDetails, setSelectedObjectDetails] =
     useState<SessionObjectDetails | null>(null)
+  const [lockedObjects, setLockedObjects] = useState<Record<string, number>>({})
 
   const appendEventLog = useCallback((value: string) => {
     setEventLog((current) => [value, ...current].slice(0, MAX_LOG_LINES))
@@ -273,6 +275,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     setSceneTree([])
     setSelections([])
     setSelectedObjectDetails(null)
+    setLockedObjects({})
   }, [])
 
   const applySelectionChanged = useCallback((userId: number, objectId: string | null) => {
@@ -305,6 +308,14 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
             lockOwnerUserId,
           },
         }
+      })
+      setLockedObjects((current) => {
+        if (lockState === "locked" && lockOwnerUserId !== null) {
+          return { ...current, [objectId]: lockOwnerUserId }
+        }
+        const next = { ...current }
+        delete next[objectId]
+        return next
       })
     },
     []
@@ -394,6 +405,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       selectedObject,
       selectedObjectDetails,
       selections,
+      lockedObjects,
       setConnectionState,
       setSessionState,
       setStatusText,
@@ -456,6 +468,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       selectedObjectDetails,
       selectedObjectId,
       selections,
+      lockedObjects,
       serverOrigin,
       gizmoMode,
       setMode,
