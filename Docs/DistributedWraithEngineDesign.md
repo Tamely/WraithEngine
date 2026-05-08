@@ -2,7 +2,7 @@
 
 ## Document Status
 - Status: Draft
-- Date: 2026-05-07
+- Date: 2026-05-08
 - Audience: Engine, tools, networking, web, and infrastructure contributors
 - Intended outcome: Establish the target architecture for evolving WraithEngine into a distributed game engine and browser-based collaborative editor
 
@@ -54,6 +54,15 @@
 - `ObjectLockChangedEvent` is serialized as `object_lock_changed` and consumed by the browser to keep a `lockedObjects` map in `RemoteViewportContext`
 - the outliner renders per-row avatar chips for selecting users and a lock icon in the locking user's color; the `PresenceRoster` component shows participant chips with green/yellow/grey status dots in the toolbar
 - heartbeat: browser sends `{ "type": "heartbeat" }` on the reliable data channel every 4 s; `PresenceLoop` background thread transitions Connected → Away at 10 s and Away → Disconnected at 30 s of inactivity
+- Phase 5 (Reflection and Asset Evolution) is now implemented: `AssetId` stable identity type, `IAssetSource` / `LocalAssetSource` VFS abstraction, `ListAssets` / `GetSchema` / `SetProperty` / `SaveScene` commands, `SceneFile` JSON serializer/parser, and content browser + details panel wired to live server data
+- `AssetId` mirrors `SessionUserId` with a stable hash-derived `uint64_t` value; `LocalAssetSource` scans a root directory for `.glb`, `.gltf`, `.png`, `.jpg`, `.jpeg` files and derives IDs from hashed relative paths
+- `IAssetSource` interface exposes `Resolve(AssetId)` → `optional<path>` and `List()` → `vector<AssetDescriptor>`; engine-internal paths use `ResolveRelative` as a typed wrapper over the `AXIOM_CONTENT_DIR` macro (retained for shaders)
+- `ListAssets` command returns `{"type":"asset_list","assets":[{id,name,kind,path}...]}`; the content browser triggers it on connection and renders real assets in grid/list views with mesh/texture filter tabs and a Refresh button
+- `GetSchema` command returns `{"type":"object_schema","objectId":"...","className":"...","properties":[{name,type,readOnly}...]}`; the details panel fetches schema on selection change and shows a `className` badge in the panel header
+- `SetProperty` command dispatches to `RenameObjectCommand`, `SetObjectVisibilityCommand`, or `SetTransformCommand` based on property name; vec3 fields (location, rotationDegrees, scale) read the current transform from `ObjectDetailsById` and patch only the changed component
+- `SceneFile` (`Axiom/Assets/SceneFile.h/.cpp`) provides `SaveSceneToFile` / `LoadSceneFromFile`; serialization uses a manual `ostringstream` JSON emitter in flat-node format with `parentId` links; deserialization uses a purpose-built recursive descent parser (no external JSON library)
+- `LoadStartupScene` now checks for `Content/scene.json` first and falls back to the hardcoded default scene; scene state persists across server restarts automatically
+- `SaveScene` command writes `Content/scene.json` and replies with `{"type":"scene_saved"}` or `{"type":"scene_save_failed"}`; the toolbar Save button animates to a green checkmark for 2.5 s on success or a red X on failure
 
 ## 1. Executive Summary
 WraithEngine will evolve from a single-process native editor into a distributed platform with one shared C++ engine runtime that supports two execution styles:
@@ -998,6 +1007,20 @@ Progress update:
 - metadata persistence
 - first custom cooked asset containers
 
+Progress update:
+
+- `AssetId` stable identity type added to `Axiom/Session/SessionTypes.h`, mirroring `SessionUserId` / `SessionUserIdHash`
+- `IAssetSource` / `LocalAssetSource` VFS abstraction introduced in `Axiom/Assets/IAssetSource.h/.cpp`; `LocalAssetSource` scans a root directory and derives stable `AssetId` values from hashed relative paths; `ResolveRelative` provides typed engine-internal path lookup
+- `ListAssets`, `GetSchema`, `SetProperty`, and `SaveScene` command types added to `HeadlessCommandType` and `ParseRemoteViewportCommand`; all four are handled in both the WebSocket and WebRTC dispatch paths in `RemoteViewportServer`
+- `SerializeAssetList`, `SerializeObjectSchema`, and `SerializeSaveResult` serializers added to `HeadlessCommandProtocol`
+- `SceneFile` serializer/parser implemented in `Axiom/Assets/SceneFile.h/.cpp` using a manual ostringstream JSON emitter and a purpose-built recursive descent parser; flat-node format with `parentId` links avoids any external JSON library dependency
+- `LoadStartupScene` now checks for `Content/scene.json` first and falls back to the hardcoded default startup scene, making scene state persistent across restarts
+- `SaveScene` command writes `Content/scene.json` at runtime and returns `scene_saved` or `scene_save_failed`; the pre-existing toolbar Save button is now wired end-to-end and animates to a green checkmark (success) or red X (failure) for 2.5 s
+- content browser replaced with a live server-driven implementation: `listAssets` is dispatched on connection, results populate grid/list views with mesh/texture filter tabs and a Refresh button
+- details panel now fetches schema dynamically via `getSchema` on each selection change; `className` badge is shown in the panel header; property `readOnly` flags gate transform editing
+- `SetProperty` dispatches per-property to the appropriate existing command (`RenameObject`, `SetObjectVisibility`, or `SetTransform`); vec3 properties patch the current transform so only the changed axis changes
+- cooked asset containers remain future work; `IAssetSource` and `AssetId` establish the identity foundation they will build on
+
 ### Phase 6: C# Scripting
 - engine API assembly
 - host bridge
@@ -1086,7 +1109,8 @@ Progress update:
 - a server-side transform gizmo is now implemented across all three modes (Translate, Scale, Rotate); the toolbar Move/Rotate/Scale buttons and Q/E/R shortcuts switch modes with active-state feedback; dragging any handle drives `SetTransformCommand` through the same authoritative command path
 - reparent is implemented: any object can be dragged onto any other in the outliner; transforms are stored in local space and world transforms are recomputed for the entire moved subtree
 - Collaboration v1 is complete: object locking prevents simultaneous gizmo conflicts, presence roster shows connected users, and the heartbeat/timeout loop handles hard tab closes
-- the next step is deeper WebRTC sender/playout latency tuning for the remote viewport stream
+- Phase 5 (Reflection and Asset Evolution) is complete: `AssetId` stable identity, `IAssetSource` / `LocalAssetSource` VFS, `ListAssets` / `GetSchema` / `SetProperty` / `SaveScene` commands, `SceneFile` JSON persistence, content browser wired to live asset catalogue, details panel schema-driven, toolbar Save button with success/failure animation
+- the next step is Phase 6: C# scripting host and engine API assembly
 
 That slice proves the core thesis:
 
