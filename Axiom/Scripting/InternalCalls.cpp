@@ -12,14 +12,17 @@ namespace {
 Axiom::EditorSession *s_Session = nullptr;
 Axiom::SessionId s_SessionId{1};
 Axiom::SessionUserId s_UserId{1};
+bool s_IsRestricted = false;
 } // namespace
 
 namespace Axiom::InternalCalls {
 
-void Bind(EditorSession &Session, SessionId Id, SessionUserId UserId) {
+void Bind(EditorSession &Session, SessionId Id, SessionUserId UserId,
+          bool IsRestricted) {
   s_Session = &Session;
   s_SessionId = Id;
   s_UserId = UserId;
+  s_IsRestricted = IsRestricted;
 }
 
 // ---------------------------------------------------------------------------
@@ -75,6 +78,10 @@ Coral::Bool32 GameObject_GetVisible(Coral::String ObjectId) {
   std::string id = ObjectId;
   const auto *Details = s_Session->FindObjectDetails(id);
   return Details ? static_cast<Coral::Bool32>(Details->Visible ? 1u : 0u) : 1u;
+}
+
+Coral::Bool32 ScriptSecurity_IsRestricted() {
+  return static_cast<Coral::Bool32>(s_IsRestricted ? 1u : 0u);
 }
 
 #endif // AXIOM_SCRIPTING_ENABLED

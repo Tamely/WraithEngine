@@ -10,6 +10,9 @@ option(AXIOM_ENABLE_SCRIPTING
        "Enable the Coral C# scripting host" OFF)
 option(AXIOM_SCRIPTING_WATCH
        "Auto-reload user scripts when the assembly changes on disk (macOS kqueue)" OFF)
+set(AXIOM_SCRIPTING_TRUST_DEFAULT "Restricted" CACHE STRING
+    "Default trust profile for user scripts: Restricted (hosted) or Trusted (local)")
+set_property(CACHE AXIOM_SCRIPTING_TRUST_DEFAULT PROPERTY STRINGS "Restricted" "Trusted")
 option(AXIOM_ENABLE_WEBRTC
        "Enable the macOS WebRTC transport integration seam" OFF)
 set(AXIOM_WEBRTC_FRAMEWORK_PATH "" CACHE PATH

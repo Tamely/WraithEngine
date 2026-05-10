@@ -19,7 +19,9 @@ ScriptHost::~ScriptHost() {
   }
 }
 
-void ScriptHost::Initialize(const std::filesystem::path &CoralManagedDir) {
+void ScriptHost::Initialize(const std::filesystem::path &CoralManagedDir,
+                            ScriptTrustProfile TrustProfile) {
+  m_TrustProfile = TrustProfile;
 #if AXIOM_SCRIPTING_ENABLED
   Coral::HostSettings Settings{
       .CoralDirectory = CoralManagedDir.string(),
@@ -48,7 +50,8 @@ void ScriptHost::Initialize(const std::filesystem::path &CoralManagedDir) {
   switch (Status) {
   case Coral::CoralInitStatus::Success:
     m_Initialized = true;
-    A_CORE_INFO("ScriptHost initialized (Coral managed runtime ready)");
+    A_CORE_INFO("ScriptHost initialized (Coral managed runtime ready, trust={})",
+                TrustProfile == ScriptTrustProfile::Restricted ? "Restricted" : "Trusted");
     break;
   case Coral::CoralInitStatus::DotNetNotFound:
     A_CORE_ERROR("ScriptHost: .NET runtime not found — scripting unavailable");
@@ -112,8 +115,9 @@ void ScriptHost::RegisterInternalCalls(EditorSession &Session, SessionId Id,
     return;
   }
 
-  // Bind the session pointer used by the call implementations
-  InternalCalls::Bind(Session, Id, UserId);
+  // Bind the session pointer, credentials, and trust profile
+  InternalCalls::Bind(Session, Id, UserId,
+                      m_TrustProfile == ScriptTrustProfile::Restricted);
 
   m_EngineAssembly->AddInternalCall(
       "WraithEngine.GameObject", "s_GetName",
@@ -127,9 +131,14 @@ void ScriptHost::RegisterInternalCalls(EditorSession &Session, SessionId Id,
   m_EngineAssembly->AddInternalCall(
       "WraithEngine.GameObject", "s_GetVisible",
       reinterpret_cast<void *>(&InternalCalls::GameObject_GetVisible));
+  m_EngineAssembly->AddInternalCall(
+      "WraithEngine.Internal.ScriptSecurity", "s_IsRestricted",
+      reinterpret_cast<void *>(&InternalCalls::ScriptSecurity_IsRestricted));
 
   m_EngineAssembly->UploadInternalCalls();
-  A_CORE_INFO("ScriptHost: internal calls registered");
+  A_CORE_INFO("ScriptHost: internal calls registered (trust={})",
+              m_TrustProfile == ScriptTrustProfile::Restricted ? "Restricted"
+                                                                : "Trusted");
 #else
   (void)Id;
   (void)UserId;
@@ -167,6 +176,29 @@ void ScriptHost::LoadUserAssembly(const std::filesystem::path &AssemblyPath) {
   m_UserAssemblyPath = AssemblyPath;
   m_UserAssemblyLoaded = true;
   A_CORE_INFO("ScriptHost: user assembly loaded ({})", Assembly.GetName());
+
+  // In Restricted mode, validate that the user assembly does not reference
+  // any blocked assemblies before allowing any script instantiation.
+  if (m_TrustProfile == ScriptTrustProfile::Restricted &&
+      m_EngineAssembly != nullptr) {
+    auto PathStr = Coral::String::New(AssemblyPath.string());
+    try {
+      m_EngineAssembly->GetType("WraithEngine.Internal.ScriptSecurity")
+          .InvokeStaticMethod("ValidateUserAssembly", PathStr);
+      A_CORE_INFO("ScriptHost: user assembly passed Restricted-mode security "
+                  "validation");
+    } catch (const std::exception &Ex) {
+      Coral::String::Free(PathStr);
+      A_CORE_ERROR(
+          "ScriptHost: user assembly REJECTED by security policy — {}", Ex.what());
+      // Unload the assembly so no scripts can be instantiated from it.
+      m_Host.UnloadAssemblyLoadContext(m_UserALC);
+      m_UserAssembly = nullptr;
+      m_UserAssemblyLoaded = false;
+      return;
+    }
+    Coral::String::Free(PathStr);
+  }
 
   // Re-instantiate scripts for all existing Actors that already have a
   // ScriptClass set (e.g. loaded from scene.json).
@@ -229,6 +261,26 @@ void ScriptHost::ReloadUserAssembly() {
   m_UserAssembly = &Assembly;
   m_UserAssemblyLoaded = true;
   A_CORE_INFO("ScriptHost: user assembly reloaded ({})", Assembly.GetName());
+
+  // Re-validate security policy after reload (the DLL may have changed).
+  if (m_TrustProfile == ScriptTrustProfile::Restricted &&
+      m_EngineAssembly != nullptr) {
+    auto PathStr = Coral::String::New(m_UserAssemblyPath.string());
+    try {
+      m_EngineAssembly->GetType("WraithEngine.Internal.ScriptSecurity")
+          .InvokeStaticMethod("ValidateUserAssembly", PathStr);
+    } catch (const std::exception &Ex) {
+      Coral::String::Free(PathStr);
+      A_CORE_ERROR(
+          "ScriptHost: reloaded assembly REJECTED by security policy — {}",
+          Ex.what());
+      m_Host.UnloadAssemblyLoadContext(m_UserALC);
+      m_UserAssembly = nullptr;
+      m_UserAssemblyLoaded = false;
+      return;
+    }
+    Coral::String::Free(PathStr);
+  }
 
   // 5. Re-instantiate every script that existed before the reload
   for (const auto &[ObjectId, ClassName] : ToReinstate) {

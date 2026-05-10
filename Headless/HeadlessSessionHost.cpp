@@ -35,7 +35,10 @@ HeadlessSessionHost::HeadlessSessionHost(const ApplicationArgs &Args,
         return std::nullopt;
       });
   SetViewportFrameOutput(m_FrameBridge.get());
-  m_ScriptHost.Initialize(AXIOM_CORAL_MANAGED_DIR);
+  m_ScriptHost.Initialize(
+      AXIOM_CORAL_MANAGED_DIR,
+      AXIOM_SCRIPTING_TRUST_RESTRICTED ? ScriptTrustProfile::Restricted
+                                       : ScriptTrustProfile::Trusted);
   m_ScriptHost.LoadEngineAssembly(AXIOM_MANAGED_DIR);
   m_ScriptHost.RegisterInternalCalls(m_Layer->GetSession(),
                                      SessionId{1},

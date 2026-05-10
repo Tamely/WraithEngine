@@ -18,6 +18,18 @@
 namespace Axiom {
 class EditorSession;
 
+/// Controls what the user-script sandbox is allowed to do.
+///
+/// Restricted  — default for hosted (AxiomRemoteViewportServer) deployments.
+///               Blocks dynamic loading of networking, emit, and process
+///               assemblies; validates user assembly manifest references
+///               before any scripts are instantiated.
+///
+/// Trusted     — default for the native editor and local dev workflows.
+///               No additional restrictions; user scripts have access to the
+///               full BCL.
+enum class ScriptTrustProfile { Restricted, Trusted };
+
 class ScriptHost final : public IEditorEventSubscriber {
 public:
   ScriptHost() = default;
@@ -29,7 +41,8 @@ public:
   // -----------------------------------------------------------------------
   // Initialisation (called from HeadlessSessionHost)
   // -----------------------------------------------------------------------
-  void Initialize(const std::filesystem::path &CoralManagedDir);
+  void Initialize(const std::filesystem::path &CoralManagedDir,
+                  ScriptTrustProfile TrustProfile = ScriptTrustProfile::Restricted);
   void LoadEngineAssembly(const std::filesystem::path &ManagedDir);
   void RegisterInternalCalls(EditorSession &Session, SessionId Id,
                              SessionUserId UserId);
@@ -71,6 +84,10 @@ public:
   bool IsInitialized() const { return m_Initialized; }
   bool IsEngineAssemblyLoaded() const { return m_EngineAssemblyLoaded; }
   bool IsUserAssemblyLoaded() const { return m_UserAssemblyLoaded; }
+  ScriptTrustProfile GetTrustProfile() const { return m_TrustProfile; }
+  bool IsRestricted() const {
+    return m_TrustProfile == ScriptTrustProfile::Restricted;
+  }
   const std::filesystem::path &GetUserAssemblyPath() const {
     return m_UserAssemblyPath;
   }
@@ -104,6 +121,7 @@ private:
 #endif
   EditorSession *m_Session{nullptr};
   std::filesystem::path m_UserAssemblyPath;
+  ScriptTrustProfile m_TrustProfile{ScriptTrustProfile::Restricted};
   bool m_Initialized{false};
   bool m_EngineAssemblyLoaded{false};
   bool m_UserAssemblyLoaded{false};
