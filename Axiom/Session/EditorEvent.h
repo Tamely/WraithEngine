@@ -94,6 +94,11 @@ struct ScriptClassChangedEvent {
   std::optional<std::string> ScriptClass; // nullopt = script detached
 };
 
+struct ScriptErrorEvent {
+  std::string ObjectId;
+  std::string Message;
+};
+
 using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         LookStateChangedEvent,
                                         CommandAcknowledgedEvent,
@@ -107,7 +112,8 @@ using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         ObjectReparentedEvent,
                                         ObjectTransformUpdatedEvent,
                                         ObjectLockChangedEvent,
-                                        ScriptClassChangedEvent>;
+                                        ScriptClassChangedEvent,
+                                        ScriptErrorEvent>;
 
 struct EditorEvent {
   EditorEventPayload Payload;

@@ -428,6 +428,9 @@ void ScriptHost::InstantiateScript(const std::string &ObjectId,
   } catch (const std::exception &Ex) {
     A_CORE_ERROR("ScriptHost: OnCreate threw for '{}' (type '{}'): {}",
                  ObjectId, ScriptClassName, Ex.what());
+    if (m_Session != nullptr) {
+      m_Session->PublishScriptError(ObjectId, Ex.what());
+    }
   }
 
   m_ScriptInstances.emplace(ObjectId, std::move(Instance));
@@ -448,6 +451,9 @@ void ScriptHost::DestroyScript(const std::string &ObjectId) {
     It->second.InvokeMethod("OnDestroy");
   } catch (const std::exception &Ex) {
     A_CORE_WARN("ScriptHost: OnDestroy threw for '{}': {}", ObjectId, Ex.what());
+    if (m_Session != nullptr) {
+      m_Session->PublishScriptError(ObjectId, Ex.what());
+    }
   }
 
   m_ScriptInstances.erase(It);

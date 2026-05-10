@@ -163,6 +163,7 @@ public:
   void AcquireLock(const std::string &ObjectId, SessionUserId User);
   void ReleaseLock(const std::string &ObjectId, SessionUserId User);
   void ReleaseAllLocksForUser(SessionUserId User);
+  void PublishScriptError(const std::string &ObjectId, const std::string &Message);
 
 private:
   static std::unordered_map<std::string, EditorObjectDetails>

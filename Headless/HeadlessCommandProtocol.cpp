@@ -161,6 +161,9 @@ std::string EventPayloadType(const EditorEventPayload &Payload) {
   if (std::holds_alternative<ScriptClassChangedEvent>(Payload)) {
     return "script_class_changed";
   }
+  if (std::holds_alternative<ScriptErrorEvent>(Payload)) {
+    return "script_error";
+  }
   return "object_transform_updated";
 }
 
@@ -971,6 +974,10 @@ std::string SerializeEvent(const PublishedEditorEvent &Event) {
     } else {
       Stream << "null";
     }
+  } else if (const auto *ScriptError =
+                 std::get_if<ScriptErrorEvent>(&Event.Event.Payload)) {
+    Stream << ",\"objectId\":\"" << EscapeJson(ScriptError->ObjectId)
+           << "\",\"message\":\"" << EscapeJson(ScriptError->Message) << "\"";
   }
   Stream << "}";
   return Stream.str();

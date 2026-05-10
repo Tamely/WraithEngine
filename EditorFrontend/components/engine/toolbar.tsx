@@ -21,18 +21,34 @@ import {
   Layers,
   Sun,
   Camera,
+  RefreshCw,
 } from "lucide-react"
 import { useRemoteViewport } from "./remote-viewport-context"
 import { PresenceRoster } from "./presence-roster"
 
 export function Toolbar() {
-  const { gizmoMode, setGizmoMode, saveScene, saveStatus, setSaveStatus } = useRemoteViewport()
+  const {
+    gizmoMode,
+    setGizmoMode,
+    saveScene,
+    saveStatus,
+    setSaveStatus,
+    reloadScripts,
+    reloadStatus,
+    setReloadStatus,
+  } = useRemoteViewport()
 
   useEffect(() => {
     if (saveStatus !== "saved" && saveStatus !== "failed") return
     const timer = window.setTimeout(() => setSaveStatus("idle"), 2500)
     return () => window.clearTimeout(timer)
   }, [saveStatus, setSaveStatus])
+
+  useEffect(() => {
+    if (reloadStatus !== "reloaded" && reloadStatus !== "failed") return
+    const timer = window.setTimeout(() => setReloadStatus("idle"), 2500)
+    return () => window.clearTimeout(timer)
+  }, [reloadStatus, setReloadStatus])
 
   return (
     <div className="flex items-center h-10 bg-neutral-950 border-b border-neutral-800 px-2 gap-1">
@@ -52,6 +68,20 @@ export function Toolbar() {
           }
         />
         <ToolbarButton icon={FolderOpen} tooltip="Open" />
+        <ToolbarButton
+          icon={reloadStatus === "reloaded" ? Check : reloadStatus === "failed" ? X : RefreshCw}
+          tooltip="Reload Scripts"
+          onClick={() => void reloadScripts()}
+          className={
+            reloadStatus === "reloaded"
+              ? "text-green-400"
+              : reloadStatus === "failed"
+              ? "text-red-400"
+              : reloadStatus === "reloading"
+              ? "opacity-50"
+              : undefined
+          }
+        />
       </ToolbarGroup>
 
       <ToolbarDivider />

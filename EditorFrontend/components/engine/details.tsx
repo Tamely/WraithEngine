@@ -1,6 +1,6 @@
 "use client"
 
-import { Lock, Settings, Unlock } from "lucide-react"
+import { Code, Lock, Settings, Unlock } from "lucide-react"
 import { useEffect, useState } from "react"
 import {
   useRemoteViewport,
@@ -187,6 +187,15 @@ function DetailsContent({
         </div>
       </section>
 
+      {details.kind === "actor" && (
+        <ScriptSection
+          objectId={details.objectId}
+          schema={schema}
+          isSaving={isSaving}
+          setIsSaving={setIsSaving}
+        />
+      )}
+
       <section className="rounded border border-neutral-800 bg-neutral-950/60 p-3">
         <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">Transform</p>
         {details.capabilities.supportsTransform && details.transform ? (
@@ -232,6 +241,90 @@ function DetailsContent({
         )}
       </section>
     </div>
+  )
+}
+
+function ScriptSection({
+  objectId,
+  schema,
+  isSaving,
+  setIsSaving,
+}: {
+  objectId: string
+  schema: SessionObjectSchema | null
+  isSaving: boolean
+  setIsSaving: (value: boolean) => void
+}) {
+  const { setProperty } = useRemoteViewport()
+  const scriptProp = schema?.properties.find((p) => p.name === "scriptClass")
+  const currentValue = scriptProp?.value ?? ""
+  const [draftClass, setDraftClass] = useState(currentValue)
+
+  useEffect(() => {
+    setDraftClass(scriptProp?.value ?? "")
+  }, [objectId, scriptProp?.value])
+
+  async function applyScriptClass() {
+    setIsSaving(true)
+    try {
+      await setProperty(objectId, "scriptClass", draftClass.trim())
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  async function detachScript() {
+    setIsSaving(true)
+    try {
+      await setProperty(objectId, "scriptClass", "")
+      setDraftClass("")
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  return (
+    <section className="rounded border border-neutral-800 bg-neutral-950/60 p-3">
+      <div className="flex items-center gap-1.5 mb-3">
+        <Code className="h-3.5 w-3.5 text-neutral-400" />
+        <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">Script</p>
+      </div>
+      <div className="space-y-2">
+        <div className="flex items-center gap-3">
+          <span className="w-20 shrink-0 text-xs text-neutral-500">Class</span>
+          <div className="min-w-0 flex-1">
+            <input
+              className="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 outline-none focus:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-50 placeholder:text-neutral-600"
+              disabled={isSaving}
+              onChange={(event) => setDraftClass(event.target.value)}
+              placeholder="e.g. MyGame.RotatorScript"
+              type="text"
+              value={draftClass}
+            />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          {currentValue && (
+            <button
+              className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-400 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isSaving}
+              onClick={() => void detachScript()}
+              type="button"
+            >
+              Detach
+            </button>
+          )}
+          <button
+            className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isSaving || draftClass.trim() === currentValue}
+            onClick={() => void applyScriptClass()}
+            type="button"
+          >
+            Apply
+          </button>
+        </div>
+      </div>
+    </section>
   )
 }
 

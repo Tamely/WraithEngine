@@ -1304,6 +1304,11 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                         .ScriptClass = std::nullopt}});
 }
 
+void EditorSession::PublishScriptError(const std::string &ObjectId,
+                                       const std::string &Message) {
+  PublishEvent({ScriptErrorEvent{.ObjectId = ObjectId, .Message = Message}});
+}
+
 void EditorSession::PublishEvent(const EditorEvent &Event) {
   m_MessageBus.PublishEvent(Event);
 }
