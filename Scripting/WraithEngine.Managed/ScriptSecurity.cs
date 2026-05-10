@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Reflection.Metadata;
+using System.Reflection.PortableExecutable;
 using System.Runtime.Loader;
 using Coral.Managed.Interop;
 
@@ -23,43 +25,58 @@ internal static class ScriptSecurity
 
     /// <summary>
     /// Validates that the user assembly at <paramref name="assemblyPath"/> does not
-    /// reference any restricted assemblies. No-op when not in Restricted mode.
+    /// reference any restricted assemblies.
     ///
-    /// The assembly must already be loaded (Coral loads it first); this method locates
-    /// it by path in <see cref="AssemblyLoadContext.All"/> and then calls
-    /// <see cref="Assembly.GetReferencedAssemblies"/> to check manifest references.
+    /// Uses <see cref="PEReader"/> to inspect the assembly manifest directly from the
+    /// file without loading the assembly into any ALC.  This avoids the empty
+    /// <c>Assembly.Location</c> problem that arises when Coral loads assemblies via
+    /// <c>LoadFromStream</c> (MemoryMappedFile), and allows validation to run before
+    /// the assembly is placed into any AssemblyLoadContext.
     ///
-    /// Throws <see cref="NotSupportedException"/> if validation fails.
+    /// Returns <see langword="null"/> when validation passes (or when not in Restricted
+    /// mode). Returns a human-readable error string when validation fails.
+    ///
+    /// This method intentionally does NOT throw — it returns an error string so that
+    /// the C++ caller can act on the result without relying on Coral's exception
+    /// propagation (Coral routes managed exceptions through ExceptionCallback rather
+    /// than rethrowing as C++ exceptions).
     /// </summary>
-    internal static void ValidateUserAssembly(string assemblyPath)
+    internal static string? ValidateUserAssemblyResult(string assemblyPath)
     {
         if (!IsRestricted())
-            return;
+            return null;
 
-        // Find the assembly that was just loaded by Coral.
-        Assembly? userAssembly = null;
-        foreach (var alc in AssemblyLoadContext.All)
+        if (!System.IO.File.Exists(assemblyPath))
+            return $"assembly file not found: '{assemblyPath}'";
+
+        try
         {
-            foreach (var asm in alc.Assemblies)
+            using var stream = System.IO.File.OpenRead(assemblyPath);
+            using var peReader = new PEReader(stream);
+
+            if (!peReader.HasMetadata)
+                return $"assembly '{assemblyPath}' contains no CLI metadata";
+
+            var metadataReader = peReader.GetMetadataReader();
+            foreach (var handle in metadataReader.AssemblyReferences)
             {
-                if (string.Equals(asm.Location, assemblyPath, StringComparison.OrdinalIgnoreCase))
+                var reference = metadataReader.GetAssemblyReference(handle);
+                var refName = metadataReader.GetString(reference.Name);
+                foreach (var blocked in RestrictedAssemblyLoadContext.BlockedPrefixes)
                 {
-                    userAssembly = asm;
-                    break;
+                    if (refName.StartsWith(blocked, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return $"references restricted assembly '{refName}' " +
+                               $"('{blocked}' is not permitted in Hosted/Restricted mode)";
+                    }
                 }
             }
-            if (userAssembly is not null)
-                break;
-        }
 
-        if (userAssembly is null)
+            return null;
+        }
+        catch (Exception ex)
         {
-            // Shouldn't happen — Coral just loaded it — but treat as untrusted.
-            throw new InvalidOperationException(
-                $"Security validation failed: could not locate loaded assembly '{assemblyPath}' " +
-                $"in any AssemblyLoadContext.");
+            return $"could not inspect assembly '{assemblyPath}': {ex.Message}";
         }
-
-        RestrictedAssemblyLoadContext.ValidateAssemblyReferences(userAssembly);
     }
 }

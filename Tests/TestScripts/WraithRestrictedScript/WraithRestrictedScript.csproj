@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <AssemblyName>WraithRestrictedScript</AssemblyName>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <!-- Suppress the "consider using HttpClient via IHttpClientFactory" analyzer hint -->
+    <NoWarn>CA2234</NoWarn>
+  </PropertyGroup>
+
+  <!-- Reference the engine API assembly -->
+  <ItemGroup>
+    <Reference Include="WraithEngine.Managed">
+      <HintPath>..\..\..\Scripting\WraithEngine.Managed\bin\Debug\WraithEngine.Managed.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

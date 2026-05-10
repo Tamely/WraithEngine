@@ -87,6 +87,7 @@ void ScriptHost::LoadEngineAssembly(const std::filesystem::path &ManagedDir) {
     return;
   }
 
+  m_ManagedDir = ManagedDir;
   m_EngineALC = m_Host.CreateAssemblyLoadContext("WraithEngine");
   auto &Assembly = m_EngineALC.LoadAssembly(DllPath.string());
 
@@ -159,10 +160,64 @@ void ScriptHost::LoadUserAssembly(const std::filesystem::path &AssemblyPath) {
     return;
   }
 
-  // Tear down existing instances before unloading the ALC
-  DestroyAllScripts();
+  // In Restricted mode, validate the assembly FILE before making any changes to
+  // the ALC state.  ValidateUserAssemblyResult uses PEReader to inspect the
+  // manifest references directly from disk — no loading required.  Validating
+  // first keeps s_CachedTypes intact (UnloadAssemblyLoadContext clears it
+  // globally) so the InvokeStaticMethod round-trip works without a
+  // RefreshTypeCache call at this point.  We use the return-value form because
+  // Coral routes managed exceptions through ExceptionCallback rather than
+  // rethrowing them as C++ exceptions, making try/catch unreliable here.
+  if (m_TrustProfile == ScriptTrustProfile::Restricted &&
+      m_EngineAssembly != nullptr) {
+    auto PathStr = Coral::String::New(AssemblyPath.string());
+    auto ErrorStr =
+        m_EngineAssembly
+            ->GetLocalType("WraithEngine.Internal.ScriptSecurity")
+            .InvokeStaticMethod<Coral::String>("ValidateUserAssemblyResult",
+                                               PathStr);
+    Coral::String::Free(PathStr);
 
-  m_UserALC = m_Host.CreateAssemblyLoadContext("UserScripts");
+    std::string ErrorMsg = ErrorStr.m_String ? std::string(ErrorStr) : "";
+    Coral::String::Free(ErrorStr);
+
+    if (!ErrorMsg.empty()) {
+      A_CORE_ERROR("ScriptHost: user assembly REJECTED by security policy — {}",
+                   ErrorMsg);
+      // Unload the existing assembly — a failed replace leaves nothing live.
+      DestroyAllScripts();
+      if (m_UserAssemblyLoaded) {
+        m_Host.UnloadAssemblyLoadContext(m_UserALC);
+        m_EngineAssembly->RefreshTypeCache();
+        m_UserAssembly = nullptr;
+        m_UserAssemblyLoaded = false;
+      }
+      return;
+    }
+    A_CORE_INFO(
+        "ScriptHost: user assembly passed Restricted-mode security validation");
+  }
+
+  // Tear down existing instances and unload the previous ALC (if any) before
+  // creating a fresh one. Necessary when LoadUserAssembly is called more than once.
+  DestroyAllScripts();
+  if (m_UserAssemblyLoaded) {
+    m_Host.UnloadAssemblyLoadContext(m_UserALC);
+    // UnloadAssemblyLoadContext clears the managed s_CachedTypes globally.
+    // Repopulate the engine assembly's types so that subsequent CreateObject /
+    // InvokeMethod calls (e.g. during InstantiateScript below) work correctly.
+    m_EngineAssembly->RefreshTypeCache();
+    m_UserAssembly = nullptr;
+    m_UserAssemblyLoaded = false;
+  }
+
+  // Pass the engine managed dir so Coral's ResolveAssembly can find
+  // WraithEngine.Managed.dll.  The cross-ALC sharing patch in AssemblyLoader.cs
+  // ensures the UserScripts ALC reuses the engine ALC's already-loaded copy
+  // (with populated internal-call function pointers) rather than loading a
+  // fresh duplicate.
+  m_UserALC = m_Host.CreateAssemblyLoadContext("UserScripts",
+                                               m_ManagedDir.string());
   auto &Assembly = m_UserALC.LoadAssembly(AssemblyPath.string());
 
   if (Assembly.GetLoadStatus() != Coral::AssemblyLoadStatus::Success) {
@@ -176,29 +231,6 @@ void ScriptHost::LoadUserAssembly(const std::filesystem::path &AssemblyPath) {
   m_UserAssemblyPath = AssemblyPath;
   m_UserAssemblyLoaded = true;
   A_CORE_INFO("ScriptHost: user assembly loaded ({})", Assembly.GetName());
-
-  // In Restricted mode, validate that the user assembly does not reference
-  // any blocked assemblies before allowing any script instantiation.
-  if (m_TrustProfile == ScriptTrustProfile::Restricted &&
-      m_EngineAssembly != nullptr) {
-    auto PathStr = Coral::String::New(AssemblyPath.string());
-    try {
-      m_EngineAssembly->GetType("WraithEngine.Internal.ScriptSecurity")
-          .InvokeStaticMethod("ValidateUserAssembly", PathStr);
-      A_CORE_INFO("ScriptHost: user assembly passed Restricted-mode security "
-                  "validation");
-    } catch (const std::exception &Ex) {
-      Coral::String::Free(PathStr);
-      A_CORE_ERROR(
-          "ScriptHost: user assembly REJECTED by security policy — {}", Ex.what());
-      // Unload the assembly so no scripts can be instantiated from it.
-      m_Host.UnloadAssemblyLoadContext(m_UserALC);
-      m_UserAssembly = nullptr;
-      m_UserAssemblyLoaded = false;
-      return;
-    }
-    Coral::String::Free(PathStr);
-  }
 
   // Re-instantiate scripts for all existing Actors that already have a
   // ScriptClass set (e.g. loaded from scene.json).
@@ -239,16 +271,43 @@ void ScriptHost::ReloadUserAssembly() {
     }
   }
 
-  // 2. Call OnDestroy on all live instances and clear them
+  // 2. Validate BEFORE unloading — s_CachedTypes is still intact at this point.
+  //    PEReader inspects the file directly, so the DLL doesn't need to be loaded
+  //    into any ALC.  We validate here (not after reload) to avoid a second
+  //    TypeCache desync on the failure path.
+  if (m_TrustProfile == ScriptTrustProfile::Restricted &&
+      m_EngineAssembly != nullptr) {
+    auto PathStr = Coral::String::New(m_UserAssemblyPath.string());
+    auto ErrorStr =
+        m_EngineAssembly
+            ->GetLocalType("WraithEngine.Internal.ScriptSecurity")
+            .InvokeStaticMethod<Coral::String>("ValidateUserAssemblyResult",
+                                               PathStr);
+    Coral::String::Free(PathStr);
+
+    std::string ErrorMsg = ErrorStr.m_String ? std::string(ErrorStr) : "";
+    Coral::String::Free(ErrorStr);
+
+    if (!ErrorMsg.empty()) {
+      A_CORE_ERROR(
+          "ScriptHost: reload REJECTED by security policy — {}", ErrorMsg);
+      return; // leave existing assembly in place; nothing changed yet
+    }
+  }
+
+  // 3. Call OnDestroy on all live instances and clear them
   DestroyAllScripts();
 
-  // 3. Unload the old ALC
+  // 4. Unload the old ALC.  This clears the managed s_CachedTypes globally;
+  //    repopulate engine assembly types immediately so InstantiateScript works.
   m_Host.UnloadAssemblyLoadContext(m_UserALC);
+  m_EngineAssembly->RefreshTypeCache();
   m_UserAssembly = nullptr;
   m_UserAssemblyLoaded = false;
 
-  // 4. Create a fresh ALC and reload the assembly from the cached path
-  m_UserALC = m_Host.CreateAssemblyLoadContext("UserScripts");
+  // 5. Create a fresh ALC and reload the assembly from the cached path.
+  m_UserALC = m_Host.CreateAssemblyLoadContext("UserScripts",
+                                               m_ManagedDir.string());
   auto &Assembly = m_UserALC.LoadAssembly(m_UserAssemblyPath.string());
 
   if (Assembly.GetLoadStatus() != Coral::AssemblyLoadStatus::Success) {
@@ -262,27 +321,7 @@ void ScriptHost::ReloadUserAssembly() {
   m_UserAssemblyLoaded = true;
   A_CORE_INFO("ScriptHost: user assembly reloaded ({})", Assembly.GetName());
 
-  // Re-validate security policy after reload (the DLL may have changed).
-  if (m_TrustProfile == ScriptTrustProfile::Restricted &&
-      m_EngineAssembly != nullptr) {
-    auto PathStr = Coral::String::New(m_UserAssemblyPath.string());
-    try {
-      m_EngineAssembly->GetType("WraithEngine.Internal.ScriptSecurity")
-          .InvokeStaticMethod("ValidateUserAssembly", PathStr);
-    } catch (const std::exception &Ex) {
-      Coral::String::Free(PathStr);
-      A_CORE_ERROR(
-          "ScriptHost: reloaded assembly REJECTED by security policy — {}",
-          Ex.what());
-      m_Host.UnloadAssemblyLoadContext(m_UserALC);
-      m_UserAssembly = nullptr;
-      m_UserAssemblyLoaded = false;
-      return;
-    }
-    Coral::String::Free(PathStr);
-  }
-
-  // 5. Re-instantiate every script that existed before the reload
+  // 6. Re-instantiate every script that existed before the reload
   for (const auto &[ObjectId, ClassName] : ToReinstate) {
     InstantiateScript(ObjectId, ClassName);
   }

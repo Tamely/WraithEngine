@@ -120,6 +120,7 @@ private:
   std::unordered_map<std::string, Coral::ManagedObject> m_ScriptInstances;
 #endif
   EditorSession *m_Session{nullptr};
+  std::filesystem::path m_ManagedDir;      // directory of WraithEngine.Managed.dll
   std::filesystem::path m_UserAssemblyPath;
   ScriptTrustProfile m_TrustProfile{ScriptTrustProfile::Restricted};
   bool m_Initialized{false};

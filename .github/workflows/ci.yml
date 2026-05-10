@@ -48,6 +48,11 @@ jobs:
       - name: Build WraithEngine.Managed
         run: dotnet build Scripting/WraithEngine.Managed/WraithEngine.Managed.csproj -c Debug --nologo
 
+      - name: Build test scripts
+        run: |
+          dotnet build Tests/TestScripts/WraithTestScripts/WraithTestScripts.csproj -c Debug --nologo
+          dotnet build Tests/TestScripts/WraithRestrictedScript/WraithRestrictedScript.csproj -c Debug --nologo
+
       - name: Configure
         run: cmake --preset debug -DBUILD_TESTING=ON -DAXIOM_ENABLE_SCRIPTING=ON
 
