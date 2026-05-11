@@ -81,6 +81,11 @@ struct DetachScriptCommand {
   std::string ObjectId;
 };
 
+struct SetMeshAssetCommand {
+  std::string ObjectId;
+  std::string AssetPath; // relative path from the content directory, e.g. "Meshes/cube.glb"
+};
+
 using EditorCommandPayload =
     std::variant<UpdateViewportCameraCommand, SetViewportCameraPoseCommand,
                  SetLookActiveCommand, SelectObjectCommand,
@@ -88,7 +93,7 @@ using EditorCommandPayload =
                  CreateObjectCommand, DuplicateObjectCommand,
                  DeleteObjectCommand, ReparentObjectCommand,
                  SetTransformCommand, AttachScriptCommand,
-                 DetachScriptCommand>;
+                 DetachScriptCommand, SetMeshAssetCommand>;
 
 struct EditorCommand {
   EditorCommandPayload Payload;

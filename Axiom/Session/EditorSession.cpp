@@ -1,5 +1,7 @@
 #include "Session/EditorSession.h"
 
+#include "Assets/MeshAsset.h"
+
 #include <Core/Log.h>
 
 #include <glm/common.hpp>
@@ -77,6 +79,9 @@ std::string CommandTypeName(const EditorCommandPayload &Payload) {
   }
   if (std::holds_alternative<DetachScriptCommand>(Payload)) {
     return "detach_script";
+  }
+  if (std::holds_alternative<SetMeshAssetCommand>(Payload)) {
+    return "set_mesh_asset";
   }
   return "set_transform";
 }
@@ -1004,6 +1009,27 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
     }
   }
 
+  if (const auto *MeshAssetCmd =
+          std::get_if<SetMeshAssetCommand>(&QueuedCommand.Command.Payload)) {
+    if (MeshAssetCmd->ObjectId.empty()) {
+      FailureReason = "SetMeshAsset requires a non-empty object id.";
+      return false;
+    }
+    if (MeshAssetCmd->AssetPath.empty()) {
+      FailureReason = "SetMeshAsset requires a non-empty asset path.";
+      return false;
+    }
+    const EditorObjectDetails *Details = FindObjectDetails(MeshAssetCmd->ObjectId);
+    if (Details == nullptr) {
+      FailureReason = "SetMeshAsset targeted an unknown object.";
+      return false;
+    }
+    if (Details->Kind != EditorSceneItemKind::Mesh) {
+      FailureReason = "SetMeshAsset target must be a Mesh object.";
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -1302,6 +1328,48 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
   A_CORE_INFO("EditorSession: detached script from '{}'", Command.ObjectId);
   PublishEvent({ScriptClassChangedEvent{.ObjectId = Command.ObjectId,
                                         .ScriptClass = std::nullopt}});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const SetMeshAssetCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
+
+  auto MeshIt = std::find_if(
+      m_State.Scene.MeshInstances.begin(), m_State.Scene.MeshInstances.end(),
+      [&](const EditorSceneMeshInstance &I) { return I.ObjectId == Command.ObjectId; });
+  if (MeshIt == m_State.Scene.MeshInstances.end()) {
+    A_CORE_WARN("SetMeshAsset: no mesh instance for object '{}'", Command.ObjectId);
+    return;
+  }
+
+  if (m_ContentDir.empty()) {
+    A_CORE_WARN("SetMeshAsset: content directory not configured");
+    return;
+  }
+
+  const std::filesystem::path FullPath = m_ContentDir / Command.AssetPath;
+  const auto SceneData = Assets::LoadBasicMeshAsset(FullPath);
+  if (!SceneData.has_value() || SceneData->Instances.empty()) {
+    A_CORE_WARN("SetMeshAsset: failed to load '{}' for object '{}'",
+                Command.AssetPath, Command.ObjectId);
+    return;
+  }
+
+  const auto &First = SceneData->Instances[0];
+  MeshIt->Mesh = First.Mesh;
+  MeshIt->Material = First.Material;
+  MeshIt->AssetRelativePath = Command.AssetPath;
+
+  A_CORE_INFO("SetMeshAsset: assigned '{}' to object '{}'",
+              Command.AssetPath, Command.ObjectId);
+  PublishEvent({.Payload = MeshAssetChangedEvent{
+      .ObjectId = Command.ObjectId,
+      .AssetPath = Command.AssetPath,
+  }});
+}
+
+void EditorSession::SetContentDir(std::filesystem::path ContentDir) {
+  m_ContentDir = std::move(ContentDir);
 }
 
 void EditorSession::PublishScriptError(const std::string &ObjectId,

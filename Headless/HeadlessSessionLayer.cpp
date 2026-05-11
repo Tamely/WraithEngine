@@ -175,6 +175,10 @@ GizmoMode HeadlessSessionLayer::GetGizmoMode(SessionUserId User) const {
 }
 
 bool HeadlessSessionLayer::LoadStartupSceneIntoSession() {
+#ifndef AXIOM_CONTENT_DIR
+#define AXIOM_CONTENT_DIR "Content"
+#endif
+  m_Session.SetContentDir(AXIOM_CONTENT_DIR);
   return LoadStartupScene(m_Session);
 }
 

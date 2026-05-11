@@ -10,6 +10,7 @@
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -102,6 +103,7 @@ struct EditorSceneMeshInstance {
   MaterialInstanceRef Material;
   MeshRenderPath RenderPath{MeshRenderPath::Graphics};
   glm::mat4 Transform{1.0f};
+  std::string AssetRelativePath; // content-relative path, empty if using startup default
 };
 
 struct EditorSceneState {
@@ -134,6 +136,9 @@ public:
 
   void Subscribe(IEditorEventSubscriber *Subscriber);
   void Unsubscribe(IEditorEventSubscriber *Subscriber);
+
+  // Must be called before SetMeshAssetCommand can be processed.
+  void SetContentDir(std::filesystem::path ContentDir);
 
   void EnsureViewportState(SessionUserId User);
   void SetPresenceState(SessionUserId User, EditorUserPresenceState State);
@@ -237,6 +242,8 @@ private:
                      const AttachScriptCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const DetachScriptCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const SetMeshAssetCommand &Command);
   void PublishEvent(const EditorEvent &Event);
 
 private:
@@ -244,5 +251,6 @@ private:
   EditorSessionState m_State;
   EditorMessageBus m_MessageBus;
   std::unique_ptr<DataModel> m_SceneRoot;
+  std::filesystem::path m_ContentDir;
 };
 } // namespace Axiom

@@ -48,6 +48,7 @@ enum class HeadlessCommandType {
   AttachScript,
   DetachScript,
   ReloadScripts,
+  SetMeshAsset,
   Heartbeat,
   RenderFrame,
   Quit,
@@ -64,6 +65,7 @@ struct HeadlessCommand {
   std::string ObjectId;
   std::string PropertyName;
   std::optional<PropertyValue> PropertyVal;
+  std::string AssetPath; // used by SetMeshAsset
 };
 
 struct HeadlessAppOptions {

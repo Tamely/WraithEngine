@@ -164,6 +164,9 @@ std::string EventPayloadType(const EditorEventPayload &Payload) {
   if (std::holds_alternative<ScriptErrorEvent>(Payload)) {
     return "script_error";
   }
+  if (std::holds_alternative<MeshAssetChangedEvent>(Payload)) {
+    return "mesh_asset_changed";
+  }
   return "object_transform_updated";
 }
 
@@ -738,6 +741,18 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
         .EditorPayload = {.Payload = DetachScriptCommand{
                               .ObjectId = ObjectId.value_or("")}}};
   }
+  if (*Type == "set_mesh_asset") {
+    static const std::regex ObjectIdPattern(R"json("objectId"\s*:\s*"([^"]+)")json");
+    static const std::regex AssetPathPattern(R"json("assetPath"\s*:\s*"([^"]+)")json");
+    const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
+    const auto AssetPath = MatchString(JsonLine, AssetPathPattern);
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::SetMeshAsset,
+        .EditorPayload = {.Payload = SetMeshAssetCommand{
+                              .ObjectId = ObjectId.value_or(""),
+                              .AssetPath = AssetPath.value_or("")}},
+        .AssetPath = AssetPath.value_or("")};
+  }
   if (*Type == "get_schema") {
     static const std::regex ObjectIdPattern(R"json("objectId"\s*:\s*"([^"]+)")json");
     const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
@@ -978,6 +993,10 @@ std::string SerializeEvent(const PublishedEditorEvent &Event) {
                  std::get_if<ScriptErrorEvent>(&Event.Event.Payload)) {
     Stream << ",\"objectId\":\"" << EscapeJson(ScriptError->ObjectId)
            << "\",\"message\":\"" << EscapeJson(ScriptError->Message) << "\"";
+  } else if (const auto *MeshAsset =
+                 std::get_if<MeshAssetChangedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"objectId\":\"" << EscapeJson(MeshAsset->ObjectId)
+           << "\",\"assetPath\":\"" << EscapeJson(MeshAsset->AssetPath) << "\"";
   }
   Stream << "}";
   return Stream.str();

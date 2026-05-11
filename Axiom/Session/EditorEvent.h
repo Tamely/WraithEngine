@@ -99,6 +99,11 @@ struct ScriptErrorEvent {
   std::string Message;
 };
 
+struct MeshAssetChangedEvent {
+  std::string ObjectId;
+  std::string AssetPath;
+};
+
 using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         LookStateChangedEvent,
                                         CommandAcknowledgedEvent,
@@ -113,7 +118,8 @@ using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         ObjectTransformUpdatedEvent,
                                         ObjectLockChangedEvent,
                                         ScriptClassChangedEvent,
-                                        ScriptErrorEvent>;
+                                        ScriptErrorEvent,
+                                        MeshAssetChangedEvent>;
 
 struct EditorEvent {
   EditorEventPayload Payload;
