@@ -6,6 +6,7 @@ layout(location = 2) in vec2 inTexCoord;
 
 layout(location = 0) out vec3 outNormal;
 layout(location = 1) out vec2 outTexCoord;
+layout(location = 2) out vec3 outWorldPos;
 
 layout(std140, set = 0, binding = 0) uniform CameraFrame {
     mat4 view;
@@ -30,4 +31,5 @@ void main() {
     gl_Position = clipPosition;
     outNormal = normalize(mat3(pushConstants.model) * inNormal.xyz);
     outTexCoord = inTexCoord;
+    outWorldPos = worldPosition.xyz;
 }
