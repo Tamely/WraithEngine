@@ -26,5 +26,11 @@ void RenderCommand::SetGizmoOverlay(const GizmoOverlayData &Gizmo) {
   }
 }
 
+void RenderCommand::SetSun(const DirectionalLight &Light) {
+  if (s_ActiveScene) {
+    s_ActiveScene->Sun = Light;
+  }
+}
+
 void RenderCommand::EndScene() { s_ActiveScene = nullptr; }
 } // namespace Axiom

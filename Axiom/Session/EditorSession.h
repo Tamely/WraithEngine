@@ -53,6 +53,12 @@ struct EditorTransformDetails {
   glm::vec3 Scale{1.0f};
 };
 
+struct EditorLightProperties {
+  glm::vec3 Color{1.0f};
+  float Intensity{1.0f};
+  glm::vec3 Direction{0.35f, 0.7f, 0.2f}; // world-space (need not be normalized)
+};
+
 struct EditorObjectDetails {
   std::string ObjectId;
   std::string DisplayName;
@@ -63,6 +69,7 @@ struct EditorObjectDetails {
   std::optional<EditorTransformDetails> Transform;      // local-space
   std::optional<EditorTransformDetails> WorldTransform; // world-space (computed)
   std::optional<std::string> ScriptClass;               // C# script class name (Actors only)
+  std::optional<EditorLightProperties> Light;           // Light objects only
 };
 
 enum class EditorUserPresenceState { Connected, Away, Disconnected };

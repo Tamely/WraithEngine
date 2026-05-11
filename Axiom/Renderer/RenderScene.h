@@ -21,6 +21,12 @@ struct GizmoOverlayData {
   GizmoMode Mode{GizmoMode::Translate};
 };
 
+struct DirectionalLight {
+  glm::vec3 Color{1.0f};
+  float Intensity{1.0f};
+  glm::vec3 Direction{0.35f, 0.7f, 0.2f}; // world-space, need not be normalized
+};
+
 class RenderScene {
 public:
   void Reset();
@@ -29,5 +35,6 @@ public:
   glm::vec4 BackgroundColor{1.0f, 0.0f, 0.0f, 1.0f};
   std::vector<RenderMeshSubmission> Submissions;
   std::optional<GizmoOverlayData> GizmoOverlay;
+  std::optional<DirectionalLight> Sun;
 };
 } // namespace Axiom

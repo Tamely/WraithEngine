@@ -13,14 +13,29 @@ layout(std140, set = 0, binding = 0) uniform CameraFrame {
     vec4 cameraPosition;
     vec4 viewportSize;
     uvec4 renderOptions;
+    vec4 lightDirectionAndIntensity; // xyz = direction, w = intensity
+    vec4 lightColorAndEnabled;       // xyz = color, w = 1.0 if dynamic light active
 } cameraFrame;
 
 void main() {
-    vec3 lightDir = normalize(vec3(0.35, 0.7, 0.2));
+    vec3 lightDir;
+    vec3 lightColor;
+    float lightIntensity;
+    if (cameraFrame.lightColorAndEnabled.w > 0.5) {
+        lightDir = normalize(cameraFrame.lightDirectionAndIntensity.xyz);
+        lightIntensity = cameraFrame.lightDirectionAndIntensity.w;
+        lightColor = cameraFrame.lightColorAndEnabled.xyz;
+    } else {
+        lightDir = normalize(vec3(0.35, 0.7, 0.2));
+        lightIntensity = 1.0;
+        lightColor = vec3(1.0);
+    }
+
     vec4 baseColor = texture(sampler2D(baseColorImage, baseColorSampler), inTexCoord);
     float lighting = 1.0;
     if (cameraFrame.renderOptions.x == 0u) {
-        lighting = max(dot(normalize(inNormal), lightDir), 0.2);
+        float diffuse = max(dot(normalize(inNormal), lightDir), 0.0);
+        lighting = max(diffuse * lightIntensity, 0.2);
     }
-    outColor = vec4(baseColor.rgb * lighting, baseColor.a);
+    outColor = vec4(baseColor.rgb * lightColor * lighting, baseColor.a);
 }

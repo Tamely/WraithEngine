@@ -127,6 +127,20 @@ void HeadlessSessionLayer::OnRender() {
   Application::Get().SetRendererViewMode(RenderView.ViewMode);
   Application::Get().SetViewportFrameUser(RenderUser);
   RenderCommand::SetCamera(Viewport->Camera);
+
+  // Pick the first visible Light that has LightProperties configured.
+  for (const auto &[Id, Details] : m_Session.GetState().Scene.ObjectDetailsById) {
+    if (Details.Kind == EditorSceneItemKind::Light && Details.Visible &&
+        Details.Light.has_value()) {
+      RenderCommand::SetSun({
+          .Color = Details.Light->Color,
+          .Intensity = Details.Light->Intensity,
+          .Direction = Details.Light->Direction,
+      });
+      break;
+    }
+  }
+
   for (const auto &Submission : m_RendererAdapter->BuildRenderSubmissions(m_Session)) {
     RenderCommand::Submit(Submission);
   }

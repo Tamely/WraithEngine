@@ -11,6 +11,7 @@ public:
   static void SetCamera(const Camera &Camera);
   static void Submit(const RenderMeshSubmission &Submission);
   static void SetGizmoOverlay(const GizmoOverlayData &Gizmo);
+  static void SetSun(const DirectionalLight &Light);
   static void EndScene();
 
 private:

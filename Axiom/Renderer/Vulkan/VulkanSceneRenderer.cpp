@@ -9,6 +9,7 @@
 
 #include <glm/geometric.hpp>
 #include <glm/vec4.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 namespace Axiom {
 namespace {
@@ -30,6 +31,14 @@ VulkanSceneRenderer::BuildCameraData(const RenderContext &Context) {
       glm::vec4(static_cast<float>(Context.DrawExtent.width),
                 static_cast<float>(Context.DrawExtent.height), 0.0f, 0.0f);
   CameraData.RenderOptions.x = static_cast<uint32_t>(Context.ViewMode);
+
+  if (Context.Scene.Sun.has_value()) {
+    const auto &Sun = *Context.Scene.Sun;
+    const glm::vec3 Dir = glm::normalize(Sun.Direction);
+    CameraData.LightDirectionAndIntensity = glm::vec4(Dir, Sun.Intensity);
+    CameraData.LightColorAndEnabled = glm::vec4(Sun.Color, 1.0f);
+  }
+
   return CameraData;
 }
 
