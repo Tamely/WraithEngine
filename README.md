@@ -19,7 +19,8 @@ Browser (React / Next.js)
           ↕  commands  /  H.264 video
 AxiomRemoteViewportServer  (C++)
   └─ EditorSession  (authoritative scene state)
-          └─ Vulkan Renderer  (offscreen, per-client)
+          ├─ Vulkan Renderer  (offscreen, per-client)
+          └─ ScriptHost  (Coral .NET 9 / C# scripting)
 ```
 
 ## Features
@@ -32,6 +33,8 @@ AxiomRemoteViewportServer  (C++)
 - Transform gizmos (translate / scale / rotate) with server-side hit-testing
 - Multi-client rendering: each connected user gets their own viewport
 - WebRTC streaming to browser
+- C# scripting via [Coral](https://github.com/StudioCherno/Coral) (.NET 9, hot reload, two trust tiers)
+- Scene persistence — `scene.json` save/load across restarts
 
 **Browser editor**
 - Dockable panels: outliner, details/property inspector, content browser, toolbar
@@ -39,28 +42,140 @@ AxiomRemoteViewportServer  (C++)
 - Object lifecycle: create, duplicate, delete
 - Per-client gizmo mode (Q / E / R shortcuts)
 - User presence and camera visualization
+- Script class attachment and hot-reload button
 
 ## Prerequisites
 
 - CMake 3.10+
-- C++20 compiler (Clang or MSVC)
-- Vulkan SDK / MoltenVK (macOS)
+- Ninja (recommended; `brew install ninja`)
+- C++20 compiler (Clang recommended; Apple Clang 15+ on macOS)
+- Vulkan SDK / MoltenVK (macOS: `brew install --cask vulkan-sdk`)
 - Node.js 18+ and [pnpm](https://pnpm.io)
 - macOS: Xcode command-line tools (required for VideoToolbox / WebRTC)
 
-## Build & Run
+**Optional, required only when the corresponding CMake flag is ON:**
 
-### C++ engine
+| Feature | Requirement |
+|---------|-------------|
+| C# Scripting (`AXIOM_ENABLE_SCRIPTING`) | .NET 9 SDK (`brew install dotnet`) |
+| WebRTC transport (`AXIOM_ENABLE_WEBRTC`) | Pre-built `WebRTC.framework` or `libwebrtc` for macOS |
+
+---
+
+## Build
+
+### Quick start (minimal — no scripting, no WebRTC)
 
 ```bash
 cmake --preset debug
 cmake --build build/debug
 ```
 
+### With C# scripting enabled
+
+Build the managed assemblies first, then configure with the scripting flag:
+
+```bash
+# 1. Build Coral's managed runtime shim
+dotnet build ThirdParty/Coral/Coral.Managed/Coral.Managed-Static.csproj -c Debug
+
+# 2. Build the engine API assembly
+dotnet build Scripting/WraithEngine.Managed/WraithEngine.Managed.csproj -c Debug
+
+# 3. Configure and build
+cmake --preset debug -DAXIOM_ENABLE_SCRIPTING=ON
+cmake --build build/debug
+```
+
+### With scripting + automatic hot reload (macOS only)
+
+The file watcher uses `kqueue` to detect `.dll` changes and reload without restarting the server:
+
+```bash
+cmake --preset debug \
+  -DAXIOM_ENABLE_SCRIPTING=ON \
+  -DAXIOM_SCRIPTING_WATCH=ON
+cmake --build build/debug
+```
+
+### With WebRTC transport
+
+Supply paths to a locally built WebRTC library or pre-built framework:
+
+```bash
+# Using a pre-built WebRTC.framework (macOS)
+cmake --preset debug \
+  -DAXIOM_ENABLE_WEBRTC=ON \
+  -DAXIOM_WEBRTC_FRAMEWORK_PATH=/path/to/WebRTC.framework
+
+# Using a static libwebrtc binary
+cmake --preset debug \
+  -DAXIOM_ENABLE_WEBRTC=ON \
+  -DAXIOM_WEBRTC_LIBRARY_PATH=/path/to/libwebrtc.a \
+  -DAXIOM_WEBRTC_INCLUDE_DIR=/path/to/webrtc/include
+```
+
+### With tests
+
+```bash
+cmake --preset debug -DBUILD_TESTING=ON
+cmake --build build/debug
+ctest --test-dir build/debug
+```
+
+To include the scripting tests:
+
+```bash
+dotnet build ThirdParty/Coral/Coral.Managed/Coral.Managed-Static.csproj -c Debug
+dotnet build Scripting/WraithEngine.Managed/WraithEngine.Managed.csproj -c Debug
+dotnet build Tests/TestScripts/WraithTestScripts/WraithTestScripts.csproj -c Debug
+dotnet build Tests/TestScripts/WraithRestrictedScript/WraithRestrictedScript.csproj -c Debug
+
+cmake --preset debug -DBUILD_TESTING=ON -DAXIOM_ENABLE_SCRIPTING=ON
+cmake --build build/debug
+ctest --test-dir build/debug
+```
+
+### Release build
+
+All flags above work with the `release` preset:
+
+```bash
+cmake --preset release -DAXIOM_ENABLE_SCRIPTING=ON
+cmake --build build/release
+```
+
+---
+
+## CMake Options Reference
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `BUILD_TESTING` | `BOOL` | `OFF` | Build the Google Test suite |
+| `AXIOM_ENABLE_SCRIPTING` | `BOOL` | `OFF` | Enable the Coral C# scripting host (.NET 9) |
+| `AXIOM_SCRIPTING_WATCH` | `BOOL` | `OFF` | Auto-reload user scripts on disk change (macOS kqueue). Requires `AXIOM_ENABLE_SCRIPTING=ON` |
+| `AXIOM_SCRIPTING_TRUST_DEFAULT` | `STRING` | `Restricted` | Default sandbox tier for user scripts. `Restricted` (hosted — blocks `System.Net.*`, `System.Reflection.Emit`, etc.) or `Trusted` (local dev — full BCL access) |
+| `AXIOM_ENABLE_WEBRTC` | `BOOL` | `OFF` | Enable the macOS WebRTC transport |
+| `AXIOM_WEBRTC_FRAMEWORK_PATH` | `PATH` | _(empty)_ | Path to a `WebRTC.framework` bundle (macOS framework variant) |
+| `AXIOM_WEBRTC_LIBRARY_PATH` | `FILEPATH` | _(empty)_ | Path to a `libwebrtc` static/shared binary (non-framework variant) |
+| `AXIOM_WEBRTC_INCLUDE_DIR` | `PATH` | _(empty)_ | Include directory for the non-framework libwebrtc variant |
+
+**Trust profiles** — applies only when `AXIOM_ENABLE_SCRIPTING=ON`:
+
+| Profile | Intended use | What it blocks |
+|---------|-------------|----------------|
+| `Restricted` | Hosted / cloud sessions | `System.Net.*`, `System.Net.Sockets`, `System.Reflection.Emit`, `System.Diagnostics.Process`, dynamic assembly loading |
+| `Trusted` | Local dev, native editor | Nothing — full BCL available |
+
+---
+
+## Running
+
 ### Remote viewport server
 
 ```bash
-./build/debug/AxiomRemoteViewportServer --host 127.0.0.1 --port 8080 --width 1280 --height 720
+./build/debug/Headless/AxiomRemoteViewportServer \
+  --host 127.0.0.1 --port 8080 --width 1280 --height 720
 ```
 
 ### Browser editor
@@ -76,29 +191,28 @@ Open `http://localhost:3000` in your browser.
 ### Local native editor (no browser required)
 
 ```bash
-./build/debug/AxiomEditor
+./build/debug/Editor/AxiomEditor
 ```
 
-### Tests
-
-```bash
-cmake --preset debug -DBUILD_TESTING=ON
-cmake --build build/debug
-ctest --test-dir build/debug
-```
+---
 
 ## Project Structure
 
 | Path | Contents |
 |------|----------|
-| `Axiom/` | Engine library — core, session, renderer, remote transport |
+| `Axiom/` | Engine library — core, session, renderer, remote transport, scripting host |
 | `Editor/` | Native GLFW + ImGui editor executable |
 | `Headless/` | Headless runtime and `AxiomRemoteViewportServer` |
+| `Scripting/WraithEngine.Managed/` | C# engine API assembly (`Script`, `GameObject`, `Transform`) |
 | `EditorFrontend/` | React / Next.js browser editor shell |
-| `Content/` | Shaders and demo assets (.glb) |
+| `Content/` | Shaders, demo assets (`.glb`), and the persistent `scene.json` |
 | `Tests/` | Google Test suite |
-| `Docs/` | Architecture design documents |
-| `ThirdParty/` | Vendored dependencies |
+| `Tests/TestScripts/` | C# test assemblies for scripting tests |
+| `Docs/` | Architecture and design documents |
+| `ThirdParty/` | Vendored dependencies (Coral, spdlog, glfw, fastgltf, glm, …) |
+| `cmake/` | CMake helper modules |
+
+---
 
 ## Tech Stack
 
@@ -108,9 +222,14 @@ ctest --test-dir build/debug
 | Windowing | GLFW, MoltenVK |
 | Asset loading | fastgltf (glTF / glb) |
 | Streaming | WebRTC, H.264 (VideoToolbox) |
+| Scripting | [Coral](https://github.com/StudioCherno/Coral) — C++ ↔ .NET 9 host bridge |
+| Managed scripting API | C# (.NET 9), `WraithEngine.Managed` |
 | Browser editor | React 19, Next.js, TypeScript |
 | Styling | Tailwind CSS, Radix UI |
 | Testing | Google Test |
+| Logging | spdlog |
+
+---
 
 ## License
 

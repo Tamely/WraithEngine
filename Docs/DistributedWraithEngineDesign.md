@@ -1027,10 +1027,188 @@ Progress update:
 - hosted restricted profile
 - trusted local profile
 
-### Phase 7: Packaging and Hosted Runtime Maturation
-- packaged desktop builds from cooked content
+Progress update:
+
+- `ScriptHost` initializes a Coral `HostInstance` and owns two Assembly Load Contexts: `WraithEngine` (engine API) and `UserScripts` (user code, collectible/reloadable)
+- `WraithEngine.Managed` C# assembly exposes `Script` (base class with `OnCreate`, `OnTick`, `OnDestroy`), `GameObject` (object handle with `GetName`, `GetTransform`, `SetTransform`, `GetVisible`), `Transform`, and `Vector3`
+- `InternalCalls` binds C++ `EditorSession` methods to the managed surface via Coral's unmanaged function pointer fields; `RegisterInternalCalls` uploads them to the engine ALC
+- `ScriptHost` implements `IEditorEventSubscriber`; `ObjectCreatedEvent` instantiates scripts, `ObjectDeletedEvent` destroys them, `ScriptClassChangedEvent` handles attach/detach
+- `ScriptHost::Tick(dt)` drives `OnTick` on all live instances; `ScriptHost::ReloadUserAssembly` tears down and recreates the `UserScripts` ALC and re-instantiates all scripts
+- macOS `kqueue`-based file watcher auto-triggers reload when the assembly on disk changes (behind `AXIOM_SCRIPTING_WATCH` flag)
+- Two trust tiers: `Restricted` (default for hosted — blocks `System.Net.*`, `System.Reflection.Emit`, `System.Diagnostics.Process`; assembly manifest validated via `PEReader` before loading) and `Trusted` (local dev — full BCL)
+- `RestrictedAssemblyLoadContext` and `TrustedAssemblyLoadContext` enforce the policy in managed code; `ScriptSecurity` bridges the `IsRestricted` flag via an internal call
+- Browser: details panel shows a `ScriptClass` text field; toolbar Reload Scripts button sends `reload_scripts`; unhandled script exceptions surface as dismissible toasts
+- Five Google Test cases in `Tests/ScriptingTests.cpp`: `ScriptHostLifecycle`, `InternalCallRoundTrip`, `ScriptLifecycle`, `HotReload`, `RestrictedProfileBlocks`
+- Coral patched: cross-ALC assembly sharing in `AssemblyLoader.ResolveAssembly` (prevents duplicate `WraithEngine.Managed` load with null function pointers) and `ManagedAssembly::RefreshTypeCache` (repopulates `s_CachedTypes` after `UnloadAssemblyLoadContext` clears it globally)
+
+### Phase 7: Asset Pipeline — Textures, FBX/OBJ Import, Basic Materials
+
+Scope: Expand the asset system beyond raw `.glb` mesh loading to support standalone
+texture import, FBX and OBJ source formats, and a first-pass material model that wires
+surface parameters to the Vulkan renderer without requiring a full PBR implementation.
+
+#### 7.1 Texture Import
+- Add `TextureAsset` to the `IAssetSource` / `AssetId` identity model
+- Import `.png`, `.jpg`, `.jpeg`, `.hdr`, `.exr` via stb_image or a similar single-header library
+- Upload to Vulkan via a staging buffer / `vkCmdCopyBufferToImage` path; cache as `VkImage` + `VkImageView` + `VkSampler`
+- Surface texture assets in the content browser under the existing Texture filter tab (already present in the UI)
+- Add `TextureRef` property kind to the reflection system so materials can reference textures by `AssetId`
+
+#### 7.2 FBX / OBJ Import
+- Add [assimp](https://github.com/assimp/assimp) as a ThirdParty dependency (CMake `FetchContent` or submodule)
+- Introduce `IAssetImporter` interface with implementations for FBX (via assimp) and OBJ (via assimp or tinyobjloader)
+- Emit glTF-compatible in-memory mesh and material data so the existing `fastgltf` render path can be reused downstream; alternatively introduce a shared `MeshData` struct consumed by both loaders
+- Register `.fbx` and `.obj` extensions in `LocalAssetSource` and the content browser filter tabs
+- Import settings (coordinate-system handedness flip, scale factor, smoothing groups) stored as metadata alongside the stable `AssetId`
+
+#### 7.3 Basic Materials (no PBR required)
+- Introduce `MaterialAsset` with at minimum: albedo color (`vec4`), albedo texture ref, roughness (`float`), metallic (`float`)
+- Serialize material assets to `Content/` as `.mat.json` files alongside the stable `AssetId`
+- Add a simple forward-shading GLSL material shader variant; the existing mesh pipeline switches to a per-material descriptor set
+- Expose material properties in the details panel via `GetSchema` / `SetProperty` (reuses the existing reflection + property dispatch path)
+- `MeshObject` gains a `MaterialId` reference; `SceneMeshObject` stores it; `SetProperty("materialId", ...)` dispatches a new `SetMaterialCommand`
+- Full PBR (IBL, clearcoat, transmission) is deferred to a later rendering phase
+
+#### 7.4 Lighting
+- Add `LightComponent` as a first-class scene instance type alongside the existing `SceneLight` stub; light properties stored in `EditorObjectDetails`
+- **Point light** — position, color, intensity, range (attenuation radius); represented as a uniform buffer entry in a per-frame light list
+- **Directional light** — direction (derived from transform rotation), color, intensity; one active directional light per scene for v1
+- **Spot light** — position, direction, color, intensity, inner/outer cone angles
+- **Ambient** — a single ambient color/intensity applied to every fragment as a base term; simple sky color for v1 (IBL/HDRI deferred to a later PBR phase)
+- Vulkan: extend the per-frame UBO (or add a separate SSBO) to carry a packed light list; update the forward-shading fragment shader to iterate lights using Blinn-Phong or a simple physically-motivated approximation
+- **Shadow mapping** — directional shadow map first (single cascade, 2048×2048 depth attachment, PCF filter); point and spot shadow maps deferred to a later phase
+- Light objects appear in the scene outliner, support transform editing, and expose their properties in the details panel via the existing `GetSchema` / `SetProperty` path
+- `GetSchema` for a Light object returns `color`, `intensity`, `range`/`angle` (type-specific), and `castsShadows` as editable properties
+- Emissive property on `MaterialAsset` (color + intensity multiplier) so meshes can self-illuminate without requiring a separate light source
+
+### Phase 8: Binary Asset Formats
+
+Scope: Define engine-owned binary container formats for each cooked asset class.  Every
+asset type (mesh, texture, material) gets a single canonical on-disk representation
+after import.  This decouples the runtime load path from source-format parsers, gives
+all asset types a uniform structure, and is the prerequisite for packaging games — the
+packaged runtime just ships the cooked binaries and a manifest, with no source files or
+editor-only metadata included.
+
+#### 8.1 Design Principles
+- One binary format per asset class, version-tagged in the file header
+- Header contains: magic bytes, format version, asset type enum, stable `AssetId` hash, content length
+- Payload is asset-type-specific but follows a fixed schema (no external dependencies at load time)
+- Editor-only data (import settings, source path, thumbnail cache) lives in a sidecar `.meta` JSON file, never in the cooked binary
+- Packaged build strips all `.meta` files and source assets; the runtime only needs the cooked binaries and the asset manifest
+
+#### 8.2 Format Definitions
+
+**Mesh binary (`.wmesh`)**
+- Header: magic `WMSH`, `uint32` version, `AssetId` (8 bytes), vertex count, index count, submesh count, flags
+- Vertex buffer: interleaved `{vec3 position, vec3 normal, vec2 uv, vec4 tangent}` — layout fixed so the Vulkan pipeline never needs to inspect the source format
+- Index buffer: `uint32[]` indices
+- Submesh table: `{uint32 indexOffset, uint32 indexCount, AssetId materialId}[]`
+- Bounding sphere and AABB stored after submesh table for culling; no re-parsing needed at runtime
+
+**Texture binary (`.wtex`)**
+- Header: magic `WTEX`, `uint32` version, `AssetId`, width, height, mip count, `VkFormat` enum value, flags (sRGB, normal map, HDR)
+- Payload: raw mip chain in memory-layout order matching the target `VkFormat`; uploaded directly via a staging buffer with no format conversion at load time
+
+**Material binary (`.wmat`)**
+- Header: magic `WMAT`, `uint32` version, `AssetId`
+- Fixed-layout property block: albedo `vec4`, roughness `float`, metallic `float`, emissive color `vec3`, emissive intensity `float`
+- Texture reference table: `{uint8 slot, AssetId textureId}[]` — slots map to binding points in the material descriptor set layout
+
+#### 8.3 Import Pipeline Integration
+- `IAssetImporter::Import()` now produces the appropriate `*.wmesh` / `*.wtex` / `*.wmat` file in `Content/Cooked/` in addition to writing the `.meta` sidecar
+- `LocalAssetSource` resolves `AssetId → cooked path` at runtime; source file paths are only consulted by the importer and editor tools, never by the renderer
+- Re-import regenerates the cooked binary; the `AssetId` (derived from the relative source path hash) remains stable across re-imports
+- `AssetCookManifest` (JSON alongside the cooked directory) maps `AssetId → {cookedPath, formatVersion, sourceHash}` for incremental cook decisions
+
+#### 8.4 Packaged Build Impact
+- The packager copies only `Content/Cooked/` and the `AssetCookManifest`; source assets, `.meta` files, and `scene.json` are excluded
+- The runtime loader switches to `CookedAssetSource` (parallel to `LocalAssetSource`) which reads from the manifest and never touches source files
+- This is the direct enabler for Phase 11 (Packaging and Hosted Runtime Maturation)
+
+### Phase 9: Networking Refactor
+
+Scope: Replace the current bespoke WebSocket/HTTP signaling and data-channel transport
+stack with a well-maintained, battle-tested library that handles framing, TLS, and
+connection management reliably at scale.  Two candidates are shortlisted; the final
+choice should be made before implementation begins.
+
+#### 8.1 Candidate Libraries
+
+**Option A — [uWebSockets](https://github.com/uNetworking/uWebSockets)**
+- Header-only C++ library; extremely low overhead per connection
+- Native WebSocket and HTTP server in one; familiar API shape for the existing server code
+- TLS via BoringSSL or OpenSSL; supports SSL_CTX injection
+- No built-in reliability/ordering guarantees beyond what WebSocket provides; game-state
+  replication would sit on top
+
+**Option B — [GameNetworkingSockets](https://github.com/ValveSoftware/GameNetworkingSockets)**
+- Valve's production-proven game transport (used in Steam networking)
+- Provides reliable, unreliable, and ordered channels with integrated packet loss handling,
+  jitter buffers, and encryption (AES-GCM / Curve25519)
+- More infrastructure than uWebSockets but a better fit if gameplay replication is
+  a near-term goal alongside editor transport
+- Browser clients would need a WebSocket-to-GNS bridge or a separate signaling path
+
+#### 8.2 Refactor Scope
+- Introduce `IControlPlaneTransport` (HTTP + WebSocket for signaling, session lifecycle,
+  and editor command/event channels) as a distinct interface from the existing
+  `ISessionTransport` (viewport streaming + realtime per-frame data)
+- Replace hand-rolled HTTP/WebSocket server code in `RemoteViewportServer` with the
+  chosen library; keep `ISessionTransport` contract stable so callers are unaffected
+- Migrate the reliable data channel (editor commands, presence, lock state) and
+  the current HTTP polling endpoints to the new transport
+- Add TLS termination support; the current plain-socket path is acceptable only for
+  local development
+- Regression: all existing end-to-end tests and browser editor interactions must
+  pass without modification after the swap
+
+### Phase 10: God Class Refactoring
+
+Scope: Several classes have grown to 1,500 – 2,500 lines and now own multiple distinct
+responsibilities.  This phase extracts those responsibilities into focused units before
+the codebase becomes materially harder to extend.
+
+#### 10.1 Candidates for refactoring (audit before Phase 10 begins)
+Likely targets based on current trajectory:
+
+| File | Approximate size | Concerns to extract |
+|------|-----------------|---------------------|
+| `Axiom/Session/EditorSession.cpp` | ~2,000 lines | Command dispatch, event publication, lock management, presence logic, schema generation |
+| `Headless/RemoteViewportServer.cpp` | ~1,500 lines | HTTP routing, WebSocket framing, WebRTC signaling, command parsing, client lifecycle |
+| `Headless/HeadlessCommandProtocol.cpp` | ~800 lines | Growing with every new command; serialization/deserialization should be generated or table-driven |
+
+#### 10.2 Proposed splits
+
+**`EditorSession`** → split into:
+- `EditorSession` — thin coordinator; owns state, wires subsystems
+- `CommandDispatcher` — validates and routes incoming commands
+- `EventBroadcaster` — serializes and fans out authoritative events
+- `LockManager` — manages object/asset lock lifecycle
+- `PresenceTracker` — heartbeat, idle detection, state transitions
+
+**`RemoteViewportServer`** → split into:
+- `HttpRouter` — route table + handler registration
+- `WebSocketServer` — connection lifecycle and framing (or replaced by Phase 9 library)
+- `WebRtcSignalingHandler` — SDP/ICE exchange
+- `ClientSessionManager` — per-client state, reconnect, cleanup
+- `CommandParser` — delegates to `HeadlessCommandProtocol`
+
+**`HeadlessCommandProtocol`** → move toward a table-driven or code-generated pattern:
+- `CommandSerializer` — outbound event JSON
+- `CommandDeserializer` — inbound command JSON
+- Register new commands by adding a row to a dispatch table rather than growing `if/else` or `switch` chains
+
+#### 10.3 Acceptance criteria
+- No existing test regressions
+- No single `.cpp` file exceeds 600 lines after the refactor
+- Each new unit has its own header with a single-sentence doc comment stating its responsibility
+- CI passes without modifications to test code
+
+### Phase 11: Packaging and Hosted Runtime Maturation
+- packaged desktop builds from cooked content (depends on Phase 8 binary asset formats)
 - hosted session deployment descriptors
-- sample project proving shared runtime path
+- sample project proving shared runtime path via `CookedAssetSource`
 
 ## 29. Test Plan
 
