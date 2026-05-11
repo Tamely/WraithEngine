@@ -1379,14 +1379,6 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                   const SetMeshAssetCommand &Command) {
   EnsurePresence(QueuedCommand.Context.User);
 
-  auto MeshIt = std::find_if(
-      m_State.Scene.MeshInstances.begin(), m_State.Scene.MeshInstances.end(),
-      [&](const EditorSceneMeshInstance &I) { return I.ObjectId == Command.ObjectId; });
-  if (MeshIt == m_State.Scene.MeshInstances.end()) {
-    A_CORE_WARN("SetMeshAsset: no mesh instance for object '{}'", Command.ObjectId);
-    return;
-  }
-
   if (m_ContentDir.empty()) {
     A_CORE_WARN("SetMeshAsset: content directory not configured");
     return;
@@ -1401,6 +1393,16 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
   }
 
   const auto &First = SceneData->Instances[0];
+
+  auto MeshIt = std::find_if(
+      m_State.Scene.MeshInstances.begin(), m_State.Scene.MeshInstances.end(),
+      [&](const EditorSceneMeshInstance &I) { return I.ObjectId == Command.ObjectId; });
+  if (MeshIt == m_State.Scene.MeshInstances.end()) {
+    // Object was created at runtime (CreateObject) and has no instance yet — add one now.
+    m_State.Scene.MeshInstances.push_back(EditorSceneMeshInstance{.ObjectId = Command.ObjectId});
+    MeshIt = m_State.Scene.MeshInstances.end() - 1;
+  }
+
   MeshIt->Mesh = First.Mesh;
   MeshIt->Material = First.Material;
   MeshIt->AssetRelativePath = Command.AssetPath;

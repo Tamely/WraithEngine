@@ -21,6 +21,10 @@ target_include_directories(AxiomTests PRIVATE
   "${CMAKE_SOURCE_DIR}/Headless"
 )
 
+target_compile_definitions(AxiomTests PRIVATE
+  AXIOM_CONTENT_DIR="${CMAKE_SOURCE_DIR}/Content"
+)
+
 # ---------------------------------------------------------------------------
 # Scripting tests — only compiled when the scripting subsystem is enabled
 # ---------------------------------------------------------------------------

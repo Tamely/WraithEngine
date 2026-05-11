@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <Core/Log.h>
 #include <Session/EditorSession.h>
 
 #include <glm/vec3.hpp>
@@ -1008,4 +1009,46 @@ TEST(SceneLifecycleTests, SetMeshAsset_RejectsNonMeshTarget) {
   Session.Tick();
 
   ASSERT_NE(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+}
+
+TEST(SceneLifecycleTests, SetMeshAsset_CreatesInstanceForRuntimeCreatedMesh) {
+  // A mesh created via CreateObject has no MeshInstance entry yet.
+  // SetMeshAsset must create the entry rather than silently dropping the command.
+  Axiom::Log::Init();
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  Session.SetContentDir(AXIOM_CONTENT_DIR);
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  // CreateObject adds the object to ObjectDetailsById but not to MeshInstances.
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::CreateObjectCommand{.TemplateId = "Mesh"}});
+  Session.Tick();
+
+  const auto *Created = FindEvent<Axiom::ObjectCreatedEvent>(Subscriber.Events);
+  ASSERT_NE(Created, nullptr);
+  const std::string NewId = Created->ObjectId;
+  Subscriber.Events.clear();
+
+  // SetMeshAsset on the new object should succeed and publish MeshAssetChangedEvent.
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetMeshAssetCommand{
+                      .ObjectId = NewId,
+                      .AssetPath = "basicmesh.glb",
+                  }});
+  Session.Tick();
+
+  ASSERT_EQ(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+  const auto *Changed = FindEvent<Axiom::MeshAssetChangedEvent>(Subscriber.Events);
+  ASSERT_NE(Changed, nullptr);
+  EXPECT_EQ(Changed->ObjectId, NewId);
+
+  // The mesh instance must now exist in the scene state.
+  const auto &Instances = Session.GetState().Scene.MeshInstances;
+  const auto It = std::find_if(Instances.begin(), Instances.end(),
+                               [&](const Axiom::EditorSceneMeshInstance &I) {
+                                 return I.ObjectId == NewId;
+                               });
+  ASSERT_NE(It, Instances.end());
+  EXPECT_EQ(It->AssetRelativePath, "basicmesh.glb");
 }
