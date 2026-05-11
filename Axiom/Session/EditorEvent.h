@@ -89,6 +89,16 @@ struct ObjectLockChangedEvent {
   std::optional<SessionUserId> LockOwner;
 };
 
+struct ScriptClassChangedEvent {
+  std::string ObjectId;
+  std::optional<std::string> ScriptClass; // nullopt = script detached
+};
+
+struct ScriptErrorEvent {
+  std::string ObjectId;
+  std::string Message;
+};
+
 using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         LookStateChangedEvent,
                                         CommandAcknowledgedEvent,
@@ -101,7 +111,9 @@ using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         ObjectDeletedEvent,
                                         ObjectReparentedEvent,
                                         ObjectTransformUpdatedEvent,
-                                        ObjectLockChangedEvent>;
+                                        ObjectLockChangedEvent,
+                                        ScriptClassChangedEvent,
+                                        ScriptErrorEvent>;
 
 struct EditorEvent {
   EditorEventPayload Payload;

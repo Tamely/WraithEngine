@@ -35,9 +35,29 @@ HeadlessSessionHost::HeadlessSessionHost(const ApplicationArgs &Args,
         return std::nullopt;
       });
   SetViewportFrameOutput(m_FrameBridge.get());
+  m_ScriptHost.Initialize(
+      AXIOM_CORAL_MANAGED_DIR,
+      AXIOM_SCRIPTING_TRUST_RESTRICTED ? ScriptTrustProfile::Restricted
+                                       : ScriptTrustProfile::Trusted);
+  m_ScriptHost.LoadEngineAssembly(AXIOM_MANAGED_DIR);
+  m_ScriptHost.RegisterInternalCalls(m_Layer->GetSession(),
+                                     SessionId{1},
+                                     m_Layer->GetLocalUserId());
+  m_Layer->GetSession().Subscribe(&m_ScriptHost);
+  m_Layer->SetScriptHost(&m_ScriptHost);
 }
 
 bool HeadlessSessionHost::Step() { return Application::Step(); }
+
+void HeadlessSessionHost::LoadUserScripts(
+    const std::filesystem::path &AssemblyPath) {
+  m_ScriptHost.LoadUserAssembly(AssemblyPath);
+  m_ScriptHost.StartFileWatcher();
+}
+
+void HeadlessSessionHost::ReloadUserScripts() {
+  m_ScriptHost.ReloadUserAssembly();
+}
 
 bool HeadlessSessionHost::LoadStartupSceneIntoSession() {
   return m_Layer->LoadStartupSceneIntoSession();

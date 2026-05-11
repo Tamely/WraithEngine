@@ -61,6 +61,7 @@ struct EditorObjectDetails {
   bool TransformReadOnly{true};
   std::optional<EditorTransformDetails> Transform;      // local-space
   std::optional<EditorTransformDetails> WorldTransform; // world-space (computed)
+  std::optional<std::string> ScriptClass;               // C# script class name (Actors only)
 };
 
 enum class EditorUserPresenceState { Connected, Away, Disconnected };
@@ -162,6 +163,7 @@ public:
   void AcquireLock(const std::string &ObjectId, SessionUserId User);
   void ReleaseLock(const std::string &ObjectId, SessionUserId User);
   void ReleaseAllLocksForUser(SessionUserId User);
+  void PublishScriptError(const std::string &ObjectId, const std::string &Message);
 
 private:
   static std::unordered_map<std::string, EditorObjectDetails>
@@ -231,6 +233,10 @@ private:
                      const ReparentObjectCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SetTransformCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const AttachScriptCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const DetachScriptCommand &Command);
   void PublishEvent(const EditorEvent &Event);
 
 private:

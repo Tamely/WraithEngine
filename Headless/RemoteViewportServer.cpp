@@ -861,6 +861,8 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::DeleteObject:
   case HeadlessCommandType::ReparentObject:
   case HeadlessCommandType::SetTransform:
+  case HeadlessCommandType::AttachScript:
+  case HeadlessCommandType::DetachScript:
     m_Host.SubmitRemoteCommand(*User, Command->EditorPayload);
     break;
   case HeadlessCommandType::GizmoHover:
@@ -874,6 +876,7 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::GetSchema:
   case HeadlessCommandType::SetProperty:
   case HeadlessCommandType::SaveScene:
+  case HeadlessCommandType::ReloadScripts:
     break;
   case HeadlessCommandType::Quit:
     m_StopRequested.store(true);
@@ -1472,6 +1475,9 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   case HeadlessCommandType::DeleteObject:
   case HeadlessCommandType::ReparentObject:
   case HeadlessCommandType::SetTransform:
+  case HeadlessCommandType::AttachScript:
+  case HeadlessCommandType::DetachScript:
+  case HeadlessCommandType::ReloadScripts:
   case HeadlessCommandType::UpdateViewportCamera:
   case HeadlessCommandType::GizmoHover:
   case HeadlessCommandType::GizmoDragStart:
@@ -1547,8 +1553,18 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::DeleteObject:
   case HeadlessCommandType::ReparentObject:
   case HeadlessCommandType::SetTransform:
+  case HeadlessCommandType::AttachScript:
+  case HeadlessCommandType::DetachScript:
     m_Host.SubmitRemoteCommand(Client->User, Command->EditorPayload);
     return true;
+  case HeadlessCommandType::ReloadScripts: {
+    m_Host.ReloadUserScripts();
+    if (Client->WebRtcSession != nullptr) {
+      Client->WebRtcSession->SendReliableMessage(
+          "{\"type\":\"scripts_reloaded\"}");
+    }
+    return true;
+  }
   case HeadlessCommandType::Heartbeat: {
     const EditorUserPresence *Presence =
         m_Host.GetHeadlessLayer().GetSession().FindPresence(Client->User);
@@ -1607,6 +1623,20 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
         m_Host.SubmitRemoteCommand(
             Client->User,
             EditorCommand{SetObjectVisibilityCommand{.ObjectId = ObjId, .Visible = *B}});
+        return true;
+      }
+    } else if (Name == "scriptClass") {
+      if (const auto *S = std::get_if<std::string>(&Val)) {
+        if (S->empty()) {
+          m_Host.SubmitRemoteCommand(
+              Client->User,
+              EditorCommand{DetachScriptCommand{.ObjectId = ObjId}});
+        } else {
+          m_Host.SubmitRemoteCommand(
+              Client->User,
+              EditorCommand{AttachScriptCommand{.ObjectId = ObjId,
+                                               .ScriptClassName = *S}});
+        }
         return true;
       }
     } else if (Name == "location" || Name == "rotationDegrees" || Name == "scale") {

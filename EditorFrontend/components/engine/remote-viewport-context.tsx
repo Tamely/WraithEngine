@@ -45,6 +45,13 @@ export interface SessionPropertyDescriptor {
   name: string
   type: "string" | "bool" | "vec3"
   readOnly: boolean
+  value?: string
+}
+
+export interface ScriptErrorToast {
+  id: string
+  objectId: string
+  message: string
 }
 
 export interface SessionObjectSchema {
@@ -127,6 +134,7 @@ interface RemoteViewportActions {
     property: string,
     value: string | boolean | [number, number, number]
   ) => Promise<boolean>
+  reloadScripts: () => Promise<void>
 }
 
 export interface SessionObjectTransformUpdate {
@@ -196,6 +204,12 @@ interface RemoteViewportContextValue {
     property: string,
     value: string | boolean | [number, number, number]
   ) => Promise<boolean>
+  reloadScripts: () => Promise<void>
+  reloadStatus: "idle" | "reloading" | "reloaded" | "failed"
+  setReloadStatus: (status: "idle" | "reloading" | "reloaded" | "failed") => void
+  scriptErrorToasts: ScriptErrorToast[]
+  addScriptErrorToast: (objectId: string, message: string) => void
+  dismissScriptErrorToast: (id: string) => void
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
@@ -263,6 +277,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     getSchema: async () => {},
     saveScene: async () => {},
     setProperty: async () => false,
+    reloadScripts: async () => {},
   })
   const [connectionState, setConnectionState] =
     useState<RemoteViewportConnectionState>("idle")
@@ -289,6 +304,8 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
   const [assets, setAssets] = useState<SessionAssetDescriptor[]>([])
   const [objectSchema, setObjectSchema] = useState<SessionObjectSchema | null>(null)
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle")
+  const [reloadStatus, setReloadStatus] = useState<"idle" | "reloading" | "reloaded" | "failed">("idle")
+  const [scriptErrorToasts, setScriptErrorToasts] = useState<ScriptErrorToast[]>([])
 
   const appendEventLog = useCallback((value: string) => {
     setEventLog((current) => [value, ...current].slice(0, MAX_LOG_LINES))
@@ -448,6 +465,20 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     []
   )
 
+  const reloadScripts = useCallback(async () => {
+    setReloadStatus("reloading")
+    await actionsRef.current.reloadScripts()
+  }, [])
+
+  const addScriptErrorToast = useCallback((objectId: string, message: string) => {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+    setScriptErrorToasts((current) => [...current, { id, objectId, message }])
+  }, [])
+
+  const dismissScriptErrorToast = useCallback((id: string) => {
+    setScriptErrorToasts((current) => current.filter((toast) => toast.id !== id))
+  }, [])
+
   const selectedObjectId =
     currentUserId !== null
       ? selections.find((selection) => selection.userId === currentUserId)?.objectId ?? null
@@ -486,6 +517,12 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       saveStatus,
       setSaveStatus,
       setProperty,
+      reloadScripts,
+      reloadStatus,
+      setReloadStatus,
+      scriptErrorToasts,
+      addScriptErrorToast,
+      dismissScriptErrorToast,
       setConnectionState,
       setSessionState,
       setStatusText,
@@ -556,6 +593,11 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       saveScene,
       saveStatus,
       setProperty,
+      reloadScripts,
+      reloadStatus,
+      scriptErrorToasts,
+      addScriptErrorToast,
+      dismissScriptErrorToast,
       serverOrigin,
       gizmoMode,
       setMode,

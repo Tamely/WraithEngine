@@ -177,6 +177,7 @@ type RemoteViewportCommand =
       property: string
       value: string | boolean | [number, number, number]
     }
+  | { type: "reload_scripts" }
 
 function getServerOrigin() {
   const configuredOrigin = process.env.NEXT_PUBLIC_AXIOM_SERVER_ORIGIN?.trim()
@@ -255,6 +256,8 @@ export function Viewport() {
     setAssets,
     setObjectSchema,
     setSaveStatus,
+    setReloadStatus,
+    addScriptErrorToast,
     setSessionState,
     sessionStatusText,
     setSessionStatusText,
@@ -712,9 +715,30 @@ export function Viewport() {
                 name: typeof p.name === "string" ? p.name : "",
                 type: p.type === "bool" ? "bool" : p.type === "vec3" ? "vec3" : "string",
                 readOnly: p.readOnly === true,
+                value: typeof p.value === "string" ? p.value : undefined,
               })),
           })
         }
+        return
+      }
+
+      if (message.type === "scripts_reloaded") {
+        setReloadStatus("reloaded")
+        setSessionUi("session-ready", "Session ready", "Scripts reloaded successfully.")
+        return
+      }
+
+      if (message.payloadType === "script_class_changed") {
+        void refreshSessionSnapshotSafely("event")
+        return
+      }
+
+      if (message.payloadType === "script_error") {
+        const objectId = typeof message.objectId === "string" ? message.objectId : "unknown"
+        const errorMessage =
+          typeof message.message === "string" ? message.message : "Unknown script error"
+        addScriptErrorToast(objectId, errorMessage)
+        setSessionUi("session-ready", "Session ready", `Script error on ${objectId}.`)
         return
       }
 
@@ -1491,6 +1515,9 @@ export function Viewport() {
       setProperty: async (objectId, property, value) => {
         return sendCommand({ type: "set_property", objectId, property, value }, "reliable")
       },
+      reloadScripts: async () => {
+        await sendCommand({ type: "reload_scripts" }, "reliable")
+      },
       reparentObject: async (objectId, newParentId) => {
         const accepted = await sendCommand(
           {
@@ -1731,7 +1758,7 @@ export function Viewport() {
       claimChannelRef.current = null
       void destroyPeerConnection("component_unmount")
     }
-  }, [appendEventLog, clearEventLog, registerActions, serverOrigin, setConnectionState, setDetailText, setFrameText, setIsLooking, setServerOrigin, setStatusText, setViewMode])
+  }, [addScriptErrorToast, appendEventLog, clearEventLog, registerActions, serverOrigin, setConnectionState, setDetailText, setFrameText, setIsLooking, setReloadStatus, setServerOrigin, setStatusText, setViewMode])
 
   async function toggleLook() {
     const nextValue = !isLookingRef.current

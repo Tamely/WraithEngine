@@ -11,6 +11,7 @@ CTestTestfile.cmake
 _deps
 CMakeUserPresets.json
 Build/
+build/
 .cache/
 .vs/
 .idea/
@@ -28,3 +29,11 @@ imgui.ini
 EditorFrontend/tsconfig.tsbuildinfo
 *.tsbuildinfo
 EditorFrontend/.env
+
+# C# / .NET build artifacts
+Scripting/*/bin/
+Scripting/*/obj/
+Tests/TestScripts/**/bin/
+Tests/TestScripts/**/obj/
+# Coral is a git submodule — its own .gitignore handles bin/ and obj/ internally.
+# Listing Coral sub-paths here is redundant and interferes with submodule commits.

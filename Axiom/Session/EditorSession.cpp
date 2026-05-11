@@ -1,5 +1,7 @@
 #include "Session/EditorSession.h"
 
+#include <Core/Log.h>
+
 #include <glm/common.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/geometric.hpp>
@@ -69,6 +71,12 @@ std::string CommandTypeName(const EditorCommandPayload &Payload) {
   }
   if (std::holds_alternative<ReparentObjectCommand>(Payload)) {
     return "reparent_object";
+  }
+  if (std::holds_alternative<AttachScriptCommand>(Payload)) {
+    return "attach_script";
+  }
+  if (std::holds_alternative<DetachScriptCommand>(Payload)) {
+    return "detach_script";
   }
   return "set_transform";
 }
@@ -963,6 +971,39 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
     }
   }
 
+  if (const auto *AttachCmd =
+          std::get_if<AttachScriptCommand>(&QueuedCommand.Command.Payload)) {
+    if (AttachCmd->ObjectId.empty()) {
+      FailureReason = "AttachScript requires a non-empty object id.";
+      return false;
+    }
+    if (AttachCmd->ScriptClassName.empty()) {
+      FailureReason = "AttachScript requires a non-empty script class name.";
+      return false;
+    }
+    const EditorObjectDetails *Details = FindObjectDetails(AttachCmd->ObjectId);
+    if (Details == nullptr) {
+      FailureReason = "AttachScript targeted an unknown object.";
+      return false;
+    }
+    if (Details->Kind != EditorSceneItemKind::Actor) {
+      FailureReason = "Scripts can only be attached to Actor objects.";
+      return false;
+    }
+  }
+
+  if (const auto *DetachCmd =
+          std::get_if<DetachScriptCommand>(&QueuedCommand.Command.Payload)) {
+    if (DetachCmd->ObjectId.empty()) {
+      FailureReason = "DetachScript requires a non-empty object id.";
+      return false;
+    }
+    if (FindObjectDetails(DetachCmd->ObjectId) == nullptr) {
+      FailureReason = "DetachScript targeted an unknown object.";
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -1238,6 +1279,34 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                     .RotationDegrees = Command.RotationDegrees,
                     .Scale = Command.Scale,
                 }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const AttachScriptCommand &Command) {
+  auto It = m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
+  if (It == m_State.Scene.ObjectDetailsById.end())
+    return;
+  It->second.ScriptClass = Command.ScriptClassName;
+  A_CORE_INFO("EditorSession: attached script '{}' to '{}'",
+              Command.ScriptClassName, Command.ObjectId);
+  PublishEvent({ScriptClassChangedEvent{.ObjectId = Command.ObjectId,
+                                        .ScriptClass = Command.ScriptClassName}});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const DetachScriptCommand &Command) {
+  auto It = m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
+  if (It == m_State.Scene.ObjectDetailsById.end())
+    return;
+  It->second.ScriptClass = std::nullopt;
+  A_CORE_INFO("EditorSession: detached script from '{}'", Command.ObjectId);
+  PublishEvent({ScriptClassChangedEvent{.ObjectId = Command.ObjectId,
+                                        .ScriptClass = std::nullopt}});
+}
+
+void EditorSession::PublishScriptError(const std::string &ObjectId,
+                                       const std::string &Message) {
+  PublishEvent({ScriptErrorEvent{.ObjectId = ObjectId, .Message = Message}});
 }
 
 void EditorSession::PublishEvent(const EditorEvent &Event) {

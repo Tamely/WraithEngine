@@ -158,6 +158,12 @@ std::string EventPayloadType(const EditorEventPayload &Payload) {
   if (std::holds_alternative<ObjectLockChangedEvent>(Payload)) {
     return "object_lock_changed";
   }
+  if (std::holds_alternative<ScriptClassChangedEvent>(Payload)) {
+    return "script_class_changed";
+  }
+  if (std::holds_alternative<ScriptErrorEvent>(Payload)) {
+    return "script_error";
+  }
   return "object_transform_updated";
 }
 
@@ -710,6 +716,28 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
   if (*Type == "save_scene") {
     return HeadlessCommand{.Type = HeadlessCommandType::SaveScene};
   }
+  if (*Type == "reload_scripts") {
+    return HeadlessCommand{.Type = HeadlessCommandType::ReloadScripts};
+  }
+  if (*Type == "attach_script") {
+    static const std::regex ObjectIdPattern(R"json("objectId"\s*:\s*"([^"]+)")json");
+    static const std::regex ClassPattern(R"json("scriptClass"\s*:\s*"([^"]*)")json");
+    const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
+    const auto ScriptClass = MatchString(JsonLine, ClassPattern);
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::AttachScript,
+        .EditorPayload = {.Payload = AttachScriptCommand{
+                              .ObjectId = ObjectId.value_or(""),
+                              .ScriptClassName = ScriptClass.value_or("")}}};
+  }
+  if (*Type == "detach_script") {
+    static const std::regex ObjectIdPattern(R"json("objectId"\s*:\s*"([^"]+)")json");
+    const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::DetachScript,
+        .EditorPayload = {.Payload = DetachScriptCommand{
+                              .ObjectId = ObjectId.value_or("")}}};
+  }
   if (*Type == "get_schema") {
     static const std::regex ObjectIdPattern(R"json("objectId"\s*:\s*"([^"]+)")json");
     const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
@@ -802,6 +830,9 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::GetSchema:
   case HeadlessCommandType::SetProperty:
   case HeadlessCommandType::SaveScene:
+  case HeadlessCommandType::AttachScript:
+  case HeadlessCommandType::DetachScript:
+  case HeadlessCommandType::ReloadScripts:
   case HeadlessCommandType::Heartbeat:
   case HeadlessCommandType::Quit:
     return Command;
@@ -934,6 +965,19 @@ std::string SerializeEvent(const PublishedEditorEvent &Event) {
     } else {
       Stream << "null";
     }
+  } else if (const auto *ScriptChanged =
+                 std::get_if<ScriptClassChangedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"objectId\":\"" << EscapeJson(ScriptChanged->ObjectId)
+           << "\",\"scriptClass\":";
+    if (ScriptChanged->ScriptClass.has_value()) {
+      Stream << "\"" << EscapeJson(*ScriptChanged->ScriptClass) << "\"";
+    } else {
+      Stream << "null";
+    }
+  } else if (const auto *ScriptError =
+                 std::get_if<ScriptErrorEvent>(&Event.Event.Payload)) {
+    Stream << ",\"objectId\":\"" << EscapeJson(ScriptError->ObjectId)
+           << "\",\"message\":\"" << EscapeJson(ScriptError->Message) << "\"";
   }
   Stream << "}";
   return Stream.str();
@@ -1256,14 +1300,18 @@ std::string SerializeObjectSchema(const EditorObjectDetails &Details) {
          << "\",\"properties\":[";
 
   bool First = true;
-  auto AppendProp = [&](std::string_view Name, std::string_view Type, bool ReadOnly) {
+  // Appends a property descriptor; Value (if non-empty) is the current value.
+  auto AppendProp = [&](std::string_view Name, std::string_view Type, bool ReadOnly,
+                        std::string_view Value = {}) {
     if (!First) Stream << ",";
     First = false;
     Stream << "{\"name\":\"" << Name << "\",\"type\":\"" << Type
-           << "\",\"readOnly\":" << (ReadOnly ? "true" : "false") << "}";
+           << "\",\"readOnly\":" << (ReadOnly ? "true" : "false");
+    if (!Value.empty()) Stream << ",\"value\":\"" << EscapeJson(Value) << "\"";
+    Stream << "}";
   };
 
-  AppendProp("displayName", "string", false);
+  AppendProp("displayName", "string", false, Details.DisplayName);
   AppendProp("visible", "bool", false);
 
   if (Details.SupportsTransform) {
@@ -1271,6 +1319,11 @@ std::string SerializeObjectSchema(const EditorObjectDetails &Details) {
     AppendProp("location",        "vec3", RO);
     AppendProp("rotationDegrees", "vec3", RO);
     AppendProp("scale",           "vec3", RO);
+  }
+
+  if (Details.Kind == EditorSceneItemKind::Actor) {
+    AppendProp("scriptClass", "string", false,
+               Details.ScriptClass.value_or(""));
   }
 
   Stream << "]}";
