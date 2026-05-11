@@ -26,7 +26,7 @@ jobs:
 
       - name: Install Vulkan SDK
         # The vulkan-sdk Homebrew cask was removed; install the individual formulae instead.
-        run: brew install molten-vk vulkan-headers
+        run: brew install molten-vk vulkan-headers glslang
 
       - name: Set Vulkan environment
         run: |
