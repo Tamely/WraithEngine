@@ -73,6 +73,7 @@ export function Outliner() {
     renameObject,
     reparentObject,
     setMeshAsset,
+    setMaterialTexture,
     participants,
     lockedObjects,
     sessionState,
@@ -198,6 +199,7 @@ export function Outliner() {
             e.preventDefault()
             e.dataTransfer.dropEffect = "copy"
             setDropTargetId(item.id)
+            return
           }
         }}
         onDragLeave={() => {
@@ -216,8 +218,9 @@ export function Outliner() {
           if (sourceId === null) {
             const assetPath = e.dataTransfer.getData("axiom/asset-path")
             const assetKind = e.dataTransfer.getData("axiom/asset-kind")
-            if (assetPath && assetKind === "mesh" && item.kind === "mesh") {
-              void setMeshAsset(item.id, assetPath)
+            if (assetPath && item.kind === "mesh") {
+              if (assetKind === "mesh") void setMeshAsset(item.id, assetPath)
+              else if (assetKind === "texture") void setMaterialTexture(item.id, assetPath)
             }
           }
         }}
