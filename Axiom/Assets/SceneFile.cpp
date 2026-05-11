@@ -191,9 +191,10 @@ struct Parser {
             Src[Pos] == '.' || Src[Pos] == 'e' || Src[Pos] == 'E' ||
             Src[Pos] == '+' || Src[Pos] == '-'))
       ++Pos;
-    double V = 0.0;
-    auto [Ptr, Ec] = std::from_chars(Src.data() + Start, Src.data() + Pos, V);
-    if (Ec != std::errc{}) return std::nullopt;
+    // std::from_chars for floating-point requires macOS 13.3+; use strtod instead.
+    char *End = nullptr;
+    double V = std::strtod(Src.data() + Start, &End);
+    if (End == Src.data() + Start) return std::nullopt;
     return V;
   }
 
