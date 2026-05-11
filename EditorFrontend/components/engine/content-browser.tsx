@@ -234,9 +234,15 @@ export function ContentBrowser() {
                 {filteredAssets.map((asset) => (
                   <div
                     key={asset.id}
+                    draggable={asset.kind === "mesh"}
                     onClick={() => setSelectedAsset(asset.id)}
                     onDoubleClick={() => void assignAssetToSelection(asset)}
-                    title={canAssignToSelection && asset.kind === "mesh" ? "Double-click to assign to selected mesh" : asset.path}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("axiom/asset-path", asset.path)
+                      e.dataTransfer.setData("axiom/asset-kind", asset.kind)
+                      e.dataTransfer.effectAllowed = "copy"
+                    }}
+                    title={canAssignToSelection && asset.kind === "mesh" ? "Double-click or drag to assign to a mesh object" : asset.path}
                     className={`flex flex-col items-center p-1 rounded cursor-pointer hover:bg-neutral-800 ${
                       selectedAsset === asset.id
                         ? "bg-neutral-700 ring-1 ring-white/30"
@@ -257,9 +263,15 @@ export function ContentBrowser() {
                 {filteredAssets.map((asset) => (
                   <div
                     key={asset.id}
+                    draggable={asset.kind === "mesh"}
                     onClick={() => setSelectedAsset(asset.id)}
                     onDoubleClick={() => void assignAssetToSelection(asset)}
-                    title={canAssignToSelection && asset.kind === "mesh" ? "Double-click to assign to selected mesh" : asset.path}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("axiom/asset-path", asset.path)
+                      e.dataTransfer.setData("axiom/asset-kind", asset.kind)
+                      e.dataTransfer.effectAllowed = "copy"
+                    }}
+                    title={canAssignToSelection && asset.kind === "mesh" ? "Double-click or drag to assign to a mesh object" : asset.path}
                     className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-neutral-800 ${
                       selectedAsset === asset.id
                         ? "bg-neutral-700 ring-1 ring-white/30"
