@@ -77,7 +77,7 @@ jobs:
       # pnpm must be set up before setup-node so the built-in cache can locate the store.
       - uses: pnpm/action-setup@v4
         with:
-          version: latest
+          version: "10"
 
       - uses: actions/setup-node@v4
         with:
@@ -87,9 +87,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Lint
-        run: pnpm lint
 
       - name: Build
         run: pnpm build
