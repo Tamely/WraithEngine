@@ -60,6 +60,12 @@ jobs:
       - name: Build
         run: cmake --build build/debug
 
+      - name: Set DOTNET_ROOT
+        run: |
+          # Coral's hostfxr discovery checks DOTNET_ROOT; point it at the
+          # dotnet install root so it finds libhostfxr.dylib on CI runners.
+          echo "DOTNET_ROOT=$(dirname $(realpath $(which dotnet)))" >> $GITHUB_ENV
+
       - name: Test
         run: ctest --test-dir build/debug --output-on-failure
 

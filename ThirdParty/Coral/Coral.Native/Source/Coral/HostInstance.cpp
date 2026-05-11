@@ -163,11 +163,12 @@ namespace Coral {
 			basePath
 		};
 #elif defined(CORAL_APPLE)
-		auto searchPaths = std::array
-		{
-			std::filesystem::path("/usr/local/share/dotnet/host/fxr/"),
-			std::filesystem::path("/usr/share/dotnet/host/fxr/")
-		};
+		// Honour DOTNET_ROOT when set (e.g. GitHub Actions CI runners).
+		std::vector<std::filesystem::path> searchPaths;
+		if (const char* dotnetRoot = std::getenv("DOTNET_ROOT"))
+			searchPaths.push_back(std::filesystem::path(dotnetRoot) / "host/fxr");
+		searchPaths.push_back(std::filesystem::path("/usr/local/share/dotnet/host/fxr/"));
+		searchPaths.push_back(std::filesystem::path("/usr/share/dotnet/host/fxr/"));
 #else
 		auto searchPaths = std::array
 		{
@@ -181,6 +182,9 @@ namespace Coral {
 		};
 #endif
 
+		std::filesystem::path bestFxr;
+		std::string bestVersion;
+
 		for (const auto& path : searchPaths)
 		{
 			if (!std::filesystem::exists(path))
@@ -191,19 +195,28 @@ namespace Coral {
 				if (!dir.is_directory())
 					continue;
 
-				auto dirPath = dir.path().filename();
-				char version = dirPath.string()[0];
-
-				if (version != '9')
+				auto dirName = dir.path().filename().string();
+				// Accept any .NET version >= 6 (e.g. "6.", "7.", "8.", "9.", "10.")
+				if (dirName.empty() || !std::isdigit((unsigned char)dirName[0]))
+					continue;
+				int major = std::atoi(dirName.c_str());
+				if (major < 6)
 					continue;
 
 				auto res = dir / std::filesystem::path(CORAL_HOSTFXR_NAME);
-				CORAL_VERIFY(std::filesystem::exists(res));
-				return res;
+				if (!std::filesystem::exists(res))
+					continue;
+
+				// Pick the highest version found so we always use the newest runtime.
+				if (bestVersion.empty() || dirName > bestVersion)
+				{
+					bestVersion = dirName;
+					bestFxr = res;
+				}
 			}
 		}
 
-		return "";
+		return bestFxr;
 	}
 
 	bool HostInstance::LoadHostFXR() const
