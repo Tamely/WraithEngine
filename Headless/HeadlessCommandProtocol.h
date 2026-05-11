@@ -50,6 +50,7 @@ enum class HeadlessCommandType {
   ReloadScripts,
   SetMeshAsset,
   SetLightProperties,
+  SetMaterialProperties,
   Heartbeat,
   RenderFrame,
   Quit,
@@ -66,9 +67,12 @@ struct HeadlessCommand {
   std::string ObjectId;
   std::string PropertyName;
   std::optional<PropertyValue> PropertyVal;
-  std::string AssetPath;    // used by SetMeshAsset
-  glm::vec3 Color{1.0f};   // used by SetLightProperties
-  float Intensity{1.0f};   // used by SetLightProperties
+  std::string AssetPath;         // used by SetMeshAsset
+  glm::vec3 Color{1.0f};        // used by SetLightProperties
+  float Intensity{1.0f};        // used by SetLightProperties
+  glm::vec4 BaseColorFactor{1.0f}; // used by SetMaterialProperties
+  float Metallic{0.0f};         // used by SetMaterialProperties
+  float Roughness{0.5f};        // used by SetMaterialProperties
 };
 
 struct HeadlessAppOptions {

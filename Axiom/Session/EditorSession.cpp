@@ -86,6 +86,9 @@ std::string CommandTypeName(const EditorCommandPayload &Payload) {
   if (std::holds_alternative<SetLightPropertiesCommand>(Payload)) {
     return "set_light_properties";
   }
+  if (std::holds_alternative<SetMaterialPropertiesCommand>(Payload)) {
+    return "set_material_properties";
+  }
   return "set_transform";
 }
 
@@ -204,6 +207,19 @@ void EditorSession::SetPresenceState(SessionUserId User,
 
 void EditorSession::SetSceneState(EditorSceneState SceneState) {
   m_State.Scene = std::move(SceneState);
+  // Populate Material on object details from mesh instances so the inspector
+  // can display and edit material properties for mesh objects.
+  for (const auto &MeshInst : m_State.Scene.MeshInstances) {
+    auto DetailsIt = m_State.Scene.ObjectDetailsById.find(MeshInst.ObjectId);
+    if (DetailsIt != m_State.Scene.ObjectDetailsById.end() &&
+        MeshInst.Material && !DetailsIt->second.Material.has_value()) {
+      DetailsIt->second.Material = EditorMaterialProperties{
+          .BaseColorFactor = MeshInst.Material->BaseColorFactor,
+          .Metallic        = MeshInst.Material->Metallic,
+          .Roughness       = MeshInst.Material->Roughness,
+      };
+    }
+  }
   RebuildInstanceTree(m_State.Scene.Items, m_SceneRoot.get());
   PruneInvalidSelections();
   RecomputeAllWorldTransforms();
@@ -1046,6 +1062,19 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
     }
   }
 
+  if (const auto *MatCmd =
+          std::get_if<SetMaterialPropertiesCommand>(&QueuedCommand.Command.Payload)) {
+    const EditorObjectDetails *Details = FindObjectDetails(MatCmd->ObjectId);
+    if (Details == nullptr) {
+      FailureReason = "SetMaterialProperties targeted an unknown object.";
+      return false;
+    }
+    if (Details->Kind != EditorSceneItemKind::Mesh) {
+      FailureReason = "SetMaterialProperties target must be a Mesh object.";
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -1376,6 +1405,18 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
   MeshIt->Material = First.Material;
   MeshIt->AssetRelativePath = Command.AssetPath;
 
+  // Sync material properties on object details so the inspector reflects the new asset's material.
+  if (First.Material) {
+    auto DetailsIt = m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
+    if (DetailsIt != m_State.Scene.ObjectDetailsById.end()) {
+      DetailsIt->second.Material = EditorMaterialProperties{
+          .BaseColorFactor = First.Material->BaseColorFactor,
+          .Metallic        = First.Material->Metallic,
+          .Roughness       = First.Material->Roughness,
+      };
+    }
+  }
+
   A_CORE_INFO("SetMeshAsset: assigned '{}' to object '{}'",
               Command.AssetPath, Command.ObjectId);
   PublishEvent({.Payload = MeshAssetChangedEvent{
@@ -1403,6 +1444,41 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
       .ObjectId = Command.ObjectId,
       .Color = Command.Color,
       .Intensity = Command.Intensity,
+  }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const SetMaterialPropertiesCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
+
+  auto DetailsIt = m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
+  if (DetailsIt == m_State.Scene.ObjectDetailsById.end()) {
+    return;
+  }
+
+  if (!DetailsIt->second.Material.has_value()) {
+    DetailsIt->second.Material = EditorMaterialProperties{};
+  }
+  DetailsIt->second.Material->BaseColorFactor = Command.BaseColorFactor;
+  DetailsIt->second.Material->Metallic        = Command.Metallic;
+  DetailsIt->second.Material->Roughness       = Command.Roughness;
+
+  auto MeshIt = std::find_if(m_State.Scene.MeshInstances.begin(),
+                             m_State.Scene.MeshInstances.end(),
+                             [&](const EditorSceneMeshInstance &M) {
+                               return M.ObjectId == Command.ObjectId;
+                             });
+  if (MeshIt != m_State.Scene.MeshInstances.end() && MeshIt->Material) {
+    MeshIt->Material->BaseColorFactor = Command.BaseColorFactor;
+    MeshIt->Material->Metallic        = Command.Metallic;
+    MeshIt->Material->Roughness       = Command.Roughness;
+  }
+
+  PublishEvent({.Payload = MaterialPropertiesChangedEvent{
+      .ObjectId         = Command.ObjectId,
+      .BaseColorFactor  = Command.BaseColorFactor,
+      .Metallic         = Command.Metallic,
+      .Roughness        = Command.Roughness,
   }});
 }
 

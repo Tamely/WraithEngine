@@ -205,6 +205,15 @@ function DetailsContent({
         />
       )}
 
+      {details.kind === "mesh" && (
+        <MaterialSection
+          objectId={details.objectId}
+          material={details.material ?? null}
+          isSaving={isSaving}
+          setIsSaving={setIsSaving}
+        />
+      )}
+
       <section className="rounded border border-neutral-800 bg-neutral-950/60 p-3">
         <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">Transform</p>
         {details.capabilities.supportsTransform && details.transform ? (
@@ -407,6 +416,138 @@ function LightSection({
             type="button"
           >
             {isSaving ? "Applying..." : "Apply Light"}
+          </button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function MaterialSection({
+  objectId,
+  material,
+  isSaving,
+  setIsSaving,
+}: {
+  objectId: string
+  material: {
+    baseColorFactor: [number, number, number, number]
+    metallic: number
+    roughness: number
+  } | null
+  isSaving: boolean
+  setIsSaving: (value: boolean) => void
+}) {
+  const { setMaterialProperties } = useRemoteViewport()
+  const [draftColor, setDraftColor] = useState<[string, string, string]>(
+    material
+      ? [
+          String(material.baseColorFactor[0]),
+          String(material.baseColorFactor[1]),
+          String(material.baseColorFactor[2]),
+        ]
+      : ["1", "1", "1"]
+  )
+  const [draftAlpha, setDraftAlpha] = useState(String(material?.baseColorFactor[3] ?? 1))
+  const [draftMetallic, setDraftMetallic] = useState(String(material?.metallic ?? 0))
+  const [draftRoughness, setDraftRoughness] = useState(String(material?.roughness ?? 0.5))
+
+  useEffect(() => {
+    if (material) {
+      setDraftColor([
+        String(material.baseColorFactor[0]),
+        String(material.baseColorFactor[1]),
+        String(material.baseColorFactor[2]),
+      ])
+      setDraftAlpha(String(material.baseColorFactor[3]))
+      setDraftMetallic(String(material.metallic))
+      setDraftRoughness(String(material.roughness))
+    }
+  }, [
+    objectId,
+    material?.baseColorFactor[0],
+    material?.baseColorFactor[1],
+    material?.baseColorFactor[2],
+    material?.baseColorFactor[3],
+    material?.metallic,
+    material?.roughness,
+  ])
+
+  async function applyMaterialProperties() {
+    const r = Number(draftColor[0])
+    const g = Number(draftColor[1])
+    const b = Number(draftColor[2])
+    const a = Number(draftAlpha)
+    const metallic = Number(draftMetallic)
+    const roughness = Number(draftRoughness)
+    if ([r, g, b, a, metallic, roughness].some((v) => Number.isNaN(v))) return
+    setIsSaving(true)
+    try {
+      await setMaterialProperties(objectId, [r, g, b, a], metallic, roughness)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  return (
+    <section className="rounded border border-neutral-800 bg-neutral-950/60 p-3">
+      <div className="flex items-center gap-1.5 mb-3">
+        <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">Material</p>
+      </div>
+      <div className="space-y-3">
+        <VectorEditor
+          disabled={isSaving}
+          label="Base Color"
+          value={draftColor}
+          onChange={setDraftColor}
+        />
+        <div className="flex items-center gap-3">
+          <span className="w-20 shrink-0 text-xs text-neutral-500">Alpha</span>
+          <input
+            className="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 outline-none focus:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isSaving}
+            onChange={(e) => setDraftAlpha(e.target.value)}
+            type="number"
+            min={0}
+            max={1}
+            step={0.01}
+            value={draftAlpha}
+          />
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="w-20 shrink-0 text-xs text-neutral-500">Metallic</span>
+          <input
+            className="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 outline-none focus:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isSaving}
+            onChange={(e) => setDraftMetallic(e.target.value)}
+            type="number"
+            min={0}
+            max={1}
+            step={0.01}
+            value={draftMetallic}
+          />
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="w-20 shrink-0 text-xs text-neutral-500">Roughness</span>
+          <input
+            className="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 outline-none focus:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isSaving}
+            onChange={(e) => setDraftRoughness(e.target.value)}
+            type="number"
+            min={0}
+            max={1}
+            step={0.01}
+            value={draftRoughness}
+          />
+        </div>
+        <div className="flex justify-end pt-1">
+          <button
+            className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isSaving}
+            onClick={() => void applyMaterialProperties()}
+            type="button"
+          >
+            {isSaving ? "Applying..." : "Apply Material"}
           </button>
         </div>
       </div>

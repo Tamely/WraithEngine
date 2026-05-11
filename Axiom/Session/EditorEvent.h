@@ -3,6 +3,7 @@
 #include "Session/SessionTypes.h"
 
 #include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 
 #include <optional>
 #include <string>
@@ -110,6 +111,13 @@ struct LightPropertiesChangedEvent {
   float Intensity{1.0f};
 };
 
+struct MaterialPropertiesChangedEvent {
+  std::string ObjectId;
+  glm::vec4 BaseColorFactor{1.0f};
+  float Metallic{0.0f};
+  float Roughness{0.5f};
+};
+
 using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         LookStateChangedEvent,
                                         CommandAcknowledgedEvent,
@@ -126,7 +134,8 @@ using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         ScriptClassChangedEvent,
                                         ScriptErrorEvent,
                                         MeshAssetChangedEvent,
-                                        LightPropertiesChangedEvent>;
+                                        LightPropertiesChangedEvent,
+                                        MaterialPropertiesChangedEvent>;
 
 struct EditorEvent {
   EditorEventPayload Payload;

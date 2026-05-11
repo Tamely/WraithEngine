@@ -59,6 +59,12 @@ struct EditorLightProperties {
   glm::vec3 Direction{0.35f, 0.7f, 0.2f}; // world-space (need not be normalized)
 };
 
+struct EditorMaterialProperties {
+  glm::vec4 BaseColorFactor{1.0f};
+  float Metallic{0.0f};
+  float Roughness{0.5f};
+};
+
 struct EditorObjectDetails {
   std::string ObjectId;
   std::string DisplayName;
@@ -70,6 +76,7 @@ struct EditorObjectDetails {
   std::optional<EditorTransformDetails> WorldTransform; // world-space (computed)
   std::optional<std::string> ScriptClass;               // C# script class name (Actors only)
   std::optional<EditorLightProperties> Light;           // Light objects only
+  std::optional<EditorMaterialProperties> Material;     // Mesh objects only
 };
 
 enum class EditorUserPresenceState { Connected, Away, Disconnected };
@@ -253,6 +260,8 @@ private:
                      const SetMeshAssetCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SetLightPropertiesCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const SetMaterialPropertiesCommand &Command);
   void PublishEvent(const EditorEvent &Event);
 
 private:

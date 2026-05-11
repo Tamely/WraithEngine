@@ -99,6 +99,12 @@ export interface SessionLightDetails {
   intensity: number
 }
 
+export interface SessionMaterialDetails {
+  baseColorFactor: [number, number, number, number]
+  metallic: number
+  roughness: number
+}
+
 export interface SessionObjectDetails {
   objectId: string
   displayName: string
@@ -110,6 +116,7 @@ export interface SessionObjectDetails {
   }
   transform: SessionTransformDetails | null
   light: SessionLightDetails | null
+  material: SessionMaterialDetails | null
   collaboration: {
     selectedByUserIds: number[]
     lockState: "unlocked" | "locked"
@@ -146,6 +153,12 @@ interface RemoteViewportActions {
     objectId: string,
     color: [number, number, number],
     intensity: number
+  ) => Promise<boolean>
+  setMaterialProperties: (
+    objectId: string,
+    baseColorFactor: [number, number, number, number],
+    metallic: number,
+    roughness: number
   ) => Promise<boolean>
 }
 
@@ -223,6 +236,12 @@ interface RemoteViewportContextValue {
     color: [number, number, number],
     intensity: number
   ) => Promise<boolean>
+  setMaterialProperties: (
+    objectId: string,
+    baseColorFactor: [number, number, number, number],
+    metallic: number,
+    roughness: number
+  ) => Promise<boolean>
   reloadStatus: "idle" | "reloading" | "reloaded" | "failed"
   setReloadStatus: (status: "idle" | "reloading" | "reloaded" | "failed") => void
   scriptErrorToasts: ScriptErrorToast[]
@@ -298,6 +317,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     reloadScripts: async () => {},
     setMeshAsset: async () => false,
     setLightProperties: async () => false,
+    setMaterialProperties: async () => false,
   })
   const [connectionState, setConnectionState] =
     useState<RemoteViewportConnectionState>("idle")
@@ -502,6 +522,16 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     []
   )
 
+  const setMaterialProperties = useCallback(
+    async (
+      objectId: string,
+      baseColorFactor: [number, number, number, number],
+      metallic: number,
+      roughness: number
+    ) => actionsRef.current.setMaterialProperties(objectId, baseColorFactor, metallic, roughness),
+    []
+  )
+
   const addScriptErrorToast = useCallback((objectId: string, message: string) => {
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`
     setScriptErrorToasts((current) => [...current, { id, objectId, message }])
@@ -552,6 +582,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       reloadScripts,
       setMeshAsset,
       setLightProperties,
+      setMaterialProperties,
       reloadStatus,
       setReloadStatus,
       scriptErrorToasts,
@@ -630,6 +661,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       reloadScripts,
       setMeshAsset,
       setLightProperties,
+      setMaterialProperties,
       reloadStatus,
       scriptErrorToasts,
       addScriptErrorToast,

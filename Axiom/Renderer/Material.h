@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <glm/vec4.hpp>
 #include <memory>
 #include <vector>
 
@@ -22,6 +23,9 @@ using TextureSourceDataRef = std::shared_ptr<TextureSourceData>;
 
 struct MaterialInstance {
   TextureSourceDataRef BaseColorTexture;
+  glm::vec4 BaseColorFactor{1.0f};
+  float Metallic{0.0f};
+  float Roughness{0.5f};
 };
 
 using MaterialInstanceRef = std::shared_ptr<MaterialInstance>;

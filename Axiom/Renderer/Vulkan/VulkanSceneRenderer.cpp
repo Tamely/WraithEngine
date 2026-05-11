@@ -317,8 +317,13 @@ void VulkanSceneRenderer::RecordGraphicsPass(
                             &GraphicsDescriptorSet, 0, VK_NULL_HANDLE);
     MeshGraphicsPushConstants PushConstants{};
     PushConstants.Model = VisibleSubmission.Submission->Transform;
+    if (VisibleSubmission.Submission->Material) {
+      PushConstants.BaseColorFactor = VisibleSubmission.Submission->Material->BaseColorFactor;
+      PushConstants.Metallic        = VisibleSubmission.Submission->Material->Metallic;
+      PushConstants.Roughness       = VisibleSubmission.Submission->Material->Roughness;
+    }
     vkCmdPushConstants(Context.CommandBuffer, Context.MeshGraphicsPipelineLayout,
-                       VK_SHADER_STAGE_VERTEX_BIT, 0,
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                        sizeof(MeshGraphicsPushConstants), &PushConstants);
     BindMeshBuffers(Context.CommandBuffer, VisibleSubmission.Mesh);
     vkCmdDrawIndexed(Context.CommandBuffer, VisibleSubmission.Mesh->IndexCount, 1,

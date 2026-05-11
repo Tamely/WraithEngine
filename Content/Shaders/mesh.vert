@@ -17,7 +17,10 @@ layout(std140, set = 0, binding = 0) uniform CameraFrame {
 } cameraFrame;
 
 layout(push_constant) uniform MeshGraphicsPushConstants {
-    mat4 model;
+    mat4  model;
+    vec4  baseColorFactor;
+    float metallic;
+    float roughness;
 } pushConstants;
 
 void main() {

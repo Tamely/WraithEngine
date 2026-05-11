@@ -14,7 +14,6 @@ public:
 private:
   struct CachedMeshInstance {
     MeshRef Mesh;
-    MaterialInstanceRef Material;
     MeshRenderPath RenderPath{MeshRenderPath::Graphics};
     std::string AssetRelativePath;
   };

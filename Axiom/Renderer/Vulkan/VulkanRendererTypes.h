@@ -44,6 +44,9 @@ struct MeshRasterPushConstants {
 
 struct MeshGraphicsPushConstants {
   glm::mat4 Model{1.0f};
+  glm::vec4 BaseColorFactor{1.0f};
+  float Metallic{0.0f};
+  float Roughness{0.5f};
 };
 
 struct HzbReducePushConstants {

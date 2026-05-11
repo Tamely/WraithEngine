@@ -189,6 +189,13 @@ type RemoteViewportCommand =
       color: [number, number, number]
       intensity: number
     }
+  | {
+      type: "set_material_properties"
+      objectId: string
+      baseColorFactor: [number, number, number, number]
+      metallic: number
+      roughness: number
+    }
 
 function getServerOrigin() {
   const configuredOrigin = process.env.NEXT_PUBLIC_AXIOM_SERVER_ORIGIN?.trim()
@@ -750,6 +757,11 @@ export function Viewport() {
       }
 
       if (message.payloadType === "light_properties_changed") {
+        void refreshSessionSnapshotSafely("event")
+        return
+      }
+
+      if (message.payloadType === "material_properties_changed") {
         void refreshSessionSnapshotSafely("event")
         return
       }
@@ -1544,6 +1556,12 @@ export function Viewport() {
       },
       setLightProperties: async (objectId, color, intensity) => {
         return sendCommand({ type: "set_light_properties", objectId, color, intensity }, "reliable")
+      },
+      setMaterialProperties: async (objectId, baseColorFactor, metallic, roughness) => {
+        return sendCommand(
+          { type: "set_material_properties", objectId, baseColorFactor, metallic, roughness },
+          "reliable"
+        )
       },
       reparentObject: async (objectId, newParentId) => {
         const accepted = await sendCommand(

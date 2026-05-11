@@ -170,6 +170,9 @@ std::string EventPayloadType(const EditorEventPayload &Payload) {
   if (std::holds_alternative<LightPropertiesChangedEvent>(Payload)) {
     return "light_properties_changed";
   }
+  if (std::holds_alternative<MaterialPropertiesChangedEvent>(Payload)) {
+    return "material_properties_changed";
+  }
   return "object_transform_updated";
 }
 
@@ -319,6 +322,17 @@ void SerializeObjectDetails(std::ostringstream &Stream,
            << "],\"intensity\":" << Details.Light->Intensity << "}";
   } else {
     Stream << ",\"light\":null";
+  }
+  if (Details.Material.has_value()) {
+    Stream << ",\"material\":{\"baseColorFactor\":["
+           << Details.Material->BaseColorFactor.r << ","
+           << Details.Material->BaseColorFactor.g << ","
+           << Details.Material->BaseColorFactor.b << ","
+           << Details.Material->BaseColorFactor.a
+           << "],\"metallic\":" << Details.Material->Metallic
+           << ",\"roughness\":" << Details.Material->Roughness << "}";
+  } else {
+    Stream << ",\"material\":null";
   }
   Stream << ",\"collaboration\":{\"selectedByUserIds\":[";
   bool FirstSelectionOwner = true;
@@ -786,6 +800,51 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
         .Intensity = Cmd.Intensity}};
     return Cmd;
   }
+  if (*Type == "set_material_properties") {
+    static const std::regex ObjectIdPattern(R"json("objectId"\s*:\s*"([^"]+)")json");
+    static const std::regex BaseColorPattern(
+        R"json("baseColorFactor"\s*:\s*\[\s*(-?[0-9Ee.+-]+)\s*,\s*(-?[0-9Ee.+-]+)\s*,\s*(-?[0-9Ee.+-]+)\s*,\s*(-?[0-9Ee.+-]+)\s*\])json");
+    static const std::regex MetallicPattern(R"json("metallic"\s*:\s*(-?[0-9Ee.+-]+))json");
+    static const std::regex RoughnessPattern(R"json("roughness"\s*:\s*(-?[0-9Ee.+-]+))json");
+    const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
+    std::optional<glm::vec4> BaseColorFactor;
+    {
+      std::match_results<std::string_view::const_iterator> M;
+      if (std::regex_search(JsonLine.begin(), JsonLine.end(), M, BaseColorPattern)) {
+        auto R = ParseDouble(std::string_view(M[1].first, M[1].second));
+        auto G = ParseDouble(std::string_view(M[2].first, M[2].second));
+        auto B = ParseDouble(std::string_view(M[3].first, M[3].second));
+        auto A = ParseDouble(std::string_view(M[4].first, M[4].second));
+        if (R && G && B && A)
+          BaseColorFactor = glm::vec4(
+              static_cast<float>(*R), static_cast<float>(*G),
+              static_cast<float>(*B), static_cast<float>(*A));
+      }
+    }
+    std::optional<double> Metallic;
+    std::optional<double> Roughness;
+    {
+      std::match_results<std::string_view::const_iterator> M;
+      if (std::regex_search(JsonLine.begin(), JsonLine.end(), M, MetallicPattern))
+        Metallic = ParseDouble(std::string_view(M[1].first, M[1].second));
+    }
+    {
+      std::match_results<std::string_view::const_iterator> M;
+      if (std::regex_search(JsonLine.begin(), JsonLine.end(), M, RoughnessPattern))
+        Roughness = ParseDouble(std::string_view(M[1].first, M[1].second));
+    }
+    HeadlessCommand Cmd;
+    Cmd.Type = HeadlessCommandType::SetMaterialProperties;
+    Cmd.BaseColorFactor = BaseColorFactor.value_or(glm::vec4(1.0f));
+    Cmd.Metallic  = static_cast<float>(Metallic.value_or(0.0));
+    Cmd.Roughness = static_cast<float>(Roughness.value_or(0.5));
+    Cmd.EditorPayload = {.Payload = SetMaterialPropertiesCommand{
+        .ObjectId         = ObjectId.value_or(""),
+        .BaseColorFactor  = Cmd.BaseColorFactor,
+        .Metallic         = Cmd.Metallic,
+        .Roughness        = Cmd.Roughness}};
+    return Cmd;
+  }
   if (*Type == "get_schema") {
     static const std::regex ObjectIdPattern(R"json("objectId"\s*:\s*"([^"]+)")json");
     const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
@@ -882,6 +941,7 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::DetachScript:
   case HeadlessCommandType::SetMeshAsset:
   case HeadlessCommandType::SetLightProperties:
+  case HeadlessCommandType::SetMaterialProperties:
   case HeadlessCommandType::ReloadScripts:
   case HeadlessCommandType::Heartbeat:
   case HeadlessCommandType::Quit:
@@ -1037,6 +1097,14 @@ std::string SerializeEvent(const PublishedEditorEvent &Event) {
     Stream << ",\"objectId\":\"" << EscapeJson(LightProps->ObjectId)
            << "\",\"color\":[" << LightProps->Color.r << "," << LightProps->Color.g
            << "," << LightProps->Color.b << "],\"intensity\":" << LightProps->Intensity;
+  } else if (const auto *MatProps =
+                 std::get_if<MaterialPropertiesChangedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"objectId\":\"" << EscapeJson(MatProps->ObjectId)
+           << "\",\"baseColorFactor\":["
+           << MatProps->BaseColorFactor.r << "," << MatProps->BaseColorFactor.g << ","
+           << MatProps->BaseColorFactor.b << "," << MatProps->BaseColorFactor.a
+           << "],\"metallic\":" << MatProps->Metallic
+           << ",\"roughness\":" << MatProps->Roughness;
   }
   Stream << "}";
   return Stream.str();

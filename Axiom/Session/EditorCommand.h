@@ -4,6 +4,7 @@
 
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -92,6 +93,13 @@ struct SetLightPropertiesCommand {
   float Intensity{1.0f};
 };
 
+struct SetMaterialPropertiesCommand {
+  std::string ObjectId;
+  glm::vec4 BaseColorFactor{1.0f};
+  float Metallic{0.0f};
+  float Roughness{0.5f};
+};
+
 using EditorCommandPayload =
     std::variant<UpdateViewportCameraCommand, SetViewportCameraPoseCommand,
                  SetLookActiveCommand, SelectObjectCommand,
@@ -100,7 +108,8 @@ using EditorCommandPayload =
                  DeleteObjectCommand, ReparentObjectCommand,
                  SetTransformCommand, AttachScriptCommand,
                  DetachScriptCommand, SetMeshAssetCommand,
-                 SetLightPropertiesCommand>;
+                 SetLightPropertiesCommand,
+                 SetMaterialPropertiesCommand>;
 
 struct EditorCommand {
   EditorCommandPayload Payload;
