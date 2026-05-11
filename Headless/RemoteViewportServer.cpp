@@ -8,6 +8,7 @@
 
 #include "GizmoHitTest.h"
 #include "HeadlessCommandProtocol.h"
+#include <Session/MeshPicking.h>
 #include <Renderer/VideoEncoderFactory.h>
 #include <stb_image.h>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -2001,52 +2002,64 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
         m_Host.GetHeadlessLayer().GetSession();
     const EditorViewportState *Viewport =
         Session.FindViewport(Client->User);
+    if (Viewport == nullptr) {
+      return true;
+    }
     const EditorObjectDetails *Selected =
         Session.FindSelectedObjectDetails(Client->User);
     const auto *DragTD = (Selected != nullptr && Selected->SupportsTransform)
         ? (Selected->WorldTransform.has_value() ? &*Selected->WorldTransform
                : (Selected->Transform.has_value() ? &*Selected->Transform : nullptr))
         : nullptr;
-    if (Viewport == nullptr || DragTD == nullptr) {
-      return true;
+
+    if (DragTD != nullptr) {
+      const glm::vec3 &ObjPos = DragTD->Location;
+      const float GizmoScale = ComputeGizmoScale(
+          Viewport->Camera, ObjPos, m_Options.Width, m_Options.Height);
+      if (Client->CurrentGizmoMode == GizmoMode::Rotate) {
+        auto DragState = BeginGizmoRotateDrag(
+            Viewport->Camera, m_Options.Width, m_Options.Height,
+            Command->MousePosition, ObjPos, GizmoScale, ObjPos);
+        if (DragState.has_value()) {
+          Client->GizmoDrag = ActiveGizmoDrag{
+              .Math = *DragState,
+              .ObjectId = Selected->ObjectId,
+              .StartRotDeg = DragTD->RotationDegrees,
+              .StartScale = DragTD->Scale,
+              .Mode = GizmoMode::Rotate,
+              .GizmoScaleAtDragStart = GizmoScale,
+          };
+          Session.AcquireLock(Selected->ObjectId, Client->User);
+          m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, DragState->Axis);
+          return true;
+        }
+      } else {
+        auto DragState = BeginGizmoDrag(
+            Viewport->Camera, m_Options.Width, m_Options.Height,
+            Command->MousePosition, ObjPos, GizmoScale, ObjPos);
+        if (DragState.has_value()) {
+          Client->GizmoDrag = ActiveGizmoDrag{
+              .Math = *DragState,
+              .ObjectId = Selected->ObjectId,
+              .StartRotDeg = DragTD->RotationDegrees,
+              .StartScale = DragTD->Scale,
+              .Mode = Client->CurrentGizmoMode,
+              .GizmoScaleAtDragStart = GizmoScale,
+          };
+          Session.AcquireLock(Selected->ObjectId, Client->User);
+          m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, DragState->Axis);
+          return true;
+        }
+      }
     }
-    const glm::vec3 &ObjPos = DragTD->Location;
-    const float GizmoScale = ComputeGizmoScale(
-        Viewport->Camera, ObjPos, m_Options.Width, m_Options.Height);
-    if (Client->CurrentGizmoMode == GizmoMode::Rotate) {
-      auto DragState = BeginGizmoRotateDrag(
-          Viewport->Camera, m_Options.Width, m_Options.Height,
-          Command->MousePosition, ObjPos, GizmoScale, ObjPos);
-      if (!DragState.has_value()) {
-        return true;
-      }
-      Client->GizmoDrag = ActiveGizmoDrag{
-          .Math = *DragState,
-          .ObjectId = Selected->ObjectId,
-          .StartRotDeg = DragTD->RotationDegrees,
-          .StartScale = DragTD->Scale,
-          .Mode = GizmoMode::Rotate,
-          .GizmoScaleAtDragStart = GizmoScale,
-      };
-      Session.AcquireLock(Selected->ObjectId, Client->User);
-      m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, DragState->Axis);
-    } else {
-      auto DragState = BeginGizmoDrag(
-          Viewport->Camera, m_Options.Width, m_Options.Height,
-          Command->MousePosition, ObjPos, GizmoScale, ObjPos);
-      if (!DragState.has_value()) {
-        return true;
-      }
-      Client->GizmoDrag = ActiveGizmoDrag{
-          .Math = *DragState,
-          .ObjectId = Selected->ObjectId,
-          .StartRotDeg = DragTD->RotationDegrees,
-          .StartScale = DragTD->Scale,
-          .Mode = Client->CurrentGizmoMode,
-          .GizmoScaleAtDragStart = GizmoScale,
-      };
-      Session.AcquireLock(Selected->ObjectId, Client->User);
-      m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, DragState->Axis);
+
+    // No gizmo hit — fall back to mesh picking.
+    const std::string HitId = HitTestMeshes(
+        Viewport->Camera, m_Options.Width, m_Options.Height,
+        Command->MousePosition, Session.GetState().Scene.MeshInstances);
+    if (!HitId.empty()) {
+      m_Host.SubmitRemoteCommand(Client->User,
+          EditorCommand{SelectObjectCommand{.ObjectId = HitId}});
     }
     return true;
   }
