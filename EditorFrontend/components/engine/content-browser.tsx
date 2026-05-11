@@ -16,6 +16,41 @@ import {
 } from "lucide-react"
 import { useRemoteViewport, type SessionAssetDescriptor, type SessionSceneItem } from "./remote-viewport-context"
 
+function TextureThumbnail({
+  assetPath,
+  serverOrigin,
+  size = "md",
+}: {
+  assetPath: string
+  serverOrigin: string
+  size?: "md" | "sm"
+}) {
+  const [src, setSrc] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    if (!serverOrigin) return
+    setSrc(`${serverOrigin}/assets/thumbnail?path=${encodeURIComponent(assetPath)}`)
+    setFailed(false)
+  }, [assetPath, serverOrigin])
+
+  const iconClass = size === "sm" ? "w-4 h-4" : "w-8 h-8"
+  const imgClass = size === "sm" ? "w-4 h-4 object-cover rounded" : "w-12 h-12 object-cover rounded"
+
+  if (!src || failed) {
+    return <ImageIcon className={`${iconClass} text-blue-400`} />
+  }
+
+  return (
+    <img
+      src={src}
+      alt={assetPath}
+      className={imgClass}
+      onError={() => setFailed(true)}
+    />
+  )
+}
+
 type AssetKindFilter = "all" | "mesh" | "texture"
 
 interface FolderItem {
@@ -35,13 +70,26 @@ const folderStructure: FolderItem[] = [
   },
 ]
 
-function AssetIcon({ kind }: { kind: SessionAssetDescriptor["kind"] }) {
-  if (kind === "texture") return <ImageIcon className="w-8 h-8 text-blue-400" />
-  return <Box className="w-8 h-8 text-orange-400" />
+function AssetIcon({
+  kind,
+  path,
+  serverOrigin,
+  size = "md",
+}: {
+  kind: SessionAssetDescriptor["kind"]
+  path: string
+  serverOrigin: string
+  size?: "md" | "sm"
+}) {
+  if (kind === "texture") {
+    return <TextureThumbnail assetPath={path} serverOrigin={serverOrigin} size={size} />
+  }
+  const cls = size === "sm" ? "w-4 h-4 text-orange-400" : "w-8 h-8 text-orange-400"
+  return <Box className={cls} />
 }
 
 export function ContentBrowser() {
-  const { assets, listAssets, connectionState, selectedObject, setMeshAsset } = useRemoteViewport()
+  const { assets, listAssets, connectionState, selectedObject, setMeshAsset, serverOrigin } = useRemoteViewport()
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedFolder, setSelectedFolder] = useState<AssetKindFilter>("all")
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
@@ -250,7 +298,7 @@ export function ContentBrowser() {
                     }`}
                   >
                     <div className="w-12 h-12 flex items-center justify-center mb-1">
-                      <AssetIcon kind={asset.kind} />
+                      <AssetIcon kind={asset.kind} path={asset.path} serverOrigin={serverOrigin} />
                     </div>
                     <span className="text-[10px] text-neutral-400 text-center truncate w-full">
                       {asset.name}
@@ -278,7 +326,7 @@ export function ContentBrowser() {
                         : ""
                     }`}
                   >
-                    <AssetIcon kind={asset.kind} />
+                    <AssetIcon kind={asset.kind} path={asset.path} serverOrigin={serverOrigin} size="sm" />
                     <div className="flex-1 min-w-0">
                       <div className="text-xs text-neutral-300 truncate">
                         {asset.name}
