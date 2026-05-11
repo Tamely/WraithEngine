@@ -2,7 +2,7 @@
 
 ## Document Status
 - Status: Draft
-- Date: 2026-05-08
+- Date: 2026-05-11
 - Audience: Engine, tools, networking, web, and infrastructure contributors
 - Intended outcome: Establish the target architecture for evolving WraithEngine into a distributed game engine and browser-based collaborative editor
 
@@ -63,6 +63,13 @@
 - `SceneFile` (`Axiom/Assets/SceneFile.h/.cpp`) provides `SaveSceneToFile` / `LoadSceneFromFile`; serialization uses a manual `ostringstream` JSON emitter in flat-node format with `parentId` links; deserialization uses a purpose-built recursive descent parser (no external JSON library)
 - `LoadStartupScene` now checks for `Content/scene.json` first and falls back to the hardcoded default scene; scene state persists across server restarts automatically
 - `SaveScene` command writes `Content/scene.json` and replies with `{"type":"scene_saved"}` or `{"type":"scene_save_failed"}`; the toolbar Save button animates to a green checkmark for 2.5 s on success or a red X on failure
+- Phase 7 (Asset Pipeline) is now implemented: mesh asset assignment, dynamic directional lighting, material property editing, and texture thumbnail previews
+- `SetMeshAssetCommand` lets any `SceneMeshObject` reference a discovered `.glb`/`.gltf` asset by path; the handler creates a `MeshInstance` entry for runtime-created objects (i.e. those created via `CreateObject`) so `SetMeshAsset` works immediately after object creation without requiring a prior scene-file load
+- `SetLightPropertiesCommand` drives the first `SceneLight` in the scene; color, intensity, and direction are uploaded to the `CameraFrameUniform` UBO every frame; the fragment shader uses Blinn-Phong specular with a metallic ambient boost to approximate environment reflections without IBL
+- `SetMaterialPropertiesCommand` exposes `BaseColorFactor` (vec4), `Metallic`, and `Roughness` on mesh instances; values are passed as Vulkan push constants to `mesh.frag`; the inspector shows a color picker, alpha slider, and metallic/roughness number inputs with an Apply button
+- `GET /assets/thumbnail?path=` endpoint on the remote viewport server decodes the URL-encoded path, loads the image via stb_image, scales to 128×128 via nearest-neighbor, and returns a JPEG; the content browser fetches and displays thumbnails for texture assets in grid view
+- Content browser is now non-recursive: only immediate children of the current path are shown; the sidebar renders a dynamic tree derived from actual asset paths; breadcrumb navigation and folder double-click update `currentPath`; search bypasses the folder filter and matches recursively
+- 17 new Google Test cases added across `HeadlessProtocolTests` (protocol parse/serialize coverage for all Phase 7 commands and events) and `SceneLifecycleTests` (session behavior for `SetLightPropertiesCommand`, `SetMaterialPropertiesCommand`, `SetSceneState` material backfill, `SetMeshAsset` validation, and the `CreateObject`→`SetMeshAsset` runtime-creation regression)
 
 ## 1. Executive Summary
 WraithEngine will evolve from a single-process native editor into a distributed platform with one shared C++ engine runtime that supports two execution styles:
@@ -1041,45 +1048,32 @@ Progress update:
 - Five Google Test cases in `Tests/ScriptingTests.cpp`: `ScriptHostLifecycle`, `InternalCallRoundTrip`, `ScriptLifecycle`, `HotReload`, `RestrictedProfileBlocks`
 - Coral patched: cross-ALC assembly sharing in `AssemblyLoader.ResolveAssembly` (prevents duplicate `WraithEngine.Managed` load with null function pointers) and `ManagedAssembly::RefreshTypeCache` (repopulates `s_CachedTypes` after `UnloadAssemblyLoadContext` clears it globally)
 
-### Phase 7: Asset Pipeline — Textures, FBX/OBJ Import, Basic Materials
+### Phase 7: Asset Pipeline
 
-Scope: Expand the asset system beyond raw `.glb` mesh loading to support standalone
-texture import, FBX and OBJ source formats, and a first-pass material model that wires
-surface parameters to the Vulkan renderer without requiring a full PBR implementation.
+Scope: Get real asset data flowing — mesh assignment, directional lighting, material
+editing, and texture previews — without requiring a full PBR renderer or secondary import
+pipeline.
 
-#### 7.1 Texture Import
-- Add `TextureAsset` to the `IAssetSource` / `AssetId` identity model
-- Import `.png`, `.jpg`, `.jpeg`, `.hdr`, `.exr` via stb_image or a similar single-header library
-- Upload to Vulkan via a staging buffer / `vkCmdCopyBufferToImage` path; cache as `VkImage` + `VkImageView` + `VkSampler`
-- Surface texture assets in the content browser under the existing Texture filter tab (already present in the UI)
-- Add `TextureRef` property kind to the reflection system so materials can reference textures by `AssetId`
+Progress update:
 
-#### 7.2 FBX / OBJ Import
-- Add [assimp](https://github.com/assimp/assimp) as a ThirdParty dependency (CMake `FetchContent` or submodule)
-- Introduce `IAssetImporter` interface with implementations for FBX (via assimp) and OBJ (via assimp or tinyobjloader)
-- Emit glTF-compatible in-memory mesh and material data so the existing `fastgltf` render path can be reused downstream; alternatively introduce a shared `MeshData` struct consumed by both loaders
-- Register `.fbx` and `.obj` extensions in `LocalAssetSource` and the content browser filter tabs
-- Import settings (coordinate-system handedness flip, scale factor, smoothing groups) stored as metadata alongside the stable `AssetId`
+- `SetMeshAssetCommand { ObjectId, AssetPath }` lets any `SceneMeshObject` reference any discovered `.glb`/`.gltf` asset; the handler resolves `ContentDir / AssetPath`, calls `LoadBasicMeshAsset`, and updates the live `MeshInstance`; if the object was created at runtime via `CreateObject` (which does not pre-populate `MeshInstances`), the handler now creates the entry rather than silently dropping the command
+- `SetMeshAsset` is fully serialized to `scene.json` via the `assetRelativePath` field on each mesh entry so assignments survive server restarts; the content browser double-click on a `.glb` asset while a mesh object is selected sends the command end-to-end
+- `SetLightPropertiesCommand { ObjectId, Color, Intensity, Direction }` drives the first visible `SceneLight` in the scene; direction is derived from the light object's world-space position each frame; the `CameraFrameUniform` UBO was extended with `lightDirectionAndIntensity` and `lightColorAndEnabled` fields consumed by `mesh.frag`
+- `mesh.frag` was rewritten with a Blinn-Phong specular model: half-vector `H = normalize(L + V)`, `shininess = mix(256, 2, roughness)`, specular color blended between dielectric F0 `vec3(0.04)` and base color via metallic factor; a separate metallic ambient floor (`0.35` at metallic=1/roughness=0) approximates environment reflections absent IBL so metallic surfaces are not black without a high-intensity light
+- `SetMaterialPropertiesCommand { ObjectId, BaseColorFactor, Metallic, Roughness }` updates both `ObjectDetailsById.Material` and the live `MeshInstance.Material`; values reach the shader as Vulkan push constants in `MeshGraphicsPushConstants`; both stage flags (`VERTEX_BIT | FRAGMENT_BIT`) are set so the layout is valid
+- Inspector shows a `MaterialSection` when a Mesh is selected: Base Color (vec3 editor), Alpha, Metallic, and Roughness number inputs with an Apply button; `setMaterialProperties` action is registered in `RemoteViewportContext` and handled via `material_properties_changed` event
+- `GET /assets/thumbnail?path=<url-encoded-path>` endpoint on `AxiomRemoteViewportServer` decodes the URL-encoded path (since `encodeURIComponent` encodes `/` as `%2F`), loads the image via `stbi_load`, scales to 128×128 nearest-neighbor, and returns a JPEG via `stbi_write_jpg_to_func`; `STB_IMAGE_WRITE_IMPLEMENTATION` is defined in `RemoteViewportServer.cpp` (separate from `AxiomHeadless.cpp` — the two binaries do not share object files)
+- Content browser is now non-recursive: a dynamic `FolderNode` tree is derived from asset paths; only immediate subdirectories and files at `currentPath` are shown; breadcrumb navigation and folder double-click update `currentPath`; search bypasses the folder filter and matches all assets recursively
+- 17 new Google Test cases: `HeadlessProtocolTests` covers parse of `set_mesh_asset`, `set_light_properties`, `set_material_properties` commands and serialization of the corresponding changed events and object details; `SceneLifecycleTests` covers `SetLightPropertiesCommand` updates and rejections, `SetMaterialPropertiesCommand` updates and rejections, `SetSceneState` material backfill, `SetMeshAsset` validation rejections, and the runtime-creation regression (`CreateObject` → `SetMeshAsset`)
 
-#### 7.3 Basic Materials (no PBR required)
-- Introduce `MaterialAsset` with at minimum: albedo color (`vec4`), albedo texture ref, roughness (`float`), metallic (`float`)
-- Serialize material assets to `Content/` as `.mat.json` files alongside the stable `AssetId`
-- Add a simple forward-shading GLSL material shader variant; the existing mesh pipeline switches to a per-material descriptor set
-- Expose material properties in the details panel via `GetSchema` / `SetProperty` (reuses the existing reflection + property dispatch path)
-- `MeshObject` gains a `MaterialId` reference; `SceneMeshObject` stores it; `SetProperty("materialId", ...)` dispatches a new `SetMaterialCommand`
-- Full PBR (IBL, clearcoat, transmission) is deferred to a later rendering phase
+Remaining from original scope:
 
-#### 7.4 Lighting
-- Add `LightComponent` as a first-class scene instance type alongside the existing `SceneLight` stub; light properties stored in `EditorObjectDetails`
-- **Point light** — position, color, intensity, range (attenuation radius); represented as a uniform buffer entry in a per-frame light list
-- **Directional light** — direction (derived from transform rotation), color, intensity; one active directional light per scene for v1
-- **Spot light** — position, direction, color, intensity, inner/outer cone angles
-- **Ambient** — a single ambient color/intensity applied to every fragment as a base term; simple sky color for v1 (IBL/HDRI deferred to a later PBR phase)
-- Vulkan: extend the per-frame UBO (or add a separate SSBO) to carry a packed light list; update the forward-shading fragment shader to iterate lights using Blinn-Phong or a simple physically-motivated approximation
-- **Shadow mapping** — directional shadow map first (single cascade, 2048×2048 depth attachment, PCF filter); point and spot shadow maps deferred to a later phase
-- Light objects appear in the scene outliner, support transform editing, and expose their properties in the details panel via the existing `GetSchema` / `SetProperty` path
-- `GetSchema` for a Light object returns `color`, `intensity`, `range`/`angle` (type-specific), and `castsShadows` as editable properties
-- Emissive property on `MaterialAsset` (color + intensity multiplier) so meshes can self-illuminate without requiring a separate light source
+- `SetLightPropertiesCommand` inspector UI (Color, Intensity fields in details panel) — deferred
+- Full point/spot light list in the per-frame UBO; currently only one directional light is supported per scene
+- Shadow mapping — deferred to a later rendering phase
+- FBX / OBJ import via assimp — deferred to Phase 8 or later
+- First-class `TextureAsset` with GPU upload (`VkImage` / `VkImageView` / `VkSampler`) — thumbnails use stb_image to JPEG only; textures are not yet uploaded as bindable GPU resources independently of mesh materials
+- Standalone `.mat.json` material asset files — material properties currently live on `MaterialInstance` and are saved per mesh-instance in `scene.json`, not as independent assets
 
 ### Phase 8: Binary Asset Formats
 
@@ -1288,7 +1282,8 @@ Progress update:
 - reparent is implemented: any object can be dragged onto any other in the outliner; transforms are stored in local space and world transforms are recomputed for the entire moved subtree
 - Collaboration v1 is complete: object locking prevents simultaneous gizmo conflicts, presence roster shows connected users, and the heartbeat/timeout loop handles hard tab closes
 - Phase 5 (Reflection and Asset Evolution) is complete: `AssetId` stable identity, `IAssetSource` / `LocalAssetSource` VFS, `ListAssets` / `GetSchema` / `SetProperty` / `SaveScene` commands, `SceneFile` JSON persistence, content browser wired to live asset catalogue, details panel schema-driven, toolbar Save button with success/failure animation
-- the next step is Phase 6: C# scripting host and engine API assembly
+- Phase 7 (Asset Pipeline) is complete: `SetMeshAssetCommand` wires any discovered `.glb`/`.gltf` to any `SceneMeshObject` with scene-file persistence; `SetLightPropertiesCommand` drives a Blinn-Phong directional light from `SceneLight` world position; `SetMaterialPropertiesCommand` exposes `BaseColorFactor`/`Metallic`/`Roughness` push constants end-to-end through the inspector; texture thumbnail previews are served by the remote viewport server; the content browser navigates folders non-recursively; 17 new tests cover all new commands, events, and the `CreateObject`→`SetMeshAsset` runtime-creation path
+- the next step is Phase 8: binary asset formats (`.wmesh`, `.wtex`, `.wmat`), the cook pipeline, and `CookedAssetSource`
 
 That slice proves the core thesis:
 
