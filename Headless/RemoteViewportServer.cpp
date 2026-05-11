@@ -18,6 +18,8 @@
 #include <chrono>
 #include <cctype>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <sstream>
@@ -913,6 +915,9 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   if (Route == "/webrtc/close") {
     return HandleWebRtcCloseRequest(ClientSocketValue, HeaderBlock, Body);
   }
+  if (Route == "/assets/upload") {
+    return HandleAssetUploadRequest(ClientSocketValue, Path, HeaderBlock, Body);
+  }
   if (Route != "/command") {
     const std::string Response =
         JsonResponse("404 Not Found", SerializeError("Unknown POST endpoint."));
@@ -1335,6 +1340,155 @@ bool RemoteViewportServer::HandleWebRtcCloseRequest(
       Status.ConnectionState, Status.Detail, Status.SessionId,
       Status.PendingLocalIceCandidateCount, Status.Video);
   const std::string Response = JsonResponse("200 OK", Payload);
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
+bool RemoteViewportServer::HandleAssetUploadRequest(
+    uintptr_t ClientSocketValue, std::string_view Path,
+    std::string_view HeaderBlock, std::string_view Body) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+
+  // Parse boundary from Content-Type header.
+  const auto ContentType = FindHeaderValue(HeaderBlock, "Content-Type");
+  if (!ContentType.has_value() ||
+      ContentType->find("multipart/form-data") == std::string::npos) {
+    const std::string Response = JsonResponse(
+        "400 Bad Request",
+        SerializeError("Expected multipart/form-data Content-Type."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+  const auto BoundaryPos = ContentType->find("boundary=");
+  if (BoundaryPos == std::string::npos) {
+    const std::string Response =
+        JsonResponse("400 Bad Request", SerializeError("Missing boundary."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+  const std::string Boundary =
+      "--" + ContentType->substr(BoundaryPos + 9 /* len("boundary=") */);
+
+  // Optional target subdirectory from ?dir= query parameter.
+  const std::string TargetDir = GetQueryParam(Path, "dir").value_or("");
+
+  const Assets::LocalAssetSource ContentSource{AXIOM_CONTENT_DIR};
+
+  // Resolve and validate destination directory.
+  std::filesystem::path DestDir;
+  if (TargetDir.empty()) {
+    DestDir = std::filesystem::path(AXIOM_CONTENT_DIR);
+  } else {
+    // Prevent path traversal: reject any component that starts with ".."
+    bool Unsafe = false;
+    for (const auto &Part :
+         std::filesystem::path(TargetDir)) {
+      if (Part.string().find("..") != std::string::npos) {
+        Unsafe = true;
+        break;
+      }
+    }
+    if (Unsafe) {
+      const std::string Response = JsonResponse(
+          "400 Bad Request", SerializeError("Invalid target directory."));
+      SendAll(ClientSocket, Response.data(), Response.size());
+      return false;
+    }
+    DestDir = std::filesystem::path(AXIOM_CONTENT_DIR) / TargetDir;
+  }
+
+  // Split multipart body into parts.
+  static constexpr std::string_view kContentDisposition = "Content-Disposition:";
+  std::vector<std::string> Saved;
+  std::string_view Remaining{Body};
+
+  while (true) {
+    // Find boundary
+    const auto BPos = Remaining.find(Boundary);
+    if (BPos == std::string_view::npos) break;
+    Remaining.remove_prefix(BPos + Boundary.size());
+    // Skip "\r\n" after boundary, or stop on "--" (final boundary)
+    if (Remaining.starts_with("--")) break;
+    if (Remaining.starts_with("\r\n")) Remaining.remove_prefix(2);
+
+    // Find end of part headers (blank line)
+    const auto HeaderEnd = Remaining.find("\r\n\r\n");
+    if (HeaderEnd == std::string_view::npos) break;
+    const std::string_view PartHeaders = Remaining.substr(0, HeaderEnd);
+    Remaining.remove_prefix(HeaderEnd + 4);
+
+    // Find filename in Content-Disposition
+    const auto CDPos = PartHeaders.find(kContentDisposition);
+    if (CDPos == std::string_view::npos) continue;
+    const auto FnPos = PartHeaders.find("filename=\"", CDPos);
+    if (FnPos == std::string_view::npos) continue;
+    const auto FnStart = FnPos + 10;
+    const auto FnEnd = PartHeaders.find('"', FnStart);
+    if (FnEnd == std::string_view::npos) continue;
+    const std::string Filename{PartHeaders.substr(FnStart, FnEnd - FnStart)};
+    if (Filename.empty()) continue;
+
+    // Find part body (ends at next boundary)
+    const auto BodyEnd = Remaining.find(Boundary);
+    if (BodyEnd == std::string_view::npos) break;
+    // Strip trailing \r\n before boundary
+    const size_t PartBodyLen = BodyEnd >= 2 ? BodyEnd - 2 : BodyEnd;
+    const std::string_view PartBody = Remaining.substr(0, PartBodyLen);
+
+    // Validate extension
+    const std::filesystem::path FilePath{Filename};
+    const std::string Ext = [&] {
+      auto E = FilePath.extension().string();
+      for (auto &C : E) C = static_cast<char>(std::tolower(static_cast<unsigned char>(C)));
+      return E;
+    }();
+    static constexpr std::string_view kAllowed[] = {
+        ".glb", ".gltf", ".fbx", ".obj", ".png", ".jpg", ".jpeg"};
+    bool Allowed = false;
+    for (const auto &A : kAllowed) {
+      if (Ext == A) { Allowed = true; break; }
+    }
+    if (!Allowed) {
+      std::cerr << "[AssetUpload] rejected '" << Filename
+                << "': unsupported extension\n";
+      continue;
+    }
+
+    // Write file to destination, creating directories as needed.
+    std::error_code Ec;
+    std::filesystem::create_directories(DestDir, Ec);
+    const std::filesystem::path OutPath = DestDir / FilePath.filename();
+    std::ofstream OutFile(OutPath, std::ios::binary);
+    if (!OutFile.is_open()) {
+      std::cerr << "[AssetUpload] could not open '" << OutPath.string()
+                << "' for writing\n";
+      continue;
+    }
+    OutFile.write(PartBody.data(), static_cast<std::streamsize>(PartBody.size()));
+    OutFile.close();
+    std::cerr << "[AssetUpload] saved '" << OutPath.string() << "'\n";
+
+    // Build content-relative path for the response.
+    const auto Rel = std::filesystem::relative(OutPath,
+                                               std::filesystem::path(AXIOM_CONTENT_DIR), Ec);
+    if (!Ec) Saved.push_back(Rel.string());
+  }
+
+  // Broadcast updated asset list to all WebSocket clients.
+  {
+    const Assets::LocalAssetSource Refreshed{AXIOM_CONTENT_DIR};
+    BroadcastTextMessage(SerializeAssetList(Refreshed.List()));
+  }
+
+  // Build JSON response with saved paths.
+  std::ostringstream Out;
+  Out << "{\"type\":\"assets_uploaded\",\"files\":[";
+  for (size_t i = 0; i < Saved.size(); ++i) {
+    if (i > 0) Out << ",";
+    Out << "\"" << EscapeJson(Saved[i]) << "\"";
+  }
+  Out << "]}";
+  const std::string Response = JsonResponse("200 OK", Out.str());
   SendAll(ClientSocket, Response.data(), Response.size());
   return false;
 }

@@ -134,9 +134,35 @@ export function ContentBrowser() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid")
   const [selectedAsset, setSelectedAsset] = useState<number | null>(null)
   const [folderWidth, setFolderWidth] = useState(192)
+  const [isExternalDragOver, setIsExternalDragOver] = useState(false)
   const isDraggingFolderRef = useRef(false)
   const startXRef = useRef(0)
   const startWidthRef = useRef(0)
+
+  const uploadFiles = useCallback(
+    async (fileList: FileList, targetDir: string) => {
+      if (!serverOrigin || fileList.length === 0) return
+      const form = new FormData()
+      for (const file of fileList) {
+        form.append("file", file, file.name)
+      }
+      const dirParam = targetDir ? `?dir=${encodeURIComponent(targetDir)}` : ""
+      try {
+        await fetch(`${serverOrigin}/assets/upload${dirParam}`, {
+          method: "POST",
+          body: form,
+        })
+        void listAssets()
+      } catch {
+        // upload failed silently — listAssets refresh will show what made it
+      }
+    },
+    [serverOrigin, listAssets]
+  )
+
+  const isExternalDrag = (e: React.DragEvent) =>
+    e.dataTransfer.types.includes("Files") &&
+    !e.dataTransfer.types.includes("axiom/asset-path")
 
   useEffect(() => {
     if (connectionState === "control-ready" || connectionState === "streaming") {
@@ -273,10 +299,22 @@ export function ContentBrowser() {
           <Plus className="w-3 h-3" />
           Add
         </button>
-        <button className="flex items-center gap-1 px-2 py-1 text-xs hover:bg-neutral-800 text-neutral-400 rounded">
+        <label className="flex items-center gap-1 px-2 py-1 text-xs hover:bg-neutral-800 text-neutral-400 rounded cursor-pointer">
           <FolderOpen className="w-3 h-3" />
           Import
-        </button>
+          <input
+            type="file"
+            multiple
+            accept=".glb,.gltf,.fbx,.obj,.png,.jpg,.jpeg"
+            className="sr-only"
+            onChange={(e) => {
+              if (e.target.files && e.target.files.length > 0) {
+                void uploadFiles(e.target.files, currentPath)
+                e.target.value = ""
+              }
+            }}
+          />
+        </label>
         <button
           onClick={() => void listAssets()}
           className="flex items-center gap-1 px-2 py-1 text-xs hover:bg-neutral-800 text-neutral-400 rounded"
@@ -342,7 +380,34 @@ export function ContentBrowser() {
               <List className="w-3.5 h-3.5 text-neutral-400" />
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto p-2">
+          <div
+            className={`flex-1 overflow-y-auto p-2 relative ${isExternalDragOver ? "ring-2 ring-inset ring-blue-500/60" : ""}`}
+            onDragOver={(e) => {
+              if (!isExternalDrag(e)) return
+              e.preventDefault()
+              e.dataTransfer.dropEffect = "copy"
+              setIsExternalDragOver(true)
+            }}
+            onDragLeave={(e) => {
+              if (e.currentTarget.contains(e.relatedTarget as Node)) return
+              setIsExternalDragOver(false)
+            }}
+            onDrop={(e) => {
+              if (!isExternalDrag(e)) return
+              e.preventDefault()
+              setIsExternalDragOver(false)
+              if (e.dataTransfer.files.length > 0) {
+                void uploadFiles(e.dataTransfer.files, currentPath)
+              }
+            }}
+          >
+            {isExternalDragOver && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-10">
+                <span className="rounded bg-blue-500/20 px-3 py-1.5 text-xs text-blue-300 backdrop-blur-sm">
+                  Drop to import
+                </span>
+              </div>
+            )}
             {isEmpty ? (
               <div className="flex items-center justify-center h-full text-xs text-neutral-600">
                 {assets.length === 0 ? "No assets loaded" : "No results"}
