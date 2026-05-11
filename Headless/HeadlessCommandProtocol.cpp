@@ -21,10 +21,10 @@ std::optional<std::string> MatchString(std::string_view Text,
 }
 
 std::optional<double> ParseDouble(std::string_view Value) {
-  double Result = 0.0;
-  const auto [Ptr, Ec] =
-      std::from_chars(Value.data(), Value.data() + Value.size(), Result);
-  if (Ec != std::errc{} || Ptr != Value.data() + Value.size()) {
+  // std::from_chars for floating-point requires macOS 13.3+; use strtod.
+  char *End = nullptr;
+  const double Result = std::strtod(Value.data(), &End);
+  if (End != Value.data() + Value.size()) {
     return std::nullopt;
   }
   return Result;
