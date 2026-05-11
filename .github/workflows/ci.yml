@@ -25,13 +25,14 @@ jobs:
         run: brew install ninja cmake
 
       - name: Install Vulkan SDK
-        run: brew install --cask vulkan-sdk
+        # The vulkan-sdk Homebrew cask was removed; install the individual formulae instead.
+        run: brew install molten-vk vulkan-headers
 
       - name: Set Vulkan environment
         run: |
-          VULKAN_SDK_DIR=$(ls -d /usr/local/VulkanSDK/*/macOS 2>/dev/null | tail -1)
-          echo "VULKAN_SDK=$VULKAN_SDK_DIR" >> $GITHUB_ENV
-          echo "$VULKAN_SDK_DIR/bin" >> $GITHUB_PATH
+          BREW_PREFIX=$(brew --prefix)
+          echo "VULKAN_SDK=$BREW_PREFIX" >> $GITHUB_ENV
+          echo "$BREW_PREFIX/bin" >> $GITHUB_PATH
 
       - name: Cache CMake build
         uses: actions/cache@v4
@@ -73,25 +74,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
+      # pnpm must be set up before setup-node so the built-in cache can locate the store.
       - uses: pnpm/action-setup@v4
         with:
           version: latest
-          run_install: false
 
-      - name: Get pnpm store path
-        id: pnpm-cache
-        run: echo "store=$(pnpm store path)" >> $GITHUB_OUTPUT
-
-      - name: Cache pnpm store
-        uses: actions/cache@v4
+      - uses: actions/setup-node@v4
         with:
-          path: ${{ steps.pnpm-cache.outputs.store }}
-          key: pnpm-${{ runner.os }}-${{ hashFiles('EditorFrontend/pnpm-lock.yaml') }}
-          restore-keys: pnpm-${{ runner.os }}-
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: EditorFrontend/pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
