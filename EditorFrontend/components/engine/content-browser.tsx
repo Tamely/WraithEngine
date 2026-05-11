@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useCallback, useEffect } from "react"
+import { useState, useRef, useCallback, useEffect, useMemo } from "react"
 import {
   Search,
   Plus,
@@ -14,7 +14,7 @@ import {
   Grid3X3,
   List,
 } from "lucide-react"
-import { useRemoteViewport, type SessionAssetDescriptor, type SessionSceneItem } from "./remote-viewport-context"
+import { useRemoteViewport, type SessionAssetDescriptor } from "./remote-viewport-context"
 
 function TextureThumbnail({
   assetPath,
@@ -51,25 +51,6 @@ function TextureThumbnail({
   )
 }
 
-type AssetKindFilter = "all" | "mesh" | "texture"
-
-interface FolderItem {
-  id: AssetKindFilter
-  name: string
-  children?: FolderItem[]
-}
-
-const folderStructure: FolderItem[] = [
-  {
-    id: "all",
-    name: "Content",
-    children: [
-      { id: "mesh", name: "Meshes" },
-      { id: "texture", name: "Textures" },
-    ],
-  },
-]
-
 function AssetIcon({
   kind,
   path,
@@ -88,13 +69,61 @@ function AssetIcon({
   return <Box className={cls} />
 }
 
+interface FolderNode {
+  name: string
+  path: string
+  children: FolderNode[]
+}
+
+function buildFolderTree(assets: SessionAssetDescriptor[]): FolderNode {
+  const root: FolderNode = { name: "Content", path: "", children: [] }
+  const nodesByPath = new Map<string, FolderNode>([["", root]])
+
+  for (const asset of assets) {
+    const parts = asset.path.split("/")
+    for (let depth = 1; depth < parts.length; depth++) {
+      const fullPath = parts.slice(0, depth).join("/")
+      if (!nodesByPath.has(fullPath)) {
+        const parentPath = parts.slice(0, depth - 1).join("/")
+        const node: FolderNode = { name: parts[depth - 1], path: fullPath, children: [] }
+        nodesByPath.set(fullPath, node)
+        nodesByPath.get(parentPath)!.children.push(node)
+      }
+    }
+  }
+
+  return root
+}
+
+function getDirectoryContents(assets: SessionAssetDescriptor[], currentPath: string) {
+  const subdirSet = new Set<string>()
+  const files: SessionAssetDescriptor[] = []
+
+  for (const asset of assets) {
+    const lastSlash = asset.path.lastIndexOf("/")
+    const dir = lastSlash === -1 ? "" : asset.path.substring(0, lastSlash)
+
+    if (dir === currentPath) {
+      files.push(asset)
+    } else {
+      const prefix = currentPath === "" ? "" : currentPath + "/"
+      if (currentPath === "" ? dir.length > 0 : dir.startsWith(prefix)) {
+        const rest = currentPath === "" ? dir : dir.substring(prefix.length)
+        const immediateChild = rest.split("/")[0]
+        if (immediateChild) subdirSet.add(immediateChild)
+      }
+    }
+  }
+
+  return { subdirs: Array.from(subdirSet).sort(), files }
+}
+
 export function ContentBrowser() {
-  const { assets, listAssets, connectionState, selectedObject, setMeshAsset, serverOrigin } = useRemoteViewport()
+  const { assets, listAssets, connectionState, selectedObject, setMeshAsset, serverOrigin } =
+    useRemoteViewport()
   const [searchQuery, setSearchQuery] = useState("")
-  const [selectedFolder, setSelectedFolder] = useState<AssetKindFilter>("all")
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
-    new Set(["all"])
-  )
+  const [currentPath, setCurrentPath] = useState("")
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set([""]))
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid")
   const [selectedAsset, setSelectedAsset] = useState<number | null>(null)
   const [folderWidth, setFolderWidth] = useState(192)
@@ -108,6 +137,19 @@ export function ContentBrowser() {
     }
   }, [connectionState, listAssets])
 
+  const folderTree = useMemo(() => buildFolderTree(assets), [assets])
+
+  const { subdirs, files } = useMemo(() => {
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase()
+      return {
+        subdirs: [],
+        files: assets.filter((a) => a.name.toLowerCase().includes(q)),
+      }
+    }
+    return getDirectoryContents(assets, currentPath)
+  }, [assets, currentPath, searchQuery])
+
   const canAssignToSelection =
     selectedObject?.kind === "mesh" && selectedObject.id !== undefined
 
@@ -119,13 +161,26 @@ export function ContentBrowser() {
     [canAssignToSelection, selectedObject, setMeshAsset]
   )
 
-  const filteredAssets = assets.filter((a) => {
-    const matchesFolder = selectedFolder === "all" || a.kind === selectedFolder
-    const matchesSearch =
-      searchQuery === "" ||
-      a.name.toLowerCase().includes(searchQuery.toLowerCase())
-    return matchesFolder && matchesSearch
-  })
+  const navigateTo = (path: string) => {
+    setCurrentPath(path)
+    setSelectedAsset(null)
+    setExpandedPaths((prev) => {
+      const next = new Set(prev)
+      next.add(path)
+      return next
+    })
+  }
+
+  const breadcrumbs = useMemo(() => {
+    const crumbs: { name: string; path: string }[] = [{ name: "Content", path: "" }]
+    if (currentPath) {
+      const parts = currentPath.split("/")
+      parts.forEach((part, i) => {
+        crumbs.push({ name: part, path: parts.slice(0, i + 1).join("/") })
+      })
+    }
+    return crumbs
+  }, [currentPath])
 
   const onFolderSplitterMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -150,40 +205,35 @@ export function ContentBrowser() {
     [folderWidth]
   )
 
-  const toggleFolder = (id: string) => {
-    setExpandedFolders((prev) => {
+  const toggleExpand = (path: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setExpandedPaths((prev) => {
       const next = new Set(prev)
-      if (next.has(id)) {
-        next.delete(id)
+      if (next.has(path)) {
+        next.delete(path)
       } else {
-        next.add(id)
+        next.add(path)
       }
       return next
     })
   }
 
-  const renderFolder = (folder: FolderItem, depth = 0) => {
-    const isExpanded = expandedFolders.has(folder.id)
-    const isSelected = selectedFolder === folder.id
-    const hasChildren = !!folder.children?.length
+  const renderFolderNode = (node: FolderNode, depth = 0): React.ReactNode => {
+    const isExpanded = expandedPaths.has(node.path)
+    const isSelected = currentPath === node.path
+    const hasChildren = node.children.length > 0
 
     return (
-      <div key={folder.id}>
+      <div key={node.path}>
         <div
-          className={`flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-neutral-800 ${
+          className={`flex items-center gap-1 py-1 cursor-pointer hover:bg-neutral-800 ${
             isSelected ? "bg-neutral-700" : ""
           }`}
           style={{ paddingLeft: `${depth * 12 + 8}px` }}
-          onClick={() => setSelectedFolder(folder.id)}
+          onClick={() => navigateTo(node.path)}
         >
           {hasChildren ? (
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                toggleFolder(folder.id)
-              }}
-              className="p-0.5"
-            >
+            <button className="p-0.5" onClick={(e) => toggleExpand(node.path, e)}>
               {isExpanded ? (
                 <ChevronDown className="w-3 h-3 text-neutral-500" />
               ) : (
@@ -194,14 +244,16 @@ export function ContentBrowser() {
             <div className="w-4" />
           )}
           <Folder className="w-4 h-4 text-yellow-500" />
-          <span className="text-xs text-neutral-300">{folder.name}</span>
+          <span className="text-xs text-neutral-300">{node.name}</span>
         </div>
         {hasChildren &&
           isExpanded &&
-          folder.children!.map((child) => renderFolder(child, depth + 1))}
+          node.children.map((child) => renderFolderNode(child, depth + 1))}
       </div>
     )
   }
+
+  const isEmpty = subdirs.length === 0 && files.length === 0
 
   return (
     <div className="h-full flex flex-col bg-neutral-950">
@@ -221,14 +273,21 @@ export function ContentBrowser() {
           Refresh
         </button>
         <div className="flex-1" />
+        {/* Breadcrumb */}
         <div className="flex items-center gap-1 text-xs text-neutral-500">
-          <span>Content</span>
-          {selectedFolder !== "all" && (
-            <>
-              <ChevronRight className="w-3 h-3" />
-              <span className="capitalize">{selectedFolder}s</span>
-            </>
-          )}
+          {breadcrumbs.map((crumb, i) => (
+            <span key={crumb.path} className="flex items-center gap-1">
+              {i > 0 && <ChevronRight className="w-3 h-3" />}
+              <button
+                onClick={() => navigateTo(crumb.path)}
+                className={`hover:text-neutral-300 ${
+                  i === breadcrumbs.length - 1 ? "text-neutral-300" : ""
+                }`}
+              >
+                {crumb.name}
+              </button>
+            </span>
+          ))}
         </div>
       </div>
       <div className="flex flex-1 overflow-hidden">
@@ -236,7 +295,7 @@ export function ContentBrowser() {
           className="shrink-0 overflow-y-auto border-r border-neutral-800"
           style={{ width: folderWidth }}
         >
-          {folderStructure.map((folder) => renderFolder(folder))}
+          {renderFolderNode(folderTree)}
         </div>
         <div
           className="w-1 shrink-0 bg-transparent hover:bg-white/20 active:bg-white/30 cursor-col-resize transition-colors relative group"
@@ -273,13 +332,33 @@ export function ContentBrowser() {
             </button>
           </div>
           <div className="flex-1 overflow-y-auto p-2">
-            {filteredAssets.length === 0 ? (
+            {isEmpty ? (
               <div className="flex items-center justify-center h-full text-xs text-neutral-600">
                 {assets.length === 0 ? "No assets loaded" : "No results"}
               </div>
             ) : viewMode === "grid" ? (
               <div className="grid grid-cols-8 gap-2">
-                {filteredAssets.map((asset) => (
+                {/* Subdirectory entries */}
+                {subdirs.map((dir) => {
+                  const fullPath = currentPath ? `${currentPath}/${dir}` : dir
+                  return (
+                    <div
+                      key={fullPath}
+                      onDoubleClick={() => navigateTo(fullPath)}
+                      title={fullPath}
+                      className="flex flex-col items-center p-1 rounded cursor-pointer hover:bg-neutral-800"
+                    >
+                      <div className="w-12 h-12 flex items-center justify-center mb-1">
+                        <Folder className="w-8 h-8 text-yellow-500" />
+                      </div>
+                      <span className="text-[10px] text-neutral-400 text-center truncate w-full">
+                        {dir}
+                      </span>
+                    </div>
+                  )
+                })}
+                {/* File entries */}
+                {files.map((asset) => (
                   <div
                     key={asset.id}
                     draggable={asset.kind === "mesh"}
@@ -290,11 +369,13 @@ export function ContentBrowser() {
                       e.dataTransfer.setData("axiom/asset-kind", asset.kind)
                       e.dataTransfer.effectAllowed = "copy"
                     }}
-                    title={canAssignToSelection && asset.kind === "mesh" ? "Double-click or drag to assign to a mesh object" : asset.path}
+                    title={
+                      canAssignToSelection && asset.kind === "mesh"
+                        ? "Double-click or drag to assign to a mesh object"
+                        : asset.path
+                    }
                     className={`flex flex-col items-center p-1 rounded cursor-pointer hover:bg-neutral-800 ${
-                      selectedAsset === asset.id
-                        ? "bg-neutral-700 ring-1 ring-white/30"
-                        : ""
+                      selectedAsset === asset.id ? "bg-neutral-700 ring-1 ring-white/30" : ""
                     }`}
                   >
                     <div className="w-12 h-12 flex items-center justify-center mb-1">
@@ -308,7 +389,26 @@ export function ContentBrowser() {
               </div>
             ) : (
               <div className="flex flex-col gap-0.5">
-                {filteredAssets.map((asset) => (
+                {/* Subdirectory entries */}
+                {subdirs.map((dir) => {
+                  const fullPath = currentPath ? `${currentPath}/${dir}` : dir
+                  return (
+                    <div
+                      key={fullPath}
+                      onDoubleClick={() => navigateTo(fullPath)}
+                      title={fullPath}
+                      className="flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-neutral-800"
+                    >
+                      <Folder className="w-4 h-4 text-yellow-500 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs text-neutral-300 truncate">{dir}</div>
+                      </div>
+                      <span className="text-[10px] text-neutral-600 shrink-0">folder</span>
+                    </div>
+                  )
+                })}
+                {/* File entries */}
+                {files.map((asset) => (
                   <div
                     key={asset.id}
                     draggable={asset.kind === "mesh"}
@@ -319,21 +419,24 @@ export function ContentBrowser() {
                       e.dataTransfer.setData("axiom/asset-kind", asset.kind)
                       e.dataTransfer.effectAllowed = "copy"
                     }}
-                    title={canAssignToSelection && asset.kind === "mesh" ? "Double-click or drag to assign to a mesh object" : asset.path}
+                    title={
+                      canAssignToSelection && asset.kind === "mesh"
+                        ? "Double-click or drag to assign to a mesh object"
+                        : asset.path
+                    }
                     className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-neutral-800 ${
-                      selectedAsset === asset.id
-                        ? "bg-neutral-700 ring-1 ring-white/30"
-                        : ""
+                      selectedAsset === asset.id ? "bg-neutral-700 ring-1 ring-white/30" : ""
                     }`}
                   >
-                    <AssetIcon kind={asset.kind} path={asset.path} serverOrigin={serverOrigin} size="sm" />
+                    <AssetIcon
+                      kind={asset.kind}
+                      path={asset.path}
+                      serverOrigin={serverOrigin}
+                      size="sm"
+                    />
                     <div className="flex-1 min-w-0">
-                      <div className="text-xs text-neutral-300 truncate">
-                        {asset.name}
-                      </div>
-                      <div className="text-[10px] text-neutral-600 truncate">
-                        {asset.path}
-                      </div>
+                      <div className="text-xs text-neutral-300 truncate">{asset.name}</div>
+                      <div className="text-[10px] text-neutral-600 truncate">{asset.path}</div>
                     </div>
                     <span className="text-[10px] text-neutral-600 capitalize shrink-0">
                       {asset.kind}
