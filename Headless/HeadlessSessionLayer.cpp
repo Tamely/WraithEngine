@@ -132,10 +132,21 @@ void HeadlessSessionLayer::OnRender() {
   for (const auto &[Id, Details] : m_Session.GetState().Scene.ObjectDetailsById) {
     if (Details.Kind == EditorSceneItemKind::Light && Details.Visible &&
         Details.Light.has_value()) {
+      // Derive direction from the light's world-space position so that moving
+      // the object in the editor has an immediate effect on the sun direction.
+      glm::vec3 Dir = Details.Light->Direction;
+      const EditorTransformDetails *EffTransform =
+          Details.WorldTransform.has_value()  ? &*Details.WorldTransform
+          : Details.Transform.has_value()     ? &*Details.Transform
+                                              : nullptr;
+      if (EffTransform != nullptr &&
+          glm::length(EffTransform->Location) > 0.001f) {
+        Dir = EffTransform->Location;
+      }
       RenderCommand::SetSun({
           .Color = Details.Light->Color,
           .Intensity = Details.Light->Intensity,
-          .Direction = Details.Light->Direction,
+          .Direction = Dir,
       });
       break;
     }

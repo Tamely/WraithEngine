@@ -18,24 +18,25 @@ layout(std140, set = 0, binding = 0) uniform CameraFrame {
 } cameraFrame;
 
 void main() {
-    vec3 lightDir;
-    vec3 lightColor;
-    float lightIntensity;
-    if (cameraFrame.lightColorAndEnabled.w > 0.5) {
-        lightDir = normalize(cameraFrame.lightDirectionAndIntensity.xyz);
-        lightIntensity = cameraFrame.lightDirectionAndIntensity.w;
-        lightColor = cameraFrame.lightColorAndEnabled.xyz;
-    } else {
-        lightDir = normalize(vec3(0.35, 0.7, 0.2));
-        lightIntensity = 1.0;
-        lightColor = vec3(1.0);
-    }
-
     vec4 baseColor = texture(sampler2D(baseColorImage, baseColorSampler), inTexCoord);
     float lighting = 1.0;
-    if (cameraFrame.renderOptions.x == 0u) {
-        float diffuse = max(dot(normalize(inNormal), lightDir), 0.0);
-        lighting = max(diffuse * lightIntensity, 0.2);
+    vec3 tint = vec3(1.0);
+
+    bool litMode = cameraFrame.renderOptions.x == 0u;
+    bool hasLight = cameraFrame.lightColorAndEnabled.w > 0.5;
+
+    if (litMode) {
+        if (hasLight) {
+            vec3 lightDir = normalize(cameraFrame.lightDirectionAndIntensity.xyz);
+            float lightIntensity = cameraFrame.lightDirectionAndIntensity.w;
+            tint = cameraFrame.lightColorAndEnabled.xyz;
+            float diffuse = max(dot(normalize(inNormal), lightDir), 0.0);
+            lighting = max(diffuse * lightIntensity, 0.15);
+        } else {
+            // No active light: ambient-only so hiding a light has a visible effect.
+            lighting = 0.15;
+        }
     }
-    outColor = vec4(baseColor.rgb * lightColor * lighting, baseColor.a);
+
+    outColor = vec4(baseColor.rgb * tint * lighting, baseColor.a);
 }

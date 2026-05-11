@@ -123,6 +123,11 @@ bool SaveSceneToFile(const std::filesystem::path &Path,
         Out << ",\"assetRelativePath\":" << EscStr(AssetIt->second);
       }
     }
+    if (Details.Light.has_value()) {
+      Out << ",\"lightColor\":" << SerializeVec3(Details.Light->Color)
+          << ",\"lightIntensity\":" << Details.Light->Intensity
+          << ",\"lightDirection\":" << SerializeVec3(Details.Light->Direction);
+    }
     Out << "}";
   }
   Out << "\n  ],\n";
@@ -342,6 +347,7 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
     std::optional<EditorTransformDetails> Transform;
     std::optional<std::string> ScriptClass;
     std::string AssetRelativePath;
+    std::optional<EditorLightProperties> Light;
   };
 
   std::string MeshAsset;
@@ -411,6 +417,21 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
           }
           if (K == "assetRelativePath") {
             auto V = P.ParseString(); if (V) Data.AssetRelativePath = *V; return true;
+          }
+          if (K == "lightColor") {
+            auto V = P.ParseVec3();
+            if (V) { if (!Data.Light) Data.Light = EditorLightProperties{}; Data.Light->Color = *V; }
+            return true;
+          }
+          if (K == "lightIntensity") {
+            auto V = P.ParseNumber();
+            if (V) { if (!Data.Light) Data.Light = EditorLightProperties{}; Data.Light->Intensity = static_cast<float>(*V); }
+            return true;
+          }
+          if (K == "lightDirection") {
+            auto V = P.ParseVec3();
+            if (V) { if (!Data.Light) Data.Light = EditorLightProperties{}; Data.Light->Direction = *V; }
+            return true;
           }
           return false;
         });
@@ -482,6 +503,7 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
     Details.TransformReadOnly = Data.TransformReadOnly;
     Details.Transform       = Data.Transform;
     Details.ScriptClass     = Data.ScriptClass;
+    Details.Light           = Data.Light;
     State.ObjectDetailsById[Id] = std::move(Details);
   }
 
