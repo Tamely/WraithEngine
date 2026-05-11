@@ -178,6 +178,11 @@ type RemoteViewportCommand =
       value: string | boolean | [number, number, number]
     }
   | { type: "reload_scripts" }
+  | {
+      type: "set_mesh_asset"
+      objectId: string
+      assetPath: string
+    }
 
 function getServerOrigin() {
   const configuredOrigin = process.env.NEXT_PUBLIC_AXIOM_SERVER_ORIGIN?.trim()
@@ -729,6 +734,11 @@ export function Viewport() {
       }
 
       if (message.payloadType === "script_class_changed") {
+        void refreshSessionSnapshotSafely("event")
+        return
+      }
+
+      if (message.payloadType === "mesh_asset_changed") {
         void refreshSessionSnapshotSafely("event")
         return
       }
@@ -1517,6 +1527,9 @@ export function Viewport() {
       },
       reloadScripts: async () => {
         await sendCommand({ type: "reload_scripts" }, "reliable")
+      },
+      setMeshAsset: async (objectId, assetPath) => {
+        return sendCommand({ type: "set_mesh_asset", objectId, assetPath }, "reliable")
       },
       reparentObject: async (objectId, newParentId) => {
         const accepted = await sendCommand(

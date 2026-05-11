@@ -14,7 +14,7 @@ import {
   Grid3X3,
   List,
 } from "lucide-react"
-import { useRemoteViewport, type SessionAssetDescriptor } from "./remote-viewport-context"
+import { useRemoteViewport, type SessionAssetDescriptor, type SessionSceneItem } from "./remote-viewport-context"
 
 type AssetKindFilter = "all" | "mesh" | "texture"
 
@@ -41,7 +41,7 @@ function AssetIcon({ kind }: { kind: SessionAssetDescriptor["kind"] }) {
 }
 
 export function ContentBrowser() {
-  const { assets, listAssets, connectionState } = useRemoteViewport()
+  const { assets, listAssets, connectionState, selectedObject, setMeshAsset } = useRemoteViewport()
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedFolder, setSelectedFolder] = useState<AssetKindFilter>("all")
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
@@ -59,6 +59,17 @@ export function ContentBrowser() {
       void listAssets()
     }
   }, [connectionState, listAssets])
+
+  const canAssignToSelection =
+    selectedObject?.kind === "mesh" && selectedObject.id !== undefined
+
+  const assignAssetToSelection = useCallback(
+    async (asset: SessionAssetDescriptor) => {
+      if (!canAssignToSelection || asset.kind !== "mesh" || !selectedObject) return
+      await setMeshAsset(selectedObject.id, asset.path)
+    },
+    [canAssignToSelection, selectedObject, setMeshAsset]
+  )
 
   const filteredAssets = assets.filter((a) => {
     const matchesFolder = selectedFolder === "all" || a.kind === selectedFolder
@@ -224,6 +235,8 @@ export function ContentBrowser() {
                   <div
                     key={asset.id}
                     onClick={() => setSelectedAsset(asset.id)}
+                    onDoubleClick={() => void assignAssetToSelection(asset)}
+                    title={canAssignToSelection && asset.kind === "mesh" ? "Double-click to assign to selected mesh" : asset.path}
                     className={`flex flex-col items-center p-1 rounded cursor-pointer hover:bg-neutral-800 ${
                       selectedAsset === asset.id
                         ? "bg-neutral-700 ring-1 ring-white/30"
@@ -245,6 +258,8 @@ export function ContentBrowser() {
                   <div
                     key={asset.id}
                     onClick={() => setSelectedAsset(asset.id)}
+                    onDoubleClick={() => void assignAssetToSelection(asset)}
+                    title={canAssignToSelection && asset.kind === "mesh" ? "Double-click to assign to selected mesh" : asset.path}
                     className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-neutral-800 ${
                       selectedAsset === asset.id
                         ? "bg-neutral-700 ring-1 ring-white/30"

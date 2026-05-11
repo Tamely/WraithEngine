@@ -135,6 +135,7 @@ interface RemoteViewportActions {
     value: string | boolean | [number, number, number]
   ) => Promise<boolean>
   reloadScripts: () => Promise<void>
+  setMeshAsset: (objectId: string, assetPath: string) => Promise<boolean>
 }
 
 export interface SessionObjectTransformUpdate {
@@ -205,6 +206,7 @@ interface RemoteViewportContextValue {
     value: string | boolean | [number, number, number]
   ) => Promise<boolean>
   reloadScripts: () => Promise<void>
+  setMeshAsset: (objectId: string, assetPath: string) => Promise<boolean>
   reloadStatus: "idle" | "reloading" | "reloaded" | "failed"
   setReloadStatus: (status: "idle" | "reloading" | "reloaded" | "failed") => void
   scriptErrorToasts: ScriptErrorToast[]
@@ -278,6 +280,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     saveScene: async () => {},
     setProperty: async () => false,
     reloadScripts: async () => {},
+    setMeshAsset: async () => false,
   })
   const [connectionState, setConnectionState] =
     useState<RemoteViewportConnectionState>("idle")
@@ -470,6 +473,12 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     await actionsRef.current.reloadScripts()
   }, [])
 
+  const setMeshAsset = useCallback(
+    async (objectId: string, assetPath: string) =>
+      actionsRef.current.setMeshAsset(objectId, assetPath),
+    []
+  )
+
   const addScriptErrorToast = useCallback((objectId: string, message: string) => {
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`
     setScriptErrorToasts((current) => [...current, { id, objectId, message }])
@@ -518,6 +527,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       setSaveStatus,
       setProperty,
       reloadScripts,
+      setMeshAsset,
       reloadStatus,
       setReloadStatus,
       scriptErrorToasts,
@@ -594,6 +604,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       saveStatus,
       setProperty,
       reloadScripts,
+      setMeshAsset,
       reloadStatus,
       scriptErrorToasts,
       addScriptErrorToast,
