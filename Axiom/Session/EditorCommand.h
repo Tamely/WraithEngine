@@ -86,6 +86,12 @@ struct SetMeshAssetCommand {
   std::string AssetPath; // relative path from the content directory, e.g. "Meshes/cube.glb"
 };
 
+struct SetLightPropertiesCommand {
+  std::string ObjectId;
+  glm::vec3 Color{1.0f};
+  float Intensity{1.0f};
+};
+
 using EditorCommandPayload =
     std::variant<UpdateViewportCameraCommand, SetViewportCameraPoseCommand,
                  SetLookActiveCommand, SelectObjectCommand,
@@ -93,7 +99,8 @@ using EditorCommandPayload =
                  CreateObjectCommand, DuplicateObjectCommand,
                  DeleteObjectCommand, ReparentObjectCommand,
                  SetTransformCommand, AttachScriptCommand,
-                 DetachScriptCommand, SetMeshAssetCommand>;
+                 DetachScriptCommand, SetMeshAssetCommand,
+                 SetLightPropertiesCommand>;
 
 struct EditorCommand {
   EditorCommandPayload Payload;

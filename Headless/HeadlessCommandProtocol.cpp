@@ -167,6 +167,9 @@ std::string EventPayloadType(const EditorEventPayload &Payload) {
   if (std::holds_alternative<MeshAssetChangedEvent>(Payload)) {
     return "mesh_asset_changed";
   }
+  if (std::holds_alternative<LightPropertiesChangedEvent>(Payload)) {
+    return "light_properties_changed";
+  }
   return "object_transform_updated";
 }
 
@@ -309,6 +312,13 @@ void SerializeObjectDetails(std::ostringstream &Stream,
            << "," << T->Scale.z << "]}";
   } else {
     Stream << "null";
+  }
+  if (Details.Light.has_value()) {
+    Stream << ",\"light\":{\"color\":[" << Details.Light->Color.r << ","
+           << Details.Light->Color.g << "," << Details.Light->Color.b
+           << "],\"intensity\":" << Details.Light->Intensity << "}";
+  } else {
+    Stream << ",\"light\":null";
   }
   Stream << ",\"collaboration\":{\"selectedByUserIds\":[";
   bool FirstSelectionOwner = true;
@@ -753,6 +763,29 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
                               .AssetPath = AssetPath.value_or("")}},
         .AssetPath = AssetPath.value_or("")};
   }
+  if (*Type == "set_light_properties") {
+    static const std::regex ObjectIdPattern(R"json("objectId"\s*:\s*"([^"]+)")json");
+    static const std::regex ColorPattern(
+        R"json("color"\s*:\s*\[\s*(-?[0-9Ee.+-]+)\s*,\s*(-?[0-9Ee.+-]+)\s*,\s*(-?[0-9Ee.+-]+)\s*\])json");
+    static const std::regex IntensityPattern(R"json("intensity"\s*:\s*(-?[0-9Ee.+-]+))json");
+    const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
+    const auto Color = MatchVec3(JsonLine, ColorPattern);
+    std::optional<double> Intensity;
+    {
+      std::match_results<std::string_view::const_iterator> M;
+      if (std::regex_search(JsonLine.begin(), JsonLine.end(), M, IntensityPattern))
+        Intensity = ParseDouble(std::string_view(M[1].first, M[1].second));
+    }
+    HeadlessCommand Cmd;
+    Cmd.Type = HeadlessCommandType::SetLightProperties;
+    Cmd.Color = Color.value_or(glm::vec3(1.0f));
+    Cmd.Intensity = static_cast<float>(Intensity.value_or(1.0));
+    Cmd.EditorPayload = {.Payload = SetLightPropertiesCommand{
+        .ObjectId = ObjectId.value_or(""),
+        .Color = Cmd.Color,
+        .Intensity = Cmd.Intensity}};
+    return Cmd;
+  }
   if (*Type == "get_schema") {
     static const std::regex ObjectIdPattern(R"json("objectId"\s*:\s*"([^"]+)")json");
     const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
@@ -847,6 +880,8 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::SaveScene:
   case HeadlessCommandType::AttachScript:
   case HeadlessCommandType::DetachScript:
+  case HeadlessCommandType::SetMeshAsset:
+  case HeadlessCommandType::SetLightProperties:
   case HeadlessCommandType::ReloadScripts:
   case HeadlessCommandType::Heartbeat:
   case HeadlessCommandType::Quit:
@@ -997,6 +1032,11 @@ std::string SerializeEvent(const PublishedEditorEvent &Event) {
                  std::get_if<MeshAssetChangedEvent>(&Event.Event.Payload)) {
     Stream << ",\"objectId\":\"" << EscapeJson(MeshAsset->ObjectId)
            << "\",\"assetPath\":\"" << EscapeJson(MeshAsset->AssetPath) << "\"";
+  } else if (const auto *LightProps =
+                 std::get_if<LightPropertiesChangedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"objectId\":\"" << EscapeJson(LightProps->ObjectId)
+           << "\",\"color\":[" << LightProps->Color.r << "," << LightProps->Color.g
+           << "," << LightProps->Color.b << "],\"intensity\":" << LightProps->Intensity;
   }
   Stream << "}";
   return Stream.str();

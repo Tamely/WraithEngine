@@ -101,7 +101,7 @@ function DetailsContent({
   const lockOwnerName =
     details.collaboration.lockOwnerUserId !== null
       ? participants.find((entry) => entry.userId === details.collaboration.lockOwnerUserId)
-          ?.displayName ?? fallbackUserLabel(details.collaboration.lockOwnerUserId)
+        ?.displayName ?? fallbackUserLabel(details.collaboration.lockOwnerUserId)
       : "None"
 
   async function applyTransform() {
@@ -191,6 +191,15 @@ function DetailsContent({
         <ScriptSection
           objectId={details.objectId}
           schema={schema}
+          isSaving={isSaving}
+          setIsSaving={setIsSaving}
+        />
+      )}
+
+      {details.kind === "light" && (
+        <LightSection
+          objectId={details.objectId}
+          light={details.light ?? null}
           isSaving={isSaving}
           setIsSaving={setIsSaving}
         />
@@ -321,6 +330,83 @@ function ScriptSection({
             type="button"
           >
             Apply
+          </button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function LightSection({
+  objectId,
+  light,
+  isSaving,
+  setIsSaving,
+}: {
+  objectId: string
+  light: { color: [number, number, number]; intensity: number } | null
+  isSaving: boolean
+  setIsSaving: (value: boolean) => void
+}) {
+  const { setLightProperties } = useRemoteViewport()
+  const [draftColor, setDraftColor] = useState<[string, string, string]>(
+    light ? [String(light.color[0]), String(light.color[1]), String(light.color[2])] : ["1", "1", "1"]
+  )
+  const [draftIntensity, setDraftIntensity] = useState(String(light?.intensity ?? 1))
+
+  useEffect(() => {
+    if (light) {
+      setDraftColor([String(light.color[0]), String(light.color[1]), String(light.color[2])])
+      setDraftIntensity(String(light.intensity))
+    }
+  }, [objectId, light?.color[0], light?.color[1], light?.color[2], light?.intensity])
+
+  async function applyLightProperties() {
+    const r = Number(draftColor[0])
+    const g = Number(draftColor[1])
+    const b = Number(draftColor[2])
+    const intensity = Number(draftIntensity)
+    if ([r, g, b, intensity].some((v) => Number.isNaN(v))) return
+    setIsSaving(true)
+    try {
+      await setLightProperties(objectId, [r, g, b], intensity)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  return (
+    <section className="rounded border border-neutral-800 bg-neutral-950/60 p-3">
+      <div className="flex items-center gap-1.5 mb-3">
+        <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">Light</p>
+      </div>
+      <div className="space-y-3">
+        <VectorEditor
+          disabled={isSaving}
+          label="Color"
+          value={draftColor}
+          onChange={setDraftColor}
+        />
+        <div className="flex items-center gap-3">
+          <span className="w-20 shrink-0 text-xs text-neutral-500">Intensity</span>
+          <input
+            className="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 outline-none focus:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isSaving}
+            onChange={(e) => setDraftIntensity(e.target.value)}
+            type="number"
+            min={0}
+            step={0.1}
+            value={draftIntensity}
+          />
+        </div>
+        <div className="flex justify-end pt-1">
+          <button
+            className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isSaving}
+            onClick={() => void applyLightProperties()}
+            type="button"
+          >
+            {isSaving ? "Applying..." : "Apply Light"}
           </button>
         </div>
       </div>

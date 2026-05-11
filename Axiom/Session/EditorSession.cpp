@@ -83,6 +83,9 @@ std::string CommandTypeName(const EditorCommandPayload &Payload) {
   if (std::holds_alternative<SetMeshAssetCommand>(Payload)) {
     return "set_mesh_asset";
   }
+  if (std::holds_alternative<SetLightPropertiesCommand>(Payload)) {
+    return "set_light_properties";
+  }
   return "set_transform";
 }
 
@@ -1030,6 +1033,19 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
     }
   }
 
+  if (const auto *LightCmd =
+          std::get_if<SetLightPropertiesCommand>(&QueuedCommand.Command.Payload)) {
+    const EditorObjectDetails *Details = FindObjectDetails(LightCmd->ObjectId);
+    if (Details == nullptr) {
+      FailureReason = "SetLightProperties targeted an unknown object.";
+      return false;
+    }
+    if (Details->Kind != EditorSceneItemKind::Light) {
+      FailureReason = "SetLightProperties target must be a Light object.";
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -1365,6 +1381,28 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
   PublishEvent({.Payload = MeshAssetChangedEvent{
       .ObjectId = Command.ObjectId,
       .AssetPath = Command.AssetPath,
+  }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const SetLightPropertiesCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
+
+  auto DetailsIt = m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
+  if (DetailsIt == m_State.Scene.ObjectDetailsById.end()) {
+    return;
+  }
+
+  if (!DetailsIt->second.Light.has_value()) {
+    DetailsIt->second.Light = EditorLightProperties{};
+  }
+  DetailsIt->second.Light->Color = Command.Color;
+  DetailsIt->second.Light->Intensity = Command.Intensity;
+
+  PublishEvent({.Payload = LightPropertiesChangedEvent{
+      .ObjectId = Command.ObjectId,
+      .Color = Command.Color,
+      .Intensity = Command.Intensity,
   }});
 }
 

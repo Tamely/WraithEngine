@@ -183,6 +183,12 @@ type RemoteViewportCommand =
       objectId: string
       assetPath: string
     }
+  | {
+      type: "set_light_properties"
+      objectId: string
+      color: [number, number, number]
+      intensity: number
+    }
 
 function getServerOrigin() {
   const configuredOrigin = process.env.NEXT_PUBLIC_AXIOM_SERVER_ORIGIN?.trim()
@@ -739,6 +745,11 @@ export function Viewport() {
       }
 
       if (message.payloadType === "mesh_asset_changed") {
+        void refreshSessionSnapshotSafely("event")
+        return
+      }
+
+      if (message.payloadType === "light_properties_changed") {
         void refreshSessionSnapshotSafely("event")
         return
       }
@@ -1530,6 +1541,9 @@ export function Viewport() {
       },
       setMeshAsset: async (objectId, assetPath) => {
         return sendCommand({ type: "set_mesh_asset", objectId, assetPath }, "reliable")
+      },
+      setLightProperties: async (objectId, color, intensity) => {
+        return sendCommand({ type: "set_light_properties", objectId, color, intensity }, "reliable")
       },
       reparentObject: async (objectId, newParentId) => {
         const accepted = await sendCommand(

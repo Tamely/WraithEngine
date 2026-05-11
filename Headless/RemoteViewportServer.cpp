@@ -864,6 +864,7 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::AttachScript:
   case HeadlessCommandType::DetachScript:
   case HeadlessCommandType::SetMeshAsset:
+  case HeadlessCommandType::SetLightProperties:
     m_Host.SubmitRemoteCommand(*User, Command->EditorPayload);
     break;
   case HeadlessCommandType::GizmoHover:
@@ -1479,6 +1480,7 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   case HeadlessCommandType::AttachScript:
   case HeadlessCommandType::DetachScript:
   case HeadlessCommandType::SetMeshAsset:
+  case HeadlessCommandType::SetLightProperties:
   case HeadlessCommandType::ReloadScripts:
   case HeadlessCommandType::UpdateViewportCamera:
   case HeadlessCommandType::GizmoHover:
@@ -1558,6 +1560,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::AttachScript:
   case HeadlessCommandType::DetachScript:
   case HeadlessCommandType::SetMeshAsset:
+  case HeadlessCommandType::SetLightProperties:
     m_Host.SubmitRemoteCommand(Client->User, Command->EditorPayload);
     return true;
   case HeadlessCommandType::ReloadScripts: {

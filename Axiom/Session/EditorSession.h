@@ -251,6 +251,8 @@ private:
                      const DetachScriptCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SetMeshAssetCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const SetLightPropertiesCommand &Command);
   void PublishEvent(const EditorEvent &Event);
 
 private:

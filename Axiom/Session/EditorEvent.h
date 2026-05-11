@@ -104,6 +104,12 @@ struct MeshAssetChangedEvent {
   std::string AssetPath;
 };
 
+struct LightPropertiesChangedEvent {
+  std::string ObjectId;
+  glm::vec3 Color{1.0f};
+  float Intensity{1.0f};
+};
+
 using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         LookStateChangedEvent,
                                         CommandAcknowledgedEvent,
@@ -119,7 +125,8 @@ using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         ObjectLockChangedEvent,
                                         ScriptClassChangedEvent,
                                         ScriptErrorEvent,
-                                        MeshAssetChangedEvent>;
+                                        MeshAssetChangedEvent,
+                                        LightPropertiesChangedEvent>;
 
 struct EditorEvent {
   EditorEventPayload Payload;
