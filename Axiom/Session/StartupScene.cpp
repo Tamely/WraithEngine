@@ -145,6 +145,11 @@ std::vector<EditorObjectDetails> BuildStartupObjectDetails() {
           .RotationDegrees = glm::vec3(-45.0f, 30.0f, 0.0f),
           .Scale = glm::vec3(1.0f),
       },
+      .Light = EditorLightProperties{
+          .Color = glm::vec3(1.0f, 0.98f, 0.92f),
+          .Intensity = 1.0f,
+          .Direction = glm::vec3(0.35f, 0.7f, 0.2f),
+      },
   },
   {
       .ObjectId = "sky-light",

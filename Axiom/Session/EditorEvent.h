@@ -3,6 +3,7 @@
 #include "Session/SessionTypes.h"
 
 #include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 
 #include <optional>
 #include <string>
@@ -99,6 +100,29 @@ struct ScriptErrorEvent {
   std::string Message;
 };
 
+struct MeshAssetChangedEvent {
+  std::string ObjectId;
+  std::string AssetPath;
+};
+
+struct LightPropertiesChangedEvent {
+  std::string ObjectId;
+  glm::vec3 Color{1.0f};
+  float Intensity{1.0f};
+};
+
+struct MaterialPropertiesChangedEvent {
+  std::string ObjectId;
+  glm::vec4 BaseColorFactor{1.0f};
+  float Metallic{0.0f};
+  float Roughness{0.5f};
+};
+
+struct MaterialTextureChangedEvent {
+  std::string ObjectId;
+  std::string TextureAssetPath; // empty = cleared back to mesh asset's embedded texture
+};
+
 using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         LookStateChangedEvent,
                                         CommandAcknowledgedEvent,
@@ -113,7 +137,11 @@ using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         ObjectTransformUpdatedEvent,
                                         ObjectLockChangedEvent,
                                         ScriptClassChangedEvent,
-                                        ScriptErrorEvent>;
+                                        ScriptErrorEvent,
+                                        MeshAssetChangedEvent,
+                                        LightPropertiesChangedEvent,
+                                        MaterialPropertiesChangedEvent,
+                                        MaterialTextureChangedEvent>;
 
 struct EditorEvent {
   EditorEventPayload Payload;

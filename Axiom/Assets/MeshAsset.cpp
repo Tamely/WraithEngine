@@ -1,4 +1,5 @@
 #include "Assets/MeshAsset.h"
+#include "Assets/AssimpImporter.h"
 
 #include "Core/Log.h"
 
@@ -375,6 +376,12 @@ void AppendNodeMeshes(const fastgltf::Asset &Asset, size_t NodeIndex,
 } // namespace
 
 std::optional<MeshSceneData> LoadBasicMeshAsset(const std::filesystem::path &Path) {
+  const std::string Ext = ToLowerCopy(Path.extension().string());
+  if (Ext == ".fbx" || Ext == ".obj") {
+    AssimpImporter Importer;
+    return Importer.Import(Path);
+  }
+
   fastgltf::GltfDataBuffer Buffer;
   if (!Buffer.loadFromFile(Path)) {
     A_CORE_ERROR("Failed to open mesh asset: {0}", Path.string());
@@ -419,9 +426,25 @@ std::optional<MeshSceneData> LoadBasicMeshAsset(const std::filesystem::path &Pat
   std::vector<MaterialInstanceRef> MaterialCache(ParsedAsset.materials.size());
   MaterialInstanceRef FallbackMaterial = std::make_shared<MaterialInstance>();
 
+  auto MakeMaterialWithFactors =
+      [](const fastgltf::Material &Mat,
+         TextureSourceDataRef Texture) -> MaterialInstanceRef {
+    auto Ref = std::make_shared<MaterialInstance>();
+    Ref->BaseColorTexture = std::move(Texture);
+    const auto &Pbr = Mat.pbrData;
+    Ref->BaseColorFactor = glm::vec4(
+        static_cast<float>(Pbr.baseColorFactor[0]),
+        static_cast<float>(Pbr.baseColorFactor[1]),
+        static_cast<float>(Pbr.baseColorFactor[2]),
+        static_cast<float>(Pbr.baseColorFactor[3]));
+    Ref->Metallic  = static_cast<float>(Pbr.metallicFactor);
+    Ref->Roughness = static_cast<float>(Pbr.roughnessFactor);
+    return Ref;
+  };
+
   auto ResolveMaterial = [&](const fastgltf::Primitive &Primitive,
                              bool HasTexCoord0) -> MaterialInstanceRef {
-    if (!HasTexCoord0 || !Primitive.materialIndex.has_value() ||
+    if (!Primitive.materialIndex.has_value() ||
         *Primitive.materialIndex >= ParsedAsset.materials.size()) {
       return FallbackMaterial;
     }
@@ -432,23 +455,28 @@ std::optional<MeshSceneData> LoadBasicMeshAsset(const std::filesystem::path &Pat
     }
 
     const auto &Material = ParsedAsset.materials[MaterialIndex];
-    if (!Material.pbrData.baseColorTexture.has_value() ||
+
+    // No texture (or no UV) — still carry PBR color factors.
+    if (!HasTexCoord0 || !Material.pbrData.baseColorTexture.has_value() ||
         Material.pbrData.baseColorTexture->texCoordIndex != 0) {
-      MaterialCache[MaterialIndex] = FallbackMaterial;
-      return FallbackMaterial;
+      auto Ref = MakeMaterialWithFactors(Material, nullptr);
+      MaterialCache[MaterialIndex] = Ref;
+      return Ref;
     }
 
     const size_t TextureIndex = Material.pbrData.baseColorTexture->textureIndex;
     if (TextureIndex >= ParsedAsset.textures.size()) {
-      MaterialCache[MaterialIndex] = FallbackMaterial;
-      return FallbackMaterial;
+      auto Ref = MakeMaterialWithFactors(Material, nullptr);
+      MaterialCache[MaterialIndex] = Ref;
+      return Ref;
     }
 
     const auto &Texture = ParsedAsset.textures[TextureIndex];
     if (!Texture.imageIndex.has_value() ||
         *Texture.imageIndex >= ParsedAsset.images.size()) {
-      MaterialCache[MaterialIndex] = FallbackMaterial;
-      return FallbackMaterial;
+      auto Ref = MakeMaterialWithFactors(Material, nullptr);
+      MaterialCache[MaterialIndex] = Ref;
+      return Ref;
     }
 
     const size_t ImageIndex = *Texture.imageIndex;
@@ -458,12 +486,12 @@ std::optional<MeshSceneData> LoadBasicMeshAsset(const std::filesystem::path &Pat
     }
 
     if (!ImageCache[ImageIndex] || !ImageCache[ImageIndex]->IsValid()) {
-      MaterialCache[MaterialIndex] = FallbackMaterial;
-      return FallbackMaterial;
+      auto Ref = MakeMaterialWithFactors(Material, nullptr);
+      MaterialCache[MaterialIndex] = Ref;
+      return Ref;
     }
 
-    auto MaterialRef = std::make_shared<MaterialInstance>();
-    MaterialRef->BaseColorTexture = ImageCache[ImageIndex];
+    auto MaterialRef = MakeMaterialWithFactors(Material, ImageCache[ImageIndex]);
     MaterialCache[MaterialIndex] = MaterialRef;
     return MaterialRef;
   };
@@ -482,5 +510,16 @@ std::optional<MeshSceneData> LoadBasicMeshAsset(const std::filesystem::path &Pat
   }
 
   return SceneData;
+}
+
+TextureSourceDataRef LoadTextureFromFile(const std::filesystem::path &Path) {
+  return DecodeTextureFromFile(Path);
+}
+
+TextureSourceDataRef LoadTextureFromMemory(const unsigned char *Bytes,
+                                           int Length,
+                                           const std::string &DebugName) {
+  return DecodeTextureFromMemory(
+      reinterpret_cast<const stbi_uc *>(Bytes), Length, DebugName);
 }
 } // namespace Axiom::Assets

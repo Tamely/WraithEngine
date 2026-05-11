@@ -537,3 +537,148 @@ TEST(HeadlessProtocolTests, StubWebRtcSessionBuffersVideoAfterFirstKeyframe) {
   EXPECT_EQ(Packets.front().FrameIndex, 11u);
   EXPECT_EQ(Packets.back().FrameIndex, 12u);
 }
+
+// ---------------------------------------------------------------------------
+// Phase 7: Asset Pipeline — protocol parse / serialize tests
+// ---------------------------------------------------------------------------
+
+TEST(HeadlessProtocolTests, ParsesSetMeshAssetCommand) {
+  std::string Error;
+  const auto Command = Axiom::ParseRemoteViewportCommand(
+      R"json({"type":"set_mesh_asset","objectId":"crate-1","assetPath":"Meshes/barrel.glb"})json",
+      Error);
+
+  ASSERT_TRUE(Command.has_value()) << Error;
+  EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::SetMeshAsset);
+  const auto *Payload =
+      std::get_if<Axiom::SetMeshAssetCommand>(&Command->EditorPayload.Payload);
+  ASSERT_NE(Payload, nullptr);
+  EXPECT_EQ(Payload->ObjectId, "crate-1");
+  EXPECT_EQ(Payload->AssetPath, "Meshes/barrel.glb");
+}
+
+TEST(HeadlessProtocolTests, ParsesSetLightPropertiesCommand) {
+  std::string Error;
+  const auto Command = Axiom::ParseRemoteViewportCommand(
+      R"json({"type":"set_light_properties","objectId":"directional-light","color":[1.0,0.9,0.8],"intensity":2.5})json",
+      Error);
+
+  ASSERT_TRUE(Command.has_value()) << Error;
+  EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::SetLightProperties);
+  const auto *Payload =
+      std::get_if<Axiom::SetLightPropertiesCommand>(&Command->EditorPayload.Payload);
+  ASSERT_NE(Payload, nullptr);
+  EXPECT_EQ(Payload->ObjectId, "directional-light");
+  EXPECT_FLOAT_EQ(Payload->Color.r, 1.0f);
+  EXPECT_FLOAT_EQ(Payload->Color.g, 0.9f);
+  EXPECT_FLOAT_EQ(Payload->Color.b, 0.8f);
+  EXPECT_FLOAT_EQ(Payload->Intensity, 2.5f);
+}
+
+TEST(HeadlessProtocolTests, ParsesSetMaterialPropertiesCommand) {
+  std::string Error;
+  const auto Command = Axiom::ParseRemoteViewportCommand(
+      R"json({"type":"set_material_properties","objectId":"crate-1","baseColorFactor":[0.8,0.2,0.1,1.0],"metallic":0.9,"roughness":0.1})json",
+      Error);
+
+  ASSERT_TRUE(Command.has_value()) << Error;
+  EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::SetMaterialProperties);
+  const auto *Payload =
+      std::get_if<Axiom::SetMaterialPropertiesCommand>(&Command->EditorPayload.Payload);
+  ASSERT_NE(Payload, nullptr);
+  EXPECT_EQ(Payload->ObjectId, "crate-1");
+  EXPECT_FLOAT_EQ(Payload->BaseColorFactor.r, 0.8f);
+  EXPECT_FLOAT_EQ(Payload->BaseColorFactor.g, 0.2f);
+  EXPECT_FLOAT_EQ(Payload->BaseColorFactor.b, 0.1f);
+  EXPECT_FLOAT_EQ(Payload->BaseColorFactor.a, 1.0f);
+  EXPECT_FLOAT_EQ(Payload->Metallic, 0.9f);
+  EXPECT_FLOAT_EQ(Payload->Roughness, 0.1f);
+}
+
+TEST(HeadlessProtocolTests, SerializesMeshAssetChangedEvent) {
+  const Axiom::PublishedEditorEvent Event{
+      .Id = Axiom::EventId{10},
+      .Event = {.Payload = Axiom::MeshAssetChangedEvent{
+                    .ObjectId = "crate-1",
+                    .AssetPath = "Meshes/barrel.glb",
+                }}};
+
+  const std::string Json = Axiom::SerializeEvent(Event);
+  EXPECT_NE(Json.find("\"payloadType\":\"mesh_asset_changed\""), std::string::npos);
+  EXPECT_NE(Json.find("\"objectId\":\"crate-1\""), std::string::npos);
+  EXPECT_NE(Json.find("\"assetPath\":\"Meshes/barrel.glb\""), std::string::npos);
+}
+
+TEST(HeadlessProtocolTests, SerializesLightPropertiesChangedEvent) {
+  const Axiom::PublishedEditorEvent Event{
+      .Id = Axiom::EventId{11},
+      .Event = {.Payload = Axiom::LightPropertiesChangedEvent{
+                    .ObjectId = "directional-light",
+                    .Color = glm::vec3(1.0f, 0.9f, 0.8f),
+                    .Intensity = 2.5f,
+                }}};
+
+  const std::string Json = Axiom::SerializeEvent(Event);
+  EXPECT_NE(Json.find("\"payloadType\":\"light_properties_changed\""), std::string::npos);
+  EXPECT_NE(Json.find("\"objectId\":\"directional-light\""), std::string::npos);
+  EXPECT_NE(Json.find("\"intensity\":2.5"), std::string::npos);
+}
+
+TEST(HeadlessProtocolTests, SerializesMaterialPropertiesChangedEvent) {
+  const Axiom::PublishedEditorEvent Event{
+      .Id = Axiom::EventId{12},
+      .Event = {.Payload = Axiom::MaterialPropertiesChangedEvent{
+                    .ObjectId = "crate-1",
+                    .BaseColorFactor = glm::vec4(0.8f, 0.2f, 0.1f, 1.0f),
+                    .Metallic = 0.9f,
+                    .Roughness = 0.1f,
+                }}};
+
+  const std::string Json = Axiom::SerializeEvent(Event);
+  EXPECT_NE(Json.find("\"payloadType\":\"material_properties_changed\""), std::string::npos);
+  EXPECT_NE(Json.find("\"objectId\":\"crate-1\""), std::string::npos);
+  EXPECT_NE(Json.find("\"metallic\":0.9"), std::string::npos);
+  EXPECT_NE(Json.find("\"roughness\":0.1"), std::string::npos);
+}
+
+TEST(HeadlessProtocolTests, SerializesObjectDetailsWithMaterial) {
+  Axiom::EditorSessionState State{.Session = Axiom::SessionId{1}};
+  State.Scene.ObjectDetailsById["crate-1"] = Axiom::EditorObjectDetails{
+      .ObjectId = "crate-1",
+      .DisplayName = "Crate",
+      .Kind = Axiom::EditorSceneItemKind::Mesh,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      .Material = Axiom::EditorMaterialProperties{
+          .BaseColorFactor = glm::vec4(0.5f, 0.5f, 0.5f, 1.0f),
+          .Metallic = 0.0f,
+          .Roughness = 0.5f,
+      },
+  };
+  State.SelectedObjectIds[Axiom::SessionUserId{1}] = "crate-1";
+
+  const std::string Json = Axiom::SerializeSessionSnapshot(
+      State, Axiom::SessionUserId{1}, true, "connected", "connected");
+  EXPECT_NE(Json.find("\"material\":{"), std::string::npos);
+  EXPECT_NE(Json.find("\"baseColorFactor\":[0.5,0.5,0.5,1]"), std::string::npos);
+  EXPECT_NE(Json.find("\"metallic\":0"), std::string::npos);
+  EXPECT_NE(Json.find("\"roughness\":0.5"), std::string::npos);
+}
+
+TEST(HeadlessProtocolTests, SerializesObjectDetailsWithNullMaterialForLights) {
+  Axiom::EditorSessionState State{.Session = Axiom::SessionId{1}};
+  State.Scene.ObjectDetailsById["sun"] = Axiom::EditorObjectDetails{
+      .ObjectId = "sun",
+      .DisplayName = "Sun",
+      .Kind = Axiom::EditorSceneItemKind::Light,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+  };
+  State.SelectedObjectIds[Axiom::SessionUserId{1}] = "sun";
+
+  const std::string Json = Axiom::SerializeSessionSnapshot(
+      State, Axiom::SessionUserId{1}, true, "connected", "connected");
+  EXPECT_NE(Json.find("\"material\":null"), std::string::npos);
+}

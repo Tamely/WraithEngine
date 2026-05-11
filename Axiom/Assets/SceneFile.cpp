@@ -10,6 +10,7 @@
 #include <functional>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 
 #ifndef AXIOM_CONTENT_DIR
 #define AXIOM_CONTENT_DIR "Content"
@@ -77,6 +78,14 @@ void SerializeSceneItemsFlat(
 
 bool SaveSceneToFile(const std::filesystem::path &Path,
                      const EditorSceneState &Scene) {
+  // Build per-object asset path lookup from MeshInstances.
+  std::unordered_map<std::string, std::string> AssetPathByObjectId;
+  for (const auto &Inst : Scene.MeshInstances) {
+    if (!Inst.AssetRelativePath.empty()) {
+      AssetPathByObjectId[Inst.ObjectId] = Inst.AssetRelativePath;
+    }
+  }
+
   std::ostringstream Out;
   Out << "{\n";
   Out << "  \"version\": 1,\n";
@@ -107,6 +116,20 @@ bool SaveSceneToFile(const std::filesystem::path &Path,
     }
     if (Details.ScriptClass.has_value()) {
       Out << ",\"scriptClass\":" << EscStr(*Details.ScriptClass);
+    }
+    if (Details.Kind == EditorSceneItemKind::Mesh) {
+      const auto AssetIt = AssetPathByObjectId.find(Id);
+      if (AssetIt != AssetPathByObjectId.end()) {
+        Out << ",\"assetRelativePath\":" << EscStr(AssetIt->second);
+      }
+      if (Details.Material.has_value() && Details.Material->TextureAssetPath.has_value()) {
+        Out << ",\"textureAssetPath\":" << EscStr(*Details.Material->TextureAssetPath);
+      }
+    }
+    if (Details.Light.has_value()) {
+      Out << ",\"lightColor\":" << SerializeVec3(Details.Light->Color)
+          << ",\"lightIntensity\":" << Details.Light->Intensity
+          << ",\"lightDirection\":" << SerializeVec3(Details.Light->Direction);
     }
     Out << "}";
   }
@@ -326,6 +349,9 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
     bool TransformReadOnly{true};
     std::optional<EditorTransformDetails> Transform;
     std::optional<std::string> ScriptClass;
+    std::string AssetRelativePath;
+    std::string TextureAssetPath;
+    std::optional<EditorLightProperties> Light;
   };
 
   std::string MeshAsset;
@@ -391,6 +417,29 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
           if (K == "scriptClass") {
             P.SkipWs();
             if (P.Peek() == 'n') { P.ParseNull(); } else { auto V = P.ParseString(); if (V) Data.ScriptClass = *V; }
+            return true;
+          }
+          if (K == "assetRelativePath") {
+            auto V = P.ParseString(); if (V) Data.AssetRelativePath = *V; return true;
+          }
+          if (K == "textureAssetPath") {
+            P.SkipWs();
+            if (P.Peek() == 'n') { P.ParseNull(); } else { auto V = P.ParseString(); if (V) Data.TextureAssetPath = *V; }
+            return true;
+          }
+          if (K == "lightColor") {
+            auto V = P.ParseVec3();
+            if (V) { if (!Data.Light) Data.Light = EditorLightProperties{}; Data.Light->Color = *V; }
+            return true;
+          }
+          if (K == "lightIntensity") {
+            auto V = P.ParseNumber();
+            if (V) { if (!Data.Light) Data.Light = EditorLightProperties{}; Data.Light->Intensity = static_cast<float>(*V); }
+            return true;
+          }
+          if (K == "lightDirection") {
+            auto V = P.ParseVec3();
+            if (V) { if (!Data.Light) Data.Light = EditorLightProperties{}; Data.Light->Direction = *V; }
             return true;
           }
           return false;
@@ -463,10 +512,68 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
     Details.TransformReadOnly = Data.TransformReadOnly;
     Details.Transform       = Data.Transform;
     Details.ScriptClass     = Data.ScriptClass;
+    Details.Light           = Data.Light;
     State.ObjectDetailsById[Id] = std::move(Details);
   }
 
-  // --- Stage 4: reload mesh instances from disk ---
+  // --- Stage 4a: load per-object explicit asset assignments ---
+  // Objects saved with assetRelativePath (from SetMeshAssetCommand) are loaded
+  // individually. Track which objectIds are handled so Stage 4b skips them.
+  std::unordered_set<std::string> LoadedByAssetPath;
+  for (const auto &[ObjId, Data] : Objects) {
+    if (Data.Kind != EditorSceneItemKind::Mesh || Data.AssetRelativePath.empty()) continue;
+    const auto FullPath =
+        std::filesystem::path(AXIOM_CONTENT_DIR) / Data.AssetRelativePath;
+    const auto SceneData = LoadBasicMeshAsset(FullPath);
+    if (!SceneData.has_value() || SceneData->Instances.empty()) {
+      A_CORE_WARN("SceneFile: failed to load asset '{}' for object '{}'",
+                  Data.AssetRelativePath, ObjId);
+      continue;
+    }
+    glm::mat4 Transform = SceneData->Instances[0].Transform;
+    const auto DetailsIt = State.ObjectDetailsById.find(ObjId);
+    if (DetailsIt != State.ObjectDetailsById.end() &&
+        DetailsIt->second.Transform.has_value()) {
+      const auto &T = *DetailsIt->second.Transform;
+      glm::mat4 M(1.0f);
+      M = glm::translate(M, T.Location);
+      M = glm::rotate(M, glm::radians(T.RotationDegrees.y), {0,1,0});
+      M = glm::rotate(M, glm::radians(T.RotationDegrees.x), {1,0,0});
+      M = glm::rotate(M, glm::radians(T.RotationDegrees.z), {0,0,1});
+      M = glm::scale(M, T.Scale);
+      Transform = M;
+    }
+    auto Material = SceneData->Instances[0].Material;
+    if (!Data.TextureAssetPath.empty()) {
+      const auto TexPath =
+          std::filesystem::path(AXIOM_CONTENT_DIR) / Data.TextureAssetPath;
+      auto Tex = LoadTextureFromFile(TexPath);
+      if (Tex) {
+        if (!Material) Material = std::make_shared<MaterialInstance>();
+        Material->BaseColorTexture = std::move(Tex);
+        Material->TextureAssetPath = Data.TextureAssetPath;
+      }
+    }
+    State.MeshInstances.push_back({
+        .ObjectId           = ObjId,
+        .Mesh               = SceneData->Instances[0].Mesh,
+        .Material           = std::move(Material),
+        .RenderPath         = MeshRenderPath::Graphics,
+        .Transform          = Transform,
+        .AssetRelativePath  = Data.AssetRelativePath,
+    });
+    // Propagate textureAssetPath into ObjectDetails so inspector shows it.
+    {
+      const auto DetailsIt = State.ObjectDetailsById.find(ObjId);
+      if (DetailsIt != State.ObjectDetailsById.end() && !Data.TextureAssetPath.empty()) {
+        if (!DetailsIt->second.Material) DetailsIt->second.Material = EditorMaterialProperties{};
+        DetailsIt->second.Material->TextureAssetPath = Data.TextureAssetPath;
+      }
+    }
+    LoadedByAssetPath.insert(ObjId);
+  }
+
+  // --- Stage 4b: reload remaining mesh instances from the global mesh asset ---
   if (!MeshAsset.empty() && !MeshNameToObjectId.empty()) {
     const auto MeshPath =
         std::filesystem::path(AXIOM_CONTENT_DIR) / MeshAsset;
@@ -476,6 +583,7 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
         const auto It = MeshNameToObjectId.find(Instance.Name);
         if (It == MeshNameToObjectId.end()) continue;
         const auto &ObjId = It->second;
+        if (LoadedByAssetPath.count(ObjId)) continue; // already loaded in Stage 4a
 
         glm::mat4 Transform = Instance.Transform;
         const auto DetailsIt = State.ObjectDetailsById.find(ObjId);

@@ -14,8 +14,8 @@ public:
 private:
   struct CachedMeshInstance {
     MeshRef Mesh;
-    MaterialInstanceRef Material;
     MeshRenderPath RenderPath{MeshRenderPath::Graphics};
+    std::string AssetRelativePath;
   };
 
   std::unordered_map<std::string, CachedMeshInstance> m_MeshesByObjectId;

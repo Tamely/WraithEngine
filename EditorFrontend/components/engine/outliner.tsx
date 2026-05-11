@@ -72,6 +72,8 @@ export function Outliner() {
     deleteObject,
     renameObject,
     reparentObject,
+    setMeshAsset,
+    setMaterialTexture,
     participants,
     lockedObjects,
     sessionState,
@@ -185,11 +187,20 @@ export function Outliner() {
           e.dataTransfer.effectAllowed = "move"
         }}
         onDragOver={(e) => {
-          if (draggedIdRef.current === null || draggedIdRef.current === item.id) return
           if (isParticipantCamera) return
-          e.preventDefault()
-          e.dataTransfer.dropEffect = "move"
-          setDropTargetId(item.id)
+          if (draggedIdRef.current !== null && draggedIdRef.current !== item.id) {
+            e.preventDefault()
+            e.dataTransfer.dropEffect = "move"
+            setDropTargetId(item.id)
+            return
+          }
+          if (draggedIdRef.current === null && item.kind === "mesh" &&
+              e.dataTransfer.types.includes("axiom/asset-path")) {
+            e.preventDefault()
+            e.dataTransfer.dropEffect = "copy"
+            setDropTargetId(item.id)
+            return
+          }
         }}
         onDragLeave={() => {
           setDropTargetId(null)
@@ -197,11 +208,21 @@ export function Outliner() {
         onDrop={(e) => {
           e.preventDefault()
           setDropTargetId(null)
+          if (isParticipantCamera) return
           const sourceId = draggedIdRef.current
           draggedIdRef.current = null
-          if (sourceId === null || sourceId === item.id) return
-          if (isParticipantCamera) return
-          void reparentObject(sourceId, item.id)
+          if (sourceId !== null && sourceId !== item.id) {
+            void reparentObject(sourceId, item.id)
+            return
+          }
+          if (sourceId === null) {
+            const assetPath = e.dataTransfer.getData("axiom/asset-path")
+            const assetKind = e.dataTransfer.getData("axiom/asset-kind")
+            if (assetPath && item.kind === "mesh") {
+              if (assetKind === "mesh") void setMeshAsset(item.id, assetPath)
+              else if (assetKind === "texture") void setMaterialTexture(item.id, assetPath)
+            }
+          }
         }}
         onDragEnd={() => {
           draggedIdRef.current = null

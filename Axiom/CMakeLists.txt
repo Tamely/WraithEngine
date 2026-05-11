@@ -1,6 +1,7 @@
 set(ENGINE_SOURCES
   Scripting/ScriptHost.cpp
   Scripting/InternalCalls.cpp
+  Assets/AssimpImporter.cpp
   Assets/IAssetSource.cpp
   Assets/MeshAsset.cpp
   Assets/SceneFile.cpp
@@ -286,9 +287,9 @@ target_include_directories(AxiomCore PUBLIC
   "${Vulkan_INCLUDE_DIRS}"
 )
 
-target_link_libraries(AxiomCore PUBLIC 
+target_link_libraries(AxiomCore PUBLIC
   glfw Vulkan::Vulkan fastgltf glm
-  spdlog
+  spdlog assimp
 )
 
 target_compile_definitions(AxiomCore PUBLIC

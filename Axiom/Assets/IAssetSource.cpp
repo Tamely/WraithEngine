@@ -6,7 +6,7 @@ namespace {
 
 AssetKind KindFromExtension(const std::filesystem::path &Path) {
   auto ext = Path.extension().string();
-  if (ext == ".glb" || ext == ".gltf")
+  if (ext == ".glb" || ext == ".gltf" || ext == ".fbx" || ext == ".obj")
     return AssetKind::Mesh;
   return AssetKind::Texture;
 }
@@ -15,8 +15,9 @@ AssetId IdFromRelPath(const std::filesystem::path &RelPath) {
   return AssetId{std::hash<std::string>{}(RelPath.string())};
 }
 
-constexpr std::string_view kContentExtensions[] = {".glb", ".gltf", ".png",
-                                                    ".jpg", ".jpeg"};
+constexpr std::string_view kContentExtensions[] = {".glb", ".gltf", ".fbx",
+                                                    ".obj", ".png", ".jpg",
+                                                    ".jpeg"};
 
 bool IsContentFile(const std::filesystem::path &Path) {
   auto ext = Path.extension().string();

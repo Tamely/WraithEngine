@@ -10,6 +10,7 @@
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -52,6 +53,19 @@ struct EditorTransformDetails {
   glm::vec3 Scale{1.0f};
 };
 
+struct EditorLightProperties {
+  glm::vec3 Color{1.0f};
+  float Intensity{1.0f};
+  glm::vec3 Direction{0.35f, 0.7f, 0.2f}; // world-space (need not be normalized)
+};
+
+struct EditorMaterialProperties {
+  glm::vec4 BaseColorFactor{1.0f};
+  float Metallic{0.0f};
+  float Roughness{0.5f};
+  std::optional<std::string> TextureAssetPath; // content-relative path, nullopt = embedded
+};
+
 struct EditorObjectDetails {
   std::string ObjectId;
   std::string DisplayName;
@@ -62,6 +76,8 @@ struct EditorObjectDetails {
   std::optional<EditorTransformDetails> Transform;      // local-space
   std::optional<EditorTransformDetails> WorldTransform; // world-space (computed)
   std::optional<std::string> ScriptClass;               // C# script class name (Actors only)
+  std::optional<EditorLightProperties> Light;           // Light objects only
+  std::optional<EditorMaterialProperties> Material;     // Mesh objects only
 };
 
 enum class EditorUserPresenceState { Connected, Away, Disconnected };
@@ -102,6 +118,7 @@ struct EditorSceneMeshInstance {
   MaterialInstanceRef Material;
   MeshRenderPath RenderPath{MeshRenderPath::Graphics};
   glm::mat4 Transform{1.0f};
+  std::string AssetRelativePath; // content-relative path, empty if using startup default
 };
 
 struct EditorSceneState {
@@ -134,6 +151,9 @@ public:
 
   void Subscribe(IEditorEventSubscriber *Subscriber);
   void Unsubscribe(IEditorEventSubscriber *Subscriber);
+
+  // Must be called before SetMeshAssetCommand can be processed.
+  void SetContentDir(std::filesystem::path ContentDir);
 
   void EnsureViewportState(SessionUserId User);
   void SetPresenceState(SessionUserId User, EditorUserPresenceState State);
@@ -237,6 +257,14 @@ private:
                      const AttachScriptCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const DetachScriptCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const SetMeshAssetCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const SetLightPropertiesCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const SetMaterialPropertiesCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const SetMaterialTextureCommand &Command);
   void PublishEvent(const EditorEvent &Event);
 
 private:
@@ -244,5 +272,6 @@ private:
   EditorSessionState m_State;
   EditorMessageBus m_MessageBus;
   std::unique_ptr<DataModel> m_SceneRoot;
+  std::filesystem::path m_ContentDir;
 };
 } // namespace Axiom

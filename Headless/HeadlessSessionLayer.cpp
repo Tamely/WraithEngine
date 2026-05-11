@@ -127,6 +127,31 @@ void HeadlessSessionLayer::OnRender() {
   Application::Get().SetRendererViewMode(RenderView.ViewMode);
   Application::Get().SetViewportFrameUser(RenderUser);
   RenderCommand::SetCamera(Viewport->Camera);
+
+  // Pick the first visible Light that has LightProperties configured.
+  for (const auto &[Id, Details] : m_Session.GetState().Scene.ObjectDetailsById) {
+    if (Details.Kind == EditorSceneItemKind::Light && Details.Visible &&
+        Details.Light.has_value()) {
+      // Derive direction from the light's world-space position so that moving
+      // the object in the editor has an immediate effect on the sun direction.
+      glm::vec3 Dir = Details.Light->Direction;
+      const EditorTransformDetails *EffTransform =
+          Details.WorldTransform.has_value()  ? &*Details.WorldTransform
+          : Details.Transform.has_value()     ? &*Details.Transform
+                                              : nullptr;
+      if (EffTransform != nullptr &&
+          glm::length(EffTransform->Location) > 0.001f) {
+        Dir = EffTransform->Location;
+      }
+      RenderCommand::SetSun({
+          .Color = Details.Light->Color,
+          .Intensity = Details.Light->Intensity,
+          .Direction = Dir,
+      });
+      break;
+    }
+  }
+
   for (const auto &Submission : m_RendererAdapter->BuildRenderSubmissions(m_Session)) {
     RenderCommand::Submit(Submission);
   }
@@ -175,6 +200,10 @@ GizmoMode HeadlessSessionLayer::GetGizmoMode(SessionUserId User) const {
 }
 
 bool HeadlessSessionLayer::LoadStartupSceneIntoSession() {
+#ifndef AXIOM_CONTENT_DIR
+#define AXIOM_CONTENT_DIR "Content"
+#endif
+  m_Session.SetContentDir(AXIOM_CONTENT_DIR);
   return LoadStartupScene(m_Session);
 }
 

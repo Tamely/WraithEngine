@@ -9,12 +9,17 @@
 #include "GizmoHitTest.h"
 #include "HeadlessCommandProtocol.h"
 #include <Renderer/VideoEncoderFactory.h>
+#include <stb_image.h>
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
 #include <algorithm>
 #include <array>
 #include <charconv>
 #include <chrono>
 #include <cctype>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <sstream>
@@ -172,6 +177,53 @@ std::string_view StripQuery(std::string_view Path) {
   return Query == std::string_view::npos ? Path : Path.substr(0, Query);
 }
 
+std::string UrlDecode(std::string_view Input) {
+  std::string Out;
+  Out.reserve(Input.size());
+  for (size_t I = 0; I < Input.size(); ++I) {
+    if (Input[I] == '%' && I + 2 < Input.size()) {
+      const char Hi = Input[I + 1];
+      const char Lo = Input[I + 2];
+      auto HexVal = [](char C) -> int {
+        if (C >= '0' && C <= '9') return C - '0';
+        if (C >= 'a' && C <= 'f') return C - 'a' + 10;
+        if (C >= 'A' && C <= 'F') return C - 'A' + 10;
+        return -1;
+      };
+      const int H = HexVal(Hi), L = HexVal(Lo);
+      if (H >= 0 && L >= 0) {
+        Out += static_cast<char>(H * 16 + L);
+        I += 2;
+        continue;
+      }
+    } else if (Input[I] == '+') {
+      Out += ' ';
+      continue;
+    }
+    Out += Input[I];
+  }
+  return Out;
+}
+
+// Returns the URL-decoded value of a query parameter, or nullopt if not present.
+std::optional<std::string> GetQueryParam(std::string_view Path,
+                                          std::string_view Key) {
+  const size_t Q = Path.find('?');
+  if (Q == std::string_view::npos) return std::nullopt;
+  std::string_view Query = Path.substr(Q + 1);
+  while (!Query.empty()) {
+    const size_t Amp = Query.find('&');
+    std::string_view Pair = Amp == std::string_view::npos ? Query : Query.substr(0, Amp);
+    const size_t Eq = Pair.find('=');
+    if (Eq != std::string_view::npos && Pair.substr(0, Eq) == Key) {
+      return UrlDecode(Pair.substr(Eq + 1));
+    }
+    if (Amp == std::string_view::npos) break;
+    Query.remove_prefix(Amp + 1);
+  }
+  return std::nullopt;
+}
+
 std::string Trim(std::string_view Value) {
   while (!Value.empty() &&
          std::isspace(static_cast<unsigned char>(Value.front())) != 0) {
@@ -304,6 +356,53 @@ bool ReadHttpRequest(SocketHandle Socket, HttpRequest &Request,
 
 std::string JsonResponse(std::string_view Status, std::string_view Payload) {
   return BuildHttpResponse(Status, "application/json; charset=utf-8", Payload);
+}
+
+// Loads an image file, scales it to fit within MaxDim x MaxDim (preserving
+// aspect ratio), and encodes as JPEG. Returns empty vector on any failure.
+std::vector<uint8_t> MakeThumbnailJpeg(const std::filesystem::path &Path,
+                                        int MaxDim = 128) {
+  int W = 0, H = 0, Channels = 0;
+  stbi_uc *Pixels =
+      stbi_load(Path.string().c_str(), &W, &H, &Channels, STBI_rgb);
+  if (!Pixels || W <= 0 || H <= 0) return {};
+
+  // Compute thumbnail dimensions preserving aspect ratio.
+  int ThumbW = W, ThumbH = H;
+  if (W > MaxDim || H > MaxDim) {
+    if (W >= H) {
+      ThumbW = MaxDim;
+      ThumbH = std::max(1, H * MaxDim / W);
+    } else {
+      ThumbH = MaxDim;
+      ThumbW = std::max(1, W * MaxDim / H);
+    }
+  }
+
+  // Nearest-neighbour downsample (fast, acceptable for small thumbnails).
+  std::vector<uint8_t> Scaled(static_cast<size_t>(ThumbW * ThumbH * 3));
+  for (int Y = 0; Y < ThumbH; ++Y) {
+    for (int X = 0; X < ThumbW; ++X) {
+      int SrcX = X * W / ThumbW;
+      int SrcY = Y * H / ThumbH;
+      const stbi_uc *Src = Pixels + (SrcY * W + SrcX) * 3;
+      uint8_t *Dst = Scaled.data() + (Y * ThumbW + X) * 3;
+      Dst[0] = Src[0];
+      Dst[1] = Src[1];
+      Dst[2] = Src[2];
+    }
+  }
+  stbi_image_free(Pixels);
+
+  std::vector<uint8_t> JpegBytes;
+  stbi_write_jpg_to_func(
+      [](void *Ctx, void *Data, int Size) {
+        auto *Out = static_cast<std::vector<uint8_t> *>(Ctx);
+        const uint8_t *Bytes = static_cast<const uint8_t *>(Data);
+        Out->insert(Out->end(), Bytes, Bytes + Size);
+      },
+      &JpegBytes, ThumbW, ThumbH, 3, Scaled.data(), 85);
+  return JpegBytes;
 }
 
 std::string Base64Encode(const unsigned char *Data, size_t Size) {
@@ -816,6 +915,9 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   if (Route == "/webrtc/close") {
     return HandleWebRtcCloseRequest(ClientSocketValue, HeaderBlock, Body);
   }
+  if (Route == "/assets/upload") {
+    return HandleAssetUploadRequest(ClientSocketValue, Path, HeaderBlock, Body);
+  }
   if (Route != "/command") {
     const std::string Response =
         JsonResponse("404 Not Found", SerializeError("Unknown POST endpoint."));
@@ -863,6 +965,10 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::AttachScript:
   case HeadlessCommandType::DetachScript:
+  case HeadlessCommandType::SetMeshAsset:
+  case HeadlessCommandType::SetLightProperties:
+  case HeadlessCommandType::SetMaterialProperties:
+  case HeadlessCommandType::SetMaterialTexture:
     m_Host.SubmitRemoteCommand(*User, Command->EditorPayload);
     break;
   case HeadlessCommandType::GizmoHover:
@@ -988,6 +1094,37 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
         m_TransportConnected.load() ? "connected" : "disconnected",
         Status.ConnectionState);
     const std::string Response = JsonResponse("200 OK", Body);
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+  if (Route == "/assets/thumbnail") {
+    const auto RelPath = GetQueryParam(Path, "path");
+    if (!RelPath.has_value() || RelPath->empty()) {
+      const std::string Response =
+          JsonResponse("400 Bad Request", SerializeError("Missing 'path' query parameter."));
+      SendAll(ClientSocket, Response.data(), Response.size());
+      return false;
+    }
+    // Reject any path that tries to escape the content directory.
+    if (RelPath->find("..") != std::string::npos) {
+      const std::string Response =
+          JsonResponse("400 Bad Request", SerializeError("Invalid path."));
+      SendAll(ClientSocket, Response.data(), Response.size());
+      return false;
+    }
+    const Assets::LocalAssetSource ContentDir{AXIOM_CONTENT_DIR};
+    const std::filesystem::path FullPath = ContentDir.ResolveRelative(*RelPath);
+    const std::vector<uint8_t> Jpeg = MakeThumbnailJpeg(FullPath);
+    if (Jpeg.empty()) {
+      const std::string Response =
+          JsonResponse("404 Not Found", SerializeError("Could not load thumbnail."));
+      SendAll(ClientSocket, Response.data(), Response.size());
+      return false;
+    }
+    const std::string_view JpegView(reinterpret_cast<const char *>(Jpeg.data()),
+                                    Jpeg.size());
+    const std::string Response =
+        BuildHttpResponse("200 OK", "image/jpeg", JpegView);
     SendAll(ClientSocket, Response.data(), Response.size());
     return false;
   }
@@ -1203,6 +1340,155 @@ bool RemoteViewportServer::HandleWebRtcCloseRequest(
       Status.ConnectionState, Status.Detail, Status.SessionId,
       Status.PendingLocalIceCandidateCount, Status.Video);
   const std::string Response = JsonResponse("200 OK", Payload);
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
+bool RemoteViewportServer::HandleAssetUploadRequest(
+    uintptr_t ClientSocketValue, std::string_view Path,
+    std::string_view HeaderBlock, std::string_view Body) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+
+  // Parse boundary from Content-Type header.
+  const auto ContentType = FindHeaderValue(HeaderBlock, "Content-Type");
+  if (!ContentType.has_value() ||
+      ContentType->find("multipart/form-data") == std::string::npos) {
+    const std::string Response = JsonResponse(
+        "400 Bad Request",
+        SerializeError("Expected multipart/form-data Content-Type."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+  const auto BoundaryPos = ContentType->find("boundary=");
+  if (BoundaryPos == std::string::npos) {
+    const std::string Response =
+        JsonResponse("400 Bad Request", SerializeError("Missing boundary."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+  const std::string Boundary =
+      "--" + ContentType->substr(BoundaryPos + 9 /* len("boundary=") */);
+
+  // Optional target subdirectory from ?dir= query parameter.
+  const std::string TargetDir = GetQueryParam(Path, "dir").value_or("");
+
+  const Assets::LocalAssetSource ContentSource{AXIOM_CONTENT_DIR};
+
+  // Resolve and validate destination directory.
+  std::filesystem::path DestDir;
+  if (TargetDir.empty()) {
+    DestDir = std::filesystem::path(AXIOM_CONTENT_DIR);
+  } else {
+    // Prevent path traversal: reject any component that starts with ".."
+    bool Unsafe = false;
+    for (const auto &Part :
+         std::filesystem::path(TargetDir)) {
+      if (Part.string().find("..") != std::string::npos) {
+        Unsafe = true;
+        break;
+      }
+    }
+    if (Unsafe) {
+      const std::string Response = JsonResponse(
+          "400 Bad Request", SerializeError("Invalid target directory."));
+      SendAll(ClientSocket, Response.data(), Response.size());
+      return false;
+    }
+    DestDir = std::filesystem::path(AXIOM_CONTENT_DIR) / TargetDir;
+  }
+
+  // Split multipart body into parts.
+  static constexpr std::string_view kContentDisposition = "Content-Disposition:";
+  std::vector<std::string> Saved;
+  std::string_view Remaining{Body};
+
+  while (true) {
+    // Find boundary
+    const auto BPos = Remaining.find(Boundary);
+    if (BPos == std::string_view::npos) break;
+    Remaining.remove_prefix(BPos + Boundary.size());
+    // Skip "\r\n" after boundary, or stop on "--" (final boundary)
+    if (Remaining.starts_with("--")) break;
+    if (Remaining.starts_with("\r\n")) Remaining.remove_prefix(2);
+
+    // Find end of part headers (blank line)
+    const auto HeaderEnd = Remaining.find("\r\n\r\n");
+    if (HeaderEnd == std::string_view::npos) break;
+    const std::string_view PartHeaders = Remaining.substr(0, HeaderEnd);
+    Remaining.remove_prefix(HeaderEnd + 4);
+
+    // Find filename in Content-Disposition
+    const auto CDPos = PartHeaders.find(kContentDisposition);
+    if (CDPos == std::string_view::npos) continue;
+    const auto FnPos = PartHeaders.find("filename=\"", CDPos);
+    if (FnPos == std::string_view::npos) continue;
+    const auto FnStart = FnPos + 10;
+    const auto FnEnd = PartHeaders.find('"', FnStart);
+    if (FnEnd == std::string_view::npos) continue;
+    const std::string Filename{PartHeaders.substr(FnStart, FnEnd - FnStart)};
+    if (Filename.empty()) continue;
+
+    // Find part body (ends at next boundary)
+    const auto BodyEnd = Remaining.find(Boundary);
+    if (BodyEnd == std::string_view::npos) break;
+    // Strip trailing \r\n before boundary
+    const size_t PartBodyLen = BodyEnd >= 2 ? BodyEnd - 2 : BodyEnd;
+    const std::string_view PartBody = Remaining.substr(0, PartBodyLen);
+
+    // Validate extension
+    const std::filesystem::path FilePath{Filename};
+    const std::string Ext = [&] {
+      auto E = FilePath.extension().string();
+      for (auto &C : E) C = static_cast<char>(std::tolower(static_cast<unsigned char>(C)));
+      return E;
+    }();
+    static constexpr std::string_view kAllowed[] = {
+        ".glb", ".gltf", ".fbx", ".obj", ".png", ".jpg", ".jpeg"};
+    bool Allowed = false;
+    for (const auto &A : kAllowed) {
+      if (Ext == A) { Allowed = true; break; }
+    }
+    if (!Allowed) {
+      std::cerr << "[AssetUpload] rejected '" << Filename
+                << "': unsupported extension\n";
+      continue;
+    }
+
+    // Write file to destination, creating directories as needed.
+    std::error_code Ec;
+    std::filesystem::create_directories(DestDir, Ec);
+    const std::filesystem::path OutPath = DestDir / FilePath.filename();
+    std::ofstream OutFile(OutPath, std::ios::binary);
+    if (!OutFile.is_open()) {
+      std::cerr << "[AssetUpload] could not open '" << OutPath.string()
+                << "' for writing\n";
+      continue;
+    }
+    OutFile.write(PartBody.data(), static_cast<std::streamsize>(PartBody.size()));
+    OutFile.close();
+    std::cerr << "[AssetUpload] saved '" << OutPath.string() << "'\n";
+
+    // Build content-relative path for the response.
+    const auto Rel = std::filesystem::relative(OutPath,
+                                               std::filesystem::path(AXIOM_CONTENT_DIR), Ec);
+    if (!Ec) Saved.push_back(Rel.string());
+  }
+
+  // Broadcast updated asset list to all WebSocket clients.
+  {
+    const Assets::LocalAssetSource Refreshed{AXIOM_CONTENT_DIR};
+    BroadcastTextMessage(SerializeAssetList(Refreshed.List()));
+  }
+
+  // Build JSON response with saved paths.
+  std::ostringstream Out;
+  Out << "{\"type\":\"assets_uploaded\",\"files\":[";
+  for (size_t i = 0; i < Saved.size(); ++i) {
+    if (i > 0) Out << ",";
+    Out << "\"" << EscapeJson(Saved[i]) << "\"";
+  }
+  Out << "]}";
+  const std::string Response = JsonResponse("200 OK", Out.str());
   SendAll(ClientSocket, Response.data(), Response.size());
   return false;
 }
@@ -1477,6 +1763,10 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::AttachScript:
   case HeadlessCommandType::DetachScript:
+  case HeadlessCommandType::SetMeshAsset:
+  case HeadlessCommandType::SetLightProperties:
+  case HeadlessCommandType::SetMaterialProperties:
+  case HeadlessCommandType::SetMaterialTexture:
   case HeadlessCommandType::ReloadScripts:
   case HeadlessCommandType::UpdateViewportCamera:
   case HeadlessCommandType::GizmoHover:
@@ -1555,6 +1845,10 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::AttachScript:
   case HeadlessCommandType::DetachScript:
+  case HeadlessCommandType::SetMeshAsset:
+  case HeadlessCommandType::SetLightProperties:
+  case HeadlessCommandType::SetMaterialProperties:
+  case HeadlessCommandType::SetMaterialTexture:
     m_Host.SubmitRemoteCommand(Client->User, Command->EditorPayload);
     return true;
   case HeadlessCommandType::ReloadScripts: {

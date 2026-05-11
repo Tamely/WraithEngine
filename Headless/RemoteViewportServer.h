@@ -108,6 +108,10 @@ private:
   bool HandleWebRtcCloseRequest(uintptr_t ClientSocketValue,
                                 std::string_view HeaderBlock,
                                 std::string_view Body);
+  bool HandleAssetUploadRequest(uintptr_t ClientSocketValue,
+                                std::string_view Path,
+                                std::string_view HeaderBlock,
+                                std::string_view Body);
   bool HandleWebSocketUpgrade(uintptr_t ClientSocketValue,
                               std::string_view HeaderBlock,
                               std::string_view Path);

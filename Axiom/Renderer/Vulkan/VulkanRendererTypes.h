@@ -27,6 +27,10 @@ struct CameraFrameUniform {
   glm::vec4 CameraPosition{0.0f};
   glm::vec4 ViewportSize{0.0f};
   glm::uvec4 RenderOptions{0u};
+  // xyz = normalized light direction, w = intensity
+  glm::vec4 LightDirectionAndIntensity{0.35f, 0.7f, 0.2f, 1.0f};
+  // xyz = light color, w = 1.0 if a dynamic light is active (0.0 = use defaults)
+  glm::vec4 LightColorAndEnabled{1.0f, 1.0f, 1.0f, 0.0f};
 };
 
 struct MeshProjectPushConstants {
@@ -40,6 +44,9 @@ struct MeshRasterPushConstants {
 
 struct MeshGraphicsPushConstants {
   glm::mat4 Model{1.0f};
+  glm::vec4 BaseColorFactor{1.0f};
+  float Metallic{0.0f};
+  float Roughness{0.5f};
 };
 
 struct HzbReducePushConstants {

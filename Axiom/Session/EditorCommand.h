@@ -4,6 +4,7 @@
 
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -81,6 +82,31 @@ struct DetachScriptCommand {
   std::string ObjectId;
 };
 
+struct SetMeshAssetCommand {
+  std::string ObjectId;
+  std::string AssetPath; // relative path from the content directory, e.g. "Meshes/cube.glb"
+};
+
+struct SetLightPropertiesCommand {
+  std::string ObjectId;
+  glm::vec3 Color{1.0f};
+  float Intensity{1.0f};
+};
+
+struct SetMaterialPropertiesCommand {
+  std::string ObjectId;
+  glm::vec4 BaseColorFactor{1.0f};
+  float Metallic{0.0f};
+  float Roughness{0.5f};
+};
+
+struct SetMaterialTextureCommand {
+  std::string ObjectId;
+  // Content-relative path of the texture to assign, e.g. "Textures/rock.png".
+  // Empty string clears the override and falls back to the mesh asset's embedded texture.
+  std::string TextureAssetPath;
+};
+
 using EditorCommandPayload =
     std::variant<UpdateViewportCameraCommand, SetViewportCameraPoseCommand,
                  SetLookActiveCommand, SelectObjectCommand,
@@ -88,7 +114,10 @@ using EditorCommandPayload =
                  CreateObjectCommand, DuplicateObjectCommand,
                  DeleteObjectCommand, ReparentObjectCommand,
                  SetTransformCommand, AttachScriptCommand,
-                 DetachScriptCommand>;
+                 DetachScriptCommand, SetMeshAssetCommand,
+                 SetLightPropertiesCommand,
+                 SetMaterialPropertiesCommand,
+                 SetMaterialTextureCommand>;
 
 struct EditorCommand {
   EditorCommandPayload Payload;

@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <Core/Log.h>
 #include <Session/EditorSession.h>
 
 #include <glm/vec3.hpp>
@@ -728,4 +729,326 @@ TEST(SceneLifecycleTests, ReparentToSelfIsRejected) {
   Session.Tick();
 
   ASSERT_NE(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7: SetLightPropertiesCommand
+// ---------------------------------------------------------------------------
+
+namespace {
+
+Axiom::EditorSession MakeSessionWithLight(const std::string &ObjectId) {
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  Session.SetSceneItems({{
+      .Id = ObjectId,
+      .DisplayName = "Sun",
+      .Kind = Axiom::EditorSceneItemKind::Light,
+      .Visible = true,
+  }});
+  Session.SetObjectDetails({{
+      .ObjectId = ObjectId,
+      .DisplayName = "Sun",
+      .Kind = Axiom::EditorSceneItemKind::Light,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      .Light = Axiom::EditorLightProperties{
+          .Color = glm::vec3(1.0f),
+          .Intensity = 1.0f,
+          .Direction = glm::vec3(0.0f, 1.0f, 0.0f),
+      },
+  }});
+  return Session;
+}
+
+Axiom::EditorSession MakeSessionWithMesh(const std::string &ObjectId) {
+  auto Mat = std::make_shared<Axiom::MaterialInstance>();
+  Mat->BaseColorFactor = glm::vec4(1.0f);
+  Mat->Metallic = 0.0f;
+  Mat->Roughness = 0.5f;
+
+  Axiom::EditorSceneState SceneState;
+  SceneState.Items = {{
+      .Id = ObjectId,
+      .DisplayName = "Crate",
+      .Kind = Axiom::EditorSceneItemKind::Mesh,
+      .Visible = true,
+  }};
+  SceneState.ObjectDetailsById[ObjectId] = Axiom::EditorObjectDetails{
+      .ObjectId = ObjectId,
+      .DisplayName = "Crate",
+      .Kind = Axiom::EditorSceneItemKind::Mesh,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      .Material = Axiom::EditorMaterialProperties{
+          .BaseColorFactor = glm::vec4(1.0f),
+          .Metallic = 0.0f,
+          .Roughness = 0.5f,
+      },
+  };
+  SceneState.MeshInstances = {{
+      .ObjectId = ObjectId,
+      .Mesh = {},
+      .Material = Mat,
+      .RenderPath = Axiom::MeshRenderPath::Graphics,
+      .Transform = glm::mat4(1.0f),
+  }};
+
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  Session.SetSceneState(std::move(SceneState));
+  return Session;
+}
+
+} // namespace
+
+TEST(SceneLifecycleTests, SetLightProperties_UpdatesDetailsAndPublishesEvent) {
+  Axiom::EditorSession Session = MakeSessionWithLight("sun");
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetLightPropertiesCommand{
+                      .ObjectId = "sun",
+                      .Color = glm::vec3(1.0f, 0.9f, 0.8f),
+                      .Intensity = 2.5f,
+                  }});
+  Session.Tick();
+
+  const auto *Evt = FindEvent<Axiom::LightPropertiesChangedEvent>(Subscriber.Events);
+  ASSERT_NE(Evt, nullptr);
+  EXPECT_EQ(Evt->ObjectId, "sun");
+  EXPECT_FLOAT_EQ(Evt->Intensity, 2.5f);
+  EXPECT_FLOAT_EQ(Evt->Color.r, 1.0f);
+  EXPECT_FLOAT_EQ(Evt->Color.g, 0.9f);
+
+  const Axiom::EditorObjectDetails *Details = Session.FindObjectDetails("sun");
+  ASSERT_NE(Details, nullptr);
+  ASSERT_TRUE(Details->Light.has_value());
+  EXPECT_FLOAT_EQ(Details->Light->Intensity, 2.5f);
+  EXPECT_FLOAT_EQ(Details->Light->Color.b, 0.8f);
+
+  const auto *Ack = FindEvent<Axiom::CommandAcknowledgedEvent>(Subscriber.Events);
+  ASSERT_NE(Ack, nullptr);
+  EXPECT_EQ(Ack->CommandType, "set_light_properties");
+}
+
+TEST(SceneLifecycleTests, SetLightProperties_RejectsUnknownObject) {
+  Axiom::EditorSession Session = MakeSessionWithLight("sun");
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetLightPropertiesCommand{
+                      .ObjectId = "ghost",
+                      .Color = glm::vec3(1.0f),
+                      .Intensity = 1.0f,
+                  }});
+  Session.Tick();
+
+  ASSERT_NE(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+}
+
+TEST(SceneLifecycleTests, SetLightProperties_RejectsNonLightTarget) {
+  Axiom::EditorSession Session = MakeSessionWithMesh("crate-1");
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetLightPropertiesCommand{
+                      .ObjectId = "crate-1",
+                      .Color = glm::vec3(1.0f),
+                      .Intensity = 1.0f,
+                  }});
+  Session.Tick();
+
+  ASSERT_NE(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7: SetMaterialPropertiesCommand
+// ---------------------------------------------------------------------------
+
+TEST(SceneLifecycleTests, SetMaterialProperties_UpdatesDetailsAndMeshInstanceAndPublishesEvent) {
+  Axiom::EditorSession Session = MakeSessionWithMesh("crate-1");
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetMaterialPropertiesCommand{
+                      .ObjectId = "crate-1",
+                      .BaseColorFactor = glm::vec4(0.8f, 0.2f, 0.1f, 1.0f),
+                      .Metallic = 0.9f,
+                      .Roughness = 0.1f,
+                  }});
+  Session.Tick();
+
+  // Event fires with correct values.
+  const auto *Evt = FindEvent<Axiom::MaterialPropertiesChangedEvent>(Subscriber.Events);
+  ASSERT_NE(Evt, nullptr);
+  EXPECT_EQ(Evt->ObjectId, "crate-1");
+  EXPECT_FLOAT_EQ(Evt->Metallic, 0.9f);
+  EXPECT_FLOAT_EQ(Evt->Roughness, 0.1f);
+  EXPECT_FLOAT_EQ(Evt->BaseColorFactor.r, 0.8f);
+
+  // ObjectDetails updated.
+  const Axiom::EditorObjectDetails *Details = Session.FindObjectDetails("crate-1");
+  ASSERT_NE(Details, nullptr);
+  ASSERT_TRUE(Details->Material.has_value());
+  EXPECT_FLOAT_EQ(Details->Material->Metallic, 0.9f);
+  EXPECT_FLOAT_EQ(Details->Material->Roughness, 0.1f);
+  EXPECT_FLOAT_EQ(Details->Material->BaseColorFactor.r, 0.8f);
+
+  // Live mesh instance material updated.
+  const auto &Instances = Session.GetState().Scene.MeshInstances;
+  ASSERT_EQ(Instances.size(), 1u);
+  ASSERT_NE(Instances[0].Material, nullptr);
+  EXPECT_FLOAT_EQ(Instances[0].Material->Metallic, 0.9f);
+  EXPECT_FLOAT_EQ(Instances[0].Material->BaseColorFactor.g, 0.2f);
+
+  const auto *Ack = FindEvent<Axiom::CommandAcknowledgedEvent>(Subscriber.Events);
+  ASSERT_NE(Ack, nullptr);
+  EXPECT_EQ(Ack->CommandType, "set_material_properties");
+}
+
+TEST(SceneLifecycleTests, SetMaterialProperties_RejectsUnknownObject) {
+  Axiom::EditorSession Session = MakeSessionWithMesh("crate-1");
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetMaterialPropertiesCommand{
+                      .ObjectId = "ghost",
+                      .BaseColorFactor = glm::vec4(1.0f),
+                      .Metallic = 0.0f,
+                      .Roughness = 0.5f,
+                  }});
+  Session.Tick();
+
+  ASSERT_NE(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+}
+
+TEST(SceneLifecycleTests, SetMaterialProperties_RejectsNonMeshTarget) {
+  Axiom::EditorSession Session = MakeSessionWithLight("sun");
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetMaterialPropertiesCommand{
+                      .ObjectId = "sun",
+                      .BaseColorFactor = glm::vec4(1.0f),
+                      .Metallic = 0.0f,
+                      .Roughness = 0.5f,
+                  }});
+  Session.Tick();
+
+  ASSERT_NE(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+}
+
+TEST(SceneLifecycleTests, SetSceneState_PopulatesMaterialOnObjectDetailsFromMeshInstances) {
+  auto Mat = std::make_shared<Axiom::MaterialInstance>();
+  Mat->BaseColorFactor = glm::vec4(0.5f, 0.3f, 0.1f, 1.0f);
+  Mat->Metallic = 0.7f;
+  Mat->Roughness = 0.2f;
+
+  Axiom::EditorSceneState SceneState;
+  SceneState.ObjectDetailsById["box"] = Axiom::EditorObjectDetails{
+      .ObjectId = "box",
+      .DisplayName = "Box",
+      .Kind = Axiom::EditorSceneItemKind::Mesh,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      // Material intentionally not set — SetSceneState should fill it in.
+  };
+  SceneState.MeshInstances = {{
+      .ObjectId = "box",
+      .Mesh = {},
+      .Material = Mat,
+      .RenderPath = Axiom::MeshRenderPath::Graphics,
+      .Transform = glm::mat4(1.0f),
+  }};
+
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  Session.SetSceneState(std::move(SceneState));
+
+  const Axiom::EditorObjectDetails *Details = Session.FindObjectDetails("box");
+  ASSERT_NE(Details, nullptr);
+  ASSERT_TRUE(Details->Material.has_value());
+  EXPECT_FLOAT_EQ(Details->Material->Metallic, 0.7f);
+  EXPECT_FLOAT_EQ(Details->Material->Roughness, 0.2f);
+  EXPECT_FLOAT_EQ(Details->Material->BaseColorFactor.r, 0.5f);
+  EXPECT_FLOAT_EQ(Details->Material->BaseColorFactor.g, 0.3f);
+}
+
+TEST(SceneLifecycleTests, SetMeshAsset_RejectsUnknownObject) {
+  Axiom::EditorSession Session = MakeSessionWithMesh("crate-1");
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetMeshAssetCommand{
+                      .ObjectId = "ghost",
+                      .AssetPath = "Meshes/barrel.glb",
+                  }});
+  Session.Tick();
+
+  ASSERT_NE(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+}
+
+TEST(SceneLifecycleTests, SetMeshAsset_RejectsNonMeshTarget) {
+  Axiom::EditorSession Session = MakeSessionWithLight("sun");
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetMeshAssetCommand{
+                      .ObjectId = "sun",
+                      .AssetPath = "Meshes/barrel.glb",
+                  }});
+  Session.Tick();
+
+  ASSERT_NE(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+}
+
+TEST(SceneLifecycleTests, SetMeshAsset_CreatesInstanceForRuntimeCreatedMesh) {
+  // A mesh created via CreateObject has no MeshInstance entry yet.
+  // SetMeshAsset must create the entry rather than silently dropping the command.
+  Axiom::Log::Init();
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  Session.SetContentDir(AXIOM_CONTENT_DIR);
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  // CreateObject adds the object to ObjectDetailsById but not to MeshInstances.
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::CreateObjectCommand{.TemplateId = "Mesh"}});
+  Session.Tick();
+
+  const auto *Created = FindEvent<Axiom::ObjectCreatedEvent>(Subscriber.Events);
+  ASSERT_NE(Created, nullptr);
+  const std::string NewId = Created->ObjectId;
+  Subscriber.Events.clear();
+
+  // SetMeshAsset on the new object should succeed and publish MeshAssetChangedEvent.
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetMeshAssetCommand{
+                      .ObjectId = NewId,
+                      .AssetPath = "basicmesh.glb",
+                  }});
+  Session.Tick();
+
+  ASSERT_EQ(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+  const auto *Changed = FindEvent<Axiom::MeshAssetChangedEvent>(Subscriber.Events);
+  ASSERT_NE(Changed, nullptr);
+  EXPECT_EQ(Changed->ObjectId, NewId);
+
+  // The mesh instance must now exist in the scene state.
+  const auto &Instances = Session.GetState().Scene.MeshInstances;
+  const auto It = std::find_if(Instances.begin(), Instances.end(),
+                               [&](const Axiom::EditorSceneMeshInstance &I) {
+                                 return I.ObjectId == NewId;
+                               });
+  ASSERT_NE(It, Instances.end());
+  EXPECT_EQ(It->AssetRelativePath, "basicmesh.glb");
 }

@@ -2,7 +2,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <glm/vec4.hpp>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace Axiom {
@@ -22,6 +24,12 @@ using TextureSourceDataRef = std::shared_ptr<TextureSourceData>;
 
 struct MaterialInstance {
   TextureSourceDataRef BaseColorTexture;
+  glm::vec4 BaseColorFactor{1.0f};
+  float Metallic{0.0f};
+  float Roughness{0.5f};
+  // Content-relative path of the standalone texture assigned via
+  // SetMaterialTextureCommand; empty if the texture came from the mesh asset.
+  std::string TextureAssetPath;
 };
 
 using MaterialInstanceRef = std::shared_ptr<MaterialInstance>;

@@ -27,6 +27,24 @@ add_subdirectory(ThirdParty/glfw)
 add_subdirectory(ThirdParty/fastgltf)
 add_subdirectory(ThirdParty/glm/glm)
 
+include(FetchContent)
+FetchContent_Declare(
+  assimp
+  URL https://github.com/assimp/assimp/archive/refs/tags/v5.4.3.zip
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+set(ASSIMP_BUILD_TESTS            OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ASSIMP_TOOLS     OFF CACHE BOOL "" FORCE)
+set(ASSIMP_NO_EXPORT              ON  CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_FBX_IMPORTER     ON  CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_OBJ_IMPORTER     ON  CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ZLIB             OFF CACHE BOOL "" FORCE)
+set(ASSIMP_WARNINGS_AS_ERRORS     OFF CACHE BOOL "" FORCE)
+set(ASSIMP_INSTALL                OFF CACHE BOOL "" FORCE)
+set(ASSIMP_INJECT_DEBUG_POSTFIX   OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(assimp)
+
 if(AXIOM_ENABLE_SCRIPTING)
   include(cmake/CoralNative.cmake)
 endif()

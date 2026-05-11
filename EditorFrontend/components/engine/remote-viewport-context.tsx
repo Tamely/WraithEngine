@@ -94,6 +94,18 @@ export interface SessionTransformDetails {
   scale: [number, number, number]
 }
 
+export interface SessionLightDetails {
+  color: [number, number, number]
+  intensity: number
+}
+
+export interface SessionMaterialDetails {
+  baseColorFactor: [number, number, number, number]
+  metallic: number
+  roughness: number
+  textureAssetPath: string | null
+}
+
 export interface SessionObjectDetails {
   objectId: string
   displayName: string
@@ -104,6 +116,8 @@ export interface SessionObjectDetails {
     transformReadOnly: boolean
   }
   transform: SessionTransformDetails | null
+  light: SessionLightDetails | null
+  material: SessionMaterialDetails | null
   collaboration: {
     selectedByUserIds: number[]
     lockState: "unlocked" | "locked"
@@ -135,6 +149,19 @@ interface RemoteViewportActions {
     value: string | boolean | [number, number, number]
   ) => Promise<boolean>
   reloadScripts: () => Promise<void>
+  setMeshAsset: (objectId: string, assetPath: string) => Promise<boolean>
+  setLightProperties: (
+    objectId: string,
+    color: [number, number, number],
+    intensity: number
+  ) => Promise<boolean>
+  setMaterialProperties: (
+    objectId: string,
+    baseColorFactor: [number, number, number, number],
+    metallic: number,
+    roughness: number
+  ) => Promise<boolean>
+  setMaterialTexture: (objectId: string, textureAssetPath: string) => Promise<boolean>
 }
 
 export interface SessionObjectTransformUpdate {
@@ -205,6 +232,19 @@ interface RemoteViewportContextValue {
     value: string | boolean | [number, number, number]
   ) => Promise<boolean>
   reloadScripts: () => Promise<void>
+  setMeshAsset: (objectId: string, assetPath: string) => Promise<boolean>
+  setLightProperties: (
+    objectId: string,
+    color: [number, number, number],
+    intensity: number
+  ) => Promise<boolean>
+  setMaterialProperties: (
+    objectId: string,
+    baseColorFactor: [number, number, number, number],
+    metallic: number,
+    roughness: number
+  ) => Promise<boolean>
+  setMaterialTexture: (objectId: string, textureAssetPath: string) => Promise<boolean>
   reloadStatus: "idle" | "reloading" | "reloaded" | "failed"
   setReloadStatus: (status: "idle" | "reloading" | "reloaded" | "failed") => void
   scriptErrorToasts: ScriptErrorToast[]
@@ -278,6 +318,10 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     saveScene: async () => {},
     setProperty: async () => false,
     reloadScripts: async () => {},
+    setMeshAsset: async () => false,
+    setLightProperties: async () => false,
+    setMaterialProperties: async () => false,
+    setMaterialTexture: async () => false,
   })
   const [connectionState, setConnectionState] =
     useState<RemoteViewportConnectionState>("idle")
@@ -470,6 +514,34 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     await actionsRef.current.reloadScripts()
   }, [])
 
+  const setMeshAsset = useCallback(
+    async (objectId: string, assetPath: string) =>
+      actionsRef.current.setMeshAsset(objectId, assetPath),
+    []
+  )
+
+  const setLightProperties = useCallback(
+    async (objectId: string, color: [number, number, number], intensity: number) =>
+      actionsRef.current.setLightProperties(objectId, color, intensity),
+    []
+  )
+
+  const setMaterialProperties = useCallback(
+    async (
+      objectId: string,
+      baseColorFactor: [number, number, number, number],
+      metallic: number,
+      roughness: number
+    ) => actionsRef.current.setMaterialProperties(objectId, baseColorFactor, metallic, roughness),
+    []
+  )
+
+  const setMaterialTexture = useCallback(
+    async (objectId: string, textureAssetPath: string) =>
+      actionsRef.current.setMaterialTexture(objectId, textureAssetPath),
+    []
+  )
+
   const addScriptErrorToast = useCallback((objectId: string, message: string) => {
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`
     setScriptErrorToasts((current) => [...current, { id, objectId, message }])
@@ -518,6 +590,10 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       setSaveStatus,
       setProperty,
       reloadScripts,
+      setMeshAsset,
+      setLightProperties,
+      setMaterialProperties,
+      setMaterialTexture,
       reloadStatus,
       setReloadStatus,
       scriptErrorToasts,
@@ -594,6 +670,10 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       saveStatus,
       setProperty,
       reloadScripts,
+      setMeshAsset,
+      setLightProperties,
+      setMaterialProperties,
+      setMaterialTexture,
       reloadStatus,
       scriptErrorToasts,
       addScriptErrorToast,

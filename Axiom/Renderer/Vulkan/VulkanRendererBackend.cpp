@@ -605,7 +605,7 @@ void VulkanRendererBackend::InitMeshPipelines() {
   VkPushConstantRange PushConstant{};
   PushConstant.offset = 0;
   PushConstant.size = sizeof(MeshGraphicsPushConstants);
-  PushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+  PushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
   VkPipelineLayoutCreateInfo GraphicsLayout = VkInit::PipelineLayoutCreateInfo();
   GraphicsLayout.pSetLayouts = &m_MeshGraphicsFrameDescriptorLayout;

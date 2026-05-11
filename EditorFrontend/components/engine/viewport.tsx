@@ -178,6 +178,29 @@ type RemoteViewportCommand =
       value: string | boolean | [number, number, number]
     }
   | { type: "reload_scripts" }
+  | {
+      type: "set_mesh_asset"
+      objectId: string
+      assetPath: string
+    }
+  | {
+      type: "set_light_properties"
+      objectId: string
+      color: [number, number, number]
+      intensity: number
+    }
+  | {
+      type: "set_material_properties"
+      objectId: string
+      baseColorFactor: [number, number, number, number]
+      metallic: number
+      roughness: number
+    }
+  | {
+      type: "set_material_texture"
+      objectId: string
+      textureAssetPath: string
+    }
 
 function getServerOrigin() {
   const configuredOrigin = process.env.NEXT_PUBLIC_AXIOM_SERVER_ORIGIN?.trim()
@@ -729,6 +752,26 @@ export function Viewport() {
       }
 
       if (message.payloadType === "script_class_changed") {
+        void refreshSessionSnapshotSafely("event")
+        return
+      }
+
+      if (message.payloadType === "mesh_asset_changed") {
+        void refreshSessionSnapshotSafely("event")
+        return
+      }
+
+      if (message.payloadType === "light_properties_changed") {
+        void refreshSessionSnapshotSafely("event")
+        return
+      }
+
+      if (message.payloadType === "material_properties_changed") {
+        void refreshSessionSnapshotSafely("event")
+        return
+      }
+
+      if (message.payloadType === "material_texture_changed") {
         void refreshSessionSnapshotSafely("event")
         return
       }
@@ -1517,6 +1560,21 @@ export function Viewport() {
       },
       reloadScripts: async () => {
         await sendCommand({ type: "reload_scripts" }, "reliable")
+      },
+      setMeshAsset: async (objectId, assetPath) => {
+        return sendCommand({ type: "set_mesh_asset", objectId, assetPath }, "reliable")
+      },
+      setLightProperties: async (objectId, color, intensity) => {
+        return sendCommand({ type: "set_light_properties", objectId, color, intensity }, "reliable")
+      },
+      setMaterialProperties: async (objectId, baseColorFactor, metallic, roughness) => {
+        return sendCommand(
+          { type: "set_material_properties", objectId, baseColorFactor, metallic, roughness },
+          "reliable"
+        )
+      },
+      setMaterialTexture: async (objectId, textureAssetPath) => {
+        return sendCommand({ type: "set_material_texture", objectId, textureAssetPath }, "reliable")
       },
       reparentObject: async (objectId, newParentId) => {
         const accepted = await sendCommand(
