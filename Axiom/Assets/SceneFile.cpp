@@ -122,6 +122,9 @@ bool SaveSceneToFile(const std::filesystem::path &Path,
       if (AssetIt != AssetPathByObjectId.end()) {
         Out << ",\"assetRelativePath\":" << EscStr(AssetIt->second);
       }
+      if (Details.Material.has_value() && Details.Material->TextureAssetPath.has_value()) {
+        Out << ",\"textureAssetPath\":" << EscStr(*Details.Material->TextureAssetPath);
+      }
     }
     if (Details.Light.has_value()) {
       Out << ",\"lightColor\":" << SerializeVec3(Details.Light->Color)
@@ -347,6 +350,7 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
     std::optional<EditorTransformDetails> Transform;
     std::optional<std::string> ScriptClass;
     std::string AssetRelativePath;
+    std::string TextureAssetPath;
     std::optional<EditorLightProperties> Light;
   };
 
@@ -417,6 +421,11 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
           }
           if (K == "assetRelativePath") {
             auto V = P.ParseString(); if (V) Data.AssetRelativePath = *V; return true;
+          }
+          if (K == "textureAssetPath") {
+            P.SkipWs();
+            if (P.Peek() == 'n') { P.ParseNull(); } else { auto V = P.ParseString(); if (V) Data.TextureAssetPath = *V; }
+            return true;
           }
           if (K == "lightColor") {
             auto V = P.ParseVec3();
@@ -534,14 +543,33 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
       M = glm::scale(M, T.Scale);
       Transform = M;
     }
+    auto Material = SceneData->Instances[0].Material;
+    if (!Data.TextureAssetPath.empty()) {
+      const auto TexPath =
+          std::filesystem::path(AXIOM_CONTENT_DIR) / Data.TextureAssetPath;
+      auto Tex = LoadTextureFromFile(TexPath);
+      if (Tex) {
+        if (!Material) Material = std::make_shared<MaterialInstance>();
+        Material->BaseColorTexture = std::move(Tex);
+        Material->TextureAssetPath = Data.TextureAssetPath;
+      }
+    }
     State.MeshInstances.push_back({
         .ObjectId           = ObjId,
         .Mesh               = SceneData->Instances[0].Mesh,
-        .Material           = SceneData->Instances[0].Material,
+        .Material           = std::move(Material),
         .RenderPath         = MeshRenderPath::Graphics,
         .Transform          = Transform,
         .AssetRelativePath  = Data.AssetRelativePath,
     });
+    // Propagate textureAssetPath into ObjectDetails so inspector shows it.
+    {
+      const auto DetailsIt = State.ObjectDetailsById.find(ObjId);
+      if (DetailsIt != State.ObjectDetailsById.end() && !Data.TextureAssetPath.empty()) {
+        if (!DetailsIt->second.Material) DetailsIt->second.Material = EditorMaterialProperties{};
+        DetailsIt->second.Material->TextureAssetPath = Data.TextureAssetPath;
+      }
+    }
     LoadedByAssetPath.insert(ObjId);
   }
 

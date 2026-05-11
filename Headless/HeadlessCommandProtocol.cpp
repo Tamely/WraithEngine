@@ -173,6 +173,9 @@ std::string EventPayloadType(const EditorEventPayload &Payload) {
   if (std::holds_alternative<MaterialPropertiesChangedEvent>(Payload)) {
     return "material_properties_changed";
   }
+  if (std::holds_alternative<MaterialTextureChangedEvent>(Payload)) {
+    return "material_texture_changed";
+  }
   return "object_transform_updated";
 }
 
@@ -330,7 +333,14 @@ void SerializeObjectDetails(std::ostringstream &Stream,
            << Details.Material->BaseColorFactor.b << ","
            << Details.Material->BaseColorFactor.a
            << "],\"metallic\":" << Details.Material->Metallic
-           << ",\"roughness\":" << Details.Material->Roughness << "}";
+           << ",\"roughness\":" << Details.Material->Roughness;
+    if (Details.Material->TextureAssetPath.has_value()) {
+      Stream << ",\"textureAssetPath\":\""
+             << EscapeJson(*Details.Material->TextureAssetPath) << "\"";
+    } else {
+      Stream << ",\"textureAssetPath\":null";
+    }
+    Stream << "}";
   } else {
     Stream << ",\"material\":null";
   }
@@ -845,6 +855,19 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
         .Roughness        = Cmd.Roughness}};
     return Cmd;
   }
+  if (*Type == "set_material_texture") {
+    static const std::regex ObjectIdPattern(R"json("objectId"\s*:\s*"([^"]+)")json");
+    static const std::regex TexturePathPattern(R"json("textureAssetPath"\s*:\s*"([^"]*)")json");
+    const auto ObjectId     = MatchString(JsonLine, ObjectIdPattern);
+    const auto TexturePath  = MatchString(JsonLine, TexturePathPattern);
+    HeadlessCommand Cmd;
+    Cmd.Type             = HeadlessCommandType::SetMaterialTexture;
+    Cmd.TextureAssetPath = TexturePath.value_or("");
+    Cmd.EditorPayload    = {.Payload = SetMaterialTextureCommand{
+        .ObjectId         = ObjectId.value_or(""),
+        .TextureAssetPath = Cmd.TextureAssetPath}};
+    return Cmd;
+  }
   if (*Type == "get_schema") {
     static const std::regex ObjectIdPattern(R"json("objectId"\s*:\s*"([^"]+)")json");
     const auto ObjectId = MatchString(JsonLine, ObjectIdPattern);
@@ -942,6 +965,7 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::SetMeshAsset:
   case HeadlessCommandType::SetLightProperties:
   case HeadlessCommandType::SetMaterialProperties:
+  case HeadlessCommandType::SetMaterialTexture:
   case HeadlessCommandType::ReloadScripts:
   case HeadlessCommandType::Heartbeat:
   case HeadlessCommandType::Quit:
@@ -1105,6 +1129,10 @@ std::string SerializeEvent(const PublishedEditorEvent &Event) {
            << MatProps->BaseColorFactor.b << "," << MatProps->BaseColorFactor.a
            << "],\"metallic\":" << MatProps->Metallic
            << ",\"roughness\":" << MatProps->Roughness;
+  } else if (const auto *TexEv =
+                 std::get_if<MaterialTextureChangedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"objectId\":\"" << EscapeJson(TexEv->ObjectId)
+           << "\",\"textureAssetPath\":\"" << EscapeJson(TexEv->TextureAssetPath) << "\"";
   }
   Stream << "}";
   return Stream.str();
@@ -1451,6 +1479,14 @@ std::string SerializeObjectSchema(const EditorObjectDetails &Details) {
   if (Details.Kind == EditorSceneItemKind::Actor) {
     AppendProp("scriptClass", "string", false,
                Details.ScriptClass.value_or(""));
+  }
+
+  if (Details.Kind == EditorSceneItemKind::Mesh) {
+    const std::string_view TexPath =
+        (Details.Material.has_value() && Details.Material->TextureAssetPath.has_value())
+            ? *Details.Material->TextureAssetPath
+            : std::string_view{};
+    AppendProp("baseColorTexture", "texture_ref", false, TexPath);
   }
 
   Stream << "]}";

@@ -89,6 +89,9 @@ std::string CommandTypeName(const EditorCommandPayload &Payload) {
   if (std::holds_alternative<SetMaterialPropertiesCommand>(Payload)) {
     return "set_material_properties";
   }
+  if (std::holds_alternative<SetMaterialTextureCommand>(Payload)) {
+    return "set_material_texture";
+  }
   return "set_transform";
 }
 
@@ -1075,6 +1078,19 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
     }
   }
 
+  if (const auto *TexCmd =
+          std::get_if<SetMaterialTextureCommand>(&QueuedCommand.Command.Payload)) {
+    const EditorObjectDetails *Details = FindObjectDetails(TexCmd->ObjectId);
+    if (Details == nullptr) {
+      FailureReason = "SetMaterialTexture targeted an unknown object.";
+      return false;
+    }
+    if (Details->Kind != EditorSceneItemKind::Mesh) {
+      FailureReason = "SetMaterialTexture target must be a Mesh object.";
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -1481,6 +1497,57 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
       .BaseColorFactor  = Command.BaseColorFactor,
       .Metallic         = Command.Metallic,
       .Roughness        = Command.Roughness,
+  }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const SetMaterialTextureCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
+
+  auto DetailsIt = m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
+  if (DetailsIt == m_State.Scene.ObjectDetailsById.end())
+    return;
+
+  auto MeshIt = std::find_if(m_State.Scene.MeshInstances.begin(),
+                              m_State.Scene.MeshInstances.end(),
+                              [&](const EditorSceneMeshInstance &M) {
+                                return M.ObjectId == Command.ObjectId;
+                              });
+  if (MeshIt == m_State.Scene.MeshInstances.end() || !MeshIt->Material)
+    return;
+
+  if (Command.TextureAssetPath.empty()) {
+    // Clear the override — the mesh asset's embedded texture (if any) remains
+    MeshIt->Material->BaseColorTexture = nullptr;
+    MeshIt->Material->TextureAssetPath.clear();
+  } else {
+    if (m_ContentDir.empty()) {
+      A_CORE_WARN("SetMaterialTexture: content directory not configured");
+      return;
+    }
+    const auto FullPath = m_ContentDir / Command.TextureAssetPath;
+    auto Loaded = Assets::LoadTextureFromFile(FullPath);
+    if (!Loaded) {
+      A_CORE_WARN("SetMaterialTexture: failed to load '{}' for object '{}'",
+                  Command.TextureAssetPath, Command.ObjectId);
+      return;
+    }
+    MeshIt->Material->BaseColorTexture = std::move(Loaded);
+    MeshIt->Material->TextureAssetPath  = Command.TextureAssetPath;
+  }
+
+  if (!DetailsIt->second.Material.has_value())
+    DetailsIt->second.Material = EditorMaterialProperties{};
+  DetailsIt->second.Material->TextureAssetPath =
+      Command.TextureAssetPath.empty()
+          ? std::nullopt
+          : std::optional<std::string>(Command.TextureAssetPath);
+
+  A_CORE_INFO("SetMaterialTexture: assigned '{}' to object '{}'",
+              Command.TextureAssetPath, Command.ObjectId);
+  PublishEvent({.Payload = MaterialTextureChangedEvent{
+      .ObjectId         = Command.ObjectId,
+      .TextureAssetPath = Command.TextureAssetPath,
   }});
 }
 

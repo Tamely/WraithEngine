@@ -1,4 +1,5 @@
 #include "Assets/MeshAsset.h"
+#include "Assets/AssimpImporter.h"
 
 #include "Core/Log.h"
 
@@ -375,6 +376,12 @@ void AppendNodeMeshes(const fastgltf::Asset &Asset, size_t NodeIndex,
 } // namespace
 
 std::optional<MeshSceneData> LoadBasicMeshAsset(const std::filesystem::path &Path) {
+  const std::string Ext = ToLowerCopy(Path.extension().string());
+  if (Ext == ".fbx" || Ext == ".obj") {
+    AssimpImporter Importer;
+    return Importer.Import(Path);
+  }
+
   fastgltf::GltfDataBuffer Buffer;
   if (!Buffer.loadFromFile(Path)) {
     A_CORE_ERROR("Failed to open mesh asset: {0}", Path.string());
@@ -503,5 +510,16 @@ std::optional<MeshSceneData> LoadBasicMeshAsset(const std::filesystem::path &Pat
   }
 
   return SceneData;
+}
+
+TextureSourceDataRef LoadTextureFromFile(const std::filesystem::path &Path) {
+  return DecodeTextureFromFile(Path);
+}
+
+TextureSourceDataRef LoadTextureFromMemory(const unsigned char *Bytes,
+                                           int Length,
+                                           const std::string &DebugName) {
+  return DecodeTextureFromMemory(
+      reinterpret_cast<const stbi_uc *>(Bytes), Length, DebugName);
 }
 } // namespace Axiom::Assets

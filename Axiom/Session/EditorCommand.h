@@ -100,6 +100,13 @@ struct SetMaterialPropertiesCommand {
   float Roughness{0.5f};
 };
 
+struct SetMaterialTextureCommand {
+  std::string ObjectId;
+  // Content-relative path of the texture to assign, e.g. "Textures/rock.png".
+  // Empty string clears the override and falls back to the mesh asset's embedded texture.
+  std::string TextureAssetPath;
+};
+
 using EditorCommandPayload =
     std::variant<UpdateViewportCameraCommand, SetViewportCameraPoseCommand,
                  SetLookActiveCommand, SelectObjectCommand,
@@ -109,7 +116,8 @@ using EditorCommandPayload =
                  SetTransformCommand, AttachScriptCommand,
                  DetachScriptCommand, SetMeshAssetCommand,
                  SetLightPropertiesCommand,
-                 SetMaterialPropertiesCommand>;
+                 SetMaterialPropertiesCommand,
+                 SetMaterialTextureCommand>;
 
 struct EditorCommand {
   EditorCommandPayload Payload;

@@ -119,8 +119,15 @@ function getDirectoryContents(assets: SessionAssetDescriptor[], currentPath: str
 }
 
 export function ContentBrowser() {
-  const { assets, listAssets, connectionState, selectedObject, setMeshAsset, serverOrigin } =
-    useRemoteViewport()
+  const {
+    assets,
+    listAssets,
+    connectionState,
+    selectedObject,
+    setMeshAsset,
+    setMaterialTexture,
+    serverOrigin,
+  } = useRemoteViewport()
   const [searchQuery, setSearchQuery] = useState("")
   const [currentPath, setCurrentPath] = useState("")
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set([""]))
@@ -155,10 +162,14 @@ export function ContentBrowser() {
 
   const assignAssetToSelection = useCallback(
     async (asset: SessionAssetDescriptor) => {
-      if (!canAssignToSelection || asset.kind !== "mesh" || !selectedObject) return
-      await setMeshAsset(selectedObject.id, asset.path)
+      if (!canAssignToSelection || !selectedObject) return
+      if (asset.kind === "mesh") {
+        await setMeshAsset(selectedObject.id, asset.path)
+      } else if (asset.kind === "texture") {
+        await setMaterialTexture(selectedObject.id, asset.path)
+      }
     },
-    [canAssignToSelection, selectedObject, setMeshAsset]
+    [canAssignToSelection, selectedObject, setMeshAsset, setMaterialTexture]
   )
 
   const navigateTo = (path: string) => {
@@ -361,7 +372,7 @@ export function ContentBrowser() {
                 {files.map((asset) => (
                   <div
                     key={asset.id}
-                    draggable={asset.kind === "mesh"}
+                    draggable={asset.kind === "mesh" || asset.kind === "texture"}
                     onClick={() => setSelectedAsset(asset.id)}
                     onDoubleClick={() => void assignAssetToSelection(asset)}
                     onDragStart={(e) => {
@@ -372,7 +383,9 @@ export function ContentBrowser() {
                     title={
                       canAssignToSelection && asset.kind === "mesh"
                         ? "Double-click or drag to assign to a mesh object"
-                        : asset.path
+                        : canAssignToSelection && asset.kind === "texture"
+                          ? "Double-click or drag to assign texture to a mesh object"
+                          : asset.path
                     }
                     className={`flex flex-col items-center p-1 rounded cursor-pointer hover:bg-neutral-800 ${
                       selectedAsset === asset.id ? "bg-neutral-700 ring-1 ring-white/30" : ""
@@ -411,7 +424,7 @@ export function ContentBrowser() {
                 {files.map((asset) => (
                   <div
                     key={asset.id}
-                    draggable={asset.kind === "mesh"}
+                    draggable={asset.kind === "mesh" || asset.kind === "texture"}
                     onClick={() => setSelectedAsset(asset.id)}
                     onDoubleClick={() => void assignAssetToSelection(asset)}
                     onDragStart={(e) => {
@@ -422,7 +435,9 @@ export function ContentBrowser() {
                     title={
                       canAssignToSelection && asset.kind === "mesh"
                         ? "Double-click or drag to assign to a mesh object"
-                        : asset.path
+                        : canAssignToSelection && asset.kind === "texture"
+                          ? "Double-click or drag to assign texture to a mesh object"
+                          : asset.path
                     }
                     className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-neutral-800 ${
                       selectedAsset === asset.id ? "bg-neutral-700 ring-1 ring-white/30" : ""

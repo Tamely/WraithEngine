@@ -118,6 +118,11 @@ struct MaterialPropertiesChangedEvent {
   float Roughness{0.5f};
 };
 
+struct MaterialTextureChangedEvent {
+  std::string ObjectId;
+  std::string TextureAssetPath; // empty = cleared back to mesh asset's embedded texture
+};
+
 using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         LookStateChangedEvent,
                                         CommandAcknowledgedEvent,
@@ -135,7 +140,8 @@ using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         ScriptErrorEvent,
                                         MeshAssetChangedEvent,
                                         LightPropertiesChangedEvent,
-                                        MaterialPropertiesChangedEvent>;
+                                        MaterialPropertiesChangedEvent,
+                                        MaterialTextureChangedEvent>;
 
 struct EditorEvent {
   EditorEventPayload Payload;

@@ -434,11 +434,12 @@ function MaterialSection({
     baseColorFactor: [number, number, number, number]
     metallic: number
     roughness: number
+    textureAssetPath: string | null
   } | null
   isSaving: boolean
   setIsSaving: (value: boolean) => void
 }) {
-  const { setMaterialProperties } = useRemoteViewport()
+  const { setMaterialProperties, setMaterialTexture } = useRemoteViewport()
   const [draftColor, setDraftColor] = useState<[string, string, string]>(
     material
       ? [
@@ -484,6 +485,15 @@ function MaterialSection({
     setIsSaving(true)
     try {
       await setMaterialProperties(objectId, [r, g, b, a], metallic, roughness)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  async function clearTexture() {
+    setIsSaving(true)
+    try {
+      await setMaterialTexture(objectId, "")
     } finally {
       setIsSaving(false)
     }
@@ -540,6 +550,25 @@ function MaterialSection({
             value={draftRoughness}
           />
         </div>
+        {material?.textureAssetPath && (
+          <div className="flex items-center gap-3">
+            <span className="w-20 shrink-0 text-xs text-neutral-500">Texture</span>
+            <div className="flex min-w-0 flex-1 items-center gap-1">
+              <span className="min-w-0 flex-1 truncate rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-300">
+                {material.textureAssetPath}
+              </span>
+              <button
+                className="shrink-0 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-400 hover:border-neutral-600 hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={isSaving}
+                onClick={() => void clearTexture()}
+                title="Clear texture"
+                type="button"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
         <div className="flex justify-end pt-1">
           <button
             className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"

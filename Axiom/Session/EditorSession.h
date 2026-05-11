@@ -63,6 +63,7 @@ struct EditorMaterialProperties {
   glm::vec4 BaseColorFactor{1.0f};
   float Metallic{0.0f};
   float Roughness{0.5f};
+  std::optional<std::string> TextureAssetPath; // content-relative path, nullopt = embedded
 };
 
 struct EditorObjectDetails {
@@ -262,6 +263,8 @@ private:
                      const SetLightPropertiesCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SetMaterialPropertiesCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const SetMaterialTextureCommand &Command);
   void PublishEvent(const EditorEvent &Event);
 
 private:
