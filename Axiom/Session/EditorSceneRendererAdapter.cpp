@@ -23,10 +23,11 @@ EditorSceneRendererAdapter::BuildRenderSubmissions(const EditorSession &Session)
     }
 
     auto &Cached = m_MeshesByObjectId[Instance.ObjectId];
-    if (Cached.Mesh == nullptr) {
+    if (Cached.Mesh == nullptr || Cached.AssetRelativePath != Instance.AssetRelativePath) {
       Cached.Mesh = Renderer::Get().CreateMesh(Instance.Mesh);
       Cached.Material = Instance.Material;
       Cached.RenderPath = Instance.RenderPath;
+      Cached.AssetRelativePath = Instance.AssetRelativePath;
     }
 
     if (Cached.Mesh == nullptr) {
