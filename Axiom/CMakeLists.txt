@@ -2,6 +2,7 @@ set(ENGINE_SOURCES
   Scripting/ScriptHost.cpp
   Scripting/InternalCalls.cpp
   Assets/AssetCookManifest.cpp
+  Assets/AssetCooker.cpp
   Assets/AssimpImporter.cpp
   Assets/CookedMeshAsset.cpp
   Assets/IAssetSource.cpp
