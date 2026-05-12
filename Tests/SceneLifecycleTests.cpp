@@ -1143,3 +1143,46 @@ TEST(SceneLifecycleTests, SetMeshAsset_CreatesInstanceForRuntimeCreatedMesh) {
   ASSERT_NE(It, Instances.end());
   EXPECT_EQ(It->AssetRelativePath, "basicmesh.glb");
 }
+
+TEST(SceneLifecycleTests, SetMeshAsset_CooksMeshAssetManifestEntry) {
+  EnsureLogInitialized();
+  Axiom::EditorSession Session = MakeWorldSession();
+
+  const auto TempRoot =
+      std::filesystem::temp_directory_path() / "wraithengine-scene-cook-test";
+  std::error_code RemoveError;
+  std::filesystem::remove_all(TempRoot, RemoveError);
+  std::filesystem::create_directories(TempRoot / "Content");
+  std::filesystem::copy_file(std::filesystem::path(AXIOM_CONTENT_DIR) / "basicmesh.glb",
+                             TempRoot / "Content" / "basicmesh.glb",
+                             std::filesystem::copy_options::overwrite_existing);
+  Session.SetContentDir(TempRoot / "Content");
+
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::CreateObjectCommand{.TemplateId = "Mesh"}});
+  Session.Tick();
+  const auto *Created = FindEvent<Axiom::ObjectCreatedEvent>(Subscriber.Events);
+  ASSERT_NE(Created, nullptr);
+  const std::string ObjectId = Created->ObjectId;
+  Subscriber.Events.clear();
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetMeshAssetCommand{
+                      .ObjectId = ObjectId,
+                      .AssetPath = "basicmesh.glb",
+                  }});
+  Session.Tick();
+
+  ASSERT_EQ(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+  const auto ManifestPath =
+      TempRoot / "Content" / "Cooked" / "AssetCookManifest.json";
+  const auto Manifest = Axiom::Assets::LoadAssetCookManifest(ManifestPath);
+  ASSERT_TRUE(Manifest.has_value());
+  ASSERT_EQ(Manifest->Entries.size(), 1u);
+  EXPECT_EQ(Manifest->Entries[0].RelativePath, "basicmesh.glb");
+  EXPECT_EQ(std::filesystem::path(Manifest->Entries[0].CookedPath).extension(),
+            ".wmesh");
+}
