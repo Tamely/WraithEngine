@@ -7,5 +7,6 @@ void RenderScene::Reset() {
   Submissions.clear();
   GizmoOverlay.reset();
   Sun.reset();
+  LightBillboards.clear();
 }
 } // namespace Axiom

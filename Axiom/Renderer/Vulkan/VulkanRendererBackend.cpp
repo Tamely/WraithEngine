@@ -1,5 +1,6 @@
 #include "Renderer/Vulkan/VulkanRendererBackend.h"
 
+#include "Assets/SvgTexture.h"
 #include "Renderer/RenderScene.h"
 #include "Renderer/Vulkan/VulkanBuffer.h"
 #include "Renderer/Vulkan/VulkanDescriptors.h"
@@ -479,18 +480,41 @@ void VulkanRendererBackend::InitDescriptors() {
 
 void VulkanRendererBackend::InitTextureResources() {
   m_MaterialResources.InitFallbackTexture();
+  const std::filesystem::path LightIconPath =
+      std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine" / "lightbulb.svg";
+  if (const auto IconTexture = Assets::LoadSvgTextureFromFile(LightIconPath)) {
+    m_LightBillboardMaterial = std::make_shared<MaterialInstance>();
+    m_LightBillboardMaterial->BaseColorTexture = IconTexture;
+  } else {
+    A_CORE_WARN("Failed to load light billboard icon from {0}; using fallback texture",
+                LightIconPath.string());
+    m_LightBillboardMaterial = std::make_shared<MaterialInstance>();
+  }
 }
 
 void VulkanRendererBackend::InitPipelines() {
   InitBackgroundPipelines();
   InitMeshPipelines();
   InitGizmoPipeline();
+  InitLightBillboardPipeline();
 }
 
 void VulkanRendererBackend::InitGizmoPipeline() {
   m_GizmoRenderer.Init({.Device = m_Device.Device,
                          .DrawImageFormat = m_DrawImage.ImageFormat},
                         m_MainDeletionQueue);
+}
+
+void VulkanRendererBackend::InitLightBillboardPipeline() {
+  const VkImageView TextureView =
+      m_MaterialResources.ResolveMaterialTextureView(m_LightBillboardMaterial);
+  m_LightBillboardRenderer.Init(
+      {.Device = m_Device.Device,
+       .DrawImageFormat = m_DrawImage.ImageFormat,
+       .DescriptorAllocator = &m_GlobalDescriptorAllocator,
+       .TextureView = TextureView,
+       .TextureSampler = m_TextureSampler},
+      m_MainDeletionQueue);
 }
 
 void VulkanRendererBackend::InitBackgroundPipelines() {
@@ -1308,6 +1332,11 @@ void VulkanRendererBackend::Draw() {
   vkCmdWriteTimestamp2(CommandBuffer,
                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                        MeshFrame.TimestampQueryPool, 3);
+
+  if (m_ActiveScene != nullptr && m_LightBillboardRenderer.IsInitialized()) {
+    m_LightBillboardRenderer.DrawLightBillboards(
+        CommandBuffer, m_DrawExtent, m_DrawImage.ImageView, *m_ActiveScene);
+  }
 
   if (m_ActiveScene != nullptr && m_GizmoRenderer.IsInitialized()) {
     m_GizmoRenderer.DrawGizmoOverlay(CommandBuffer, m_DrawExtent,

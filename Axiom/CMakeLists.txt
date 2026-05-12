@@ -5,6 +5,7 @@ set(ENGINE_SOURCES
   Assets/IAssetSource.cpp
   Assets/MeshAsset.cpp
   Assets/SceneFile.cpp
+  Assets/SvgTexture.cpp
   Core/Application.cpp
   Core/GlfwEditorInputSource.cpp
   Core/GlfwWindow.cpp
@@ -36,6 +37,7 @@ set(ENGINE_SOURCES
   Renderer/Vulkan/VulkanGizmoRenderer.cpp
   Renderer/Vulkan/VulkanImGuiRenderer.cpp
   Renderer/Vulkan/VulkanInitializers.cpp
+  Renderer/Vulkan/VulkanLightBillboardRenderer.cpp
   Renderer/Vulkan/VulkanMaterialResources.cpp
   Renderer/Vulkan/VulkanMesh.cpp
   Renderer/Vulkan/VulkanOcclusionCulling.cpp

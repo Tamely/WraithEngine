@@ -155,6 +155,9 @@ void HeadlessSessionLayer::OnRender() {
   for (const auto &Submission : m_RendererAdapter->BuildRenderSubmissions(m_Session)) {
     RenderCommand::Submit(Submission);
   }
+  for (const auto &Billboard : BuildLightBillboards()) {
+    RenderCommand::SubmitLightBillboard(Billboard);
+  }
   for (const auto &Submission : BuildPresenceOverlaySubmissions(RenderUser)) {
     RenderCommand::Submit(Submission);
   }
@@ -197,6 +200,31 @@ GizmoMode HeadlessSessionLayer::GetGizmoMode(SessionUserId User) const {
   std::lock_guard Lock(m_GizmoModeMutex);
   const auto It = m_GizmoModeByUser.find(User.Value);
   return It != m_GizmoModeByUser.end() ? It->second : GizmoMode::Translate;
+}
+
+std::vector<LightBillboardOverlay> HeadlessSessionLayer::BuildLightBillboards()
+    const {
+  std::vector<LightBillboardOverlay> Result;
+  for (const auto &[Id, Details] : m_Session.GetState().Scene.ObjectDetailsById) {
+    (void)Id;
+    if (Details.Kind != EditorSceneItemKind::Light || !Details.Visible ||
+        !Details.Light.has_value()) {
+      continue;
+    }
+
+    const EditorTransformDetails *EffectiveTransform =
+        Details.WorldTransform.has_value()  ? &*Details.WorldTransform
+        : Details.Transform.has_value()     ? &*Details.Transform
+                                            : nullptr;
+    Result.push_back({
+        .WorldPosition = EffectiveTransform != nullptr
+            ? EffectiveTransform->Location
+            : glm::vec3(0.0f),
+        .Color = glm::vec4(Details.Light->Color, 1.0f),
+        .PixelSize = 48.0f,
+    });
+  }
+  return Result;
 }
 
 bool HeadlessSessionLayer::LoadStartupSceneIntoSession() {

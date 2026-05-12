@@ -3,6 +3,7 @@ add_executable(AxiomTests
   HeadlessProtocolTests.cpp
   MeshPickingTests.cpp
   SceneLifecycleTests.cpp
+  ../Headless/HeadlessSessionLayer.cpp
   ../Headless/HeadlessCommandProtocol.cpp
   ../Headless/WebRtcSession.cpp
 )
