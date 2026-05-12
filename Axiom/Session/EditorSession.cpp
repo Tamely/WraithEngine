@@ -29,6 +29,19 @@ void CookMeshAssetBestEffort(const std::filesystem::path &ContentDir,
   }
 }
 
+void CookTextureAssetBestEffort(const std::filesystem::path &ContentDir,
+                                std::string_view RelativeAssetPath) {
+  if (ContentDir.empty() || RelativeAssetPath.empty()) {
+    return;
+  }
+
+  const auto Cooked = Assets::CookTextureAsset(ContentDir, RelativeAssetPath);
+  if (!Cooked.has_value()) {
+    A_CORE_WARN("EditorSession: failed to cook texture asset '{}'",
+                std::string(RelativeAssetPath));
+  }
+}
+
 std::string DefaultUserDisplayName(SessionUserId User) {
   if (User.Value == 1) {
     return "Host";
@@ -1620,6 +1633,7 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
       A_CORE_WARN("SetMaterialTexture: content directory not configured");
       return;
     }
+    CookTextureAssetBestEffort(m_ContentDir, Command.TextureAssetPath);
     const auto FullPath = m_ContentDir / Command.TextureAssetPath;
     auto Loaded = Assets::LoadTextureFromFile(FullPath);
     if (!Loaded) {

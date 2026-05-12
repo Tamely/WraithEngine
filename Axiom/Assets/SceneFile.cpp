@@ -547,6 +547,7 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
     }
     auto Material = SceneData->Instances[0].Material;
     if (!Data.TextureAssetPath.empty()) {
+      CookTextureAsset(AXIOM_CONTENT_DIR, Data.TextureAssetPath);
       const auto TexPath =
           std::filesystem::path(AXIOM_CONTENT_DIR) / Data.TextureAssetPath;
       auto Tex = LoadTextureFromFile(TexPath);
