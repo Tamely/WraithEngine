@@ -13,4 +13,10 @@ std::optional<AssetCookManifestEntry>
 CookMeshAsset(const std::filesystem::path &ContentRoot,
               const std::filesystem::path &RelativeAssetPath);
 
+// Decodes a source texture asset from the content directory, writes a cooked
+// `.wtex`, and updates the cook manifest entry for the asset.
+std::optional<AssetCookManifestEntry>
+CookTextureAsset(const std::filesystem::path &ContentRoot,
+                 const std::filesystem::path &RelativeAssetPath);
+
 } // namespace Axiom::Assets
