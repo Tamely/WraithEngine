@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Renderer/Mesh.h"
+#include "Session/SessionTypes.h"
 
 #include <filesystem>
 #include <optional>

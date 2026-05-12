@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <Assets/AssetCookManifest.h>
 #include <Core/Log.h>
 #include <Session/EditorSession.h>
 
