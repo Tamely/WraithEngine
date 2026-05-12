@@ -1,4 +1,5 @@
 #include "Assets/SceneFile.h"
+#include "Assets/AssetCooker.h"
 #include "Assets/MeshAsset.h"
 #include "Core/Log.h"
 
@@ -522,6 +523,7 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
   std::unordered_set<std::string> LoadedByAssetPath;
   for (const auto &[ObjId, Data] : Objects) {
     if (Data.Kind != EditorSceneItemKind::Mesh || Data.AssetRelativePath.empty()) continue;
+    CookMeshAsset(AXIOM_CONTENT_DIR, Data.AssetRelativePath);
     const auto FullPath =
         std::filesystem::path(AXIOM_CONTENT_DIR) / Data.AssetRelativePath;
     const auto SceneData = LoadBasicMeshAsset(FullPath);
@@ -575,6 +577,7 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
 
   // --- Stage 4b: reload remaining mesh instances from the global mesh asset ---
   if (!MeshAsset.empty() && !MeshNameToObjectId.empty()) {
+    CookMeshAsset(AXIOM_CONTENT_DIR, MeshAsset);
     const auto MeshPath =
         std::filesystem::path(AXIOM_CONTENT_DIR) / MeshAsset;
     const auto SceneData = LoadBasicMeshAsset(MeshPath);
