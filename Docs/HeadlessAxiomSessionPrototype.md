@@ -252,14 +252,20 @@ A server-side transform gizmo is now fully implemented on the `scene-editing` br
 - `gizmo_drag_start` / `gizmo_drag_end` (reliable): bracket the drag; drag start resolves the hit handle and captures object state; drag end commits the final transform
 - `gizmo_drag_update` (unreliable): sent every `mousemove` during drag; server applies the current drag math and dispatches `SetTransformCommand`
 - `set_gizmo_mode`: switches the per-client gizmo mode (`translate` / `scale` / `rotate`); server updates hit-test and rendering for subsequent frames
+- `set_grid_snap`: updates per-client snap settings for gizmo drags; move snap can be disabled or set from the toolbar dropdown, while rotation and scale use the selected increments when snapping is enabled
 - snapshot refresh is suppressed while a gizmo drag is active to prevent server state polls from fighting the in-progress drag position
 
 ### Mode Switching
 - `GizmoMode` enum (Translate / Scale / Rotate) lives in `RenderScene.h` and is passed through `GizmoOverlayData` to the renderer
 - per-client mode is stored in `RemoteClientSession::CurrentGizmoMode` and in `HeadlessSessionLayer` for the render path
 - the toolbar Move, Rotate, and Scale buttons are now wired to `setGizmoMode` from `RemoteViewportContext`; active-state styling reflects the current mode
+- the toolbar Grid Snap control is now a dropdown instead of a simple toggle; it stores shared snap settings in `RemoteViewportContext` and sends them over `set_grid_snap` so the authoritative drag path uses the chosen move/rotate/scale increments
 - Q = Translate, E = Scale, R = Rotate keyboard shortcuts fire when the viewport is focused and not in camera look mode
 - `gizmoMode` state lives in `RemoteViewportContext` so toolbar and viewport share a single source of truth
+
+### Viewport Chrome
+- the maximize button in the remote viewport header now toggles browser fullscreen on the viewport shell via the Fullscreen API
+- the button swaps between enter/exit fullscreen icons based on `fullscreenchange`, so the viewport chrome stays in sync even if fullscreen exits outside the button
 
 ### Coordinate Mapping Fix
 - mouse pixel coordinates sent to the server account for the `object-contain` CSS letterboxing on the video element: the actual content rectangle is computed from the uniform scale factor and centering offsets before mapping to server pixels, so hit-testing is accurate regardless of window aspect ratio
