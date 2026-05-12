@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ElementType } from "react"
 import {
   Maximize2,
+  Minimize2,
   Camera,
   ChevronDown,
 } from "lucide-react"
@@ -258,6 +259,7 @@ export function Viewport() {
   const rightMouseDownRef = useRef(false)
   const viewportFocusedRef = useRef(false)
   const isDraggingGizmoRef = useRef(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
   const keysRef = useRef(new Set<string>())
   const cursorRef = useRef({ x: 0, y: 0 })
   const pendingLookDeltaRef = useRef({ x: 0, y: 0 })
@@ -323,6 +325,18 @@ export function Viewport() {
   useEffect(() => {
     participantsRef.current = participants
   }, [participants])
+
+  useEffect(() => {
+    function syncFullscreenState() {
+      setIsFullscreen(document.fullscreenElement === viewportShellRef.current)
+    }
+
+    syncFullscreenState()
+    document.addEventListener("fullscreenchange", syncFullscreenState)
+    return () => {
+      document.removeEventListener("fullscreenchange", syncFullscreenState)
+    }
+  }, [])
 
   useEffect(() => {
     let disposed = false
@@ -1912,6 +1926,20 @@ export function Viewport() {
     )
   }
 
+  async function toggleFullscreen() {
+    const shell = viewportShellRef.current
+    if (!shell) {
+      return
+    }
+
+    if (document.fullscreenElement === shell) {
+      await document.exitFullscreen()
+      return
+    }
+
+    await shell.requestFullscreen()
+  }
+
   return (
     <div className="h-full flex flex-col bg-neutral-900">
       <div className="flex items-center justify-between h-8 bg-neutral-950 border-b border-neutral-800 px-2">
@@ -1950,7 +1978,11 @@ export function Viewport() {
           </button>
         </div>
         <div className="flex items-center gap-1">
-          <ViewportButton icon={Maximize2} onClick={() => void connectRef.current()} />
+          <ViewportButton
+            icon={isFullscreen ? Minimize2 : Maximize2}
+            tooltip={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+            onClick={() => void toggleFullscreen()}
+          />
         </div>
       </div>
       <div
@@ -1990,15 +2022,18 @@ export function Viewport() {
 
 function ViewportButton({
   icon: Icon,
+  tooltip,
   onClick,
 }: {
   icon: ElementType
+  tooltip?: string
   onClick?: () => void
 }) {
   return (
     <button
       className="rounded p-1.5 text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-white"
       onClick={onClick}
+      title={tooltip}
       type="button"
     >
       <Icon className="h-3.5 w-3.5" />
