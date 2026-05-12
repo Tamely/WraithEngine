@@ -747,6 +747,25 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
   if (*Type == "gizmo_drag_start") return ParseMouseXY(HeadlessCommandType::GizmoDragStart);
   if (*Type == "gizmo_drag_update") return ParseMouseXY(HeadlessCommandType::GizmoDragUpdate);
   if (*Type == "gizmo_drag_end") return ParseMouseXY(HeadlessCommandType::GizmoDragEnd);
+  if (*Type == "drop_mesh") {
+    static const std::regex AssetPathPattern(R"json("assetPath"\s*:\s*"([^"]+)")json");
+    const auto AssetPath = MatchString(JsonLine, AssetPathPattern);
+    const auto MX = MatchString(JsonLine, MouseXPattern);
+    const auto MY = MatchString(JsonLine, MouseYPattern);
+    float MouseX = 0.0f;
+    float MouseY = 0.0f;
+    if (MX.has_value()) {
+      if (const auto V = ParseDouble(*MX)) MouseX = static_cast<float>(*V);
+    }
+    if (MY.has_value()) {
+      if (const auto V = ParseDouble(*MY)) MouseY = static_cast<float>(*V);
+    }
+    HeadlessCommand Cmd;
+    Cmd.Type = HeadlessCommandType::DropMesh;
+    Cmd.MeshAssetPath = AssetPath.value_or("");
+    Cmd.MousePosition = {MouseX, MouseY};
+    return Cmd;
+  }
   if (*Type == "drop_texture") {
     static const std::regex TexturePathPattern(R"json("textureAssetPath"\s*:\s*"([^"]*)")json");
     const auto TexturePath = MatchString(JsonLine, TexturePathPattern);
@@ -985,6 +1004,7 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::SetLightProperties:
   case HeadlessCommandType::SetMaterialProperties:
   case HeadlessCommandType::SetMaterialTexture:
+  case HeadlessCommandType::DropMesh:
   case HeadlessCommandType::DropTexture:
   case HeadlessCommandType::ReloadScripts:
   case HeadlessCommandType::Heartbeat:

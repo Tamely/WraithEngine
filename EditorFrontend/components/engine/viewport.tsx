@@ -202,6 +202,12 @@ type RemoteViewportCommand =
       textureAssetPath: string
     }
   | {
+      type: "drop_mesh"
+      mouseX: number
+      mouseY: number
+      assetPath: string
+    }
+  | {
       type: "drop_texture"
       mouseX: number
       mouseY: number
@@ -1802,7 +1808,7 @@ export function Viewport() {
     }
 
     ;(window as any).__axiomViewportDropHandler = (clientX: number, clientY: number, kind: string, path: string) => {
-      if (kind !== "texture" || !path) return
+      if ((kind !== "texture" && kind !== "mesh") || !path) return
       const x = lastDragX || clientX
       const y = lastDragY || clientY
       const s = viewportShellRef.current
@@ -1818,6 +1824,10 @@ export function Viewport() {
       if (cssX < 0 || cssY < 0 || cssX > contentW || cssY > contentH) return
       const mouseX = (cssX / contentW) * v.videoWidth
       const mouseY = (cssY / contentH) * v.videoHeight
+      if (kind === "mesh") {
+        void sendCommand({ type: "drop_mesh", mouseX, mouseY, assetPath: path }, "reliable")
+        return
+      }
       void sendCommand({ type: "drop_texture", mouseX, mouseY, textureAssetPath: path }, "reliable")
     }
 

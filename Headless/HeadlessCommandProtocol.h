@@ -52,6 +52,7 @@ enum class HeadlessCommandType {
   SetLightProperties,
   SetMaterialProperties,
   SetMaterialTexture,
+  DropMesh,
   DropTexture,
   Heartbeat,
   RenderFrame,
@@ -75,6 +76,7 @@ struct HeadlessCommand {
   glm::vec4 BaseColorFactor{1.0f}; // used by SetMaterialProperties
   float Metallic{0.0f};         // used by SetMaterialProperties
   float Roughness{0.5f};        // used by SetMaterialProperties
+  std::string MeshAssetPath;    // used by DropMesh
   std::string TextureAssetPath; // used by SetMaterialTexture
 };
 

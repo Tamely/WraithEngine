@@ -557,6 +557,19 @@ TEST(HeadlessProtocolTests, ParsesSetMeshAssetCommand) {
   EXPECT_EQ(Payload->AssetPath, "Meshes/barrel.glb");
 }
 
+TEST(HeadlessProtocolTests, ParsesDropMeshCommand) {
+  std::string Error;
+  const auto Command = Axiom::ParseRemoteViewportCommand(
+      R"json({"type":"drop_mesh","mouseX":640,"mouseY":360,"assetPath":"Meshes/barrel.glb"})json",
+      Error);
+
+  ASSERT_TRUE(Command.has_value()) << Error;
+  EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::DropMesh);
+  EXPECT_FLOAT_EQ(Command->MousePosition.x, 640.0f);
+  EXPECT_FLOAT_EQ(Command->MousePosition.y, 360.0f);
+  EXPECT_EQ(Command->MeshAssetPath, "Meshes/barrel.glb");
+}
+
 TEST(HeadlessProtocolTests, ParsesSetLightPropertiesCommand) {
   std::string Error;
   const auto Command = Axiom::ParseRemoteViewportCommand(

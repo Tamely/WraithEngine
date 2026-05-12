@@ -453,7 +453,7 @@ export function ContentBrowser() {
                     }}
                     title={
                       canAssignToSelection && asset.kind === "mesh"
-                        ? "Double-click or drag to assign to a mesh object"
+                        ? "Double-click to assign, or drag into the viewport to add"
                         : canAssignToSelection && asset.kind === "texture"
                           ? "Double-click or drag to assign texture to a mesh object"
                           : asset.path
@@ -511,7 +511,7 @@ export function ContentBrowser() {
                     }}
                     title={
                       canAssignToSelection && asset.kind === "mesh"
-                        ? "Double-click or drag to assign to a mesh object"
+                        ? "Double-click to assign, or drag into the viewport to add"
                         : canAssignToSelection && asset.kind === "texture"
                           ? "Double-click or drag to assign texture to a mesh object"
                           : asset.path

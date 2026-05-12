@@ -246,6 +246,8 @@ private:
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const CreateObjectCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const CreateMeshObjectCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const DuplicateObjectCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const DeleteObjectCommand &Command);

@@ -120,6 +120,10 @@ private:
                               std::string_view Payload);
   bool HandleClientWebRtcMessage(std::string_view ClientId,
                                  std::string_view Payload);
+  void HandleTextureDropCommand(SessionUserId User,
+                                const HeadlessCommand &Command);
+  void HandleMeshDropCommand(SessionUserId User,
+                             const HeadlessCommand &Command);
   void HandleClientEncodedVideoPacket(std::string_view ClientId,
                                       const EncodedVideoPacket &Packet);
   std::optional<SessionUserId> ResolveClientUser(

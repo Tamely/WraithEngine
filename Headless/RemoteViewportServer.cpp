@@ -972,22 +972,11 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetMaterialTexture:
     m_Host.SubmitRemoteCommand(*User, Command->EditorPayload);
     break;
+  case HeadlessCommandType::DropMesh:
+    HandleMeshDropCommand(*User, *Command);
+    break;
   case HeadlessCommandType::DropTexture: {
-    if (!Command->TextureAssetPath.empty()) {
-      const EditorSession &Session = m_Host.GetHeadlessLayer().GetSession();
-      const EditorViewportState *Viewport = Session.FindViewport(*User);
-      if (Viewport != nullptr) {
-        const std::string HitId = HitTestMeshes(
-            Viewport->Camera, m_Options.Width, m_Options.Height,
-            Command->MousePosition, Session.GetState().Scene.MeshInstances);
-        if (!HitId.empty()) {
-          m_Host.SubmitRemoteCommand(*User,
-              EditorCommand{SetMaterialTextureCommand{
-                  .ObjectId = HitId,
-                  .TextureAssetPath = Command->TextureAssetPath}});
-        }
-      }
-    }
+    HandleTextureDropCommand(*User, *Command);
     break;
   }
   case HeadlessCommandType::GizmoHover:
@@ -1629,6 +1618,55 @@ void RemoteViewportServer::HandleClientEncodedVideoPacket(
   }
 }
 
+void RemoteViewportServer::HandleTextureDropCommand(
+    SessionUserId User, const HeadlessCommand &Command) {
+  if (Command.TextureAssetPath.empty()) {
+    return;
+  }
+
+  const EditorSession &Session = m_Host.GetHeadlessLayer().GetSession();
+  const EditorViewportState *Viewport = Session.FindViewport(User);
+  if (Viewport == nullptr) {
+    return;
+  }
+
+  const std::string HitId = HitTestMeshes(
+      Viewport->Camera, m_Options.Width, m_Options.Height,
+      Command.MousePosition, Session.GetState().Scene.MeshInstances);
+  if (HitId.empty()) {
+    return;
+  }
+
+  m_Host.SubmitRemoteCommand(User, EditorCommand{SetMaterialTextureCommand{
+                                       .ObjectId = HitId,
+                                       .TextureAssetPath = Command.TextureAssetPath,
+                                   }});
+}
+
+void RemoteViewportServer::HandleMeshDropCommand(SessionUserId User,
+                                                 const HeadlessCommand &Command) {
+  if (Command.MeshAssetPath.empty()) {
+    return;
+  }
+
+  const EditorSession &Session = m_Host.GetHeadlessLayer().GetSession();
+  const EditorViewportState *Viewport = Session.FindViewport(User);
+  if (Viewport == nullptr) {
+    return;
+  }
+
+  const glm::vec3 SpawnLocation = ResolveViewportDropPosition(
+      Viewport->Camera, m_Options.Width, m_Options.Height, Command.MousePosition,
+      Session.GetState().Scene.MeshInstances);
+
+  m_Host.SubmitRemoteCommand(User, EditorCommand{CreateMeshObjectCommand{
+                                       .AssetPath = Command.MeshAssetPath,
+                                       .Location = SpawnLocation,
+                                       .RotationDegrees = glm::vec3(0.0f),
+                                       .Scale = glm::vec3(1.0f),
+                                   }});
+}
+
 bool RemoteViewportServer::HandleWebSocketUpgrade(uintptr_t ClientSocketValue,
                                                   std::string_view HeaderBlock,
                                                   std::string_view Path) {
@@ -1770,6 +1808,12 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetViewMode:
     m_Host.SetRemoteViewMode(Command->ViewMode);
     return true;
+  case HeadlessCommandType::DropMesh:
+    HandleMeshDropCommand(m_Host.GetHeadlessLayer().GetLocalUserId(), *Command);
+    return true;
+  case HeadlessCommandType::DropTexture:
+    HandleTextureDropCommand(m_Host.GetHeadlessLayer().GetLocalUserId(), *Command);
+    return true;
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
   case HeadlessCommandType::SelectObject:
@@ -1786,7 +1830,6 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetLightProperties:
   case HeadlessCommandType::SetMaterialProperties:
   case HeadlessCommandType::SetMaterialTexture:
-  case HeadlessCommandType::DropTexture:
   case HeadlessCommandType::ReloadScripts:
   case HeadlessCommandType::UpdateViewportCamera:
   case HeadlessCommandType::GizmoHover:
@@ -1870,6 +1913,9 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::SetMaterialProperties:
   case HeadlessCommandType::SetMaterialTexture:
     m_Host.SubmitRemoteCommand(Client->User, Command->EditorPayload);
+    return true;
+  case HeadlessCommandType::DropMesh:
+    HandleMeshDropCommand(Client->User, *Command);
     return true;
   case HeadlessCommandType::ReloadScripts: {
     m_Host.ReloadUserScripts();
@@ -2083,20 +2129,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     return true;
   }
   case HeadlessCommandType::DropTexture: {
-    const EditorSession &Session = m_Host.GetHeadlessLayer().GetSession();
-    const EditorViewportState *Viewport = Session.FindViewport(Client->User);
-    if (Viewport == nullptr || Command->TextureAssetPath.empty()) {
-      return true;
-    }
-    const std::string HitId = HitTestMeshes(
-        Viewport->Camera, m_Options.Width, m_Options.Height,
-        Command->MousePosition, Session.GetState().Scene.MeshInstances);
-    if (!HitId.empty()) {
-      m_Host.SubmitRemoteCommand(Client->User,
-          EditorCommand{SetMaterialTextureCommand{
-              .ObjectId = HitId,
-              .TextureAssetPath = Command->TextureAssetPath}});
-    }
+    HandleTextureDropCommand(Client->User, *Command);
     return true;
   }
   case HeadlessCommandType::GizmoDragUpdate: {
