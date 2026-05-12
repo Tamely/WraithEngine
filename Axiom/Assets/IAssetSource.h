@@ -4,11 +4,12 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Axiom::Assets {
 
-enum class AssetKind { Mesh, Texture };
+enum class AssetKind { Mesh, Texture, Material, Unknown };
 
 struct AssetDescriptor {
   AssetId Id;
@@ -24,6 +25,8 @@ public:
   virtual std::vector<AssetDescriptor> List() const = 0;
 };
 
+AssetId AssetIdFromRelativePath(const std::filesystem::path &RelPath);
+
 // Scans a root directory on disk and maps discovered content files to stable
 // AssetIds derived from their relative paths.
 class LocalAssetSource : public IAssetSource {
@@ -38,6 +41,20 @@ public:
 
 private:
   std::filesystem::path m_Root;
+  std::vector<AssetDescriptor> m_Index;
+};
+
+// Resolves cooked asset binaries from the cook manifest inside Content/Cooked.
+class CookedAssetSource : public IAssetSource {
+public:
+  explicit CookedAssetSource(std::filesystem::path ContentRoot);
+
+  std::optional<std::filesystem::path> Resolve(AssetId Id) const override;
+  std::vector<AssetDescriptor> List() const override;
+  bool HasManifest() const;
+
+private:
+  std::filesystem::path m_ContentRoot;
   std::vector<AssetDescriptor> m_Index;
 };
 
