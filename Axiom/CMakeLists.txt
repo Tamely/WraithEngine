@@ -1,6 +1,7 @@
 set(ENGINE_SOURCES
   Scripting/ScriptHost.cpp
   Scripting/InternalCalls.cpp
+  Assets/AssetCookManifest.cpp
   Assets/AssimpImporter.cpp
   Assets/IAssetSource.cpp
   Assets/MeshAsset.cpp
