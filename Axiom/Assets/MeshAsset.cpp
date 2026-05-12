@@ -1,6 +1,7 @@
 #include "Assets/MeshAsset.h"
 #include "Assets/AssimpImporter.h"
 #include "Assets/CookedMeshAsset.h"
+#include "Assets/CookedTextureAsset.h"
 #include "Assets/IAssetSource.h"
 
 #include "Core/Log.h"
@@ -429,6 +430,38 @@ LoadCookedMeshAssetIfAvailable(const std::filesystem::path &Path) {
 
   return ToRuntimeMeshSceneData(*CookedScene);
 }
+
+TextureSourceDataRef
+LoadCookedTextureAssetIfAvailable(const std::filesystem::path &Path) {
+  const auto ContentRoot = FindContentRootForPath(Path);
+  if (!ContentRoot.has_value()) {
+    return nullptr;
+  }
+
+  std::error_code Ec;
+  const auto RelativePath = std::filesystem::relative(Path, *ContentRoot, Ec);
+  if (Ec) {
+    return nullptr;
+  }
+
+  const CookedAssetSource CookedSource(*ContentRoot);
+  if (!CookedSource.HasManifest()) {
+    return nullptr;
+  }
+
+  const auto CookedPath =
+      CookedSource.Resolve(AssetIdFromRelativePath(RelativePath));
+  if (!CookedPath.has_value()) {
+    return nullptr;
+  }
+
+  const auto CookedTexture = LoadCookedTextureAsset(*CookedPath);
+  if (!CookedTexture.has_value()) {
+    return nullptr;
+  }
+
+  return std::make_shared<TextureSourceData>(*CookedTexture);
+}
 } // namespace
 
 std::optional<MeshSceneData>
@@ -587,8 +620,26 @@ std::optional<MeshSceneData> LoadBasicMeshAsset(const std::filesystem::path &Pat
   return LoadBasicMeshAssetFromSource(Path);
 }
 
-TextureSourceDataRef LoadTextureFromFile(const std::filesystem::path &Path) {
+TextureSourceDataRef LoadTextureFromSourceFile(const std::filesystem::path &Path) {
   return DecodeTextureFromFile(Path);
+}
+
+TextureSourceDataRef LoadTextureFromFile(const std::filesystem::path &Path) {
+  const std::string Ext = ToLowerCopy(Path.extension().string());
+  if (Ext == ".wtex") {
+    const auto CookedTexture = LoadCookedTextureAsset(Path);
+    if (!CookedTexture.has_value()) {
+      return nullptr;
+    }
+    return std::make_shared<TextureSourceData>(*CookedTexture);
+  }
+
+  if (auto CookedTexture = LoadCookedTextureAssetIfAvailable(Path);
+      CookedTexture != nullptr) {
+    return CookedTexture;
+  }
+
+  return LoadTextureFromSourceFile(Path);
 }
 
 TextureSourceDataRef LoadTextureFromMemory(const unsigned char *Bytes,
