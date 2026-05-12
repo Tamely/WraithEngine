@@ -1179,6 +1179,7 @@ Likely targets based on current trajectory:
 | `Axiom/Session/EditorSession.cpp` | ~2,000 lines | Command dispatch, event publication, lock management, presence logic, schema generation |
 | `Headless/RemoteViewportServer.cpp` | ~1,500 lines | HTTP routing, WebSocket framing, WebRTC signaling, command parsing, client lifecycle |
 | `Headless/HeadlessCommandProtocol.cpp` | ~800 lines | Growing with every new command; serialization/deserialization should be generated or table-driven |
+| viewport interaction / gizmo hit-testing path | multi-file | mode-specific hit testing, drag math, and interaction branching are starting to duplicate patterns and should move toward reusable primitives or strategies |
 
 #### 10.2 Proposed splits
 
@@ -1200,6 +1201,12 @@ Likely targets based on current trajectory:
 - `CommandSerializer` — outbound event JSON
 - `CommandDeserializer` — inbound command JSON
 - Register new commands by adding a row to a dispatch table rather than growing `if/else` or `switch` chains
+
+**Viewport interaction and hit-testing** → simplify into modular interaction primitives:
+- extract per-tool interaction handlers so translate / rotate / scale / selection no longer expand one shared branch ladder
+- separate hit-test resolution from drag execution so the same selection / gizmo queries can be reused by hover, drag-start, and future tools
+- prefer data-driven handle descriptors or small strategy objects over repeated mode checks spread through the remote viewport path
+- keep the authoritative command path unchanged while reducing the amount of bespoke branching needed to add a new viewport tool
 
 #### 10.3 Acceptance criteria
 - No existing test regressions
