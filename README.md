@@ -41,6 +41,8 @@ AxiomRemoteViewportServer  (C++)
 - Scene outliner with drag-drop reparenting, inline rename, right-click context menus
 - Object lifecycle: create, duplicate, delete
 - Per-client gizmo mode (Q / E / R shortcuts)
+- Drag meshes into the remote viewport to add them directly
+- Light icons render as color-tinted billboards and are selectable from the remote viewport
 - User presence and camera visualization
 - Script class attachment and hot-reload button
 

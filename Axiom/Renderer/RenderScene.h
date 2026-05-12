@@ -7,6 +7,7 @@
 #include <glm/vec4.hpp>
 
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace Axiom {
@@ -27,6 +28,13 @@ struct DirectionalLight {
   glm::vec3 Direction{0.35f, 0.7f, 0.2f}; // world-space, need not be normalized
 };
 
+struct LightBillboardOverlay {
+  std::string ObjectId;
+  glm::vec3 WorldPosition{0.0f};
+  glm::vec4 Color{1.0f};
+  float PixelSize{48.0f};
+};
+
 class RenderScene {
 public:
   void Reset();
@@ -36,5 +44,6 @@ public:
   std::vector<RenderMeshSubmission> Submissions;
   std::optional<GizmoOverlayData> GizmoOverlay;
   std::optional<DirectionalLight> Sun;
+  std::vector<LightBillboardOverlay> LightBillboards;
 };
 } // namespace Axiom

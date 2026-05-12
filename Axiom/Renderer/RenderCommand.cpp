@@ -20,6 +20,13 @@ void RenderCommand::Submit(const RenderMeshSubmission &Submission) {
   }
 }
 
+void RenderCommand::SubmitLightBillboard(
+    const LightBillboardOverlay &Billboard) {
+  if (s_ActiveScene) {
+    s_ActiveScene->LightBillboards.push_back(Billboard);
+  }
+}
+
 void RenderCommand::SetGizmoOverlay(const GizmoOverlayData &Gizmo) {
   if (s_ActiveScene) {
     s_ActiveScene->GizmoOverlay = Gizmo;

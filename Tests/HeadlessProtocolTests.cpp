@@ -155,6 +155,20 @@ TEST(HeadlessProtocolTests, RemoteViewportAcceptsSetTransformCommand) {
   EXPECT_EQ(Payload->Scale, glm::vec3(1.0f, 1.5f, 2.0f));
 }
 
+TEST(HeadlessProtocolTests, RemoteViewportAcceptsSetGridSnapCommand) {
+  std::string Error;
+  const auto Command = Axiom::ParseRemoteViewportCommand(
+      R"json({"type":"set_grid_snap","enabled":true,"translationStep":0.5,"rotationStepDegrees":10.0,"scaleStep":0.05})json",
+      Error);
+
+  ASSERT_TRUE(Command.has_value()) << Error;
+  EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::SetGridSnap);
+  EXPECT_TRUE(Command->Enabled);
+  EXPECT_FLOAT_EQ(Command->TranslationStep, 0.5f);
+  EXPECT_FLOAT_EQ(Command->RotationStepDegrees, 10.0f);
+  EXPECT_FLOAT_EQ(Command->ScaleStep, 0.05f);
+}
+
 TEST(HeadlessProtocolTests, SerializesCommandRejectedEvent) {
   const Axiom::PublishedEditorEvent Event{
       .Id = Axiom::EventId{4},
@@ -555,6 +569,19 @@ TEST(HeadlessProtocolTests, ParsesSetMeshAssetCommand) {
   ASSERT_NE(Payload, nullptr);
   EXPECT_EQ(Payload->ObjectId, "crate-1");
   EXPECT_EQ(Payload->AssetPath, "Meshes/barrel.glb");
+}
+
+TEST(HeadlessProtocolTests, ParsesDropMeshCommand) {
+  std::string Error;
+  const auto Command = Axiom::ParseRemoteViewportCommand(
+      R"json({"type":"drop_mesh","mouseX":640,"mouseY":360,"assetPath":"Meshes/barrel.glb"})json",
+      Error);
+
+  ASSERT_TRUE(Command.has_value()) << Error;
+  EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::DropMesh);
+  EXPECT_FLOAT_EQ(Command->MousePosition.x, 640.0f);
+  EXPECT_FLOAT_EQ(Command->MousePosition.y, 360.0f);
+  EXPECT_EQ(Command->MeshAssetPath, "Meshes/barrel.glb");
 }
 
 TEST(HeadlessProtocolTests, ParsesSetLightPropertiesCommand) {

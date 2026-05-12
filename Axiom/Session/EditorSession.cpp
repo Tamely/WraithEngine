@@ -65,6 +65,9 @@ std::string CommandTypeName(const EditorCommandPayload &Payload) {
   if (std::holds_alternative<CreateObjectCommand>(Payload)) {
     return "create_object";
   }
+  if (std::holds_alternative<CreateMeshObjectCommand>(Payload)) {
+    return "create_mesh_object";
+  }
   if (std::holds_alternative<DuplicateObjectCommand>(Payload)) {
     return "duplicate_object";
   }
@@ -931,6 +934,34 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
     }
   }
 
+  if (const auto *CreateMeshCmd =
+          std::get_if<CreateMeshObjectCommand>(&QueuedCommand.Command.Payload)) {
+    if (CreateMeshCmd->AssetPath.empty()) {
+      FailureReason = "CreateMeshObject requires a non-empty asset path.";
+      return false;
+    }
+    if (FindWorldFolder() == nullptr) {
+      FailureReason = "No world folder found in scene root.";
+      return false;
+    }
+    if (CreateMeshCmd->Scale.x <= 0.0f || CreateMeshCmd->Scale.y <= 0.0f ||
+        CreateMeshCmd->Scale.z <= 0.0f) {
+      FailureReason = "Scale values must be greater than zero.";
+      return false;
+    }
+    if (m_ContentDir.empty()) {
+      FailureReason = "CreateMeshObject requires a configured content directory.";
+      return false;
+    }
+    const std::filesystem::path FullPath = m_ContentDir / CreateMeshCmd->AssetPath;
+    const auto SceneData = Assets::LoadBasicMeshAsset(FullPath);
+    if (!SceneData.has_value() || SceneData->Instances.empty()) {
+      FailureReason = "CreateMeshObject failed to load mesh asset: " +
+                      CreateMeshCmd->AssetPath + ".";
+      return false;
+    }
+  }
+
   if (const auto *DupCmd =
           std::get_if<DuplicateObjectCommand>(&QueuedCommand.Command.Payload)) {
     if (DupCmd->ObjectId.empty()) {
@@ -1260,6 +1291,54 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                     .ObjectId = ObjectId,
                     .DisplayName = DisplayName,
                 }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const CreateMeshObjectCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
+
+  const std::string ObjectId = BuildUniqueObjectId("Mesh");
+  const std::string DisplayName = BuildUniqueDisplayName("Mesh");
+  const EditorTransformDetails Transform{
+      .Location = Command.Location,
+      .RotationDegrees = Command.RotationDegrees,
+      .Scale = Command.Scale,
+  };
+
+  m_State.Scene.ObjectDetailsById.emplace(
+      ObjectId,
+      EditorObjectDetails{
+          .ObjectId = ObjectId,
+          .DisplayName = DisplayName,
+          .Kind = EditorSceneItemKind::Mesh,
+          .Visible = true,
+          .SupportsTransform = true,
+          .TransformReadOnly = false,
+          .Transform = Transform,
+          .WorldTransform = Transform,
+      });
+
+  if (Instance *Node = CreateInstanceForTemplate("Mesh", ObjectId)) {
+    Node->SetParent(FindWorldFolder());
+  }
+
+  SyncItemsFromTree();
+  PublishEvent({.Payload = ObjectCreatedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .ObjectId = ObjectId,
+                    .DisplayName = DisplayName,
+                }});
+
+  HandleCommand(QueuedCommand, SetMeshAssetCommand{
+                                  .ObjectId = ObjectId,
+                                  .AssetPath = Command.AssetPath,
+                              });
+  HandleCommand(QueuedCommand, SetTransformCommand{
+                                  .ObjectId = ObjectId,
+                                  .Location = Command.Location,
+                                  .RotationDegrees = Command.RotationDegrees,
+                                  .Scale = Command.Scale,
+                              });
 }
 
 void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,

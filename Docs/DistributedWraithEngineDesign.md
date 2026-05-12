@@ -47,6 +47,8 @@
 - `VulkanGizmoRenderer` draws mode-appropriate handles: arrows for translate, arrows with perpendicular cross-caps for scale, and 24-segment screen-space rings for rotate; the hovered handle brightens in all modes
 - Gizmo mouse coordinates are forwarded using the correct `object-contain` content rect mapping so hit-testing is accurate regardless of the viewport aspect ratio or window size
 - `gizmoMode` state lives in `RemoteViewportContext` so the toolbar and viewport share a single source of truth without prop drilling
+- Mesh assets can now be dragged from the content browser into the remote viewport to create mesh objects directly at the cursor-resolved spawn point
+- Visible lights now render as color-tinted billboard icons in the remote viewport, and those billboards participate in remote click selection using the same gizmo-first input path
 - Collaboration v1 is now implemented: object locking, selection/lock visibility, presence roster, heartbeat-driven idle detection, and two-threshold disconnect (Away at 10 s, Disconnected at 30 s with lock release)
 - `EditorObjectLockState` (`Unlocked` / `Locked`) and `EditorObjectCollaborationState` live in `EditorSessionState`; `AcquireLock`, `ReleaseLock`, and `ReleaseAllLocksForUser` are public `EditorSession` methods
 - `ValidateCommand` rejects any mutating command (`SetTransform`, `Rename`, `SetObjectVisibility`, `Delete`, `Reparent`) on an object locked by a different user
@@ -1177,6 +1179,7 @@ Likely targets based on current trajectory:
 | `Axiom/Session/EditorSession.cpp` | ~2,000 lines | Command dispatch, event publication, lock management, presence logic, schema generation |
 | `Headless/RemoteViewportServer.cpp` | ~1,500 lines | HTTP routing, WebSocket framing, WebRTC signaling, command parsing, client lifecycle |
 | `Headless/HeadlessCommandProtocol.cpp` | ~800 lines | Growing with every new command; serialization/deserialization should be generated or table-driven |
+| viewport interaction / gizmo hit-testing path | multi-file | mode-specific hit testing, drag math, and interaction branching are starting to duplicate patterns and should move toward reusable primitives or strategies |
 
 #### 10.2 Proposed splits
 
@@ -1198,6 +1201,12 @@ Likely targets based on current trajectory:
 - `CommandSerializer` — outbound event JSON
 - `CommandDeserializer` — inbound command JSON
 - Register new commands by adding a row to a dispatch table rather than growing `if/else` or `switch` chains
+
+**Viewport interaction and hit-testing** → simplify into modular interaction primitives:
+- extract per-tool interaction handlers so translate / rotate / scale / selection no longer expand one shared branch ladder
+- separate hit-test resolution from drag execution so the same selection / gizmo queries can be reused by hover, drag-start, and future tools
+- prefer data-driven handle descriptors or small strategy objects over repeated mode checks spread through the remote viewport path
+- keep the authoritative command path unchanged while reducing the amount of bespoke branching needed to add a new viewport tool
 
 #### 10.3 Acceptance criteria
 - No existing test regressions
@@ -1285,6 +1294,8 @@ Progress update:
 - the details panel supports rename and transform editing; drafts are scoped to the selected object's ID so periodic server snapshot polls do not clobber edits in progress
 - viewport keyboard input (WASD, Space, Shift) is now gated on pointer lock state; keys are only consumed while the viewport has pointer lock and are cleared immediately when it releases, so other UI elements (inputs, the outliner) receive input normally
 - a server-side transform gizmo is now implemented across all three modes (Translate, Scale, Rotate); the toolbar Move/Rotate/Scale buttons and Q/E/R shortcuts switch modes with active-state feedback; dragging any handle drives `SetTransformCommand` through the same authoritative command path
+- grid snapping is now configured from a toolbar dropdown instead of a fixed toggle preset; the selected move/rotate/scale increments are stored in shared viewport state and pushed to the server with `set_grid_snap`, so gizmo drags snap authoritatively
+- the remote viewport header maximize button now toggles browser fullscreen on the viewport shell and reflects enter/exit state in its iconography
 - reparent is implemented: any object can be dragged onto any other in the outliner; transforms are stored in local space and world transforms are recomputed for the entire moved subtree
 - Collaboration v1 is complete: object locking prevents simultaneous gizmo conflicts, presence roster shows connected users, and the heartbeat/timeout loop handles hard tab closes
 - Phase 5 (Reflection and Asset Evolution) is complete: `AssetId` stable identity, `IAssetSource` / `LocalAssetSource` VFS, `ListAssets` / `GetSchema` / `SetProperty` / `SaveScene` commands, `SceneFile` JSON persistence, content browser wired to live asset catalogue, details panel schema-driven, toolbar Save button with success/failure animation

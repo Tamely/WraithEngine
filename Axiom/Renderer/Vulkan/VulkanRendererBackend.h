@@ -9,6 +9,7 @@
 #include "Renderer/Vulkan/VulkanDevice.h"
 #include "Renderer/Vulkan/VulkanGizmoRenderer.h"
 #include "Renderer/Vulkan/VulkanImGuiRenderer.h"
+#include "Renderer/Vulkan/VulkanLightBillboardRenderer.h"
 #include "Renderer/Vulkan/VulkanMaterialResources.h"
 #include "Renderer/Vulkan/VulkanOcclusionCulling.h"
 #include "Renderer/Vulkan/VulkanRendererTypes.h"
@@ -57,6 +58,7 @@ private:
   void InitBackgroundPipelines();
   void InitMeshPipelines();
   void InitGizmoPipeline();
+  void InitLightBillboardPipeline();
   void InitMeshFrameResources();
 
   void InitHzbResources();
@@ -150,9 +152,11 @@ private:
   std::array<MeshFrameResources, FRAME_OVERLAP> m_MeshFrames{};
   VulkanGizmoRenderer m_GizmoRenderer;
   VulkanImGuiRenderer m_ImGuiRenderer;
+  VulkanLightBillboardRenderer m_LightBillboardRenderer;
   VulkanMaterialResources m_MaterialResources;
   VulkanOcclusionCulling m_OcclusionCulling;
   VulkanSceneRenderer m_SceneRenderer;
+  MaterialInstanceRef m_LightBillboardMaterial;
   RenderScene *m_ActiveScene{nullptr};
   RendererFrameStats m_FrameStats{};
   float m_TimestampPeriod{0.0f};

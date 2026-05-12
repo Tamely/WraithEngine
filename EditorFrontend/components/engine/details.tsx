@@ -84,8 +84,22 @@ function DetailsContent({
 
   useEffect(() => {
     setDraftName(details.displayName)
-    setDraft(toDraft(details))
   }, [details.objectId])
+
+  useEffect(() => {
+    setDraft(toDraft(details))
+  }, [
+    details.objectId,
+    details.transform?.location[0],
+    details.transform?.location[1],
+    details.transform?.location[2],
+    details.transform?.rotationDegrees[0],
+    details.transform?.rotationDegrees[1],
+    details.transform?.rotationDegrees[2],
+    details.transform?.scale[0],
+    details.transform?.scale[1],
+    details.transform?.scale[2],
+  ])
 
   const schemaTransformReadOnly =
     schema?.properties.find((p) => p.name === "location")?.readOnly ?? null

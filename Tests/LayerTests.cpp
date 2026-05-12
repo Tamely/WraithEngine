@@ -4,7 +4,11 @@
 #include <Core/Platform.h>
 #include <Core/GlfwEditorInputSource.h>
 #include <Core/InputPlatform.h>
+#include <Assets/SvgTexture.h>
+#include <Renderer/RenderCommand.h>
+#include <Renderer/RenderScene.h>
 #include "../Headless/HeadlessRenderView.h"
+#include "../Headless/HeadlessSessionLayer.h"
 #include "../Headless/HeadlessViewportFrameBridge.h"
 #include <Remote/AxiomSessionEndpoint.h>
 #include <Renderer/OffscreenRenderSurface.h>
@@ -22,6 +26,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <filesystem>
 #include <cstddef>
 #include <thread>
 #include <vector>
@@ -1165,3 +1170,139 @@ TEST(RemoteViewportTests, DefaultVideoEncoderProducesH264PacketsOnMacOS) {
   EXPECT_FALSE(Output.Packets.front().Bytes.empty());
 }
 #endif
+
+TEST(RenderSceneTests, ResetClearsLightBillboardsAndOverlayState) {
+  Axiom::RenderScene Scene;
+  Scene.LightBillboards.push_back({
+      .WorldPosition = {1.0f, 2.0f, 3.0f},
+      .Color = {0.2f, 0.4f, 0.6f, 1.0f},
+      .PixelSize = 64.0f,
+  });
+  Scene.GizmoOverlay = Axiom::GizmoOverlayData{};
+  Scene.Sun = Axiom::DirectionalLight{};
+
+  Scene.Reset();
+
+  EXPECT_TRUE(Scene.LightBillboards.empty());
+  EXPECT_FALSE(Scene.GizmoOverlay.has_value());
+  EXPECT_FALSE(Scene.Sun.has_value());
+}
+
+TEST(RenderSceneTests, RenderCommandSubmitsLightBillboardOverlay) {
+  Axiom::RenderScene Scene;
+  Axiom::RenderCommand::BeginScene(Scene);
+  Axiom::RenderCommand::SubmitLightBillboard({
+      .ObjectId = "light-test",
+      .WorldPosition = {4.0f, 5.0f, 6.0f},
+      .Color = {0.8f, 0.3f, 0.1f, 1.0f},
+      .PixelSize = 40.0f,
+  });
+  Axiom::RenderCommand::EndScene();
+
+  ASSERT_EQ(Scene.LightBillboards.size(), 1u);
+  EXPECT_EQ(Scene.LightBillboards.front().ObjectId, "light-test");
+  EXPECT_FLOAT_EQ(Scene.LightBillboards.front().WorldPosition.x, 4.0f);
+  EXPECT_FLOAT_EQ(Scene.LightBillboards.front().Color.g, 0.3f);
+  EXPECT_FLOAT_EQ(Scene.LightBillboards.front().PixelSize, 40.0f);
+}
+
+TEST(HeadlessSessionLayerTests, BuildLightBillboardsUsesVisibleLightsOnly) {
+  Axiom::HeadlessSessionLayer Layer;
+  Layer.GetSession().SetObjectDetails({
+      {
+          .ObjectId = "light-a",
+          .DisplayName = "Light A",
+          .Kind = Axiom::EditorSceneItemKind::Light,
+          .Visible = true,
+          .Transform = Axiom::EditorTransformDetails{
+              .Location = {1.0f, 2.0f, 3.0f},
+          },
+          .Light = Axiom::EditorLightProperties{
+              .Color = {0.1f, 0.7f, 0.4f},
+              .Intensity = 2.0f,
+          },
+      },
+      {
+          .ObjectId = "light-b",
+          .DisplayName = "Light B",
+          .Kind = Axiom::EditorSceneItemKind::Light,
+          .Visible = true,
+          .Transform = Axiom::EditorTransformDetails{
+              .Location = {50.0f, 50.0f, 50.0f},
+          },
+          .WorldTransform = Axiom::EditorTransformDetails{
+              .Location = {-3.0f, 5.0f, 8.0f},
+          },
+          .Light = Axiom::EditorLightProperties{
+              .Color = {0.9f, 0.3f, 0.2f},
+              .Intensity = 1.0f,
+          },
+      },
+      {
+          .ObjectId = "light-hidden",
+          .DisplayName = "Hidden Light",
+          .Kind = Axiom::EditorSceneItemKind::Light,
+          .Visible = false,
+          .Transform = Axiom::EditorTransformDetails{
+              .Location = {9.0f, 9.0f, 9.0f},
+          },
+          .Light = Axiom::EditorLightProperties{},
+      },
+      {
+          .ObjectId = "mesh-a",
+          .DisplayName = "Mesh A",
+          .Kind = Axiom::EditorSceneItemKind::Mesh,
+          .Visible = true,
+      },
+  });
+
+  const std::vector<Axiom::LightBillboardOverlay> Billboards =
+      Layer.BuildLightBillboards();
+
+  ASSERT_EQ(Billboards.size(), 2u);
+  const auto WorldTransformBillboard = std::find_if(
+      Billboards.begin(), Billboards.end(),
+      [](const Axiom::LightBillboardOverlay &Billboard) {
+        return Billboard.ObjectId == "light-b";
+      });
+  ASSERT_NE(WorldTransformBillboard, Billboards.end());
+  EXPECT_FLOAT_EQ(WorldTransformBillboard->PixelSize, 48.0f);
+  EXPECT_FLOAT_EQ(WorldTransformBillboard->Color.r, 0.9f);
+  EXPECT_FLOAT_EQ(WorldTransformBillboard->WorldPosition.x, -3.0f);
+
+  const auto LocalTransformBillboard = std::find_if(
+      Billboards.begin(), Billboards.end(),
+      [](const Axiom::LightBillboardOverlay &Billboard) {
+        return Billboard.ObjectId == "light-a";
+      });
+  ASSERT_NE(LocalTransformBillboard, Billboards.end());
+  EXPECT_FLOAT_EQ(LocalTransformBillboard->Color.g, 0.7f);
+  EXPECT_FLOAT_EQ(LocalTransformBillboard->WorldPosition.z, 3.0f);
+  EXPECT_EQ(std::find_if(Billboards.begin(), Billboards.end(),
+                         [](const Axiom::LightBillboardOverlay &Billboard) {
+                           return Billboard.ObjectId == "light-hidden";
+                         }),
+            Billboards.end());
+}
+
+TEST(SvgTextureTests, LightbulbSvgRasterizesToValidTexture) {
+  const std::filesystem::path IconPath =
+      std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine" / "lightbulb.svg";
+  const auto Texture = Axiom::Assets::LoadSvgTextureFromFile(IconPath, 128);
+
+  ASSERT_NE(Texture, nullptr);
+  EXPECT_TRUE(Texture->IsValid());
+  EXPECT_GT(Texture->Width, 0u);
+  EXPECT_GT(Texture->Height, 0u);
+  EXPECT_EQ(Texture->Pixels.size(),
+            static_cast<size_t>(Texture->Width) *
+                static_cast<size_t>(Texture->Height) * 4u);
+  EXPECT_TRUE(std::any_of(Texture->Pixels.begin(), Texture->Pixels.end(),
+                          [](uint8_t Value) { return Value != 0u; }));
+}
+
+TEST(SvgTextureTests, MissingSvgTextureReturnsNull) {
+  const auto Texture = Axiom::Assets::LoadSvgTextureFromFile(
+      std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine" / "missing-icon.svg");
+  EXPECT_EQ(Texture, nullptr);
+}

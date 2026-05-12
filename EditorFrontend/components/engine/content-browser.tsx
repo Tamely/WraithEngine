@@ -444,10 +444,16 @@ export function ContentBrowser() {
                       e.dataTransfer.setData("axiom/asset-path", asset.path)
                       e.dataTransfer.setData("axiom/asset-kind", asset.kind)
                       e.dataTransfer.effectAllowed = "copy"
+                      ;(window as any).__axiomDragAsset = { kind: asset.kind, path: asset.path }
+                    }}
+                    onDragEnd={(e) => {
+                      ;(window as any).__axiomDragAsset = null
+                      const h = (window as any).__axiomViewportDropHandler
+                      if (h) h(e.clientX, e.clientY, asset.kind, asset.path)
                     }}
                     title={
                       canAssignToSelection && asset.kind === "mesh"
-                        ? "Double-click or drag to assign to a mesh object"
+                        ? "Double-click to assign, or drag into the viewport to add"
                         : canAssignToSelection && asset.kind === "texture"
                           ? "Double-click or drag to assign texture to a mesh object"
                           : asset.path
@@ -496,10 +502,16 @@ export function ContentBrowser() {
                       e.dataTransfer.setData("axiom/asset-path", asset.path)
                       e.dataTransfer.setData("axiom/asset-kind", asset.kind)
                       e.dataTransfer.effectAllowed = "copy"
+                      ;(window as any).__axiomDragAsset = { kind: asset.kind, path: asset.path }
+                    }}
+                    onDragEnd={(e) => {
+                      ;(window as any).__axiomDragAsset = null
+                      const h = (window as any).__axiomViewportDropHandler
+                      if (h) h(e.clientX, e.clientY, asset.kind, asset.path)
                     }}
                     title={
                       canAssignToSelection && asset.kind === "mesh"
-                        ? "Double-click or drag to assign to a mesh object"
+                        ? "Double-click to assign, or drag into the viewport to add"
                         : canAssignToSelection && asset.kind === "texture"
                           ? "Double-click or drag to assign texture to a mesh object"
                           : asset.path

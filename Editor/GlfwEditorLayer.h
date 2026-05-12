@@ -27,5 +27,6 @@ private:
   std::unique_ptr<IInputPlatform> m_WindowInputPlatform;
   std::unique_ptr<IEditorInputSource> m_InputSource;
   float m_MoveSpeed{3.5f};
+  bool m_LastLeftMouseDown{false};
 };
 } // namespace Axiom

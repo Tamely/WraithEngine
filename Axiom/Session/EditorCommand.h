@@ -53,6 +53,13 @@ struct CreateObjectCommand {
   std::string TemplateId;
 };
 
+struct CreateMeshObjectCommand {
+  std::string AssetPath;
+  glm::vec3 Location{0.0f};
+  glm::vec3 RotationDegrees{0.0f};
+  glm::vec3 Scale{1.0f};
+};
+
 struct DuplicateObjectCommand {
   std::string ObjectId;
 };
@@ -111,7 +118,8 @@ using EditorCommandPayload =
     std::variant<UpdateViewportCameraCommand, SetViewportCameraPoseCommand,
                  SetLookActiveCommand, SelectObjectCommand,
                  RenameObjectCommand, SetObjectVisibilityCommand,
-                 CreateObjectCommand, DuplicateObjectCommand,
+                 CreateObjectCommand, CreateMeshObjectCommand,
+                 DuplicateObjectCommand,
                  DeleteObjectCommand, ReparentObjectCommand,
                  SetTransformCommand, AttachScriptCommand,
                  DetachScriptCommand, SetMeshAssetCommand,

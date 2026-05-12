@@ -50,6 +50,7 @@ public:
   int GetGizmoHoveredAxis(SessionUserId User) const;
   void SetGizmoMode(SessionUserId User, GizmoMode Mode);
   GizmoMode GetGizmoMode(SessionUserId User) const;
+  std::vector<LightBillboardOverlay> BuildLightBillboards() const;
   std::vector<RenderMeshSubmission>
   BuildPresenceOverlaySubmissions(SessionUserId RenderUser) const;
 

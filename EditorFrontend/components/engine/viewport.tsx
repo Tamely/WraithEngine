@@ -3,8 +3,7 @@
 import { useEffect, useRef, useState, type ElementType } from "react"
 import {
   Maximize2,
-  Grid3X3,
-  Eye,
+  Minimize2,
   Camera,
   ChevronDown,
 } from "lucide-react"
@@ -17,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import {
   useRemoteViewport,
+  type RemoteViewportGridSnapSettings,
   type SessionObjectTransformUpdate,
   type SessionObjectDetails,
   type RemoteViewportConnectionState,
@@ -90,117 +90,136 @@ interface SessionConnectResponse {
 
 type RemoteViewportCommand =
   | {
-      type: "set_view_mode"
-      viewMode: ViewMode
-    }
+    type: "set_view_mode"
+    viewMode: ViewMode
+  }
   | {
-      type: "set_look_active"
-      isLooking: boolean
-      cursorPosition: [number, number]
-    }
+    type: "set_look_active"
+    isLooking: boolean
+    cursorPosition: [number, number]
+  }
   | {
-      type: "update_viewport_camera"
-      worldMovement: [number, number, number]
-      cursorPosition: [number, number]
-    }
+    type: "update_viewport_camera"
+    worldMovement: [number, number, number]
+    cursorPosition: [number, number]
+  }
   | {
-      type: "set_viewport_camera_pose"
-      position: [number, number, number]
-      yawDegrees: number
-      pitchDegrees: number
-    }
+    type: "set_viewport_camera_pose"
+    position: [number, number, number]
+    yawDegrees: number
+    pitchDegrees: number
+  }
   | {
-      type: "select_object"
-      objectId: string
-    }
+    type: "select_object"
+    objectId: string
+  }
   | {
-      type: "rename_object"
-      objectId: string
-      displayName: string
-    }
+    type: "rename_object"
+    objectId: string
+    displayName: string
+  }
   | {
-      type: "set_object_visibility"
-      objectId: string
-      visible: boolean
-    }
+    type: "set_object_visibility"
+    objectId: string
+    visible: boolean
+  }
   | ({
-      type: "set_transform"
-    } & SessionObjectTransformUpdate)
+    type: "set_transform"
+  } & SessionObjectTransformUpdate)
   | {
-      type: "create_object"
-      templateId: string
-    }
+    type: "create_object"
+    templateId: string
+  }
   | {
-      type: "duplicate_object"
-      objectId: string
-    }
+    type: "duplicate_object"
+    objectId: string
+  }
   | {
-      type: "delete_object"
-      objectId: string
-    }
+    type: "delete_object"
+    objectId: string
+  }
   | {
-      type: "reparent_object"
-      objectId: string
-      newParentId: string
-    }
+    type: "reparent_object"
+    objectId: string
+    newParentId: string
+  }
   | {
-      type: "gizmo_hover"
-      mouseX: number
-      mouseY: number
-    }
+    type: "gizmo_hover"
+    mouseX: number
+    mouseY: number
+  }
   | {
-      type: "gizmo_drag_start"
-      mouseX: number
-      mouseY: number
-    }
+    type: "gizmo_drag_start"
+    mouseX: number
+    mouseY: number
+  }
   | {
-      type: "gizmo_drag_update"
-      mouseX: number
-      mouseY: number
-    }
+    type: "gizmo_drag_update"
+    mouseX: number
+    mouseY: number
+  }
   | {
-      type: "gizmo_drag_end"
-      mouseX: number
-      mouseY: number
-    }
+    type: "gizmo_drag_end"
+    mouseX: number
+    mouseY: number
+  }
   | {
-      type: "set_gizmo_mode"
-      mode: GizmoMode
-    }
+    type: "set_gizmo_mode"
+    mode: GizmoMode
+  }
+  | {
+    type: "set_grid_snap"
+    enabled: boolean
+    translationStep: number
+    rotationStepDegrees: number
+    scaleStep: number
+  }
   | { type: "heartbeat" }
   | { type: "list_assets" }
   | { type: "get_schema"; objectId: string }
   | { type: "save_scene" }
   | {
-      type: "set_property"
-      objectId: string
-      property: string
-      value: string | boolean | [number, number, number]
-    }
+    type: "set_property"
+    objectId: string
+    property: string
+    value: string | boolean | [number, number, number]
+  }
   | { type: "reload_scripts" }
   | {
-      type: "set_mesh_asset"
-      objectId: string
-      assetPath: string
-    }
+    type: "set_mesh_asset"
+    objectId: string
+    assetPath: string
+  }
   | {
-      type: "set_light_properties"
-      objectId: string
-      color: [number, number, number]
-      intensity: number
-    }
+    type: "set_light_properties"
+    objectId: string
+    color: [number, number, number]
+    intensity: number
+  }
   | {
-      type: "set_material_properties"
-      objectId: string
-      baseColorFactor: [number, number, number, number]
-      metallic: number
-      roughness: number
-    }
+    type: "set_material_properties"
+    objectId: string
+    baseColorFactor: [number, number, number, number]
+    metallic: number
+    roughness: number
+  }
   | {
-      type: "set_material_texture"
-      objectId: string
-      textureAssetPath: string
-    }
+    type: "set_material_texture"
+    objectId: string
+    textureAssetPath: string
+  }
+  | {
+    type: "drop_mesh"
+    mouseX: number
+    mouseY: number
+    assetPath: string
+  }
+  | {
+    type: "drop_texture"
+    mouseX: number
+    mouseY: number
+    textureAssetPath: string
+  }
 
 function getServerOrigin() {
   const configuredOrigin = process.env.NEXT_PUBLIC_AXIOM_SERVER_ORIGIN?.trim()
@@ -240,15 +259,16 @@ export function Viewport() {
   const rightMouseDownRef = useRef(false)
   const viewportFocusedRef = useRef(false)
   const isDraggingGizmoRef = useRef(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
   const keysRef = useRef(new Set<string>())
   const cursorRef = useRef({ x: 0, y: 0 })
   const pendingLookDeltaRef = useRef({ x: 0, y: 0 })
   const isLookingRef = useRef(false)
   const viewModeRef = useRef<ViewMode>("lit")
   const gizmoModeRef = useRef<GizmoMode>("translate")
-  const setGizmoModeCtxRef = useRef<(mode: GizmoMode) => Promise<void>>(async () => {})
+  const setGizmoModeCtxRef = useRef<(mode: GizmoMode) => Promise<void>>(async () => { })
   const notifyServerOnDestroyRef = useRef(true)
-  const connectRef = useRef<() => Promise<void>>(async () => {})
+  const connectRef = useRef<() => Promise<void>>(async () => { })
   const sendCommandRef = useRef<
     (command: RemoteViewportCommand, preferredChannel?: ChannelPreference) => Promise<boolean>
   >(async () => false)
@@ -305,6 +325,18 @@ export function Viewport() {
   useEffect(() => {
     participantsRef.current = participants
   }, [participants])
+
+  useEffect(() => {
+    function syncFullscreenState() {
+      setIsFullscreen(document.fullscreenElement === viewportShellRef.current)
+    }
+
+    syncFullscreenState()
+    document.addEventListener("fullscreenchange", syncFullscreenState)
+    return () => {
+      document.removeEventListener("fullscreenchange", syncFullscreenState)
+    }
+  }, [])
 
   useEffect(() => {
     let disposed = false
@@ -501,8 +533,8 @@ export function Viewport() {
         const errorPayload = payload as { detail?: string; message?: string } | null
         throw new Error(
           errorPayload?.detail ??
-            errorPayload?.message ??
-            `${response.status} ${response.statusText}`
+          errorPayload?.message ??
+          `${response.status} ${response.statusText}`
         )
       }
 
@@ -1608,6 +1640,18 @@ export function Viewport() {
         gizmoModeRef.current = nextMode
         await sendCommand({ type: "set_gizmo_mode", mode: nextMode }, "reliable")
       },
+      setGridSnapSettings: async (settings: RemoteViewportGridSnapSettings) => {
+        await sendCommand(
+          {
+            type: "set_grid_snap",
+            enabled: settings.enabled,
+            translationStep: settings.translationStep,
+            rotationStepDegrees: settings.rotationStepDegrees,
+            scaleStep: settings.scaleStep,
+          },
+          "reliable"
+        )
+      },
     })
     setServerOrigin(serverOrigin)
     setupClientIdClaimChannel()
@@ -1787,8 +1831,41 @@ export function Viewport() {
       void destroyPeerConnection("page_unload")
     }
 
+    let lastDragX = 0
+    let lastDragY = 0
+
+    const handleDocDragOver = (event: DragEvent) => {
+      lastDragX = event.clientX
+      lastDragY = event.clientY
+    }
+
+      ; (window as any).__axiomViewportDropHandler = (clientX: number, clientY: number, kind: string, path: string) => {
+        if ((kind !== "texture" && kind !== "mesh") || !path) return
+        const x = lastDragX || clientX
+        const y = lastDragY || clientY
+        const s = viewportShellRef.current
+        const v = videoRef.current
+        if (!s || !v || !v.videoWidth || !v.videoHeight) return
+        const rect = s.getBoundingClientRect()
+        if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return
+        const scale = Math.min(rect.width / v.videoWidth, rect.height / v.videoHeight)
+        const contentW = v.videoWidth * scale
+        const contentH = v.videoHeight * scale
+        const cssX = x - rect.left - (rect.width - contentW) / 2
+        const cssY = y - rect.top - (rect.height - contentH) / 2
+        if (cssX < 0 || cssY < 0 || cssX > contentW || cssY > contentH) return
+        const mouseX = (cssX / contentW) * v.videoWidth
+        const mouseY = (cssY / contentH) * v.videoHeight
+        if (kind === "mesh") {
+          void sendCommand({ type: "drop_mesh", mouseX, mouseY, assetPath: path }, "reliable")
+          return
+        }
+        void sendCommand({ type: "drop_texture", mouseX, mouseY, textureAssetPath: path }, "reliable")
+      }
+
     video?.addEventListener("loadedmetadata", handleLoadedMetadata)
     video?.addEventListener("resize", handleResize)
+    document.addEventListener("dragover", handleDocDragOver)
     document.addEventListener("mousedown", handleMouseDown)
     document.addEventListener("mouseup", handleMouseUp)
     document.addEventListener("contextmenu", handleContextMenu)
@@ -1796,7 +1873,6 @@ export function Viewport() {
     document.addEventListener("keydown", handleKeyDown)
     document.addEventListener("keyup", handleKeyUp)
     window.addEventListener("beforeunload", handleBeforeUnload)
-
     void connect()
 
     return () => {
@@ -1805,6 +1881,8 @@ export function Viewport() {
       stopViewportInputPump()
       video?.removeEventListener("loadedmetadata", handleLoadedMetadata)
       video?.removeEventListener("resize", handleResize)
+      document.removeEventListener("dragover", handleDocDragOver)
+        ; (window as any).__axiomViewportDropHandler = null
       document.removeEventListener("mousedown", handleMouseDown)
       document.removeEventListener("mouseup", handleMouseUp)
       document.removeEventListener("contextmenu", handleContextMenu)
@@ -1848,6 +1926,20 @@ export function Viewport() {
     )
   }
 
+  async function toggleFullscreen() {
+    const shell = viewportShellRef.current
+    if (!shell) {
+      return
+    }
+
+    if (document.fullscreenElement === shell) {
+      await document.exitFullscreen()
+      return
+    }
+
+    await shell.requestFullscreen()
+  }
+
   return (
     <div className="h-full flex flex-col bg-neutral-900">
       <div className="flex items-center justify-between h-8 bg-neutral-950 border-b border-neutral-800 px-2">
@@ -1886,13 +1978,17 @@ export function Viewport() {
           </button>
         </div>
         <div className="flex items-center gap-1">
-          <ViewportButton icon={Grid3X3} />
-          <ViewportButton icon={Eye} />
-          <ViewportButton icon={Camera} onClick={() => void toggleLook()} />
-          <ViewportButton icon={Maximize2} onClick={() => void connectRef.current()} />
+          <ViewportButton
+            icon={isFullscreen ? Minimize2 : Maximize2}
+            tooltip={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+            onClick={() => void toggleFullscreen()}
+          />
         </div>
       </div>
-      <div ref={viewportShellRef} className="relative flex-1 overflow-hidden bg-black">
+      <div
+        ref={viewportShellRef}
+        className="relative flex-1 overflow-hidden bg-black"
+      >
         <video
           ref={videoRef}
           className="absolute inset-0 h-full w-full bg-black object-contain"
@@ -1926,15 +2022,18 @@ export function Viewport() {
 
 function ViewportButton({
   icon: Icon,
+  tooltip,
   onClick,
 }: {
   icon: ElementType
+  tooltip?: string
   onClick?: () => void
 }) {
   return (
     <button
       className="rounded p-1.5 text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-white"
       onClick={onClick}
+      title={tooltip}
       type="button"
     >
       <Icon className="h-3.5 w-3.5" />

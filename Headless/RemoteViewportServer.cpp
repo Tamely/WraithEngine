@@ -8,6 +8,7 @@
 
 #include "GizmoHitTest.h"
 #include "HeadlessCommandProtocol.h"
+#include <Session/MeshPicking.h>
 #include <Renderer/VideoEncoderFactory.h>
 #include <stb_image.h>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -17,6 +18,7 @@
 #include <charconv>
 #include <chrono>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -222,6 +224,36 @@ std::optional<std::string> GetQueryParam(std::string_view Path,
     Query.remove_prefix(Amp + 1);
   }
   return std::nullopt;
+}
+
+constexpr float kMinimumScale = 0.001f;
+
+float SnapToStep(float value, float step) {
+  if (step <= 0.0f) {
+    return value;
+  }
+  return std::round(value / step) * step;
+}
+
+void ApplyGridSnap(bool enabled, float translationStep,
+                   float rotationStepDegrees, float scaleStep, GizmoMode mode, int axis,
+                   glm::vec3 &location, glm::vec3 &rotationDegrees,
+                   glm::vec3 &scale) {
+  if (!enabled || axis < 0 || axis > 2) {
+    return;
+  }
+
+  switch (mode) {
+  case GizmoMode::Translate:
+    location[axis] = SnapToStep(location[axis], translationStep);
+    break;
+  case GizmoMode::Rotate:
+    rotationDegrees[axis] = SnapToStep(rotationDegrees[axis], rotationStepDegrees);
+    break;
+  case GizmoMode::Scale:
+    scale[axis] = std::max(kMinimumScale, SnapToStep(scale[axis], scaleStep));
+    break;
+  }
 }
 
 std::string Trim(std::string_view Value) {
@@ -971,11 +1003,19 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetMaterialTexture:
     m_Host.SubmitRemoteCommand(*User, Command->EditorPayload);
     break;
+  case HeadlessCommandType::DropMesh:
+    HandleMeshDropCommand(*User, *Command);
+    break;
+  case HeadlessCommandType::DropTexture: {
+    HandleTextureDropCommand(*User, *Command);
+    break;
+  }
   case HeadlessCommandType::GizmoHover:
   case HeadlessCommandType::GizmoDragStart:
   case HeadlessCommandType::GizmoDragUpdate:
   case HeadlessCommandType::GizmoDragEnd:
   case HeadlessCommandType::SetGizmoMode:
+  case HeadlessCommandType::SetGridSnap:
     break;
   case HeadlessCommandType::Heartbeat:
   case HeadlessCommandType::ListAssets:
@@ -1610,6 +1650,55 @@ void RemoteViewportServer::HandleClientEncodedVideoPacket(
   }
 }
 
+void RemoteViewportServer::HandleTextureDropCommand(
+    SessionUserId User, const HeadlessCommand &Command) {
+  if (Command.TextureAssetPath.empty()) {
+    return;
+  }
+
+  const EditorSession &Session = m_Host.GetHeadlessLayer().GetSession();
+  const EditorViewportState *Viewport = Session.FindViewport(User);
+  if (Viewport == nullptr) {
+    return;
+  }
+
+  const std::string HitId = HitTestMeshes(
+      Viewport->Camera, m_Options.Width, m_Options.Height,
+      Command.MousePosition, Session.GetState().Scene.MeshInstances);
+  if (HitId.empty()) {
+    return;
+  }
+
+  m_Host.SubmitRemoteCommand(User, EditorCommand{SetMaterialTextureCommand{
+                                       .ObjectId = HitId,
+                                       .TextureAssetPath = Command.TextureAssetPath,
+                                   }});
+}
+
+void RemoteViewportServer::HandleMeshDropCommand(SessionUserId User,
+                                                 const HeadlessCommand &Command) {
+  if (Command.MeshAssetPath.empty()) {
+    return;
+  }
+
+  const EditorSession &Session = m_Host.GetHeadlessLayer().GetSession();
+  const EditorViewportState *Viewport = Session.FindViewport(User);
+  if (Viewport == nullptr) {
+    return;
+  }
+
+  const glm::vec3 SpawnLocation = ResolveViewportDropPosition(
+      Viewport->Camera, m_Options.Width, m_Options.Height, Command.MousePosition,
+      Session.GetState().Scene.MeshInstances);
+
+  m_Host.SubmitRemoteCommand(User, EditorCommand{CreateMeshObjectCommand{
+                                       .AssetPath = Command.MeshAssetPath,
+                                       .Location = SpawnLocation,
+                                       .RotationDegrees = glm::vec3(0.0f),
+                                       .Scale = glm::vec3(1.0f),
+                                   }});
+}
+
 bool RemoteViewportServer::HandleWebSocketUpgrade(uintptr_t ClientSocketValue,
                                                   std::string_view HeaderBlock,
                                                   std::string_view Path) {
@@ -1751,6 +1840,12 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetViewMode:
     m_Host.SetRemoteViewMode(Command->ViewMode);
     return true;
+  case HeadlessCommandType::DropMesh:
+    HandleMeshDropCommand(m_Host.GetHeadlessLayer().GetLocalUserId(), *Command);
+    return true;
+  case HeadlessCommandType::DropTexture:
+    HandleTextureDropCommand(m_Host.GetHeadlessLayer().GetLocalUserId(), *Command);
+    return true;
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
   case HeadlessCommandType::SelectObject:
@@ -1774,6 +1869,7 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   case HeadlessCommandType::GizmoDragUpdate:
   case HeadlessCommandType::GizmoDragEnd:
   case HeadlessCommandType::SetGizmoMode:
+  case HeadlessCommandType::SetGridSnap:
   case HeadlessCommandType::Heartbeat:
     return false;
   case HeadlessCommandType::ListAssets: {
@@ -1850,6 +1946,9 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::SetMaterialProperties:
   case HeadlessCommandType::SetMaterialTexture:
     m_Host.SubmitRemoteCommand(Client->User, Command->EditorPayload);
+    return true;
+  case HeadlessCommandType::DropMesh:
+    HandleMeshDropCommand(Client->User, *Command);
     return true;
   case HeadlessCommandType::ReloadScripts: {
     m_Host.ReloadUserScripts();
@@ -1961,6 +2060,15 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     Client->CurrentGizmoMode = Command->Mode;
     m_Host.GetHeadlessLayer().SetGizmoMode(Client->User, Command->Mode);
     return true;
+  case HeadlessCommandType::SetGridSnap: {
+    Client->GridSnap.Enabled = Command->Enabled;
+    Client->GridSnap.TranslationStep =
+        std::max(kMinimumScale, Command->TranslationStep);
+    Client->GridSnap.RotationStepDegrees =
+        std::max(0.001f, Command->RotationStepDegrees);
+    Client->GridSnap.ScaleStep = std::max(kMinimumScale, Command->ScaleStep);
+    return true;
+  }
   case HeadlessCommandType::GizmoHover: {
     if (Client->GizmoDrag.has_value()) {
       return true;
@@ -2001,53 +2109,70 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
         m_Host.GetHeadlessLayer().GetSession();
     const EditorViewportState *Viewport =
         Session.FindViewport(Client->User);
+    if (Viewport == nullptr) {
+      return true;
+    }
     const EditorObjectDetails *Selected =
         Session.FindSelectedObjectDetails(Client->User);
     const auto *DragTD = (Selected != nullptr && Selected->SupportsTransform)
         ? (Selected->WorldTransform.has_value() ? &*Selected->WorldTransform
                : (Selected->Transform.has_value() ? &*Selected->Transform : nullptr))
         : nullptr;
-    if (Viewport == nullptr || DragTD == nullptr) {
-      return true;
-    }
-    const glm::vec3 &ObjPos = DragTD->Location;
-    const float GizmoScale = ComputeGizmoScale(
-        Viewport->Camera, ObjPos, m_Options.Width, m_Options.Height);
-    if (Client->CurrentGizmoMode == GizmoMode::Rotate) {
-      auto DragState = BeginGizmoRotateDrag(
-          Viewport->Camera, m_Options.Width, m_Options.Height,
-          Command->MousePosition, ObjPos, GizmoScale, ObjPos);
-      if (!DragState.has_value()) {
-        return true;
+
+    if (DragTD != nullptr) {
+      const glm::vec3 &ObjPos = DragTD->Location;
+      const float GizmoScale = ComputeGizmoScale(
+          Viewport->Camera, ObjPos, m_Options.Width, m_Options.Height);
+      if (Client->CurrentGizmoMode == GizmoMode::Rotate) {
+        auto DragState = BeginGizmoRotateDrag(
+            Viewport->Camera, m_Options.Width, m_Options.Height,
+            Command->MousePosition, ObjPos, GizmoScale, ObjPos);
+        if (DragState.has_value()) {
+          Client->GizmoDrag = ActiveGizmoDrag{
+              .Math = *DragState,
+              .ObjectId = Selected->ObjectId,
+              .StartRotDeg = DragTD->RotationDegrees,
+              .StartScale = DragTD->Scale,
+              .Mode = GizmoMode::Rotate,
+              .GizmoScaleAtDragStart = GizmoScale,
+          };
+          Session.AcquireLock(Selected->ObjectId, Client->User);
+          m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, DragState->Axis);
+          return true;
+        }
+      } else {
+        auto DragState = BeginGizmoDrag(
+            Viewport->Camera, m_Options.Width, m_Options.Height,
+            Command->MousePosition, ObjPos, GizmoScale, ObjPos);
+        if (DragState.has_value()) {
+          Client->GizmoDrag = ActiveGizmoDrag{
+              .Math = *DragState,
+              .ObjectId = Selected->ObjectId,
+              .StartRotDeg = DragTD->RotationDegrees,
+              .StartScale = DragTD->Scale,
+              .Mode = Client->CurrentGizmoMode,
+              .GizmoScaleAtDragStart = GizmoScale,
+          };
+          Session.AcquireLock(Selected->ObjectId, Client->User);
+          m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, DragState->Axis);
+          return true;
+        }
       }
-      Client->GizmoDrag = ActiveGizmoDrag{
-          .Math = *DragState,
-          .ObjectId = Selected->ObjectId,
-          .StartRotDeg = DragTD->RotationDegrees,
-          .StartScale = DragTD->Scale,
-          .Mode = GizmoMode::Rotate,
-          .GizmoScaleAtDragStart = GizmoScale,
-      };
-      Session.AcquireLock(Selected->ObjectId, Client->User);
-      m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, DragState->Axis);
-    } else {
-      auto DragState = BeginGizmoDrag(
-          Viewport->Camera, m_Options.Width, m_Options.Height,
-          Command->MousePosition, ObjPos, GizmoScale, ObjPos);
-      if (!DragState.has_value()) {
-        return true;
-      }
-      Client->GizmoDrag = ActiveGizmoDrag{
-          .Math = *DragState,
-          .ObjectId = Selected->ObjectId,
-          .StartRotDeg = DragTD->RotationDegrees,
-          .StartScale = DragTD->Scale,
-          .Mode = Client->CurrentGizmoMode,
-          .GizmoScaleAtDragStart = GizmoScale,
-      };
-      Session.AcquireLock(Selected->ObjectId, Client->User);
-      m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, DragState->Axis);
     }
+
+    // No gizmo hit — fall back to viewport object picking.
+    const auto Hit = ResolveViewportSelectionHit(
+        Viewport->Camera, m_Options.Width, m_Options.Height,
+        Command->MousePosition, Session.GetState().Scene.MeshInstances,
+        m_Host.GetHeadlessLayer().BuildLightBillboards());
+    if (Hit.has_value() && !Hit->ObjectId.empty()) {
+      m_Host.SubmitRemoteCommand(Client->User,
+          EditorCommand{SelectObjectCommand{.ObjectId = Hit->ObjectId}});
+    }
+    return true;
+  }
+  case HeadlessCommandType::DropTexture: {
+    HandleTextureDropCommand(Client->User, *Command);
     return true;
   }
   case HeadlessCommandType::GizmoDragUpdate: {
@@ -2085,6 +2210,9 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
           Command->MousePosition.x, Command->MousePosition.y);
       RotDeg[Drag.Math.Axis] = Drag.StartRotDeg[Drag.Math.Axis] + DeltaDeg;
     }
+    ApplyGridSnap(Client->GridSnap.Enabled, Client->GridSnap.TranslationStep,
+                  Client->GridSnap.RotationStepDegrees, Client->GridSnap.ScaleStep,
+                  Drag.Mode, Drag.Math.Axis, Location, RotDeg, Scale);
     EditorCommand Cmd;
     Cmd.Payload = SetTransformCommand{
         .ObjectId = Drag.ObjectId,
@@ -2128,6 +2256,9 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
             Command->MousePosition.x, Command->MousePosition.y);
         RotDeg[Drag.Math.Axis] = Drag.StartRotDeg[Drag.Math.Axis] + DeltaDeg;
       }
+      ApplyGridSnap(Client->GridSnap.Enabled, Client->GridSnap.TranslationStep,
+                    Client->GridSnap.RotationStepDegrees, Client->GridSnap.ScaleStep,
+                    Drag.Mode, Drag.Math.Axis, Location, RotDeg, Scale);
       EditorCommand Cmd;
       Cmd.Payload = SetTransformCommand{
           .ObjectId = Drag.ObjectId,

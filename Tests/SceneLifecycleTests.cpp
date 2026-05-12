@@ -5,6 +5,8 @@
 
 #include <glm/vec3.hpp>
 
+#include <mutex>
+
 namespace {
 
 class RecordingSubscriber final : public Axiom::IEditorEventSubscriber {
@@ -22,6 +24,11 @@ Axiom::CommandContext MakeContext(uint64_t FrameIndex = 1) {
       .FrameIndex = FrameIndex,
       .DeltaTimeSeconds = 1.0f / 60.0f,
   };
+}
+
+void EnsureLogInitialized() {
+  static std::once_flag Flag;
+  std::call_once(Flag, []() { Axiom::Log::Init(); });
 }
 
 // Returns a session with a "world" Folder in Items + ObjectDetailsById so that
@@ -131,6 +138,90 @@ TEST(SceneLifecycleTests, CreateFolderHasNoTransform) {
   ASSERT_NE(Details, nullptr);
   EXPECT_FALSE(Details->SupportsTransform);
   EXPECT_FALSE(Details->Transform.has_value());
+}
+
+TEST(SceneLifecycleTests, CreateMeshObjectAddsMeshWithAssetAndTransform) {
+  EnsureLogInitialized();
+  Axiom::EditorSession Session = MakeWorldSession();
+  Session.SetContentDir(AXIOM_CONTENT_DIR);
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::CreateMeshObjectCommand{
+                      .AssetPath = "basicmesh.glb",
+                      .Location = glm::vec3(1.0f, 2.0f, 3.0f),
+                      .RotationDegrees = glm::vec3(0.0f, 45.0f, 0.0f),
+                      .Scale = glm::vec3(1.5f, 1.5f, 1.5f),
+                  }});
+  Session.Tick();
+
+  ASSERT_EQ(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+
+  const auto *Created = FindEvent<Axiom::ObjectCreatedEvent>(Subscriber.Events);
+  ASSERT_NE(Created, nullptr);
+
+  const auto *MeshChanged = FindEvent<Axiom::MeshAssetChangedEvent>(Subscriber.Events);
+  ASSERT_NE(MeshChanged, nullptr);
+  EXPECT_EQ(MeshChanged->ObjectId, Created->ObjectId);
+  EXPECT_EQ(MeshChanged->AssetPath, "basicmesh.glb");
+
+  const auto *TransformChanged =
+      FindEvent<Axiom::ObjectTransformUpdatedEvent>(Subscriber.Events);
+  ASSERT_NE(TransformChanged, nullptr);
+  EXPECT_EQ(TransformChanged->ObjectId, Created->ObjectId);
+  EXPECT_FLOAT_EQ(TransformChanged->Location.x, 1.0f);
+  EXPECT_FLOAT_EQ(TransformChanged->Location.y, 2.0f);
+  EXPECT_FLOAT_EQ(TransformChanged->Location.z, 3.0f);
+  EXPECT_FLOAT_EQ(TransformChanged->RotationDegrees.y, 45.0f);
+  EXPECT_FLOAT_EQ(TransformChanged->Scale.x, 1.5f);
+  EXPECT_FLOAT_EQ(TransformChanged->Scale.y, 1.5f);
+  EXPECT_FLOAT_EQ(TransformChanged->Scale.z, 1.5f);
+
+  const Axiom::EditorSceneItem *WorldItem = Session.FindSceneItem("world");
+  ASSERT_NE(WorldItem, nullptr);
+  ASSERT_EQ(WorldItem->Children.size(), 1u);
+  EXPECT_EQ(WorldItem->Children.front().Id, Created->ObjectId);
+
+  const Axiom::EditorObjectDetails *Details =
+      Session.FindObjectDetails(Created->ObjectId);
+  ASSERT_NE(Details, nullptr);
+  ASSERT_TRUE(Details->Transform.has_value());
+  ASSERT_TRUE(Details->WorldTransform.has_value());
+  EXPECT_FLOAT_EQ(Details->Transform->Location.x, 1.0f);
+  EXPECT_FLOAT_EQ(Details->Transform->Location.y, 2.0f);
+  EXPECT_FLOAT_EQ(Details->Transform->Location.z, 3.0f);
+  EXPECT_FLOAT_EQ(Details->WorldTransform->RotationDegrees.y, 45.0f);
+
+  const auto &Instances = Session.GetState().Scene.MeshInstances;
+  const auto It = std::find_if(Instances.begin(), Instances.end(),
+                               [&](const Axiom::EditorSceneMeshInstance &I) {
+                                 return I.ObjectId == Created->ObjectId;
+                               });
+  ASSERT_NE(It, Instances.end());
+  EXPECT_EQ(It->AssetRelativePath, "basicmesh.glb");
+  EXPECT_NE(It->Material, nullptr);
+
+  const auto *Ack = FindEvent<Axiom::CommandAcknowledgedEvent>(Subscriber.Events);
+  ASSERT_NE(Ack, nullptr);
+  EXPECT_EQ(Ack->CommandType, "create_mesh_object");
+}
+
+TEST(SceneLifecycleTests, CreateMeshObjectRejectsInvalidAssetPath) {
+  EnsureLogInitialized();
+  Axiom::EditorSession Session = MakeWorldSession();
+  Session.SetContentDir(AXIOM_CONTENT_DIR);
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::CreateMeshObjectCommand{
+                      .AssetPath = "Meshes/missing.glb",
+                  }});
+  Session.Tick();
+
+  ASSERT_NE(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+  ASSERT_EQ(FindEvent<Axiom::ObjectCreatedEvent>(Subscriber.Events), nullptr);
 }
 
 TEST(SceneLifecycleTests, CreateWithUnknownTemplateIdIsRejected) {
@@ -1014,7 +1105,7 @@ TEST(SceneLifecycleTests, SetMeshAsset_RejectsNonMeshTarget) {
 TEST(SceneLifecycleTests, SetMeshAsset_CreatesInstanceForRuntimeCreatedMesh) {
   // A mesh created via CreateObject has no MeshInstance entry yet.
   // SetMeshAsset must create the entry rather than silently dropping the command.
-  Axiom::Log::Init();
+  EnsureLogInitialized();
   Axiom::EditorSession Session(Axiom::SessionId{1});
   Session.SetContentDir(AXIOM_CONTENT_DIR);
   RecordingSubscriber Subscriber;

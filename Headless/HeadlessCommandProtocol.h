@@ -41,6 +41,7 @@ enum class HeadlessCommandType {
   GizmoDragUpdate,
   GizmoDragEnd,
   SetGizmoMode,
+  SetGridSnap,
   ListAssets,
   GetSchema,
   SetProperty,
@@ -52,6 +53,8 @@ enum class HeadlessCommandType {
   SetLightProperties,
   SetMaterialProperties,
   SetMaterialTexture,
+  DropMesh,
+  DropTexture,
   Heartbeat,
   RenderFrame,
   Quit,
@@ -65,6 +68,10 @@ struct HeadlessCommand {
   RendererViewMode ViewMode{RendererViewMode::Lit};
   glm::vec2 MousePosition{0.0f};
   GizmoMode Mode{GizmoMode::Translate};
+  bool Enabled{false};
+  float TranslationStep{1.0f};
+  float RotationStepDegrees{15.0f};
+  float ScaleStep{0.1f};
   std::string ObjectId;
   std::string PropertyName;
   std::optional<PropertyValue> PropertyVal;
@@ -74,6 +81,7 @@ struct HeadlessCommand {
   glm::vec4 BaseColorFactor{1.0f}; // used by SetMaterialProperties
   float Metallic{0.0f};         // used by SetMaterialProperties
   float Roughness{0.5f};        // used by SetMaterialProperties
+  std::string MeshAssetPath;    // used by DropMesh
   std::string TextureAssetPath; // used by SetMaterialTexture
 };
 
