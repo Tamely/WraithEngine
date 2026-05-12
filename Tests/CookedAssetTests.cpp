@@ -3,6 +3,7 @@
 #include <Assets/AssetCookManifest.h>
 #include <Assets/AssetCooker.h>
 #include <Assets/CookedMeshAsset.h>
+#include <Assets/CookedTextureAsset.h>
 #include <Assets/IAssetSource.h>
 #include <Assets/MeshAsset.h>
 
@@ -108,4 +109,36 @@ TEST(CookedAssetTests, CookMeshAssetWritesManifestAndCookedLookupResolves) {
   const auto Loaded = Axiom::Assets::LoadBasicMeshAsset(ContentRoot / "basicmesh.glb");
   ASSERT_TRUE(Loaded.has_value());
   EXPECT_FALSE(Loaded->Instances.empty());
+}
+
+TEST(CookedAssetTests, CookTextureAssetWritesManifestAndCookedLookupResolves) {
+  const auto TempRoot = MakeUniqueTempRoot("texture-manifest");
+  const auto ContentRoot = TempRoot / "Content";
+  EnsureTempDirectory(ContentRoot / "Engine");
+
+  CopyFileChecked(std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine" /
+                      "tf2 coconut.jpg",
+                  ContentRoot / "Engine" / "tf2 coconut.jpg");
+
+  const auto Entry = Axiom::Assets::CookTextureAsset(
+      ContentRoot, std::filesystem::path("Engine/tf2 coconut.jpg"));
+  ASSERT_TRUE(Entry.has_value());
+  EXPECT_EQ(Entry->Kind, Axiom::Assets::AssetKind::Texture);
+  EXPECT_EQ(Entry->RelativePath, "Engine/tf2 coconut.jpg");
+
+  const auto Manifest = Axiom::Assets::LoadAssetCookManifest(
+      ContentRoot / "Cooked" / "AssetCookManifest.json");
+  ASSERT_TRUE(Manifest.has_value());
+  ASSERT_EQ(Manifest->Entries.size(), 1u);
+  EXPECT_EQ(Manifest->Entries[0].Id.Value, Entry->Id.Value);
+
+  const Axiom::Assets::CookedAssetSource Cooked(ContentRoot);
+  const auto Resolved = Cooked.Resolve(Entry->Id);
+  ASSERT_TRUE(Resolved.has_value());
+  EXPECT_EQ(Resolved->extension(), ".wtex");
+
+  const auto Loaded =
+      Axiom::Assets::LoadTextureFromFile(ContentRoot / "Engine" / "tf2 coconut.jpg");
+  ASSERT_TRUE(Loaded != nullptr);
+  EXPECT_TRUE(Loaded->IsValid());
 }
