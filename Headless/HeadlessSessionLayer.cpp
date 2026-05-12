@@ -217,6 +217,7 @@ std::vector<LightBillboardOverlay> HeadlessSessionLayer::BuildLightBillboards()
         : Details.Transform.has_value()     ? &*Details.Transform
                                             : nullptr;
     Result.push_back({
+        .ObjectId = Details.ObjectId,
         .WorldPosition = EffectiveTransform != nullptr
             ? EffectiveTransform->Location
             : glm::vec3(0.0f),

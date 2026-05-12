@@ -4,6 +4,7 @@
 #include "Renderer/Camera.h"
 #include "Renderer/Vulkan/VulkanInitializers.h"
 #include "Renderer/Vulkan/VulkanPipeline.h"
+#include "Session/MeshPicking.h"
 
 #include <array>
 #include <cmath>
@@ -24,24 +25,6 @@ struct BillboardPushConstants {
 };
 static_assert(sizeof(BillboardPushConstants) <= 128,
               "BillboardPushConstants exceeds guaranteed push constant minimum");
-
-float ComputeBillboardHalfSizeWorld(const Camera &Camera,
-                                    const LightBillboardOverlay &Billboard,
-                                    VkExtent2D DrawExtent) {
-  const glm::vec3 ToBillboard = Billboard.WorldPosition - Camera.GetPosition();
-  const float ForwardDistance =
-      glm::dot(ToBillboard, glm::normalize(Camera.GetForward()));
-  const float Distance = std::max(ForwardDistance, 0.1f);
-  const float ProjectionY = std::abs(Camera.GetProjectionMatrix()[1][1]);
-  if (ProjectionY < 0.0001f || DrawExtent.height == 0) {
-    return 0.1f;
-  }
-
-  const float TanHalfFov = 1.0f / ProjectionY;
-  const float WorldUnitsPerPixel =
-      (2.0f * Distance * TanHalfFov) / static_cast<float>(DrawExtent.height);
-  return std::max(0.01f, Billboard.PixelSize * 0.5f * WorldUnitsPerPixel);
-}
 
 } // namespace
 
@@ -243,8 +226,9 @@ void VulkanLightBillboardRenderer::DrawLightBillboards(
     BillboardPushConstants Push{};
     Push.ViewProjection = ViewProjection;
     Push.WorldPositionAndHalfSize = glm::vec4(
-        Billboard.WorldPosition,
-        ComputeBillboardHalfSizeWorld(*Scene.ActiveCamera, Billboard, DrawExtent));
+        Billboard.WorldPosition, ComputeBillboardHalfSizeWorld(
+                                     *Scene.ActiveCamera, Billboard.WorldPosition,
+                                     Billboard.PixelSize, DrawExtent.height));
     Push.Color = Billboard.Color;
     Push.CameraRight = glm::vec4(CameraRight, 0.0f);
     Push.CameraUp = glm::vec4(CameraUp, 0.0f);

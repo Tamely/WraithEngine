@@ -2118,13 +2118,14 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
       }
     }
 
-    // No gizmo hit — fall back to mesh picking.
-    const std::string HitId = HitTestMeshes(
+    // No gizmo hit — fall back to viewport object picking.
+    const auto Hit = ResolveViewportSelectionHit(
         Viewport->Camera, m_Options.Width, m_Options.Height,
-        Command->MousePosition, Session.GetState().Scene.MeshInstances);
-    if (!HitId.empty()) {
+        Command->MousePosition, Session.GetState().Scene.MeshInstances,
+        m_Host.GetHeadlessLayer().BuildLightBillboards());
+    if (Hit.has_value() && !Hit->ObjectId.empty()) {
       m_Host.SubmitRemoteCommand(Client->User,
-          EditorCommand{SelectObjectCommand{.ObjectId = HitId}});
+          EditorCommand{SelectObjectCommand{.ObjectId = Hit->ObjectId}});
     }
     return true;
   }

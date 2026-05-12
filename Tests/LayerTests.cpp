@@ -1192,6 +1192,7 @@ TEST(RenderSceneTests, RenderCommandSubmitsLightBillboardOverlay) {
   Axiom::RenderScene Scene;
   Axiom::RenderCommand::BeginScene(Scene);
   Axiom::RenderCommand::SubmitLightBillboard({
+      .ObjectId = "light-test",
       .WorldPosition = {4.0f, 5.0f, 6.0f},
       .Color = {0.8f, 0.3f, 0.1f, 1.0f},
       .PixelSize = 40.0f,
@@ -1199,6 +1200,7 @@ TEST(RenderSceneTests, RenderCommandSubmitsLightBillboardOverlay) {
   Axiom::RenderCommand::EndScene();
 
   ASSERT_EQ(Scene.LightBillboards.size(), 1u);
+  EXPECT_EQ(Scene.LightBillboards.front().ObjectId, "light-test");
   EXPECT_FLOAT_EQ(Scene.LightBillboards.front().WorldPosition.x, 4.0f);
   EXPECT_FLOAT_EQ(Scene.LightBillboards.front().Color.g, 0.3f);
   EXPECT_FLOAT_EQ(Scene.LightBillboards.front().PixelSize, 40.0f);
@@ -1261,20 +1263,26 @@ TEST(HeadlessSessionLayerTests, BuildLightBillboardsUsesVisibleLightsOnly) {
   const auto WorldTransformBillboard = std::find_if(
       Billboards.begin(), Billboards.end(),
       [](const Axiom::LightBillboardOverlay &Billboard) {
-        return Billboard.WorldPosition.x == -3.0f;
+        return Billboard.ObjectId == "light-b";
       });
   ASSERT_NE(WorldTransformBillboard, Billboards.end());
   EXPECT_FLOAT_EQ(WorldTransformBillboard->PixelSize, 48.0f);
   EXPECT_FLOAT_EQ(WorldTransformBillboard->Color.r, 0.9f);
+  EXPECT_FLOAT_EQ(WorldTransformBillboard->WorldPosition.x, -3.0f);
 
   const auto LocalTransformBillboard = std::find_if(
       Billboards.begin(), Billboards.end(),
       [](const Axiom::LightBillboardOverlay &Billboard) {
-        return Billboard.WorldPosition.x == 1.0f;
+        return Billboard.ObjectId == "light-a";
       });
   ASSERT_NE(LocalTransformBillboard, Billboards.end());
   EXPECT_FLOAT_EQ(LocalTransformBillboard->Color.g, 0.7f);
   EXPECT_FLOAT_EQ(LocalTransformBillboard->WorldPosition.z, 3.0f);
+  EXPECT_EQ(std::find_if(Billboards.begin(), Billboards.end(),
+                         [](const Axiom::LightBillboardOverlay &Billboard) {
+                           return Billboard.ObjectId == "light-hidden";
+                         }),
+            Billboards.end());
 }
 
 TEST(SvgTextureTests, LightbulbSvgRasterizesToValidTexture) {

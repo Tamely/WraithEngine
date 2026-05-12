@@ -7,6 +7,7 @@
 #include <glm/vec4.hpp>
 
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace Axiom {
@@ -28,6 +29,7 @@ struct DirectionalLight {
 };
 
 struct LightBillboardOverlay {
+  std::string ObjectId;
   glm::vec3 WorldPosition{0.0f};
   glm::vec4 Color{1.0f};
   float PixelSize{48.0f};

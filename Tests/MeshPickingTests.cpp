@@ -37,6 +37,78 @@ TEST(MeshPickingTests, HitTestMeshesDetailedReturnsWorldHitPosition) {
   EXPECT_NEAR(Hit->WorldPosition.z, 0.5f, 1e-3f);
 }
 
+TEST(MeshPickingTests, HitTestLightBillboardsDetailedReturnsLightHit) {
+  const Axiom::Camera Camera = MakeCamera({0.0f, 1.0f, 5.0f}, {0.0f, 1.0f, 0.0f});
+  const std::vector<Axiom::LightBillboardOverlay> Billboards{{
+      .ObjectId = "key-light",
+      .WorldPosition = {0.0f, 1.0f, 0.0f},
+      .PixelSize = 48.0f,
+  }};
+
+  const auto Hit = Axiom::HitTestLightBillboardsDetailed(
+      Camera, 1280, 720, {640.0f, 360.0f}, Billboards);
+
+  ASSERT_TRUE(Hit.has_value());
+  EXPECT_EQ(Hit->ObjectId, "key-light");
+  EXPECT_NEAR(Hit->WorldPosition.x, 0.0f, 1e-3f);
+  EXPECT_NEAR(Hit->WorldPosition.y, 1.0f, 1e-3f);
+  EXPECT_NEAR(Hit->WorldPosition.z, 0.0f, 1e-3f);
+  EXPECT_NEAR(Hit->Distance, 5.0f, 1e-3f);
+}
+
+TEST(MeshPickingTests, HitTestLightBillboardsDetailedMissesOutsideQuad) {
+  const Axiom::Camera Camera = MakeCamera({0.0f, 1.0f, 5.0f}, {0.0f, 1.0f, 0.0f});
+  const std::vector<Axiom::LightBillboardOverlay> Billboards{{
+      .ObjectId = "key-light",
+      .WorldPosition = {0.0f, 1.0f, 0.0f},
+      .PixelSize = 48.0f,
+  }};
+
+  const auto Hit =
+      Axiom::HitTestLightBillboardsDetailed(Camera, 1280, 720, {0.0f, 0.0f}, Billboards);
+
+  EXPECT_FALSE(Hit.has_value());
+}
+
+TEST(MeshPickingTests, ResolveViewportSelectionHitChoosesNearestObjectHit) {
+  const Axiom::Camera Camera = MakeCamera({0.0f, 1.0f, 5.0f}, {0.0f, 1.0f, 0.0f});
+  const std::vector<Axiom::EditorSceneMeshInstance> Instances{{
+      .ObjectId = "crate",
+      .Mesh = Axiom::MeshData{
+          .BoundsMin = {-0.5f, -0.5f, -0.5f},
+          .BoundsMax = {0.5f, 0.5f, 0.5f},
+      },
+      .Transform = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 1.0f, 2.0f)),
+  }};
+  const std::vector<Axiom::LightBillboardOverlay> Billboards{{
+      .ObjectId = "key-light",
+      .WorldPosition = {0.0f, 1.0f, 0.0f},
+      .PixelSize = 48.0f,
+  }};
+
+  const auto Hit = Axiom::ResolveViewportSelectionHit(
+      Camera, 1280, 720, {640.0f, 360.0f}, Instances, Billboards);
+
+  ASSERT_TRUE(Hit.has_value());
+  EXPECT_EQ(Hit->ObjectId, "crate");
+  EXPECT_LT(Hit->Distance, 5.0f);
+}
+
+TEST(MeshPickingTests, ResolveViewportSelectionHitUsesBillboardWhenMeshMisses) {
+  const Axiom::Camera Camera = MakeCamera({0.0f, 1.0f, 5.0f}, {0.0f, 1.0f, 0.0f});
+  const std::vector<Axiom::LightBillboardOverlay> Billboards{{
+      .ObjectId = "key-light",
+      .WorldPosition = {0.0f, 1.0f, 0.0f},
+      .PixelSize = 48.0f,
+  }};
+
+  const auto Hit = Axiom::ResolveViewportSelectionHit(
+      Camera, 1280, 720, {640.0f, 360.0f}, {}, Billboards);
+
+  ASSERT_TRUE(Hit.has_value());
+  EXPECT_EQ(Hit->ObjectId, "key-light");
+}
+
 TEST(MeshPickingTests, ResolveViewportDropPositionFallsBackToGroundPlane) {
   const Axiom::Camera Camera = MakeCamera({0.0f, 1.0f, 5.0f}, {0.0f, 0.0f, 0.0f});
 

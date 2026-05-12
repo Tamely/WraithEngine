@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Renderer/RenderScene.h>
 #include <Renderer/Camera.h>
 #include <Session/EditorSession.h>
 
@@ -21,11 +22,13 @@ struct ViewportRay {
   glm::vec3 Direction{0.0f, 0.0f, -1.0f};
 };
 
-struct MeshHitResult {
+struct ViewportObjectHitResult {
   std::string ObjectId;
   glm::vec3 WorldPosition{0.0f};
   float Distance{0.0f};
 };
+
+using MeshHitResult = ViewportObjectHitResult;
 
 inline std::optional<ViewportRay>
 BuildViewportRay(const Camera &Cam, uint32_t VpWidth, uint32_t VpHeight,
@@ -130,6 +133,100 @@ HitTestMeshesDetailed(const Camera &Cam, uint32_t VpWidth, uint32_t VpHeight,
   }
 
   return BestHit;
+}
+
+inline float ComputeBillboardHalfSizeWorld(const Camera &Cam,
+                                           const glm::vec3 &WorldPosition,
+                                           float PixelSize,
+                                           uint32_t VpHeight) {
+  const glm::vec3 ToBillboard = WorldPosition - Cam.GetPosition();
+  const float ForwardDistance =
+      glm::dot(ToBillboard, glm::normalize(Cam.GetForward()));
+  const float Distance = std::max(ForwardDistance, 0.1f);
+  const float ProjectionY = glm::abs(Cam.GetProjectionMatrix()[1][1]);
+  if (ProjectionY < 0.0001f || VpHeight == 0) {
+    return 0.1f;
+  }
+
+  const float TanHalfFov = 1.0f / ProjectionY;
+  const float WorldUnitsPerPixel =
+      (2.0f * Distance * TanHalfFov) / static_cast<float>(VpHeight);
+  return std::max(0.01f, PixelSize * 0.5f * WorldUnitsPerPixel);
+}
+
+inline std::optional<ViewportObjectHitResult>
+HitTestLightBillboardsDetailed(const Camera &Cam, uint32_t VpWidth,
+                               uint32_t VpHeight, glm::vec2 MousePixel,
+                               const std::vector<LightBillboardOverlay> &Billboards) {
+  const auto Ray = BuildViewportRay(Cam, VpWidth, VpHeight, MousePixel);
+  if (!Ray.has_value() || Billboards.empty()) {
+    return std::nullopt;
+  }
+
+  const glm::vec3 PlaneNormal = glm::normalize(Cam.GetForward());
+  const glm::vec3 PlaneRight = Cam.GetRight();
+  const glm::vec3 PlaneUp = Cam.GetUp();
+
+  float BestDistance = std::numeric_limits<float>::infinity();
+  std::optional<ViewportObjectHitResult> BestHit;
+  for (const LightBillboardOverlay &Billboard : Billboards) {
+    const float Denominator = glm::dot(Ray->Direction, PlaneNormal);
+    if (glm::abs(Denominator) < 1e-6f) {
+      continue;
+    }
+
+    const float Distance =
+        glm::dot(Billboard.WorldPosition - Ray->Origin, PlaneNormal) /
+        Denominator;
+    if (Distance < 0.0f) {
+      continue;
+    }
+
+    const glm::vec3 WorldHit = Ray->Origin + Ray->Direction * Distance;
+    const glm::vec3 Delta = WorldHit - Billboard.WorldPosition;
+    const float HalfSize = ComputeBillboardHalfSizeWorld(
+        Cam, Billboard.WorldPosition, Billboard.PixelSize, VpHeight);
+    const float AlongRight = glm::dot(Delta, PlaneRight);
+    const float AlongUp = glm::dot(Delta, PlaneUp);
+    if (glm::abs(AlongRight) > HalfSize || glm::abs(AlongUp) > HalfSize) {
+      continue;
+    }
+
+    if (Distance < BestDistance) {
+      BestDistance = Distance;
+      BestHit = ViewportObjectHitResult{
+          .ObjectId = Billboard.ObjectId,
+          .WorldPosition = WorldHit,
+          .Distance = Distance,
+      };
+    }
+  }
+
+  return BestHit;
+}
+
+inline std::optional<ViewportObjectHitResult>
+ResolveViewportSelectionHit(const Camera &Cam, uint32_t VpWidth,
+                            uint32_t VpHeight, glm::vec2 MousePixel,
+                            const std::vector<EditorSceneMeshInstance> &Instances,
+                            const std::vector<LightBillboardOverlay> &Billboards) {
+  const auto MeshHit =
+      HitTestMeshesDetailed(Cam, VpWidth, VpHeight, MousePixel, Instances);
+  const auto BillboardHit = HitTestLightBillboardsDetailed(
+      Cam, VpWidth, VpHeight, MousePixel, Billboards);
+
+  if (MeshHit.has_value() && BillboardHit.has_value()) {
+    return MeshHit->Distance <= BillboardHit->Distance
+               ? std::optional<ViewportObjectHitResult>(*MeshHit)
+               : BillboardHit;
+  }
+  if (MeshHit.has_value()) {
+    return *MeshHit;
+  }
+  if (BillboardHit.has_value()) {
+    return BillboardHit;
+  }
+  return std::nullopt;
 }
 
 // Returns the ObjectId of the closest mesh instance hit by a ray cast from the
