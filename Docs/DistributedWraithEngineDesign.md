@@ -47,6 +47,8 @@
 - `VulkanGizmoRenderer` draws mode-appropriate handles: arrows for translate, arrows with perpendicular cross-caps for scale, and 24-segment screen-space rings for rotate; the hovered handle brightens in all modes
 - Gizmo mouse coordinates are forwarded using the correct `object-contain` content rect mapping so hit-testing is accurate regardless of the viewport aspect ratio or window size
 - `gizmoMode` state lives in `RemoteViewportContext` so the toolbar and viewport share a single source of truth without prop drilling
+- Mesh assets can now be dragged from the content browser into the remote viewport to create mesh objects directly at the cursor-resolved spawn point
+- Visible lights now render as color-tinted billboard icons in the remote viewport, and those billboards participate in remote click selection using the same gizmo-first input path
 - Collaboration v1 is now implemented: object locking, selection/lock visibility, presence roster, heartbeat-driven idle detection, and two-threshold disconnect (Away at 10 s, Disconnected at 30 s with lock release)
 - `EditorObjectLockState` (`Unlocked` / `Locked`) and `EditorObjectCollaborationState` live in `EditorSessionState`; `AcquireLock`, `ReleaseLock`, and `ReleaseAllLocksForUser` are public `EditorSession` methods
 - `ValidateCommand` rejects any mutating command (`SetTransform`, `Rename`, `SetObjectVisibility`, `Delete`, `Reparent`) on an object locked by a different user

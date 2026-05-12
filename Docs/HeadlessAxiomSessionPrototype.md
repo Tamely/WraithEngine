@@ -264,6 +264,14 @@ A server-side transform gizmo is now fully implemented on the `scene-editing` br
 ### Coordinate Mapping Fix
 - mouse pixel coordinates sent to the server account for the `object-contain` CSS letterboxing on the video element: the actual content rectangle is computed from the uniform scale factor and centering offsets before mapping to server pixels, so hit-testing is accurate regardless of window aspect ratio
 
+## Viewport Object Interaction
+
+- dragging a mesh asset from the content browser into the remote viewport now creates a new mesh object directly at the resolved drop point; the server prefers mesh-surface hit, then ground-plane intersection, then a fixed point in front of the camera
+- visible light objects are rendered as camera-facing `lightbulb.svg` billboards tinted from the light color
+- remote viewport click selection now considers those light billboards in addition to mesh hits
+- selection remains gizmo-first; if no gizmo handle is hit, the server compares the nearest mesh hit and nearest light-billboard hit and selects whichever is closer in world space
+- billboard selection targets the underlying light object id; hidden lights do not expose selectable billboards
+
 ## Collaboration v1
 
 Object locking, selection/lock visibility, presence indicators, and heartbeat-driven idle detection are now fully implemented.
