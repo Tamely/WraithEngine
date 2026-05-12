@@ -18,6 +18,7 @@
 #include <charconv>
 #include <chrono>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -223,6 +224,39 @@ std::optional<std::string> GetQueryParam(std::string_view Path,
     Query.remove_prefix(Amp + 1);
   }
   return std::nullopt;
+}
+
+constexpr float kTranslationSnapStep = 1.0f;
+constexpr float kRotationSnapStepDegrees = 15.0f;
+constexpr float kScaleSnapStep = 0.1f;
+constexpr float kMinimumScale = 0.001f;
+
+float SnapToStep(float value, float step) {
+  if (step <= 0.0f) {
+    return value;
+  }
+  return std::round(value / step) * step;
+}
+
+void ApplyGridSnap(bool gridSnapEnabled, GizmoMode mode, int axis,
+                   glm::vec3 &location, glm::vec3 &rotationDegrees,
+                   glm::vec3 &scale) {
+  if (!gridSnapEnabled || axis < 0 || axis > 2) {
+    return;
+  }
+
+  switch (mode) {
+  case GizmoMode::Translate:
+    location[axis] = SnapToStep(location[axis], kTranslationSnapStep);
+    break;
+  case GizmoMode::Rotate:
+    rotationDegrees[axis] =
+        SnapToStep(rotationDegrees[axis], kRotationSnapStepDegrees);
+    break;
+  case GizmoMode::Scale:
+    scale[axis] = std::max(kMinimumScale, SnapToStep(scale[axis], kScaleSnapStep));
+    break;
+  }
 }
 
 std::string Trim(std::string_view Value) {
@@ -984,6 +1018,7 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::GizmoDragUpdate:
   case HeadlessCommandType::GizmoDragEnd:
   case HeadlessCommandType::SetGizmoMode:
+  case HeadlessCommandType::SetGridSnap:
     break;
   case HeadlessCommandType::Heartbeat:
   case HeadlessCommandType::ListAssets:
@@ -1837,6 +1872,7 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   case HeadlessCommandType::GizmoDragUpdate:
   case HeadlessCommandType::GizmoDragEnd:
   case HeadlessCommandType::SetGizmoMode:
+  case HeadlessCommandType::SetGridSnap:
   case HeadlessCommandType::Heartbeat:
     return false;
   case HeadlessCommandType::ListAssets: {
@@ -2027,6 +2063,9 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     Client->CurrentGizmoMode = Command->Mode;
     m_Host.GetHeadlessLayer().SetGizmoMode(Client->User, Command->Mode);
     return true;
+  case HeadlessCommandType::SetGridSnap:
+    Client->GridSnapEnabled = Command->Enabled;
+    return true;
   case HeadlessCommandType::GizmoHover: {
     if (Client->GizmoDrag.has_value()) {
       return true;
@@ -2168,6 +2207,8 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
           Command->MousePosition.x, Command->MousePosition.y);
       RotDeg[Drag.Math.Axis] = Drag.StartRotDeg[Drag.Math.Axis] + DeltaDeg;
     }
+    ApplyGridSnap(Client->GridSnapEnabled, Drag.Mode, Drag.Math.Axis, Location,
+                  RotDeg, Scale);
     EditorCommand Cmd;
     Cmd.Payload = SetTransformCommand{
         .ObjectId = Drag.ObjectId,
@@ -2211,6 +2252,8 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
             Command->MousePosition.x, Command->MousePosition.y);
         RotDeg[Drag.Math.Axis] = Drag.StartRotDeg[Drag.Math.Axis] + DeltaDeg;
       }
+      ApplyGridSnap(Client->GridSnapEnabled, Drag.Mode, Drag.Math.Axis, Location,
+                    RotDeg, Scale);
       EditorCommand Cmd;
       Cmd.Payload = SetTransformCommand{
           .ObjectId = Drag.ObjectId,

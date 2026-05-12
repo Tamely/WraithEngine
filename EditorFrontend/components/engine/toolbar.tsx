@@ -29,7 +29,9 @@ import { PresenceRoster } from "./presence-roster"
 export function Toolbar() {
   const {
     gizmoMode,
+    gridSnapEnabled,
     setGizmoMode,
+    setGridSnapEnabled,
     saveScene,
     saveStatus,
     setSaveStatus,
@@ -117,7 +119,12 @@ export function Toolbar() {
       <ToolbarDivider />
 
       <ToolbarGroup>
-        <ToolbarButton icon={Grid3X3} tooltip="Grid Snap" />
+        <ToolbarButton
+          icon={Grid3X3}
+          tooltip="Grid Snap (1u / 15deg / 0.1x)"
+          active={gridSnapEnabled}
+          onClick={() => void setGridSnapEnabled(!gridSnapEnabled)}
+        />
         <ToolbarButton icon={Layers} tooltip="Layers" />
       </ToolbarGroup>
 

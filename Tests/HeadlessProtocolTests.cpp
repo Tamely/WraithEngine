@@ -155,6 +155,16 @@ TEST(HeadlessProtocolTests, RemoteViewportAcceptsSetTransformCommand) {
   EXPECT_EQ(Payload->Scale, glm::vec3(1.0f, 1.5f, 2.0f));
 }
 
+TEST(HeadlessProtocolTests, RemoteViewportAcceptsSetGridSnapCommand) {
+  std::string Error;
+  const auto Command = Axiom::ParseRemoteViewportCommand(
+      R"json({"type":"set_grid_snap","enabled":true})json", Error);
+
+  ASSERT_TRUE(Command.has_value()) << Error;
+  EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::SetGridSnap);
+  EXPECT_TRUE(Command->Enabled);
+}
+
 TEST(HeadlessProtocolTests, SerializesCommandRejectedEvent) {
   const Axiom::PublishedEditorEvent Event{
       .Id = Axiom::EventId{4},

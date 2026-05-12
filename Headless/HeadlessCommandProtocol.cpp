@@ -964,6 +964,13 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
     }
     return HeadlessCommand{.Type = HeadlessCommandType::SetGizmoMode, .Mode = Mode};
   }
+  if (*Type == "set_grid_snap") {
+    static const std::regex EnabledPattern(R"json("enabled"\s*:\s*(true|false))json");
+    const auto EnabledStr = MatchString(JsonLine, EnabledPattern);
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::SetGridSnap,
+        .Enabled = EnabledStr.value_or("false") == "true"};
+  }
 
   Error = "Unsupported command type: " + *Type;
   return std::nullopt;
@@ -994,6 +1001,7 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::GizmoDragUpdate:
   case HeadlessCommandType::GizmoDragEnd:
   case HeadlessCommandType::SetGizmoMode:
+  case HeadlessCommandType::SetGridSnap:
   case HeadlessCommandType::ListAssets:
   case HeadlessCommandType::GetSchema:
   case HeadlessCommandType::SetProperty:

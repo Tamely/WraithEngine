@@ -41,6 +41,7 @@ enum class HeadlessCommandType {
   GizmoDragUpdate,
   GizmoDragEnd,
   SetGizmoMode,
+  SetGridSnap,
   ListAssets,
   GetSchema,
   SetProperty,
@@ -67,6 +68,7 @@ struct HeadlessCommand {
   RendererViewMode ViewMode{RendererViewMode::Lit};
   glm::vec2 MousePosition{0.0f};
   GizmoMode Mode{GizmoMode::Translate};
+  bool Enabled{false};
   std::string ObjectId;
   std::string PropertyName;
   std::optional<PropertyValue> PropertyVal;

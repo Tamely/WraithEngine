@@ -73,6 +73,7 @@ private:
     std::unique_ptr<PacketOutput> VideoPacketOutput;
     std::optional<ActiveGizmoDrag> GizmoDrag;
     GizmoMode CurrentGizmoMode{GizmoMode::Translate};
+    bool GridSnapEnabled{false};
   };
 
   struct ClientSessionResolution {

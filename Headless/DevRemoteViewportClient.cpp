@@ -153,6 +153,11 @@ int main(int argc, char **argv) {
       Host.Step();
       Subscriber.DiscardLatestFrame();
       break;
+    case Axiom::HeadlessCommandType::SetGridSnap:
+      std::cout << Axiom::SerializeError(
+                       "`set_grid_snap` is only supported by the remote viewport server.")
+                << std::endl;
+      break;
     case Axiom::HeadlessCommandType::RenderFrame: {
       if (!SceneLoaded) {
         std::cout << Axiom::SerializeError(
