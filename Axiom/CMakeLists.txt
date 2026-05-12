@@ -5,6 +5,7 @@ set(ENGINE_SOURCES
   Assets/AssetCooker.cpp
   Assets/AssimpImporter.cpp
   Assets/CookedMeshAsset.cpp
+  Assets/CookedTextureAsset.cpp
   Assets/IAssetSource.cpp
   Assets/MeshAsset.cpp
   Assets/SceneFile.cpp
