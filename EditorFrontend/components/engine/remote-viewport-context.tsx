@@ -34,6 +34,13 @@ export type RemoteViewportViewMode = "lit" | "unlit" | "wireframe"
 export type RemoteViewportGizmoMode = "translate" | "scale" | "rotate"
 export type SessionSceneItemKind = "folder" | "mesh" | "light" | "camera" | "actor"
 
+export interface RemoteViewportGridSnapSettings {
+  enabled: boolean
+  translationStep: number
+  rotationStepDegrees: number
+  scaleStep: number
+}
+
 export interface SessionAssetDescriptor {
   id: number
   name: string
@@ -130,7 +137,7 @@ interface RemoteViewportActions {
   toggleLook: () => Promise<void>
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
   setGizmoMode: (mode: RemoteViewportGizmoMode) => Promise<void>
-  setGridSnapEnabled: (enabled: boolean) => Promise<void>
+  setGridSnapSettings: (settings: RemoteViewportGridSnapSettings) => Promise<void>
   refreshSessionSnapshot: () => Promise<void>
   selectObject: (objectId: string) => Promise<boolean>
   renameObject: (objectId: string, displayName: string) => Promise<boolean>
@@ -182,7 +189,7 @@ interface RemoteViewportContextValue {
   sessionDetailText: string
   viewMode: RemoteViewportViewMode
   gizmoMode: RemoteViewportGizmoMode
-  gridSnapEnabled: boolean
+  gridSnapSettings: RemoteViewportGridSnapSettings
   isLooking: boolean
   eventLog: string[]
   serverOrigin: string
@@ -256,7 +263,7 @@ interface RemoteViewportContextValue {
   toggleLook: () => Promise<void>
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
   setGizmoMode: (mode: RemoteViewportGizmoMode) => Promise<void>
-  setGridSnapEnabled: (enabled: boolean) => Promise<void>
+  setGridSnapSettings: (settings: RemoteViewportGridSnapSettings) => Promise<void>
   refreshSessionSnapshot: () => Promise<void>
   selectObject: (objectId: string) => Promise<boolean>
   renameObject: (objectId: string, displayName: string) => Promise<boolean>
@@ -301,12 +308,19 @@ function findSceneItem(items: SessionSceneItem[], objectId: string | null): Sess
 }
 
 export function RemoteViewportProvider({ children }: { children: ReactNode }) {
+  const defaultGridSnapSettings: RemoteViewportGridSnapSettings = {
+    enabled: true,
+    translationStep: 1,
+    rotationStepDegrees: 15,
+    scaleStep: 0.1,
+  }
+
   const actionsRef = useRef<RemoteViewportActions>({
     reconnect: async () => {},
     toggleLook: async () => {},
     setMode: async () => {},
     setGizmoMode: async () => {},
-    setGridSnapEnabled: async () => {},
+    setGridSnapSettings: async () => {},
     refreshSessionSnapshot: async () => {},
     selectObject: async () => false,
     renameObject: async () => false,
@@ -339,7 +353,8 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
   )
   const [viewMode, setViewMode] = useState<RemoteViewportViewMode>("lit")
   const [gizmoMode, setGizmoModeState] = useState<RemoteViewportGizmoMode>("translate")
-  const [gridSnapEnabled, setGridSnapEnabledState] = useState(false)
+  const [gridSnapSettings, setGridSnapSettingsState] =
+    useState<RemoteViewportGridSnapSettings>(defaultGridSnapSettings)
   const [isLooking, setIsLooking] = useState(false)
   const [eventLog, setEventLog] = useState<string[]>([])
   const [serverOrigin, setServerOrigin] = useState("")
@@ -452,9 +467,9 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     await actionsRef.current.setGizmoMode(mode)
   }, [])
 
-  const setGridSnapEnabled = useCallback(async (enabled: boolean) => {
-    setGridSnapEnabledState(enabled)
-    await actionsRef.current.setGridSnapEnabled(enabled)
+  const setGridSnapSettings = useCallback(async (settings: RemoteViewportGridSnapSettings) => {
+    setGridSnapSettingsState(settings)
+    await actionsRef.current.setGridSnapSettings(settings)
   }, [])
 
   const refreshSessionSnapshot = useCallback(async () => {
@@ -578,7 +593,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       sessionDetailText,
       viewMode,
       gizmoMode,
-      gridSnapEnabled,
+      gridSnapSettings,
       isLooking,
       eventLog,
       serverOrigin,
@@ -632,7 +647,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       toggleLook,
       setMode,
       setGizmoMode: setGizmoModeAction,
-      setGridSnapEnabled,
+      setGridSnapSettings,
       refreshSessionSnapshot,
       selectObject,
       renameObject,
@@ -658,7 +673,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       frameText,
       isLooking,
       participants,
-      gridSnapEnabled,
+      gridSnapSettings,
       sessionDetailText,
       sessionState,
       sessionStatusText,
@@ -695,7 +710,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       gizmoMode,
       setMode,
       setGizmoModeAction,
-      setGridSnapEnabled,
+      setGridSnapSettings,
       setSessionDetailText,
       setSessionState,
       setSessionSnapshot,

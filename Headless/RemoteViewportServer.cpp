@@ -226,9 +226,6 @@ std::optional<std::string> GetQueryParam(std::string_view Path,
   return std::nullopt;
 }
 
-constexpr float kTranslationSnapStep = 1.0f;
-constexpr float kRotationSnapStepDegrees = 15.0f;
-constexpr float kScaleSnapStep = 0.1f;
 constexpr float kMinimumScale = 0.001f;
 
 float SnapToStep(float value, float step) {
@@ -238,23 +235,23 @@ float SnapToStep(float value, float step) {
   return std::round(value / step) * step;
 }
 
-void ApplyGridSnap(bool gridSnapEnabled, GizmoMode mode, int axis,
+void ApplyGridSnap(bool enabled, float translationStep,
+                   float rotationStepDegrees, float scaleStep, GizmoMode mode, int axis,
                    glm::vec3 &location, glm::vec3 &rotationDegrees,
                    glm::vec3 &scale) {
-  if (!gridSnapEnabled || axis < 0 || axis > 2) {
+  if (!enabled || axis < 0 || axis > 2) {
     return;
   }
 
   switch (mode) {
   case GizmoMode::Translate:
-    location[axis] = SnapToStep(location[axis], kTranslationSnapStep);
+    location[axis] = SnapToStep(location[axis], translationStep);
     break;
   case GizmoMode::Rotate:
-    rotationDegrees[axis] =
-        SnapToStep(rotationDegrees[axis], kRotationSnapStepDegrees);
+    rotationDegrees[axis] = SnapToStep(rotationDegrees[axis], rotationStepDegrees);
     break;
   case GizmoMode::Scale:
-    scale[axis] = std::max(kMinimumScale, SnapToStep(scale[axis], kScaleSnapStep));
+    scale[axis] = std::max(kMinimumScale, SnapToStep(scale[axis], scaleStep));
     break;
   }
 }
@@ -2063,9 +2060,15 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     Client->CurrentGizmoMode = Command->Mode;
     m_Host.GetHeadlessLayer().SetGizmoMode(Client->User, Command->Mode);
     return true;
-  case HeadlessCommandType::SetGridSnap:
-    Client->GridSnapEnabled = Command->Enabled;
+  case HeadlessCommandType::SetGridSnap: {
+    Client->GridSnap.Enabled = Command->Enabled;
+    Client->GridSnap.TranslationStep =
+        std::max(kMinimumScale, Command->TranslationStep);
+    Client->GridSnap.RotationStepDegrees =
+        std::max(0.001f, Command->RotationStepDegrees);
+    Client->GridSnap.ScaleStep = std::max(kMinimumScale, Command->ScaleStep);
     return true;
+  }
   case HeadlessCommandType::GizmoHover: {
     if (Client->GizmoDrag.has_value()) {
       return true;
@@ -2207,8 +2210,9 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
           Command->MousePosition.x, Command->MousePosition.y);
       RotDeg[Drag.Math.Axis] = Drag.StartRotDeg[Drag.Math.Axis] + DeltaDeg;
     }
-    ApplyGridSnap(Client->GridSnapEnabled, Drag.Mode, Drag.Math.Axis, Location,
-                  RotDeg, Scale);
+    ApplyGridSnap(Client->GridSnap.Enabled, Client->GridSnap.TranslationStep,
+                  Client->GridSnap.RotationStepDegrees, Client->GridSnap.ScaleStep,
+                  Drag.Mode, Drag.Math.Axis, Location, RotDeg, Scale);
     EditorCommand Cmd;
     Cmd.Payload = SetTransformCommand{
         .ObjectId = Drag.ObjectId,
@@ -2252,8 +2256,9 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
             Command->MousePosition.x, Command->MousePosition.y);
         RotDeg[Drag.Math.Axis] = Drag.StartRotDeg[Drag.Math.Axis] + DeltaDeg;
       }
-      ApplyGridSnap(Client->GridSnapEnabled, Drag.Mode, Drag.Math.Axis, Location,
-                    RotDeg, Scale);
+      ApplyGridSnap(Client->GridSnap.Enabled, Client->GridSnap.TranslationStep,
+                    Client->GridSnap.RotationStepDegrees, Client->GridSnap.ScaleStep,
+                    Drag.Mode, Drag.Math.Axis, Location, RotDeg, Scale);
       EditorCommand Cmd;
       Cmd.Payload = SetTransformCommand{
           .ObjectId = Drag.ObjectId,

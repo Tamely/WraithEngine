@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import {
   useRemoteViewport,
+  type RemoteViewportGridSnapSettings,
   type SessionObjectTransformUpdate,
   type SessionObjectDetails,
   type RemoteViewportConnectionState,
@@ -168,6 +169,9 @@ type RemoteViewportCommand =
   | {
     type: "set_grid_snap"
     enabled: boolean
+    translationStep: number
+    rotationStepDegrees: number
+    scaleStep: number
   }
   | { type: "heartbeat" }
   | { type: "list_assets" }
@@ -1622,8 +1626,17 @@ export function Viewport() {
         gizmoModeRef.current = nextMode
         await sendCommand({ type: "set_gizmo_mode", mode: nextMode }, "reliable")
       },
-      setGridSnapEnabled: async (enabled) => {
-        await sendCommand({ type: "set_grid_snap", enabled }, "reliable")
+      setGridSnapSettings: async (settings: RemoteViewportGridSnapSettings) => {
+        await sendCommand(
+          {
+            type: "set_grid_snap",
+            enabled: settings.enabled,
+            translationStep: settings.translationStep,
+            rotationStepDegrees: settings.rotationStepDegrees,
+            scaleStep: settings.scaleStep,
+          },
+          "reliable"
+        )
       },
     })
     setServerOrigin(serverOrigin)

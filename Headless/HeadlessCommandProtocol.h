@@ -69,6 +69,9 @@ struct HeadlessCommand {
   glm::vec2 MousePosition{0.0f};
   GizmoMode Mode{GizmoMode::Translate};
   bool Enabled{false};
+  float TranslationStep{1.0f};
+  float RotationStepDegrees{15.0f};
+  float ScaleStep{0.1f};
   std::string ObjectId;
   std::string PropertyName;
   std::optional<PropertyValue> PropertyVal;

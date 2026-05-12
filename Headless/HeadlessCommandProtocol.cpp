@@ -966,10 +966,29 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
   }
   if (*Type == "set_grid_snap") {
     static const std::regex EnabledPattern(R"json("enabled"\s*:\s*(true|false))json");
+    static const std::regex TranslationStepPattern(
+        R"json("translationStep"\s*:\s*(-?[0-9Ee.+-]+))json");
+    static const std::regex RotationStepPattern(
+        R"json("rotationStepDegrees"\s*:\s*(-?[0-9Ee.+-]+))json");
+    static const std::regex ScaleStepPattern(
+        R"json("scaleStep"\s*:\s*(-?[0-9Ee.+-]+))json");
     const auto EnabledStr = MatchString(JsonLine, EnabledPattern);
+    auto ParseScalar = [&](const std::regex &pattern, double fallback) {
+      std::match_results<std::string_view::const_iterator> match;
+      if (std::regex_search(JsonLine.begin(), JsonLine.end(), match, pattern)) {
+        if (const auto value =
+                ParseDouble(std::string_view(match[1].first, match[1].second))) {
+          return static_cast<float>(*value);
+        }
+      }
+      return static_cast<float>(fallback);
+    };
     return HeadlessCommand{
         .Type = HeadlessCommandType::SetGridSnap,
-        .Enabled = EnabledStr.value_or("false") == "true"};
+        .Enabled = EnabledStr.value_or("false") == "true",
+        .TranslationStep = ParseScalar(TranslationStepPattern, 1.0),
+        .RotationStepDegrees = ParseScalar(RotationStepPattern, 15.0),
+        .ScaleStep = ParseScalar(ScaleStepPattern, 0.1)};
   }
 
   Error = "Unsupported command type: " + *Type;
