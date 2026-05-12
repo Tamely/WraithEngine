@@ -52,6 +52,7 @@ enum class HeadlessCommandType {
   SetLightProperties,
   SetMaterialProperties,
   SetMaterialTexture,
+  DropTexture,
   Heartbeat,
   RenderFrame,
   Quit,

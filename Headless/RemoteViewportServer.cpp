@@ -972,6 +972,24 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetMaterialTexture:
     m_Host.SubmitRemoteCommand(*User, Command->EditorPayload);
     break;
+  case HeadlessCommandType::DropTexture: {
+    if (!Command->TextureAssetPath.empty()) {
+      const EditorSession &Session = m_Host.GetHeadlessLayer().GetSession();
+      const EditorViewportState *Viewport = Session.FindViewport(*User);
+      if (Viewport != nullptr) {
+        const std::string HitId = HitTestMeshes(
+            Viewport->Camera, m_Options.Width, m_Options.Height,
+            Command->MousePosition, Session.GetState().Scene.MeshInstances);
+        if (!HitId.empty()) {
+          m_Host.SubmitRemoteCommand(*User,
+              EditorCommand{SetMaterialTextureCommand{
+                  .ObjectId = HitId,
+                  .TextureAssetPath = Command->TextureAssetPath}});
+        }
+      }
+    }
+    break;
+  }
   case HeadlessCommandType::GizmoHover:
   case HeadlessCommandType::GizmoDragStart:
   case HeadlessCommandType::GizmoDragUpdate:
@@ -1768,6 +1786,7 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetLightProperties:
   case HeadlessCommandType::SetMaterialProperties:
   case HeadlessCommandType::SetMaterialTexture:
+  case HeadlessCommandType::DropTexture:
   case HeadlessCommandType::ReloadScripts:
   case HeadlessCommandType::UpdateViewportCamera:
   case HeadlessCommandType::GizmoHover:
@@ -2060,6 +2079,23 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     if (!HitId.empty()) {
       m_Host.SubmitRemoteCommand(Client->User,
           EditorCommand{SelectObjectCommand{.ObjectId = HitId}});
+    }
+    return true;
+  }
+  case HeadlessCommandType::DropTexture: {
+    const EditorSession &Session = m_Host.GetHeadlessLayer().GetSession();
+    const EditorViewportState *Viewport = Session.FindViewport(Client->User);
+    if (Viewport == nullptr || Command->TextureAssetPath.empty()) {
+      return true;
+    }
+    const std::string HitId = HitTestMeshes(
+        Viewport->Camera, m_Options.Width, m_Options.Height,
+        Command->MousePosition, Session.GetState().Scene.MeshInstances);
+    if (!HitId.empty()) {
+      m_Host.SubmitRemoteCommand(Client->User,
+          EditorCommand{SetMaterialTextureCommand{
+              .ObjectId = HitId,
+              .TextureAssetPath = Command->TextureAssetPath}});
     }
     return true;
   }

@@ -201,6 +201,12 @@ type RemoteViewportCommand =
       objectId: string
       textureAssetPath: string
     }
+  | {
+      type: "drop_texture"
+      mouseX: number
+      mouseY: number
+      textureAssetPath: string
+    }
 
 function getServerOrigin() {
   const configuredOrigin = process.env.NEXT_PUBLIC_AXIOM_SERVER_ORIGIN?.trim()
@@ -1787,8 +1793,37 @@ export function Viewport() {
       void destroyPeerConnection("page_unload")
     }
 
+    let lastDragX = 0
+    let lastDragY = 0
+
+    const handleDocDragOver = (event: DragEvent) => {
+      lastDragX = event.clientX
+      lastDragY = event.clientY
+    }
+
+    ;(window as any).__axiomViewportDropHandler = (clientX: number, clientY: number, kind: string, path: string) => {
+      if (kind !== "texture" || !path) return
+      const x = lastDragX || clientX
+      const y = lastDragY || clientY
+      const s = viewportShellRef.current
+      const v = videoRef.current
+      if (!s || !v || !v.videoWidth || !v.videoHeight) return
+      const rect = s.getBoundingClientRect()
+      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return
+      const scale = Math.min(rect.width / v.videoWidth, rect.height / v.videoHeight)
+      const contentW = v.videoWidth * scale
+      const contentH = v.videoHeight * scale
+      const cssX = x - rect.left - (rect.width - contentW) / 2
+      const cssY = y - rect.top - (rect.height - contentH) / 2
+      if (cssX < 0 || cssY < 0 || cssX > contentW || cssY > contentH) return
+      const mouseX = (cssX / contentW) * v.videoWidth
+      const mouseY = (cssY / contentH) * v.videoHeight
+      void sendCommand({ type: "drop_texture", mouseX, mouseY, textureAssetPath: path }, "reliable")
+    }
+
     video?.addEventListener("loadedmetadata", handleLoadedMetadata)
     video?.addEventListener("resize", handleResize)
+    document.addEventListener("dragover", handleDocDragOver)
     document.addEventListener("mousedown", handleMouseDown)
     document.addEventListener("mouseup", handleMouseUp)
     document.addEventListener("contextmenu", handleContextMenu)
@@ -1796,7 +1831,6 @@ export function Viewport() {
     document.addEventListener("keydown", handleKeyDown)
     document.addEventListener("keyup", handleKeyUp)
     window.addEventListener("beforeunload", handleBeforeUnload)
-
     void connect()
 
     return () => {
@@ -1805,6 +1839,8 @@ export function Viewport() {
       stopViewportInputPump()
       video?.removeEventListener("loadedmetadata", handleLoadedMetadata)
       video?.removeEventListener("resize", handleResize)
+      document.removeEventListener("dragover", handleDocDragOver)
+      ;(window as any).__axiomViewportDropHandler = null
       document.removeEventListener("mousedown", handleMouseDown)
       document.removeEventListener("mouseup", handleMouseUp)
       document.removeEventListener("contextmenu", handleContextMenu)
@@ -1892,7 +1928,10 @@ export function Viewport() {
           <ViewportButton icon={Maximize2} onClick={() => void connectRef.current()} />
         </div>
       </div>
-      <div ref={viewportShellRef} className="relative flex-1 overflow-hidden bg-black">
+      <div
+        ref={viewportShellRef}
+        className="relative flex-1 overflow-hidden bg-black"
+      >
         <video
           ref={videoRef}
           className="absolute inset-0 h-full w-full bg-black object-contain"

@@ -444,6 +444,12 @@ export function ContentBrowser() {
                       e.dataTransfer.setData("axiom/asset-path", asset.path)
                       e.dataTransfer.setData("axiom/asset-kind", asset.kind)
                       e.dataTransfer.effectAllowed = "copy"
+                      ;(window as any).__axiomDragAsset = { kind: asset.kind, path: asset.path }
+                    }}
+                    onDragEnd={(e) => {
+                      ;(window as any).__axiomDragAsset = null
+                      const h = (window as any).__axiomViewportDropHandler
+                      if (h) h(e.clientX, e.clientY, asset.kind, asset.path)
                     }}
                     title={
                       canAssignToSelection && asset.kind === "mesh"
@@ -496,6 +502,12 @@ export function ContentBrowser() {
                       e.dataTransfer.setData("axiom/asset-path", asset.path)
                       e.dataTransfer.setData("axiom/asset-kind", asset.kind)
                       e.dataTransfer.effectAllowed = "copy"
+                      ;(window as any).__axiomDragAsset = { kind: asset.kind, path: asset.path }
+                    }}
+                    onDragEnd={(e) => {
+                      ;(window as any).__axiomDragAsset = null
+                      const h = (window as any).__axiomViewportDropHandler
+                      if (h) h(e.clientX, e.clientY, asset.kind, asset.path)
                     }}
                     title={
                       canAssignToSelection && asset.kind === "mesh"
