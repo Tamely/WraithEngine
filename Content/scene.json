@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "meshAsset": "",
+  "nodes": [
+    {"id":"world","parentId":null,"displayName":"World","kind":"Folder","visible":true},
+    {"id":"lighting","parentId":"world","displayName":"Lighting","kind":"Folder","visible":true},
+    {"id":"directional-light","parentId":"lighting","displayName":"DirectionalLight","kind":"Light","visible":true},
+    {"id":"Mesh","parentId":"world","displayName":"Mesh","kind":"Mesh","visible":true}
+  ],
+  "objects": [
+    {"id":"world","displayName":"World","kind":"Folder","visible":true,"isGeneratedAssetChild":false,"supportsTransform":false,"transformReadOnly":true},
+    {"id":"lighting","displayName":"Lighting","kind":"Folder","visible":true,"isGeneratedAssetChild":false,"supportsTransform":false,"transformReadOnly":true},
+    {"id":"Mesh","displayName":"Mesh","kind":"Mesh","visible":true,"isGeneratedAssetChild":false,"supportsTransform":true,"transformReadOnly":false,"location":[7.00839,0,-7.33693],"rotationDegrees":[-0,0,0],"scale":[1,1,1],"assetRelativePath":"sponza_atrium_3.glb"},
+    {"id":"directional-light","displayName":"DirectionalLight","kind":"Light","visible":true,"isGeneratedAssetChild":false,"supportsTransform":true,"transformReadOnly":false,"location":[0.70909,7.39407,-8],"rotationDegrees":[-45,30,0],"scale":[1,1,1],"lightColor":[1,0.98,0.92],"lightIntensity":4,"lightDirection":[0.35,0.7,0.2]}
+  ],
+  "meshNameToObjectId": {
+
+  }
+}
