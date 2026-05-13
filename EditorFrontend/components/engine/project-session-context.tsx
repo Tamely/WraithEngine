@@ -1,11 +1,14 @@
 "use client"
 
-import { createContext, useContext, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useState, type ReactNode } from "react"
 import type { ProjectDescriptor } from "./project-browser"
 
 interface ProjectSessionContextValue {
   activeProject: ProjectDescriptor
   serverOrigin: string
+  requestedScriptPath: string | null
+  requestOpenScript: (path: string) => void
+  clearRequestedScriptPath: () => void
 }
 
 const ProjectSessionContext = createContext<ProjectSessionContextValue | null>(null)
@@ -19,8 +22,24 @@ export function ProjectSessionProvider({
   serverOrigin: string
   children: ReactNode
 }) {
+  const [requestedScriptPath, setRequestedScriptPath] = useState<string | null>(null)
+  const requestOpenScript = useCallback((path: string) => {
+    setRequestedScriptPath(path)
+  }, [])
+  const clearRequestedScriptPath = useCallback(() => {
+    setRequestedScriptPath(null)
+  }, [])
+
   return (
-    <ProjectSessionContext.Provider value={{ activeProject, serverOrigin }}>
+    <ProjectSessionContext.Provider
+      value={{
+        activeProject,
+        serverOrigin,
+        requestedScriptPath,
+        requestOpenScript,
+        clearRequestedScriptPath,
+      }}
+    >
       {children}
     </ProjectSessionContext.Provider>
   )

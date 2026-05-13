@@ -1,13 +1,15 @@
 "use client"
 
 import { Code, Lock, Settings, Unlock } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   useRemoteViewport,
   type SessionObjectDetails,
   type SessionObjectSchema,
   type SessionObjectTransformUpdate,
 } from "./remote-viewport-context"
+import { useProjectSession } from "./project-session-context"
+import { useDock } from "./dock/dock-context"
 
 function fallbackUserLabel(userId: number) {
   return userId === 1 ? "Host" : `User ${userId - 1}`
@@ -287,14 +289,59 @@ function ScriptSection({
   isSaving: boolean
   setIsSaving: (value: boolean) => void
 }) {
+  const { serverOrigin, activeProject, requestOpenScript } = useProjectSession()
+  const { setActiveTab } = useDock()
   const { setProperty } = useRemoteViewport()
   const scriptProp = schema?.properties.find((p) => p.name === "scriptClass")
   const currentValue = scriptProp?.value ?? ""
   const [draftClass, setDraftClass] = useState(currentValue)
+  const [availableClasses, setAvailableClasses] = useState<
+    Array<{ className: string; path: string }>
+  >([])
+  const [classesLoading, setClassesLoading] = useState(false)
 
   useEffect(() => {
     setDraftClass(scriptProp?.value ?? "")
   }, [objectId, scriptProp?.value])
+
+  const loadScriptClasses = useCallback(async () => {
+    setClassesLoading(true)
+    try {
+      const response = await fetch(`${serverOrigin}/scripts/classes`, {
+        cache: "no-store",
+      })
+      const text = await response.text()
+      const payload = text.length > 0 ? JSON.parse(text) : { classes: [] }
+      if (!response.ok) {
+        throw new Error(payload?.message ?? `${response.status} ${response.statusText}`)
+      }
+      setAvailableClasses(
+        Array.isArray(payload.classes)
+          ? payload.classes.filter(
+              (entry: unknown): entry is { className: string; path: string } =>
+                typeof entry === "object" &&
+                entry !== null &&
+                typeof (entry as { className?: unknown }).className === "string" &&
+                typeof (entry as { path?: unknown }).path === "string"
+            )
+          : []
+      )
+    } catch {
+      setAvailableClasses([])
+    } finally {
+      setClassesLoading(false)
+    }
+  }, [serverOrigin])
+
+  useEffect(() => {
+    void loadScriptClasses()
+  }, [loadScriptClasses, activeProject.slug])
+
+  const attachedScriptPath = useMemo(
+    () =>
+      availableClasses.find((entry) => entry.className === currentValue)?.path ?? null,
+    [availableClasses, currentValue]
+  )
 
   async function applyScriptClass() {
     setIsSaving(true)
@@ -315,6 +362,12 @@ function ScriptSection({
     }
   }
 
+  function openAttachedScript() {
+    if (!attachedScriptPath) return
+    requestOpenScript(attachedScriptPath)
+    setActiveTab("tg-content", "script-editor")
+  }
+
   return (
     <section className="rounded border border-neutral-800 bg-neutral-950/60 p-3">
       <div className="flex items-center gap-1.5 mb-3">
@@ -326,6 +379,7 @@ function ScriptSection({
           <span className="w-20 shrink-0 text-xs text-neutral-500">Class</span>
           <div className="min-w-0 flex-1">
             <input
+              list={`script-classes-${objectId}`}
               className="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 outline-none focus:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-50 placeholder:text-neutral-600"
               disabled={isSaving}
               onChange={(event) => setDraftClass(event.target.value)}
@@ -333,9 +387,31 @@ function ScriptSection({
               type="text"
               value={draftClass}
             />
+            <datalist id={`script-classes-${objectId}`}>
+              {availableClasses.map((entry) => (
+                <option key={entry.className} value={entry.className} />
+              ))}
+            </datalist>
+            <p className="mt-1 text-[10px] text-neutral-500">
+              {classesLoading
+                ? "Loading project script classes..."
+                : availableClasses.length > 0
+                  ? `${availableClasses.length} project classes available`
+                  : "No attachable project script classes found yet"}
+            </p>
           </div>
         </div>
         <div className="flex justify-end gap-2 pt-1">
+          {attachedScriptPath ? (
+            <button
+              className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-300 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isSaving}
+              onClick={openAttachedScript}
+              type="button"
+            >
+              Open Script
+            </button>
+          ) : null}
           {currentValue && (
             <button
               className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-400 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"

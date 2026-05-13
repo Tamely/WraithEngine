@@ -25,6 +25,7 @@
 #include <fstream>
 #include <iostream>
 #include <optional>
+#include <regex>
 #include <sstream>
 #include <string_view>
 #include <vector>
@@ -593,6 +594,22 @@ std::string SerializeScriptMutationJson(std::string_view MutationType,
   std::ostringstream Stream;
   Stream << "{\"type\":\"" << MutationType << "\",\"path\":\""
          << EscapeJsonString(RelativePath) << "\"}";
+  return Stream.str();
+}
+
+std::string SerializeScriptClassesJson(
+    const std::vector<std::pair<std::string, std::string>> &Classes) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"script_classes\",\"classes\":[";
+  for (size_t Index = 0; Index < Classes.size(); ++Index) {
+    if (Index > 0) {
+      Stream << ",";
+    }
+    Stream << "{\"className\":\"" << EscapeJsonString(Classes[Index].first)
+           << "\",\"path\":\"" << EscapeJsonString(Classes[Index].second)
+           << "\"}";
+  }
+  Stream << "]}";
   return Stream.str();
 }
 
@@ -1350,6 +1367,15 @@ bool RemoteViewportServer::HandleListScriptsRequest(uintptr_t ClientSocketValue)
   return false;
 }
 
+bool RemoteViewportServer::HandleListScriptClassesRequest(
+    uintptr_t ClientSocketValue) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  const std::string Response =
+      JsonResponse("200 OK", SerializeScriptClassesJson(ListScriptClasses()));
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
 bool RemoteViewportServer::HandleReadScriptFileRequest(uintptr_t ClientSocketValue,
                                                        std::string_view Path) {
   const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
@@ -1647,6 +1673,9 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
   }
   if (Route == "/scripts") {
     return HandleListScriptsRequest(ClientSocketValue);
+  }
+  if (Route == "/scripts/classes") {
+    return HandleListScriptClassesRequest(ClientSocketValue);
   }
   if (Route == "/scripts/file") {
     return HandleReadScriptFileRequest(ClientSocketValue, Path);
@@ -2307,6 +2336,54 @@ std::vector<std::string> RemoteViewportServer::ListScriptFiles() const {
   }
 
   std::sort(Results.begin(), Results.end());
+  return Results;
+}
+
+std::vector<std::pair<std::string, std::string>>
+RemoteViewportServer::ListScriptClasses() const {
+  std::vector<std::pair<std::string, std::string>> Results;
+  const auto ScriptFiles = ListScriptFiles();
+  const auto ActiveProject = GetActiveProject();
+  const std::string DefaultNamespace =
+      ActiveProject.has_value() ? ActiveProject->ScriptWorkspace.RootNamespace
+                                : "Project.Scripts";
+  const std::regex NamespacePattern(
+      R"(namespace\s+([A-Za-z_][A-Za-z0-9_\.]*)\s*[;{])");
+  const std::regex ClassPattern(
+      R"(public\s+class\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*Script\b)");
+
+  for (const auto &RelativePath : ScriptFiles) {
+    const auto AbsolutePath = ResolveActiveScriptPath(RelativePath);
+    if (!AbsolutePath.has_value()) {
+      continue;
+    }
+
+    std::ifstream File(*AbsolutePath);
+    if (!File.is_open()) {
+      continue;
+    }
+
+    const std::string Content((std::istreambuf_iterator<char>(File)),
+                              std::istreambuf_iterator<char>());
+    std::string Namespace = DefaultNamespace;
+    if (std::smatch NamespaceMatch;
+        std::regex_search(Content, NamespaceMatch, NamespacePattern) &&
+        NamespaceMatch.size() > 1) {
+      Namespace = NamespaceMatch[1].str();
+    }
+
+    auto ClassBegin = std::sregex_iterator(Content.begin(), Content.end(), ClassPattern);
+    const auto ClassEnd = std::sregex_iterator();
+    for (auto It = ClassBegin; It != ClassEnd; ++It) {
+      const std::string ClassName = (*It)[1].str();
+      Results.emplace_back(Namespace + "." + ClassName, RelativePath);
+    }
+  }
+
+  std::sort(Results.begin(), Results.end(),
+            [](const auto &Left, const auto &Right) {
+              return Left.first < Right.first;
+            });
   return Results;
 }
 

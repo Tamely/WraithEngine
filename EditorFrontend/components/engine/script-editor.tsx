@@ -113,7 +113,12 @@ function highlightCSharp(source: string) {
 }
 
 export function ScriptEditor() {
-  const { activeProject, serverOrigin } = useProjectSession()
+  const {
+    activeProject,
+    serverOrigin,
+    requestedScriptPath,
+    clearRequestedScriptPath,
+  } = useProjectSession()
   const { reloadScripts, reloadStatus } = useRemoteViewport()
   const [files, setFiles] = useState<string[]>([])
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
@@ -229,6 +234,27 @@ export function ScriptEditor() {
     }
     return window.confirm("Discard unsaved script changes?")
   }, [isDirty])
+
+  useEffect(() => {
+    if (!requestedScriptPath) {
+      return
+    }
+    if (requestedScriptPath === selectedPath) {
+      clearRequestedScriptPath()
+      return
+    }
+    if (!ensureCanDiscard()) {
+      clearRequestedScriptPath()
+      return
+    }
+    setSelectedPath(requestedScriptPath)
+    clearRequestedScriptPath()
+  }, [
+    clearRequestedScriptPath,
+    ensureCanDiscard,
+    requestedScriptPath,
+    selectedPath,
+  ])
 
   const chooseFile = useCallback(
     (path: string) => {

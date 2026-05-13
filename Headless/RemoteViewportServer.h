@@ -110,6 +110,7 @@ private:
   bool HandleOpenProjectRequest(uintptr_t ClientSocketValue,
                                 std::string_view Body);
   bool HandleListScriptsRequest(uintptr_t ClientSocketValue);
+  bool HandleListScriptClassesRequest(uintptr_t ClientSocketValue);
   bool HandleReadScriptFileRequest(uintptr_t ClientSocketValue,
                                    std::string_view Path);
   bool HandleCreateScriptFileRequest(uintptr_t ClientSocketValue,
@@ -168,6 +169,7 @@ private:
   std::filesystem::path GetEngineContentDir() const;
   bool LoadActiveProjectIntoSession(std::string *FailureReason = nullptr);
   std::vector<std::string> ListScriptFiles() const;
+  std::vector<std::pair<std::string, std::string>> ListScriptClasses() const;
   std::optional<std::filesystem::path>
   ResolveActiveScriptPath(std::string_view RelativePath,
                           bool AllowMissingLeaf = false) const;
