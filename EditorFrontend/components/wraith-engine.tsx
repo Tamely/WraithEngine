@@ -1,7 +1,10 @@
 "use client"
 
 import { X } from "lucide-react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { MenuBar } from "./engine/menu-bar"
+import { ProjectBrowser, type ProjectDescriptor } from "./engine/project-browser"
+import { getServerOrigin } from "./engine/server-origin"
 import { Toolbar } from "./engine/toolbar"
 import { DockProvider } from "./engine/dock/dock-context"
 import { DockLayout } from "./engine/dock/dock-layout"
@@ -39,17 +42,168 @@ function ScriptErrorToastOverlay() {
   )
 }
 
+interface ProjectsResponse {
+  type: "projects"
+  activeProjectSlug: string | null
+  projects: ProjectDescriptor[]
+}
+
+interface CurrentProjectResponse {
+  type: "current_project"
+  project: ProjectDescriptor | null
+}
+
+function formatProjectRequestError(serverOrigin: string, action: string, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  const normalizedMessage = message.toLowerCase()
+  const isNetworkError =
+    error instanceof TypeError ||
+    normalizedMessage.includes("networkerror") ||
+    normalizedMessage.includes("failed to fetch") ||
+    normalizedMessage.includes("load failed")
+
+  if (isNetworkError) {
+    return `Couldn't ${action} because the Axiom server at ${serverOrigin} isn't reachable. Start AxiomRemoteViewportServer or update NEXT_PUBLIC_AXIOM_SERVER_ORIGIN in EditorFrontend/.env.`
+  }
+
+  return message
+}
+
 export function WraithEngine() {
+  const serverOrigin = useMemo(() => getServerOrigin(), [])
+  const [projects, setProjects] = useState<ProjectDescriptor[]>([])
+  const [activeProject, setActiveProject] = useState<ProjectDescriptor | null>(null)
+  const [projectsLoading, setProjectsLoading] = useState(true)
+  const [projectsBusy, setProjectsBusy] = useState(false)
+  const [projectsError, setProjectsError] = useState<string | null>(null)
+  const [projectBrowserOpen, setProjectBrowserOpen] = useState(false)
+  const [editorGeneration, setEditorGeneration] = useState(0)
+
+  const fetchJson = useCallback(
+    async <T,>(path: string, init?: RequestInit) => {
+      const response = await fetch(`${serverOrigin}${path}`, {
+        cache: "no-store",
+        ...init,
+      })
+      const text = await response.text()
+      const payload = text.length > 0 ? (JSON.parse(text) as T & { message?: string }) : null
+      if (!response.ok) {
+        throw new Error(payload?.message ?? `${response.status} ${response.statusText}`)
+      }
+      return payload as T
+    },
+    [serverOrigin]
+  )
+
+  const refreshProjects = useCallback(async () => {
+    setProjectsLoading(true)
+    setProjectsError(null)
+    try {
+      const payload = await fetchJson<ProjectsResponse>("/projects")
+      setProjects(payload.projects)
+      const nextActive =
+        payload.activeProjectSlug !== null
+          ? payload.projects.find((project) => project.slug === payload.activeProjectSlug) ?? null
+          : null
+      setActiveProject(nextActive)
+      setProjectBrowserOpen((current) => (nextActive === null ? true : current))
+    } catch (error) {
+      setProjectsError(formatProjectRequestError(serverOrigin, "load projects", error))
+      setProjectBrowserOpen(true)
+    } finally {
+      setProjectsLoading(false)
+    }
+  }, [fetchJson])
+
+  useEffect(() => {
+    void refreshProjects()
+  }, [refreshProjects])
+
+  const handleCreateProject = useCallback(
+    async (name: string) => {
+      setProjectsBusy(true)
+      setProjectsError(null)
+      try {
+        const payload = await fetchJson<CurrentProjectResponse>("/projects/create", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ name }),
+        })
+        setActiveProject(payload.project)
+        await refreshProjects()
+        setProjectBrowserOpen(false)
+        setEditorGeneration((current) => current + 1)
+      } catch (error) {
+        setProjectsError(formatProjectRequestError(serverOrigin, "create a project", error))
+      } finally {
+        setProjectsBusy(false)
+      }
+    },
+    [fetchJson, refreshProjects]
+  )
+
+  const handleOpenProject = useCallback(
+    async (slug: string) => {
+      setProjectsBusy(true)
+      setProjectsError(null)
+      try {
+        const payload = await fetchJson<CurrentProjectResponse>("/projects/open", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ slug }),
+        })
+        setActiveProject(payload.project)
+        await refreshProjects()
+        setProjectBrowserOpen(false)
+        setEditorGeneration((current) => current + 1)
+      } catch (error) {
+        setProjectsError(formatProjectRequestError(serverOrigin, "open a project", error))
+      } finally {
+        setProjectsBusy(false)
+      }
+    },
+    [fetchJson, refreshProjects]
+  )
+
+  const showProjectBrowser = projectBrowserOpen || activeProject === null
+
   return (
     <RemoteViewportProvider>
-      <DockProvider>
-        <div className="relative flex flex-col h-screen bg-black text-white overflow-hidden">
-          <MenuBar />
-          <Toolbar />
-          <DockLayout />
-          <ScriptErrorToastOverlay />
-        </div>
-      </DockProvider>
+      <div className="relative h-screen overflow-hidden bg-black text-white">
+        {activeProject ? (
+          <DockProvider key={`${activeProject.slug}-${editorGeneration}`}>
+            <div className="relative flex h-screen flex-col overflow-hidden bg-black text-white">
+              <MenuBar
+                activeProject={activeProject}
+                onOpenProjectBrowser={() => setProjectBrowserOpen(true)}
+              />
+              <Toolbar />
+              <DockLayout />
+              <ScriptErrorToastOverlay />
+            </div>
+          </DockProvider>
+        ) : null}
+
+        {showProjectBrowser ? (
+          <ProjectBrowser
+            activeProject={activeProject}
+            busy={projectsBusy}
+            canClose={activeProject !== null}
+            error={projectsError}
+            loading={projectsLoading}
+            onClose={() => setProjectBrowserOpen(false)}
+            onCreateProject={handleCreateProject}
+            onOpenProject={handleOpenProject}
+            onRefresh={refreshProjects}
+            projects={projects}
+            serverOrigin={serverOrigin}
+          />
+        ) : null}
+      </div>
     </RemoteViewportProvider>
   )
 }

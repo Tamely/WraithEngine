@@ -1,10 +1,8 @@
 import type { Metadata } from 'next'
-import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
+import { GeistSans } from 'geist/font/sans'
+import { GeistMono } from 'geist/font/mono'
 import './globals.css'
-
-const _geist = Geist({ subsets: ["latin"] });
-const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: 'Wraith Engine',
@@ -35,8 +33,8 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
-      <body className="font-sans antialiased overflow-hidden">
+    <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable}`}>
+      <body className={`${GeistSans.className} font-sans antialiased overflow-hidden`}>
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>

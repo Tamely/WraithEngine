@@ -26,8 +26,7 @@ import {
   type SessionSceneItem,
   type SessionSelection,
 } from "./remote-viewport-context"
-
-const DEFAULT_AXIOM_SERVER_ORIGIN = "http://127.0.0.1:8080"
+import { getServerOrigin } from "./server-origin"
 const CLIENT_ID_STORAGE_KEY = "axiom-remote-client-id"
 const CLIENT_ID_CLAIM_CHANNEL = "axiom-remote-client-claims"
 const STATUS_POLL_INTERVAL_MS = 1500
@@ -220,13 +219,6 @@ type RemoteViewportCommand =
     mouseY: number
     textureAssetPath: string
   }
-
-function getServerOrigin() {
-  const configuredOrigin = process.env.NEXT_PUBLIC_AXIOM_SERVER_ORIGIN?.trim()
-  return configuredOrigin && configuredOrigin.length > 0
-    ? configuredOrigin
-    : DEFAULT_AXIOM_SERVER_ORIGIN
-}
 
 function formatLogEntry(value: unknown) {
   return typeof value === "string" ? value : JSON.stringify(value)
