@@ -157,6 +157,7 @@ public:
 
   // Must be called before SetMeshAssetCommand can be processed.
   void SetContentDir(std::filesystem::path ContentDir);
+  const std::filesystem::path &GetContentDir() const { return m_ContentDir; }
 
   void EnsureViewportState(SessionUserId User);
   void SetPresenceState(SessionUserId User, EditorUserPresenceState State);

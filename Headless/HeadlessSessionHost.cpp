@@ -63,6 +63,11 @@ bool HeadlessSessionHost::LoadStartupSceneIntoSession() {
   return m_Layer->LoadStartupSceneIntoSession();
 }
 
+bool HeadlessSessionHost::LoadStartupSceneIntoSession(
+    const std::filesystem::path &ContentDir) {
+  return m_Layer->LoadStartupSceneIntoSession(ContentDir);
+}
+
 void HeadlessSessionHost::SubmitLocalCommand(const EditorCommand &Command) {
   m_Layer->Submit(Command);
 }

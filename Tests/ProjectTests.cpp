@@ -1,4 +1,5 @@
 #include <Project/ProjectSystem.h>
+#include <Session/StartupScene.h>
 
 #include <gtest/gtest.h>
 
@@ -117,6 +118,21 @@ TEST_F(ProjectSystemTests, OpenProjectBySlugLoadsOnlyManagedProjects) {
   EXPECT_FALSE(Axiom::Project::OpenProjectBySlug(Root, "../escape").has_value());
   EXPECT_FALSE(
       Axiom::Project::OpenProjectBySlug(Root, "missing-project").has_value());
+}
+
+TEST_F(ProjectSystemTests, EmptyProjectSceneLoadsWithoutFallbackContent) {
+  std::string FailureReason;
+  const auto Created =
+      Axiom::Project::CreateProjectScaffold(Root, "Blank Project", &FailureReason);
+  ASSERT_TRUE(Created.has_value()) << FailureReason;
+
+  Axiom::EditorSession Session(Axiom::SessionId{77});
+  Session.SetContentDir(Created->Root.ContentDir);
+
+  ASSERT_TRUE(Axiom::LoadStartupScene(Session));
+  EXPECT_TRUE(Session.GetState().Scene.MeshInstances.empty());
+  EXPECT_TRUE(Session.GetState().Scene.Items.empty());
+  EXPECT_TRUE(Session.GetState().Scene.ObjectDetailsById.empty());
 }
 
 TEST_F(ProjectSystemTests, IsPathWithinRootRejectsEscapes) {

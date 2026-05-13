@@ -229,10 +229,15 @@ std::vector<LightBillboardOverlay> HeadlessSessionLayer::BuildLightBillboards()
 }
 
 bool HeadlessSessionLayer::LoadStartupSceneIntoSession() {
+  return LoadStartupSceneIntoSession(std::filesystem::path(AXIOM_CONTENT_DIR));
+}
+
+bool HeadlessSessionLayer::LoadStartupSceneIntoSession(
+    const std::filesystem::path &ContentDir) {
 #ifndef AXIOM_CONTENT_DIR
 #define AXIOM_CONTENT_DIR "Content"
 #endif
-  m_Session.SetContentDir(AXIOM_CONTENT_DIR);
+  m_Session.SetContentDir(ContentDir);
   return LoadStartupScene(m_Session);
 }
 

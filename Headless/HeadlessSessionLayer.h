@@ -30,6 +30,7 @@ public:
   void OnRender() override;
 
   bool LoadStartupSceneIntoSession();
+  bool LoadStartupSceneIntoSession(const std::filesystem::path &ContentDir);
   void Submit(const EditorCommand &Command);
   void SubmitToTransport(ISessionTransport &Transport,
                          const EditorCommand &Command);

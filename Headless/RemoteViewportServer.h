@@ -152,6 +152,8 @@ private:
   std::optional<Project::ProjectDescriptor> GetActiveProject() const;
   std::optional<Project::ProjectDescriptor>
   SetActiveProjectBySlug(std::string_view ProjectSlug);
+  std::filesystem::path GetActiveContentDir() const;
+  bool LoadActiveProjectIntoSession(std::string *FailureReason = nullptr);
 
 private:
   HeadlessSessionHost &m_Host;

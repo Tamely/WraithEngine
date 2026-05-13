@@ -243,11 +243,12 @@ std::unordered_map<std::string, EditorObjectDetails> BuildObjectDetailsMap(
 }
 } // namespace
 
-std::vector<EditorSceneMeshInstance> BuildStartupSceneMeshInstances() {
-  const Assets::LocalAssetSource ContentDir{AXIOM_CONTENT_DIR};
+std::vector<EditorSceneMeshInstance>
+BuildStartupSceneMeshInstances(const std::filesystem::path &ContentRoot) {
+  const Assets::LocalAssetSource ContentDir{ContentRoot};
   const std::filesystem::path RelativeMeshPath = "basicmesh.glb";
   const auto MeshPath = ContentDir.ResolveRelative(RelativeMeshPath.string());
-  Assets::CookMeshAsset(AXIOM_CONTENT_DIR, RelativeMeshPath);
+  Assets::CookMeshAsset(ContentRoot, RelativeMeshPath);
   const auto SceneData = Assets::LoadBasicMeshAsset(MeshPath);
   if (!SceneData.has_value()) {
     A_CORE_ERROR("Failed to load startup mesh asset scene: {0}",
@@ -294,9 +295,13 @@ std::vector<EditorSceneMeshInstance> BuildStartupSceneMeshInstances() {
   return Instances;
 }
 
-EditorSceneState BuildStartupSceneState() {
+std::vector<EditorSceneMeshInstance> BuildStartupSceneMeshInstances() {
+  return BuildStartupSceneMeshInstances(std::filesystem::path(AXIOM_CONTENT_DIR));
+}
+
+EditorSceneState BuildStartupSceneState(const std::filesystem::path &ContentDir) {
   EditorSceneState SceneState{};
-  SceneState.MeshInstances = BuildStartupSceneMeshInstances();
+  SceneState.MeshInstances = BuildStartupSceneMeshInstances(ContentDir);
   if (SceneState.MeshInstances.empty()) {
     return SceneState;
   }
@@ -306,13 +311,20 @@ EditorSceneState BuildStartupSceneState() {
   return SceneState;
 }
 
+EditorSceneState BuildStartupSceneState() {
+  return BuildStartupSceneState(std::filesystem::path(AXIOM_CONTENT_DIR));
+}
+
 bool LoadStartupScene(EditorSession &Session) {
-  const Assets::LocalAssetSource ContentDir{AXIOM_CONTENT_DIR};
+  const std::filesystem::path ContentRoot =
+      Session.GetContentDir().empty() ? std::filesystem::path(AXIOM_CONTENT_DIR)
+                                      : Session.GetContentDir();
+  const Assets::LocalAssetSource ContentDir{ContentRoot};
   const auto SceneFilePath = ContentDir.ResolveRelative("scene.json");
 
   if (std::filesystem::exists(SceneFilePath)) {
     auto Loaded = Assets::LoadSceneFromFile(SceneFilePath);
-    if (Loaded.has_value() && !Loaded->MeshInstances.empty()) {
+    if (Loaded.has_value()) {
       A_CORE_INFO("StartupScene: loaded saved scene from {0}",
                   SceneFilePath.string());
       Session.SetSceneState(std::move(*Loaded));
@@ -322,7 +334,7 @@ bool LoadStartupScene(EditorSession &Session) {
                 "falling back to defaults");
   }
 
-  EditorSceneState SceneState = BuildStartupSceneState();
+  EditorSceneState SceneState = BuildStartupSceneState(ContentRoot);
   if (SceneState.MeshInstances.empty()) {
     return false;
   }
