@@ -5,6 +5,7 @@
 #include "WebRtcSession.h"
 
 #include <Assets/IAssetSource.h>
+#include <Project/ProjectSystem.h>
 #include <Remote/SessionTransport.h>
 #include <Renderer/RendererBackend.h>
 #include <Renderer/RenderScene.h>
@@ -104,6 +105,10 @@ private:
   bool HandlePostRequest(uintptr_t ClientSocketValue, std::string_view Path,
                          std::string_view HeaderBlock,
                          std::string_view Body);
+  bool HandleCreateProjectRequest(uintptr_t ClientSocketValue,
+                                  std::string_view Body);
+  bool HandleOpenProjectRequest(uintptr_t ClientSocketValue,
+                                std::string_view Body);
   bool HandleSessionConnectRequest(uintptr_t ClientSocketValue,
                                    std::string_view HeaderBlock,
                                    std::string_view Body);
@@ -143,6 +148,10 @@ private:
   ClientSessionResolution CreateOrResumeClientSession(
       const std::optional<std::string> &ClientIdHint);
   void TouchClientSession(const std::string &ClientId);
+  std::vector<Project::ProjectDescriptor> ListProjects() const;
+  std::optional<Project::ProjectDescriptor> GetActiveProject() const;
+  std::optional<Project::ProjectDescriptor>
+  SetActiveProjectBySlug(std::string_view ProjectSlug);
 
 private:
   HeadlessSessionHost &m_Host;
@@ -158,6 +167,9 @@ private:
   std::unordered_map<std::string, RemoteClientSession> m_RemoteClientsById;
   uint64_t m_NextRemoteUserId{2};
   mutable std::mutex m_SendMutex;
+  const std::filesystem::path m_ProjectsRoot;
+  mutable std::mutex m_ProjectMutex;
+  std::optional<Project::ProjectDescriptor> m_ActiveProject;
 };
 
 bool ParseRemoteViewportServerOptions(int argc, char **argv,

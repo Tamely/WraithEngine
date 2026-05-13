@@ -421,6 +421,28 @@ DiscoverProjects(const std::filesystem::path &ProjectsRoot) {
 }
 
 std::optional<ProjectDescriptor>
+OpenProjectBySlug(const std::filesystem::path &ProjectsRoot,
+                  std::string_view ProjectSlug) {
+  if (!IsValidProjectSlug(ProjectSlug)) {
+    return std::nullopt;
+  }
+
+  const auto Root = ResolveProjectRoot(ProjectsRoot / std::string(ProjectSlug));
+  if (!IsPathWithinRoot(ProjectsRoot, Root.RootPath)) {
+    return std::nullopt;
+  }
+
+  const auto Descriptor = LoadProjectDescriptor(Root.RootPath);
+  if (!Descriptor.has_value()) {
+    return std::nullopt;
+  }
+  if (Descriptor->Manifest.Slug != ProjectSlug) {
+    return std::nullopt;
+  }
+  return Descriptor;
+}
+
+std::optional<ProjectDescriptor>
 CreateProjectScaffold(const std::filesystem::path &ProjectsRoot,
                       std::string_view ProjectName,
                       std::string *FailureReason) {

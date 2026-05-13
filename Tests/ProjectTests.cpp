@@ -102,6 +102,23 @@ TEST_F(ProjectSystemTests, DiscoverProjectsReturnsValidProjectsOnly) {
   EXPECT_EQ(Projects[1].Manifest.Name, "Bravo");
 }
 
+TEST_F(ProjectSystemTests, OpenProjectBySlugLoadsOnlyManagedProjects) {
+  std::string FailureReason;
+  ASSERT_TRUE(
+      Axiom::Project::CreateProjectScaffold(Root, "Gamma", &FailureReason)
+          .has_value())
+      << FailureReason;
+
+  const auto Opened = Axiom::Project::OpenProjectBySlug(Root, "gamma");
+  ASSERT_TRUE(Opened.has_value());
+  EXPECT_EQ(Opened->Manifest.Name, "Gamma");
+  EXPECT_EQ(Opened->Manifest.Slug, "gamma");
+
+  EXPECT_FALSE(Axiom::Project::OpenProjectBySlug(Root, "../escape").has_value());
+  EXPECT_FALSE(
+      Axiom::Project::OpenProjectBySlug(Root, "missing-project").has_value());
+}
+
 TEST_F(ProjectSystemTests, IsPathWithinRootRejectsEscapes) {
   const auto ManagedRoot = Root / "managed";
   ASSERT_TRUE(std::filesystem::create_directories(ManagedRoot));

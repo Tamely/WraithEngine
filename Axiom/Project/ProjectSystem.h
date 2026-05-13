@@ -47,6 +47,9 @@ std::optional<ProjectDescriptor>
 LoadProjectDescriptor(const std::filesystem::path &RootPath);
 std::vector<ProjectDescriptor>
 DiscoverProjects(const std::filesystem::path &ProjectsRoot);
+std::optional<ProjectDescriptor>
+OpenProjectBySlug(const std::filesystem::path &ProjectsRoot,
+                  std::string_view ProjectSlug);
 
 std::optional<ProjectDescriptor>
 CreateProjectScaffold(const std::filesystem::path &ProjectsRoot,

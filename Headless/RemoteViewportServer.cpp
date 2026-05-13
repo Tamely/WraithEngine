@@ -1,6 +1,7 @@
 #include "RemoteViewportServer.h"
 
 #include <Core/Platform.h>
+#include <Project/ProjectSystem.h>
 
 #ifndef AXIOM_CONTENT_DIR
 #define AXIOM_CONTENT_DIR "Content"
@@ -390,6 +391,144 @@ std::string JsonResponse(std::string_view Status, std::string_view Payload) {
   return BuildHttpResponse(Status, "application/json; charset=utf-8", Payload);
 }
 
+std::optional<std::string> ExtractJsonStringField(std::string_view Body,
+                                                  std::string_view FieldName) {
+  const std::string Needle = "\"" + std::string(FieldName) + "\"";
+  const size_t KeyPos = Body.find(Needle);
+  if (KeyPos == std::string_view::npos) {
+    return std::nullopt;
+  }
+
+  const size_t ColonPos = Body.find(':', KeyPos + Needle.size());
+  if (ColonPos == std::string_view::npos) {
+    return std::nullopt;
+  }
+
+  size_t ValuePos = ColonPos + 1;
+  while (ValuePos < Body.size() &&
+         std::isspace(static_cast<unsigned char>(Body[ValuePos])) != 0) {
+    ++ValuePos;
+  }
+  if (ValuePos >= Body.size() || Body[ValuePos] != '"') {
+    return std::nullopt;
+  }
+  ++ValuePos;
+
+  std::string Result;
+  while (ValuePos < Body.size()) {
+    const char Character = Body[ValuePos++];
+    if (Character == '"') {
+      return Result;
+    }
+    if (Character == '\\') {
+      if (ValuePos >= Body.size()) {
+        return std::nullopt;
+      }
+      const char Escaped = Body[ValuePos++];
+      switch (Escaped) {
+      case '\\':
+      case '"':
+      case '/':
+        Result.push_back(Escaped);
+        break;
+      case 'n':
+        Result.push_back('\n');
+        break;
+      case 'r':
+        Result.push_back('\r');
+        break;
+      case 't':
+        Result.push_back('\t');
+        break;
+      default:
+        return std::nullopt;
+      }
+      continue;
+    }
+    Result.push_back(Character);
+  }
+
+  return std::nullopt;
+}
+
+std::string EscapeJsonString(std::string_view Value) {
+  std::string Result;
+  Result.reserve(Value.size() + 4);
+  for (const char Character : Value) {
+    switch (Character) {
+    case '\\':
+      Result += "\\\\";
+      break;
+    case '"':
+      Result += "\\\"";
+      break;
+    case '\n':
+      Result += "\\n";
+      break;
+    case '\r':
+      Result += "\\r";
+      break;
+    case '\t':
+      Result += "\\t";
+      break;
+    default:
+      Result.push_back(Character);
+      break;
+    }
+  }
+  return Result;
+}
+
+std::string SerializeProjectJson(const Project::ProjectDescriptor &Project) {
+  std::ostringstream Stream;
+  Stream << "{"
+         << "\"projectId\":\"" << EscapeJsonString(Project.Manifest.ProjectId)
+         << "\",\"name\":\"" << EscapeJsonString(Project.Manifest.Name)
+         << "\",\"slug\":\"" << EscapeJsonString(Project.Manifest.Slug)
+         << "\",\"rootPath\":\""
+         << EscapeJsonString(Project.Root.RootPath.string())
+         << "\",\"contentDir\":\""
+         << EscapeJsonString(Project.Root.ContentDir.string())
+         << "\",\"sceneFilePath\":\""
+         << EscapeJsonString(Project.Root.SceneFilePath.string())
+         << "\"}";
+  return Stream.str();
+}
+
+std::string SerializeProjectList(
+    const std::vector<Project::ProjectDescriptor> &Projects,
+    const std::optional<Project::ProjectDescriptor> &ActiveProject) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"projects\",\"activeProjectSlug\":";
+  if (ActiveProject.has_value()) {
+    Stream << "\"" << EscapeJsonString(ActiveProject->Manifest.Slug) << "\"";
+  } else {
+    Stream << "null";
+  }
+  Stream << ",\"projects\":[";
+  for (size_t Index = 0; Index < Projects.size(); ++Index) {
+    if (Index > 0) {
+      Stream << ",";
+    }
+    Stream << SerializeProjectJson(Projects[Index]);
+  }
+  Stream << "]}";
+  return Stream.str();
+}
+
+std::string SerializeCurrentProject(
+    const std::optional<Project::ProjectDescriptor> &ActiveProject) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"current_project\",\"project\":";
+  if (ActiveProject.has_value()) {
+    Stream << SerializeProjectJson(*ActiveProject);
+  } else {
+    Stream << "null";
+  }
+  Stream << "}";
+  return Stream.str();
+}
+
 // Loads an image file, scales it to fit within MaxDim x MaxDim (preserving
 // aspect ratio), and encodes as JPEG. Returns empty vector on any failure.
 std::vector<uint8_t> MakeThumbnailJpeg(const std::filesystem::path &Path,
@@ -616,7 +755,9 @@ struct RemoteViewportServer::RemoteClientSession::PacketOutput final
 
 RemoteViewportServer::RemoteViewportServer(
     HeadlessSessionHost &Host, const RemoteViewportServerOptions &Options)
-    : m_Host(Host), m_Options(Options) {
+    : m_Host(Host),
+      m_Options(Options),
+      m_ProjectsRoot(Project::GetDefaultProjectsRoot()) {
   m_Host.SetTransportVideoEncoder(nullptr);
 }
 
@@ -935,6 +1076,12 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
                                              std::string_view Body) {
   const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
   const std::string_view Route = StripQuery(Path);
+  if (Route == "/projects/create") {
+    return HandleCreateProjectRequest(ClientSocketValue, Body);
+  }
+  if (Route == "/projects/open") {
+    return HandleOpenProjectRequest(ClientSocketValue, Body);
+  }
   if (Route == "/session/connect") {
     return HandleSessionConnectRequest(ClientSocketValue, HeaderBlock, Body);
   }
@@ -1040,6 +1187,66 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   return false;
 }
 
+bool RemoteViewportServer::HandleCreateProjectRequest(
+    uintptr_t ClientSocketValue, std::string_view Body) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  const auto ProjectName = ExtractJsonStringField(Body, "name");
+  if (!ProjectName.has_value() || ProjectName->empty()) {
+    const std::string Response = JsonResponse(
+        "400 Bad Request",
+        SerializeError("Missing required 'name' field."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  std::string FailureReason;
+  const auto Created = Project::CreateProjectScaffold(m_ProjectsRoot, *ProjectName,
+                                                      &FailureReason);
+  if (!Created.has_value()) {
+    const std::string Response = JsonResponse(
+        "400 Bad Request", SerializeError(FailureReason));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  {
+    std::scoped_lock Lock(m_ProjectMutex);
+    m_ActiveProject = *Created;
+  }
+
+  const std::string Response =
+      JsonResponse("201 Created", SerializeCurrentProject(Created));
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
+bool RemoteViewportServer::HandleOpenProjectRequest(uintptr_t ClientSocketValue,
+                                                    std::string_view Body) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  const auto ProjectSlug = ExtractJsonStringField(Body, "slug");
+  if (!ProjectSlug.has_value() || ProjectSlug->empty()) {
+    const std::string Response = JsonResponse(
+        "400 Bad Request",
+        SerializeError("Missing required 'slug' field."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const auto Opened = SetActiveProjectBySlug(*ProjectSlug);
+  if (!Opened.has_value()) {
+    const std::string Response = JsonResponse(
+        "404 Not Found",
+        SerializeError("Project was not found in the managed projects directory."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const std::string Response =
+      JsonResponse("200 OK", SerializeCurrentProject(Opened));
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
 bool RemoteViewportServer::HandleSessionConnectRequest(
     uintptr_t ClientSocketValue, std::string_view HeaderBlock,
     std::string_view Body) {
@@ -1077,6 +1284,21 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
                                             std::string_view HeaderBlock) {
   const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
   const std::string_view Route = StripQuery(Path);
+  if (Route == "/projects") {
+    const auto Projects = ListProjects();
+    const auto ActiveProject = GetActiveProject();
+    const std::string Response =
+        JsonResponse("200 OK", SerializeProjectList(Projects, ActiveProject));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+  if (Route == "/projects/current") {
+    const auto ActiveProject = GetActiveProject();
+    const std::string Response =
+        JsonResponse("200 OK", SerializeCurrentProject(ActiveProject));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
   if (Route == "/health") {
     const std::string Body = SerializeReady(m_Options.Width, m_Options.Height);
     const std::string Response = JsonResponse("200 OK", Body);
@@ -1640,6 +1862,30 @@ void RemoteViewportServer::TouchClientSession(const std::string &ClientId) {
     It->second.LastActivity = std::chrono::steady_clock::now();
   }
   m_Host.FocusRemoteRenderView(ClientId);
+}
+
+std::vector<Project::ProjectDescriptor> RemoteViewportServer::ListProjects() const {
+  return Project::DiscoverProjects(m_ProjectsRoot);
+}
+
+std::optional<Project::ProjectDescriptor>
+RemoteViewportServer::GetActiveProject() const {
+  std::scoped_lock Lock(m_ProjectMutex);
+  return m_ActiveProject;
+}
+
+std::optional<Project::ProjectDescriptor>
+RemoteViewportServer::SetActiveProjectBySlug(std::string_view ProjectSlug) {
+  const auto Opened = Project::OpenProjectBySlug(m_ProjectsRoot, ProjectSlug);
+  if (!Opened.has_value()) {
+    return std::nullopt;
+  }
+
+  {
+    std::scoped_lock Lock(m_ProjectMutex);
+    m_ActiveProject = *Opened;
+  }
+  return Opened;
 }
 
 void RemoteViewportServer::HandleClientEncodedVideoPacket(
