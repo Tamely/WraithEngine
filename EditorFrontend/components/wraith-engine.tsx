@@ -169,6 +169,18 @@ export function WraithEngine() {
     [fetchJson, refreshProjects]
   )
 
+  const handleShowNewProject = useCallback(() => {
+    setProjectsError(null)
+    setProjectBrowserOpen(true)
+  }, [])
+
+  const handleShowOpenProject = useCallback(() => {
+    setProjectsError(null)
+    setActiveProject(null)
+    setProjectBrowserOpen(true)
+    setEditorGeneration((current) => current + 1)
+  }, [])
+
   const showProjectBrowser = projectBrowserOpen || activeProject === null
 
   return (
@@ -179,7 +191,8 @@ export function WraithEngine() {
             <div className="relative flex h-screen flex-col overflow-hidden bg-black text-white">
               <MenuBar
                 activeProject={activeProject}
-                onOpenProjectBrowser={() => setProjectBrowserOpen(true)}
+                onNewProject={handleShowNewProject}
+                onOpenProject={handleShowOpenProject}
               />
               <Toolbar />
               <DockLayout />
