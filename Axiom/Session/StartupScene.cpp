@@ -1,6 +1,7 @@
 #include "Session/StartupScene.h"
 
 #include "Assets/AssetCooker.h"
+#include "Assets/CookedAssetRuntime.h"
 #include "Assets/IAssetSource.h"
 #include "Assets/MeshAsset.h"
 #include "Assets/SceneFile.h"
@@ -348,6 +349,7 @@ bool LoadStartupScene(EditorSession &Session) {
   const std::filesystem::path ContentRoot =
       Session.GetContentDir().empty() ? std::filesystem::path(AXIOM_CONTENT_DIR)
                                       : Session.GetContentDir();
+  const bool CookedOnlyContent = Assets::IsCookedOnlyContentPath(ContentRoot);
   const Assets::LocalAssetSource ContentDir{ContentRoot};
   const auto SceneFilePath = ContentDir.ResolveRelative("scene.json");
 
@@ -362,6 +364,13 @@ bool LoadStartupScene(EditorSession &Session) {
     }
     A_CORE_WARN("StartupScene: scene file found but failed to load, "
                 "falling back to defaults");
+  }
+
+  if (CookedOnlyContent) {
+    A_CORE_ERROR(
+        "StartupScene: packaged cooked-only content at '{}' requires a valid scene.json and will not fall back to editor defaults",
+        ContentRoot.string());
+    return false;
   }
 
   EditorSceneState SceneState = BuildStartupSceneState(ContentRoot);

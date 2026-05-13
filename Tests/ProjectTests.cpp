@@ -1,3 +1,5 @@
+#include <Assets/SceneFile.h>
+#include <Core/Log.h>
 #include <Project/ProjectSystem.h>
 #include <Session/StartupScene.h>
 
@@ -5,12 +7,36 @@
 
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 
 namespace {
 
 std::filesystem::path MakeUniqueTempRoot(std::string_view Suffix) {
   return std::filesystem::temp_directory_path() /
          ("wraith-project-tests-" + std::string(Suffix));
+}
+
+void EnsureLogInitialized() {
+  static std::once_flag Flag;
+  std::call_once(Flag, []() { Axiom::Log::Init(); });
+}
+
+std::filesystem::path WriteSingleMeshObj(
+    const std::filesystem::path &ContentRoot,
+    std::string_view RelativePath = "singlemesh.obj") {
+  const auto AbsolutePath = ContentRoot / std::filesystem::path(RelativePath);
+  std::filesystem::create_directories(AbsolutePath.parent_path());
+  std::ofstream Out(AbsolutePath);
+  Out << "o SingleMesh\n"
+         "v 0 0 0\n"
+         "v 1 0 0\n"
+         "v 0 1 0\n"
+         "vn 0 0 1\n"
+         "vt 0 0\n"
+         "vt 1 0\n"
+         "vt 0 1\n"
+         "f 1/1/1 2/2/1 3/3/1\n";
+  return AbsolutePath;
 }
 
 class ProjectSystemTests : public ::testing::Test {
@@ -205,6 +231,7 @@ TEST_F(ProjectSystemTests, LegacyManifestDefaultsScriptWorkspaceFields) {
 }
 
 TEST_F(ProjectSystemTests, EmptyProjectSceneLoadsWithoutFallbackContent) {
+  EnsureLogInitialized();
   std::string FailureReason;
   const auto Created =
       Axiom::Project::CreateProjectScaffold(Root, "Blank Project", &FailureReason);
@@ -237,6 +264,7 @@ TEST_F(ProjectSystemTests, IsPathWithinRootRejectsEscapes) {
 }
 
 TEST_F(ProjectSystemTests, PackageProjectContentStagesCookedProjectOutput) {
+  EnsureLogInitialized();
   std::string FailureReason;
   const auto Created =
       Axiom::Project::CreateProjectScaffold(Root, "Cook Package", &FailureReason);
@@ -272,4 +300,103 @@ TEST_F(ProjectSystemTests, PackageProjectContentStagesCookedProjectOutput) {
   EXPECT_NE(PackageManifestText.find(
                 "\"assetCookManifest\": \"Content/Cooked/AssetCookManifest.json\""),
             std::string::npos);
+}
+
+TEST_F(ProjectSystemTests, PackagedProjectLoadsSceneFromCookedAssetsWithoutSourceFiles) {
+  EnsureLogInitialized();
+  std::string FailureReason;
+  const auto Created =
+      Axiom::Project::CreateProjectScaffold(Root, "Cooked Runtime", &FailureReason);
+  ASSERT_TRUE(Created.has_value()) << FailureReason;
+
+  WriteSingleMeshObj(Created->Root.ContentDir, "singlemesh.obj");
+  std::filesystem::copy_file(
+      std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine" / "tf2 coconut.jpg",
+      Created->Root.ContentDir / "crate.jpg",
+      std::filesystem::copy_options::overwrite_existing);
+
+  Axiom::EditorSceneState Scene;
+  Scene.Items = {{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {{
+          .Id = "crate-1",
+          .DisplayName = "Crate",
+          .Kind = Axiom::EditorSceneItemKind::Mesh,
+          .Visible = true,
+      }},
+  }};
+  Scene.ObjectDetailsById["world"] = Axiom::EditorObjectDetails{
+      .ObjectId = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .SupportsTransform = false,
+      .TransformReadOnly = true,
+  };
+  Scene.ObjectDetailsById["crate-1"] = Axiom::EditorObjectDetails{
+      .ObjectId = "crate-1",
+      .DisplayName = "Crate",
+      .Kind = Axiom::EditorSceneItemKind::Mesh,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      .Transform = Axiom::EditorTransformDetails{},
+      .Material = Axiom::EditorMaterialProperties{
+          .BaseColorFactor = glm::vec4(0.8f, 0.2f, 0.1f, 1.0f),
+          .Metallic = 0.9f,
+          .Roughness = 0.05f,
+          .TextureAssetPath = std::string("crate.jpg"),
+      },
+  };
+
+  auto Material = std::make_shared<Axiom::MaterialInstance>();
+  Material->BaseColorFactor = glm::vec4(0.8f, 0.2f, 0.1f, 1.0f);
+  Material->Metallic = 0.9f;
+  Material->Roughness = 0.05f;
+  Material->TextureAssetPath = "crate.jpg";
+  Scene.MeshInstances = {{
+      .ObjectId = "crate-1",
+      .Mesh = {},
+      .Material = Material,
+      .RenderPath = Axiom::MeshRenderPath::Graphics,
+      .Transform = glm::mat4(1.0f),
+      .AssetRelativePath = "singlemesh.obj",
+  }};
+
+  ASSERT_TRUE(Axiom::Assets::SaveSceneToFile(Created->Root.SceneFilePath, Scene));
+
+  const auto PackageResult =
+      Axiom::Project::PackageProjectContent(*Created, &FailureReason);
+  ASSERT_TRUE(PackageResult.has_value()) << FailureReason;
+  EXPECT_FALSE(std::filesystem::exists(Created->Output.PackageDir / "Content" /
+                                       "singlemesh.obj"));
+  EXPECT_FALSE(std::filesystem::exists(Created->Output.PackageDir / "Content" /
+                                       "crate.jpg"));
+
+  const auto Loaded = Axiom::Assets::LoadSceneFromFile(
+      Created->Output.PackagedSceneFilePath);
+  ASSERT_TRUE(Loaded.has_value());
+  ASSERT_EQ(Loaded->MeshInstances.size(), 1u);
+  EXPECT_EQ(Loaded->MeshInstances[0].ObjectId, "crate-1");
+  ASSERT_TRUE(Loaded->MeshInstances[0].Material != nullptr);
+  EXPECT_EQ(Loaded->MeshInstances[0].Material->TextureAssetPath, "crate.jpg");
+  const auto DetailsIt = Loaded->ObjectDetailsById.find("crate-1");
+  ASSERT_NE(DetailsIt, Loaded->ObjectDetailsById.end());
+  ASSERT_TRUE(DetailsIt->second.Material.has_value());
+  ASSERT_TRUE(DetailsIt->second.Material->TextureAssetPath.has_value());
+  EXPECT_EQ(*DetailsIt->second.Material->TextureAssetPath, "crate.jpg");
+}
+
+TEST_F(ProjectSystemTests, PackagedContentRequiresSceneFileAndWillNotFallback) {
+  EnsureLogInitialized();
+  const auto PackagedRoot = Root / "packaged-runtime";
+  ASSERT_TRUE(std::filesystem::create_directories(PackagedRoot / "Content"));
+  std::ofstream(PackagedRoot / "package.wraith.json") << "{\n  \"version\": 1\n}\n";
+
+  Axiom::EditorSession Session(Axiom::SessionId{88});
+  Session.SetContentDir(PackagedRoot / "Content");
+  EXPECT_FALSE(Axiom::LoadStartupScene(Session));
 }
