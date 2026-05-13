@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   FileCode2,
   Folder,
@@ -78,38 +78,177 @@ function buildScriptTree(files: string[]): ScriptTreeNode {
   return root
 }
 
-function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
+type TokenStyle = "plain" | "comment" | "string" | "keyword" | "engine" | "number"
+
+interface ScriptToken {
+  text: string
+  style: TokenStyle
 }
 
-function highlightCSharp(source: string) {
-  const placeholders: string[] = []
-  const take = (value: string) => {
-    const token = `__SCRIPT_TOKEN_${placeholders.length}__`
-    placeholders.push(value)
-    return token
+const KEYWORDS = new Set([
+  "namespace",
+  "public",
+  "class",
+  "using",
+  "return",
+  "if",
+  "else",
+  "new",
+  "override",
+  "void",
+  "float",
+  "int",
+  "bool",
+  "string",
+  "private",
+  "protected",
+  "internal",
+  "static",
+  "async",
+  "await",
+  "var",
+])
+
+const ENGINE_SYMBOLS = new Set([
+  "OnCreate",
+  "OnTick",
+  "OnDestroy",
+  "Script",
+  "GameObject",
+  "Transform",
+  "Vector3",
+])
+
+function isIdentifierStart(char: string) {
+  return /[A-Za-z_]/.test(char)
+}
+
+function isIdentifierPart(char: string) {
+  return /[A-Za-z0-9_]/.test(char)
+}
+
+function isNumberStart(source: string, index: number) {
+  const current = source[index]
+  const next = source[index + 1] ?? ""
+  if (!/\d/.test(current)) {
+    return false
+  }
+  if (current !== ".") {
+    return true
+  }
+  return /\d/.test(next)
+}
+
+function tokenizeCSharp(source: string): ScriptToken[] {
+  const tokens: ScriptToken[] = []
+  let index = 0
+
+  while (index < source.length) {
+    const current = source[index]
+    const next = source[index + 1] ?? ""
+
+    if (current === "/" && next === "/") {
+      let end = index + 2
+      while (end < source.length && source[end] !== "\n") {
+        end += 1
+      }
+      tokens.push({ text: source.slice(index, end), style: "comment" })
+      index = end
+      continue
+    }
+
+    if (current === "/" && next === "*") {
+      let end = index + 2
+      while (end < source.length - 1 && !(source[end] === "*" && source[end + 1] === "/")) {
+        end += 1
+      }
+      end = Math.min(source.length, end + 2)
+      tokens.push({ text: source.slice(index, end), style: "comment" })
+      index = end
+      continue
+    }
+
+    if (current === "\"") {
+      let end = index + 1
+      while (end < source.length) {
+        if (source[end] === "\\" && end + 1 < source.length) {
+          end += 2
+          continue
+        }
+        if (source[end] === "\"") {
+          end += 1
+          break
+        }
+        end += 1
+      }
+      tokens.push({ text: source.slice(index, end), style: "string" })
+      index = end
+      continue
+    }
+
+    if (isIdentifierStart(current)) {
+      let end = index + 1
+      while (end < source.length && isIdentifierPart(source[end])) {
+        end += 1
+      }
+      const word = source.slice(index, end)
+      let style: TokenStyle = "plain"
+      if (KEYWORDS.has(word)) {
+        style = "keyword"
+      } else if (ENGINE_SYMBOLS.has(word)) {
+        style = "engine"
+      }
+      tokens.push({ text: word, style })
+      index = end
+      continue
+    }
+
+    if (isNumberStart(source, index)) {
+      let end = index + 1
+      while (end < source.length && /[\d._fFmMdD]/.test(source[end])) {
+        end += 1
+      }
+      tokens.push({ text: source.slice(index, end), style: "number" })
+      index = end
+      continue
+    }
+
+    tokens.push({ text: current, style: "plain" })
+    index += 1
   }
 
-  let html = escapeHtml(source)
-  html = html.replace(/(\/\/[^\n]*|\/\*[\s\S]*?\*\/)/g, (match) =>
-    take(`<span class="text-emerald-400/80">${match}</span>`)
-  )
-  html = html.replace(/"([^"\\]|\\.)*"/g, (match) =>
-    take(`<span class="text-amber-300">${match}</span>`)
-  )
-  html = html.replace(/\b(namespace|public|class|using|return|if|else|new|override|void|float|int|bool|string|private|protected|internal|static|async|await|var)\b/g,
-    '<span class="text-sky-300">$1</span>')
-  html = html.replace(/\b(OnCreate|OnTick|OnDestroy|Script|GameObject|Transform|Vector3)\b/g,
-    '<span class="text-fuchsia-300">$1</span>')
-  html = html.replace(/\b\d+(\.\d+)?f?\b/g, '<span class="text-cyan-300">$&</span>')
-  html = html.replace(/(__SCRIPT_TOKEN_\d+__)/g, (token) => {
-    const index = Number(token.replace(/\D/g, ""))
-    return placeholders[index] ?? token
+  return tokens
+}
+
+function tokenClassName(style: TokenStyle) {
+  switch (style) {
+    case "comment":
+      return "text-emerald-400/80"
+    case "string":
+      return "text-amber-300"
+    case "keyword":
+      return "text-sky-300"
+    case "engine":
+      return "text-fuchsia-300"
+    case "number":
+      return "text-cyan-300"
+    default:
+      return undefined
+  }
+}
+
+function renderHighlightedCode(source: string): ReactNode[] {
+  return tokenizeCSharp(source).map((token, index) => {
+    const className = tokenClassName(token.style)
+    if (!className) {
+      return <span key={index}>{token.text}</span>
+    }
+    return (
+      <span key={index} className={className}>
+        {token.text}
+      </span>
+    )
   })
-  return html
 }
 
 export function ScriptEditor() {
@@ -421,7 +560,7 @@ export function ScriptEditor() {
     )
   }
 
-  const highlightedHtml = useMemo(() => highlightCSharp(content), [content])
+  const highlightedContent = useMemo(() => renderHighlightedCode(content), [content])
 
   return (
     <div className="flex h-full min-h-0 bg-neutral-950">
@@ -524,8 +663,10 @@ export function ScriptEditor() {
                 ref={highlightRef}
                 aria-hidden="true"
                 className="pointer-events-none absolute inset-0 overflow-auto whitespace-pre-wrap break-words px-4 py-3 font-mono text-[13px] leading-6 text-neutral-200"
-                dangerouslySetInnerHTML={{ __html: highlightedHtml + "\n" }}
-              />
+              >
+                {highlightedContent}
+                {"\n"}
+              </pre>
               <textarea
                 ref={editorRef}
                 className="absolute inset-0 resize-none overflow-auto bg-transparent px-4 py-3 font-mono text-[13px] leading-6 text-transparent caret-white outline-none selection:bg-sky-400/30"
