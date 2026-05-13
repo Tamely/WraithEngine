@@ -1,6 +1,6 @@
 "use client"
 
-import { X } from "lucide-react"
+import { AlertCircle, CheckCircle2, LoaderCircle, X } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { MenuBar } from "./engine/menu-bar"
 import { ProjectBrowser, type ProjectDescriptor } from "./engine/project-browser"
@@ -74,6 +74,16 @@ interface ProjectPackageResponse {
   packageManifestPath: string
 }
 
+type BuildToastKind = "cook" | "package"
+type BuildToastStatus = "progress" | "success" | "error"
+
+interface BuildToastState {
+  kind: BuildToastKind
+  status: BuildToastStatus
+  title: string
+  message: string
+}
+
 function formatProjectRequestError(serverOrigin: string, action: string, error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
   const normalizedMessage = message.toLowerCase()
@@ -90,6 +100,50 @@ function formatProjectRequestError(serverOrigin: string, action: string, error: 
   return message
 }
 
+function BuildToastOverlay({
+  toast,
+  onDismiss,
+}: {
+  toast: BuildToastState | null
+  onDismiss: () => void
+}) {
+  if (toast === null) return null
+
+  const accentClass =
+    toast.status === "success"
+      ? "border-emerald-800 text-emerald-400"
+      : toast.status === "error"
+        ? "border-red-800 text-red-400"
+        : "border-blue-800 text-blue-400"
+
+  return (
+    <div className="pointer-events-none fixed bottom-4 left-4 z-50 flex max-w-md">
+      <div className={`pointer-events-auto flex w-full items-start gap-2 rounded border bg-neutral-950/95 px-3 py-2.5 shadow-lg ${accentClass}`}>
+        <div className="mt-0.5 shrink-0">
+          {toast.status === "progress" ? (
+            <LoaderCircle className="h-4 w-4 animate-spin" />
+          ) : toast.status === "success" ? (
+            <CheckCircle2 className="h-4 w-4" />
+          ) : (
+            <AlertCircle className="h-4 w-4" />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium text-neutral-100">{toast.title}</p>
+          <p className="mt-1 text-xs text-neutral-300">{toast.message}</p>
+        </div>
+        <button
+          className="shrink-0 rounded p-0.5 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300"
+          onClick={onDismiss}
+          type="button"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function WraithEngine() {
   const serverOrigin = useMemo(() => getServerOrigin(), [])
   const [projects, setProjects] = useState<ProjectDescriptor[]>([])
@@ -100,7 +154,7 @@ export function WraithEngine() {
   const [projectBrowserOpen, setProjectBrowserOpen] = useState(false)
   const [editorGeneration, setEditorGeneration] = useState(0)
   const [buildBusy, setBuildBusy] = useState(false)
-  const [buildNotice, setBuildNotice] = useState<string | null>(null)
+  const [buildToast, setBuildToast] = useState<BuildToastState | null>(null)
 
   const fetchJson = useCallback(
     async <T,>(path: string, init?: RequestInit) => {
@@ -206,43 +260,71 @@ export function WraithEngine() {
 
   const handleCookProject = useCallback(async () => {
     setBuildBusy(true)
-    setBuildNotice(null)
+    setBuildToast({
+      kind: "cook",
+      status: "progress",
+      title: "Cooking Project",
+      message: activeProject
+        ? `Cooking ${activeProject.name} into ${activeProject.cookedDir}...`
+        : "Cooking the active project...",
+    })
     try {
       const payload = await fetchJson<ProjectCookResponse>("/projects/cook", {
         method: "POST",
       })
-      setBuildNotice(
-        `Cooked ${payload.cookedSourceAssetCount} source assets into ${payload.project.cookedDir}. Manifest entries: ${payload.manifestEntryCount}.`
-      )
+      setBuildToast({
+        kind: "cook",
+        status: "success",
+        title: "Cook Complete",
+        message: `Cooked ${payload.cookedSourceAssetCount} source assets into ${payload.project.cookedDir}. Manifest entries: ${payload.manifestEntryCount}.`,
+      })
       setActiveProject(payload.project)
       await refreshProjects()
     } catch (error) {
-      setBuildNotice(formatProjectRequestError(serverOrigin, "cook the active project", error))
+      setBuildToast({
+        kind: "cook",
+        status: "error",
+        title: "Cook Failed",
+        message: formatProjectRequestError(serverOrigin, "cook the active project", error),
+      })
     } finally {
       setBuildBusy(false)
     }
-  }, [fetchJson, refreshProjects, serverOrigin])
+  }, [activeProject, fetchJson, refreshProjects, serverOrigin])
 
   const handlePackageProject = useCallback(async () => {
     setBuildBusy(true)
-    setBuildNotice(null)
+    setBuildToast({
+      kind: "package",
+      status: "progress",
+      title: "Packaging Project",
+      message: activeProject
+        ? `Staging a packaged build for ${activeProject.name} into ${activeProject.packageDir}...`
+        : "Packaging the active project...",
+    })
     try {
       const payload = await fetchJson<ProjectPackageResponse>("/projects/package", {
         method: "POST",
       })
-      setBuildNotice(
-        `Packaged ${payload.project.name} to ${payload.packageDir}. ${payload.packagedFileCount} files staged with cooked assets${payload.includedSceneFile ? " and scene state" : ""}.`
-      )
+      setBuildToast({
+        kind: "package",
+        status: "success",
+        title: "Package Complete",
+        message: `Packaged ${payload.project.name} to ${payload.packageDir}. ${payload.packagedFileCount} files staged with cooked assets${payload.includedSceneFile ? " and scene state" : ""}.`,
+      })
       setActiveProject(payload.project)
       await refreshProjects()
     } catch (error) {
-      setBuildNotice(
-        formatProjectRequestError(serverOrigin, "package the active project", error)
-      )
+      setBuildToast({
+        kind: "package",
+        status: "error",
+        title: "Package Failed",
+        message: formatProjectRequestError(serverOrigin, "package the active project", error),
+      })
     } finally {
       setBuildBusy(false)
     }
-  }, [fetchJson, refreshProjects, serverOrigin])
+  }, [activeProject, fetchJson, refreshProjects, serverOrigin])
 
   const showProjectBrowser = projectBrowserOpen || activeProject === null
 
@@ -264,11 +346,7 @@ export function WraithEngine() {
                 <Toolbar />
                 <DockLayout />
                 <ScriptErrorToastOverlay />
-                {buildNotice ? (
-                  <div className="pointer-events-none fixed bottom-4 left-4 z-50 max-w-xl rounded border border-neutral-800 bg-neutral-950/95 px-3 py-2 text-xs text-neutral-200 shadow-lg">
-                    {buildNotice}
-                  </div>
-                ) : null}
+                <BuildToastOverlay toast={buildToast} onDismiss={() => setBuildToast(null)} />
               </div>
             </ProjectSessionProvider>
           </DockProvider>
