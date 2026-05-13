@@ -10,7 +10,7 @@
 #include <glm/vec4.hpp>
 
 namespace Axiom {
-constexpr uint32_t MaxMeshSubmissionsPerFrame = 64;
+constexpr uint32_t MaxMeshSubmissionsPerFrame = 256;
 constexpr uint32_t TimestampQueryCount = 4;
 
 struct ComputePushConstants {
