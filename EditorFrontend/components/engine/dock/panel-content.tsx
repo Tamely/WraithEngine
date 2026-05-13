@@ -6,6 +6,7 @@ import { Outliner } from "../outliner"
 import { Details } from "../details"
 import { ContentBrowser } from "../content-browser"
 import { RemoteViewportPanel } from "../remote-viewport-panel"
+import { ScriptEditor } from "../script-editor"
 
 interface PanelContentProps {
     panelId: PanelId
@@ -23,6 +24,8 @@ export function PanelContent({ panelId }: PanelContentProps) {
             return <ContentBrowser />
         case "remote-viewport":
             return <RemoteViewportPanel />
+        case "script-editor":
+            return <ScriptEditor />
         default:
             return null
     }

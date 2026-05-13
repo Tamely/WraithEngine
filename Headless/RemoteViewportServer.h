@@ -109,6 +109,17 @@ private:
                                   std::string_view Body);
   bool HandleOpenProjectRequest(uintptr_t ClientSocketValue,
                                 std::string_view Body);
+  bool HandleListScriptsRequest(uintptr_t ClientSocketValue);
+  bool HandleReadScriptFileRequest(uintptr_t ClientSocketValue,
+                                   std::string_view Path);
+  bool HandleCreateScriptFileRequest(uintptr_t ClientSocketValue,
+                                     std::string_view Body);
+  bool HandleSaveScriptFileRequest(uintptr_t ClientSocketValue,
+                                   std::string_view Body);
+  bool HandleRenameScriptFileRequest(uintptr_t ClientSocketValue,
+                                     std::string_view Body);
+  bool HandleDeleteScriptFileRequest(uintptr_t ClientSocketValue,
+                                     std::string_view Body);
   bool HandleSessionConnectRequest(uintptr_t ClientSocketValue,
                                    std::string_view HeaderBlock,
                                    std::string_view Body);
@@ -153,8 +164,13 @@ private:
   std::optional<Project::ProjectDescriptor>
   SetActiveProjectBySlug(std::string_view ProjectSlug);
   std::filesystem::path GetActiveContentDir() const;
+  std::filesystem::path GetActiveScriptsDir() const;
   std::filesystem::path GetEngineContentDir() const;
   bool LoadActiveProjectIntoSession(std::string *FailureReason = nullptr);
+  std::vector<std::string> ListScriptFiles() const;
+  std::optional<std::filesystem::path>
+  ResolveActiveScriptPath(std::string_view RelativePath,
+                          bool AllowMissingLeaf = false) const;
   std::vector<Assets::AssetDescriptor> CollectVisibleAssets() const;
   std::optional<std::filesystem::path>
   ResolveVisibleAssetPath(std::string_view RelativePath) const;

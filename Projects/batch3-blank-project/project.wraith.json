@@ -1,6 +1,8 @@
 {
-  "version": 1,
+  "version": 2,
   "projectId": "project-9291f4a8026dea79",
   "name": "Batch3 Blank Project",
-  "slug": "batch3-blank-project"
+  "slug": "batch3-blank-project",
+  "scriptAssemblyName": "Batch3BlankProject.Scripts",
+  "scriptRootNamespace": "Batch3BlankProject.Scripts"
 }

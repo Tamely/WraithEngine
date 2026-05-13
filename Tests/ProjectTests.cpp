@@ -168,7 +168,8 @@ TEST_F(ProjectSystemTests, OpenProjectBySlugLoadsOnlyManagedProjects) {
 }
 
 TEST_F(ProjectSystemTests, LegacyManifestDefaultsScriptWorkspaceFields) {
-  const auto ProjectRoot = Axiom::Project::ResolveProjectRoot(Root / "legacy");
+  const auto ProjectRoot =
+      Axiom::Project::ResolveProjectRoot(Root / "legacy-project");
   ASSERT_TRUE(std::filesystem::create_directories(ProjectRoot.RootPath));
 
   std::ofstream ManifestFile(ProjectRoot.ManifestPath);
@@ -188,6 +189,13 @@ TEST_F(ProjectSystemTests, LegacyManifestDefaultsScriptWorkspaceFields) {
   EXPECT_EQ(Loaded->Manifest.ScriptRootNamespace, "LegacyProject.Scripts");
   EXPECT_EQ(Loaded->ScriptWorkspace.ScriptProjectPath.filename().string(),
             "LegacyProject.Scripts.csproj");
+
+  const auto Opened =
+      Axiom::Project::OpenProjectBySlug(Root, "legacy-project");
+  ASSERT_TRUE(Opened.has_value());
+  EXPECT_TRUE(std::filesystem::exists(Opened->ScriptWorkspace.ScriptProjectPath));
+  EXPECT_TRUE(std::filesystem::exists(Opened->ScriptWorkspace.ScriptSolutionPath));
+  EXPECT_TRUE(std::filesystem::exists(Opened->ScriptWorkspace.StarterScriptPath));
 }
 
 TEST_F(ProjectSystemTests, EmptyProjectSceneLoadsWithoutFallbackContent) {

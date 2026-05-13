@@ -4,6 +4,7 @@ import { X } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { MenuBar } from "./engine/menu-bar"
 import { ProjectBrowser, type ProjectDescriptor } from "./engine/project-browser"
+import { ProjectSessionProvider } from "./engine/project-session-context"
 import { getServerOrigin } from "./engine/server-origin"
 import { Toolbar } from "./engine/toolbar"
 import { DockProvider } from "./engine/dock/dock-context"
@@ -188,16 +189,18 @@ export function WraithEngine() {
       <div className="relative h-screen overflow-hidden bg-black text-white">
         {activeProject ? (
           <DockProvider key={`${activeProject.slug}-${editorGeneration}`}>
-            <div className="relative flex h-screen flex-col overflow-hidden bg-black text-white">
-              <MenuBar
-                activeProject={activeProject}
-                onNewProject={handleShowNewProject}
-                onOpenProject={handleShowOpenProject}
-              />
-              <Toolbar />
-              <DockLayout />
-              <ScriptErrorToastOverlay />
-            </div>
+            <ProjectSessionProvider activeProject={activeProject} serverOrigin={serverOrigin}>
+              <div className="relative flex h-screen flex-col overflow-hidden bg-black text-white">
+                <MenuBar
+                  activeProject={activeProject}
+                  onNewProject={handleShowNewProject}
+                  onOpenProject={handleShowOpenProject}
+                />
+                <Toolbar />
+                <DockLayout />
+                <ScriptErrorToastOverlay />
+              </div>
+            </ProjectSessionProvider>
           </DockProvider>
         ) : null}
 
