@@ -71,6 +71,7 @@ struct EditorObjectDetails {
   std::string DisplayName;
   EditorSceneItemKind Kind{EditorSceneItemKind::Mesh};
   bool Visible{true};
+  bool IsGeneratedAssetChild{false};
   bool SupportsTransform{false};
   bool TransformReadOnly{true};
   std::optional<EditorTransformDetails> Transform;      // local-space
@@ -78,6 +79,8 @@ struct EditorObjectDetails {
   std::optional<std::string> ScriptClass;               // C# script class name (Actors only)
   std::optional<EditorLightProperties> Light;           // Light objects only
   std::optional<EditorMaterialProperties> Material;     // Mesh objects only
+  std::optional<std::string> GeneratedFromAssetRootId;
+  std::string AssetRelativePath; // content-relative path when assigned directly to this object
 };
 
 enum class EditorUserPresenceState { Connected, Away, Disconnected };
@@ -205,6 +208,10 @@ private:
   void RemoveSceneObject(std::string_view ObjectId);
   void ClearSelectionsForObject(std::string_view ObjectId);
   void PruneInvalidSelections();
+  void RemoveGeneratedAssetChildren(std::string_view RootObjectId);
+  void ExpandMeshAssetIntoScene(std::string_view RootObjectId,
+                                const MeshSceneData &SceneData,
+                                std::string_view AssetPath);
   // Instance tree management
   void InitSceneRoot();
   Instance *FindWorldFolder() const;

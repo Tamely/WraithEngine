@@ -178,6 +178,44 @@ bool IsWhitespace(char Value) {
          Value == '\f' || Value == '\v';
 }
 
+std::string SanitizeGeneratedAssetToken(std::string_view Value) {
+  std::string Out;
+  Out.reserve(Value.size());
+  for (const char Character : Value) {
+    if ((Character >= 'a' && Character <= 'z') ||
+        (Character >= 'A' && Character <= 'Z') ||
+        (Character >= '0' && Character <= '9')) {
+      Out.push_back(Character);
+    } else {
+      Out.push_back('_');
+    }
+  }
+
+  while (!Out.empty() && Out.back() == '_') {
+    Out.pop_back();
+  }
+
+  if (Out.empty()) {
+    return "mesh";
+  }
+  return Out;
+}
+
+std::string BuildGeneratedAssetChildId(std::string_view RootObjectId,
+                                       std::string_view InstanceName,
+                                       size_t InstanceIndex) {
+  return std::string(RootObjectId) + "__asset_" + std::to_string(InstanceIndex) +
+         "_" + SanitizeGeneratedAssetToken(InstanceName);
+}
+
+std::string ResolveGeneratedAssetChildDisplayName(std::string_view InstanceName,
+                                                  size_t InstanceIndex) {
+  if (!InstanceName.empty()) {
+    return std::string(InstanceName);
+  }
+  return "Mesh " + std::to_string(InstanceIndex + 1);
+}
+
 glm::mat4 BuildTransformMatrix(const EditorTransformDetails &Transform) {
   glm::mat4 Matrix(1.0f);
   Matrix = glm::translate(Matrix, Transform.Location);
@@ -614,6 +652,151 @@ void EditorSession::RemoveSceneObject(std::string_view ObjectId) {
                        return M.ObjectId == Id;
                      }),
       m_State.Scene.MeshInstances.end());
+}
+
+void EditorSession::RemoveGeneratedAssetChildren(std::string_view RootObjectId) {
+  Instance *Root = FindInstanceById(m_SceneRoot.get(), RootObjectId);
+  if (Root == nullptr) {
+    return;
+  }
+
+  std::vector<std::string> GeneratedChildIds;
+  for (Instance *Child : Root->GetChildren()) {
+    const auto DetailsIt = m_State.Scene.ObjectDetailsById.find(Child->GetName());
+    if (DetailsIt == m_State.Scene.ObjectDetailsById.end()) {
+      continue;
+    }
+    if (!DetailsIt->second.IsGeneratedAssetChild ||
+        !DetailsIt->second.GeneratedFromAssetRootId.has_value() ||
+        *DetailsIt->second.GeneratedFromAssetRootId != RootObjectId) {
+      continue;
+    }
+    GeneratedChildIds.push_back(Child->GetName());
+  }
+
+  for (const std::string &ChildId : GeneratedChildIds) {
+    Instance *Child = FindInstanceById(m_SceneRoot.get(), ChildId);
+    if (Child == nullptr) {
+      continue;
+    }
+    for (const std::string &DescendantId : CollectDescendantIds(Child)) {
+      RemoveSceneObject(DescendantId);
+      ClearSelectionsForObject(DescendantId);
+    }
+    Child->Destroy();
+  }
+}
+
+void EditorSession::ExpandMeshAssetIntoScene(std::string_view RootObjectId,
+                                             const MeshSceneData &SceneData,
+                                             std::string_view AssetPath) {
+  auto DetailsIt = m_State.Scene.ObjectDetailsById.find(std::string(RootObjectId));
+  if (DetailsIt == m_State.Scene.ObjectDetailsById.end()) {
+    return;
+  }
+
+  Instance *Root = FindInstanceById(m_SceneRoot.get(), RootObjectId);
+  if (Root == nullptr) {
+    return;
+  }
+
+  RemoveGeneratedAssetChildren(RootObjectId);
+
+  m_State.Scene.MeshInstances.erase(
+      std::remove_if(m_State.Scene.MeshInstances.begin(),
+                     m_State.Scene.MeshInstances.end(),
+                     [&](const EditorSceneMeshInstance &Instance) {
+                       return Instance.ObjectId == RootObjectId;
+                     }),
+      m_State.Scene.MeshInstances.end());
+
+  EditorObjectDetails &RootDetails = DetailsIt->second;
+  RootDetails.IsGeneratedAssetChild = false;
+  RootDetails.GeneratedFromAssetRootId = std::nullopt;
+  RootDetails.AssetRelativePath = std::string(AssetPath);
+
+  if (SceneData.Instances.size() == 1) {
+    const auto &First = SceneData.Instances.front();
+    m_State.Scene.MeshInstances.push_back(EditorSceneMeshInstance{
+        .ObjectId = std::string(RootObjectId),
+        .Mesh = First.Mesh,
+        .Material = First.Material,
+        .RenderPath = MeshRenderPath::Graphics,
+        .Transform = glm::mat4(1.0f),
+        .AssetRelativePath = std::string(AssetPath),
+    });
+
+    if (First.Material) {
+      RootDetails.Material = EditorMaterialProperties{
+          .BaseColorFactor = First.Material->BaseColorFactor,
+          .Metallic = First.Material->Metallic,
+          .Roughness = First.Material->Roughness,
+          .TextureAssetPath = First.Material->TextureAssetPath.empty()
+                                  ? std::nullopt
+                                  : std::optional<std::string>(
+                                        First.Material->TextureAssetPath),
+      };
+    }
+    SyncItemsFromTree();
+    return;
+  }
+
+  RootDetails.Material = std::nullopt;
+
+  for (size_t InstanceIndex = 0; InstanceIndex < SceneData.Instances.size();
+       ++InstanceIndex) {
+    const auto &SourceInstance = SceneData.Instances[InstanceIndex];
+    const std::string ChildId = BuildGeneratedAssetChildId(
+        RootObjectId, SourceInstance.Name, InstanceIndex);
+    const std::string ChildDisplayName = ResolveGeneratedAssetChildDisplayName(
+        SourceInstance.Name, InstanceIndex);
+    const EditorTransformDetails ChildLocalTransform =
+        DecomposeMatrix(SourceInstance.Transform);
+
+    m_State.Scene.ObjectDetailsById[ChildId] = EditorObjectDetails{
+        .ObjectId = ChildId,
+        .DisplayName = ChildDisplayName,
+        .Kind = EditorSceneItemKind::Mesh,
+        .Visible = RootDetails.Visible,
+        .IsGeneratedAssetChild = true,
+        .SupportsTransform = true,
+        .TransformReadOnly = true,
+        .Transform = ChildLocalTransform,
+        .Material = SourceInstance.Material
+                        ? std::optional<EditorMaterialProperties>(
+                              EditorMaterialProperties{
+                                  .BaseColorFactor =
+                                      SourceInstance.Material->BaseColorFactor,
+                                  .Metallic = SourceInstance.Material->Metallic,
+                                  .Roughness =
+                                      SourceInstance.Material->Roughness,
+                                  .TextureAssetPath =
+                                      SourceInstance.Material->TextureAssetPath
+                                              .empty()
+                                          ? std::nullopt
+                                          : std::optional<std::string>(
+                                                SourceInstance.Material
+                                                    ->TextureAssetPath),
+                              })
+                        : std::nullopt,
+        .GeneratedFromAssetRootId = std::string(RootObjectId),
+    };
+
+    Instance *Child = CreateInstanceForTemplate("Mesh", ChildId);
+    if (Child != nullptr) {
+      Child->SetParent(Root);
+    }
+
+    m_State.Scene.MeshInstances.push_back(EditorSceneMeshInstance{
+        .ObjectId = ChildId,
+        .Mesh = SourceInstance.Mesh,
+        .Material = SourceInstance.Material,
+        .RenderPath = MeshRenderPath::Graphics,
+        .Transform = SourceInstance.Transform,
+    });
+  }
+
+  SyncItemsFromTree();
 }
 
 void EditorSession::ClearSelectionsForObject(std::string_view ObjectId) {
@@ -1517,31 +1700,10 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
   }
 
   const auto &First = SceneData->Instances[0];
-
-  auto MeshIt = std::find_if(
-      m_State.Scene.MeshInstances.begin(), m_State.Scene.MeshInstances.end(),
-      [&](const EditorSceneMeshInstance &I) { return I.ObjectId == Command.ObjectId; });
-  if (MeshIt == m_State.Scene.MeshInstances.end()) {
-    // Object was created at runtime (CreateObject) and has no instance yet — add one now.
-    m_State.Scene.MeshInstances.push_back(EditorSceneMeshInstance{.ObjectId = Command.ObjectId});
-    MeshIt = m_State.Scene.MeshInstances.end() - 1;
-  }
-
-  MeshIt->Mesh = First.Mesh;
-  MeshIt->Material = First.Material;
-  MeshIt->AssetRelativePath = Command.AssetPath;
-
-  // Sync material properties on object details so the inspector reflects the new asset's material.
-  if (First.Material) {
-    auto DetailsIt = m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
-    if (DetailsIt != m_State.Scene.ObjectDetailsById.end()) {
-      DetailsIt->second.Material = EditorMaterialProperties{
-          .BaseColorFactor = First.Material->BaseColorFactor,
-          .Metallic        = First.Material->Metallic,
-          .Roughness       = First.Material->Roughness,
-      };
-    }
-  }
+  (void)First;
+  ExpandMeshAssetIntoScene(Command.ObjectId, *SceneData, Command.AssetPath);
+  RecomputeSubtreeWorldTransforms(
+      FindInstanceById(m_SceneRoot.get(), Command.ObjectId));
 
   A_CORE_INFO("SetMeshAsset: assigned '{}' to object '{}'",
               Command.AssetPath, Command.ObjectId);

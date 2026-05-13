@@ -1,5 +1,8 @@
 #include "CookedMeshAsset.h"
 
+#include "Assets/CookedAssetRuntime.h"
+#include "Assets/CookedMaterialAsset.h"
+#include "Assets/MeshAsset.h"
 #include "Core/Log.h"
 
 #include <array>
@@ -22,6 +25,16 @@ struct FileHeader {
 
 struct InstanceHeader {
   uint32_t NameLength;
+  uint32_t MaterialAssetPathLength;
+  uint32_t VertexCount;
+  uint32_t IndexCount;
+  std::array<float, 3> BoundsMin;
+  std::array<float, 3> BoundsMax;
+  std::array<float, 16> Transform;
+};
+
+struct InstanceHeaderV1 {
+  uint32_t NameLength;
   uint32_t VertexCount;
   uint32_t IndexCount;
   std::array<float, 3> BoundsMin;
@@ -31,6 +44,7 @@ struct InstanceHeader {
 
 static_assert(std::is_trivially_copyable_v<FileHeader>);
 static_assert(std::is_trivially_copyable_v<InstanceHeader>);
+static_assert(std::is_trivially_copyable_v<InstanceHeaderV1>);
 
 template <typename T>
 bool WriteValue(std::ofstream &Stream, const T &Value) {
@@ -87,6 +101,8 @@ bool SaveCookedMeshAsset(const std::filesystem::path &Path,
   for (const auto &Instance : Scene.Instances) {
     const InstanceHeader InstanceMeta{
         .NameLength = static_cast<uint32_t>(Instance.Name.size()),
+        .MaterialAssetPathLength =
+            static_cast<uint32_t>(Instance.MaterialAssetPath.size()),
         .VertexCount = static_cast<uint32_t>(Instance.Mesh.Vertices.size()),
         .IndexCount = static_cast<uint32_t>(Instance.Mesh.Indices.size()),
         .BoundsMin = {Instance.Mesh.BoundsMin.x, Instance.Mesh.BoundsMin.y,
@@ -101,6 +117,14 @@ bool SaveCookedMeshAsset(const std::filesystem::path &Path,
     if (!Instance.Name.empty()) {
       Stream.write(Instance.Name.data(),
                    static_cast<std::streamsize>(Instance.Name.size()));
+      if (!Stream.good())
+        return false;
+    }
+
+    if (!Instance.MaterialAssetPath.empty()) {
+      Stream.write(Instance.MaterialAssetPath.data(),
+                   static_cast<std::streamsize>(
+                       Instance.MaterialAssetPath.size()));
       if (!Stream.good())
         return false;
     }
@@ -145,7 +169,7 @@ LoadCookedMeshAsset(const std::filesystem::path &Path) {
     return std::nullopt;
   }
 
-  if (Header.Version != kCookedMeshFormatVersion) {
+  if (Header.Version != 1 && Header.Version != kCookedMeshFormatVersion) {
     A_CORE_WARN("CookedMeshAsset: unsupported version {} in '{}'",
                 Header.Version, Path.string());
     return std::nullopt;
@@ -157,7 +181,21 @@ LoadCookedMeshAsset(const std::filesystem::path &Path) {
   for (uint32_t InstanceIndex = 0; InstanceIndex < Header.InstanceCount;
        ++InstanceIndex) {
     InstanceHeader InstanceMeta{};
-    if (!ReadValue(Stream, InstanceMeta)) {
+    if (Header.Version == 1) {
+      InstanceHeaderV1 LegacyMeta{};
+      if (!ReadValue(Stream, LegacyMeta)) {
+        A_CORE_WARN("CookedMeshAsset: failed to read instance header from '{}'",
+                    Path.string());
+        return std::nullopt;
+      }
+      InstanceMeta.NameLength = LegacyMeta.NameLength;
+      InstanceMeta.MaterialAssetPathLength = 0;
+      InstanceMeta.VertexCount = LegacyMeta.VertexCount;
+      InstanceMeta.IndexCount = LegacyMeta.IndexCount;
+      InstanceMeta.BoundsMin = LegacyMeta.BoundsMin;
+      InstanceMeta.BoundsMax = LegacyMeta.BoundsMax;
+      InstanceMeta.Transform = LegacyMeta.Transform;
+    } else if (!ReadValue(Stream, InstanceMeta)) {
       A_CORE_WARN("CookedMeshAsset: failed to read instance header from '{}'",
                   Path.string());
       return std::nullopt;
@@ -170,6 +208,16 @@ LoadCookedMeshAsset(const std::filesystem::path &Path) {
                   static_cast<std::streamsize>(Instance.Name.size()));
       if (!Stream.good())
         return std::nullopt;
+    }
+
+    if (Header.Version >= 2 && InstanceMeta.MaterialAssetPathLength > 0) {
+      Instance.MaterialAssetPath.resize(InstanceMeta.MaterialAssetPathLength);
+      Stream.read(Instance.MaterialAssetPath.data(),
+                  static_cast<std::streamsize>(
+                      Instance.MaterialAssetPath.size()));
+      if (!Stream.good()) {
+        return std::nullopt;
+      }
     }
 
     Instance.Mesh.Vertices.resize(InstanceMeta.VertexCount);
@@ -209,6 +257,7 @@ CookedMeshSceneData ToCookedMeshSceneData(const MeshSceneData &Scene) {
   for (const auto &Instance : Scene.Instances) {
     Out.Instances.push_back({
         .Name = Instance.Name,
+        .MaterialAssetPath = {},
         .Mesh = Instance.Mesh,
         .Transform = Instance.Transform,
     });
@@ -216,14 +265,31 @@ CookedMeshSceneData ToCookedMeshSceneData(const MeshSceneData &Scene) {
   return Out;
 }
 
-MeshSceneData ToRuntimeMeshSceneData(const CookedMeshSceneData &Scene) {
+MeshSceneData ToRuntimeMeshSceneData(const CookedMeshSceneData &Scene,
+                                     const std::filesystem::path &ContentRoot) {
   MeshSceneData Out;
   Out.Instances.reserve(Scene.Instances.size());
   for (const auto &Instance : Scene.Instances) {
+    auto Material = std::make_shared<MaterialInstance>();
+    if (!Instance.MaterialAssetPath.empty()) {
+      const auto CookedMaterial =
+          LoadCookedMaterialAssetIfAvailable(ContentRoot /
+                                             Instance.MaterialAssetPath);
+      if (CookedMaterial.has_value()) {
+        Material->BaseColorFactor = CookedMaterial->BaseColorFactor;
+        Material->Metallic = CookedMaterial->Metallic;
+        Material->Roughness = CookedMaterial->Roughness;
+        Material->TextureAssetPath = CookedMaterial->TextureAssetPath;
+        if (!CookedMaterial->TextureAssetPath.empty()) {
+          Material->BaseColorTexture =
+              LoadTextureFromFile(ContentRoot / CookedMaterial->TextureAssetPath);
+        }
+      }
+    }
     Out.Instances.push_back({
         .Name = Instance.Name,
         .Mesh = Instance.Mesh,
-        .Material = std::make_shared<MaterialInstance>(),
+        .Material = std::move(Material),
         .Transform = Instance.Transform,
     });
   }

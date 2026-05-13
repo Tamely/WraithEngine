@@ -524,7 +524,9 @@ std::optional<MeshSceneData> LoadBasicMeshAsset(const std::filesystem::path &Pat
     if (!CookedScene.has_value()) {
       return std::nullopt;
     }
-    return ToRuntimeMeshSceneData(*CookedScene);
+    const auto ContentRoot = FindContentRootForPath(Path);
+    return ToRuntimeMeshSceneData(*CookedScene,
+                                  ContentRoot.value_or(Path.parent_path()));
   }
 
   if (auto CookedScene = LoadCookedMeshAssetIfAvailable(Path);

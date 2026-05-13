@@ -7,6 +7,7 @@
 
 #include <glm/vec3.hpp>
 
+#include <fstream>
 #include <mutex>
 
 namespace {
@@ -62,6 +63,36 @@ const T *FindEvent(const std::vector<Axiom::PublishedEditorEvent> &Events) {
       return P;
   }
   return nullptr;
+}
+
+size_t CountGeneratedChildrenForRoot(const Axiom::EditorSession &Session,
+                                     const std::string &RootObjectId) {
+  size_t Count = 0;
+  for (const auto &[ObjectId, Details] : Session.GetState().Scene.ObjectDetailsById) {
+    if (Details.IsGeneratedAssetChild &&
+        Details.GeneratedFromAssetRootId.has_value() &&
+        *Details.GeneratedFromAssetRootId == RootObjectId) {
+      ++Count;
+    }
+  }
+  return Count;
+}
+
+std::filesystem::path WriteSingleMeshObj(const std::filesystem::path &ContentRoot,
+                                         std::string_view RelativePath = "singlemesh.obj") {
+  const auto AbsolutePath = ContentRoot / std::filesystem::path(RelativePath);
+  std::filesystem::create_directories(AbsolutePath.parent_path());
+  std::ofstream Out(AbsolutePath);
+  Out << "o SingleMesh\n"
+         "v 0 0 0\n"
+         "v 1 0 0\n"
+         "v 0 1 0\n"
+         "vn 0 0 1\n"
+         "vt 0 0\n"
+         "vt 1 0\n"
+         "vt 0 1\n"
+         "f 1/1/1 2/2/1 3/3/1\n";
+  return AbsolutePath;
 }
 
 } // namespace
@@ -144,14 +175,21 @@ TEST(SceneLifecycleTests, CreateFolderHasNoTransform) {
 
 TEST(SceneLifecycleTests, CreateMeshObjectAddsMeshWithAssetAndTransform) {
   EnsureLogInitialized();
+  const auto TempRoot =
+      std::filesystem::temp_directory_path() / "wraithengine-single-mesh-create-test";
+  std::error_code RemoveError;
+  std::filesystem::remove_all(TempRoot, RemoveError);
+  std::filesystem::create_directories(TempRoot / "Content");
+  WriteSingleMeshObj(TempRoot / "Content");
+
   Axiom::EditorSession Session = MakeWorldSession();
-  Session.SetContentDir(AXIOM_CONTENT_DIR);
+  Session.SetContentDir(TempRoot / "Content");
   RecordingSubscriber Subscriber;
   Session.Subscribe(&Subscriber);
 
   Session.Submit(MakeContext(),
                  {.Payload = Axiom::CreateMeshObjectCommand{
-                      .AssetPath = "basicmesh.glb",
+                      .AssetPath = "singlemesh.obj",
                       .Location = glm::vec3(1.0f, 2.0f, 3.0f),
                       .RotationDegrees = glm::vec3(0.0f, 45.0f, 0.0f),
                       .Scale = glm::vec3(1.5f, 1.5f, 1.5f),
@@ -166,7 +204,7 @@ TEST(SceneLifecycleTests, CreateMeshObjectAddsMeshWithAssetAndTransform) {
   const auto *MeshChanged = FindEvent<Axiom::MeshAssetChangedEvent>(Subscriber.Events);
   ASSERT_NE(MeshChanged, nullptr);
   EXPECT_EQ(MeshChanged->ObjectId, Created->ObjectId);
-  EXPECT_EQ(MeshChanged->AssetPath, "basicmesh.glb");
+  EXPECT_EQ(MeshChanged->AssetPath, "singlemesh.obj");
 
   const auto *TransformChanged =
       FindEvent<Axiom::ObjectTransformUpdatedEvent>(Subscriber.Events);
@@ -201,7 +239,7 @@ TEST(SceneLifecycleTests, CreateMeshObjectAddsMeshWithAssetAndTransform) {
                                  return I.ObjectId == Created->ObjectId;
                                });
   ASSERT_NE(It, Instances.end());
-  EXPECT_EQ(It->AssetRelativePath, "basicmesh.glb");
+  EXPECT_EQ(It->AssetRelativePath, "singlemesh.obj");
   EXPECT_NE(It->Material, nullptr);
 
   const auto *Ack = FindEvent<Axiom::CommandAcknowledgedEvent>(Subscriber.Events);
@@ -224,6 +262,47 @@ TEST(SceneLifecycleTests, CreateMeshObjectRejectsInvalidAssetPath) {
 
   ASSERT_NE(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
   ASSERT_EQ(FindEvent<Axiom::ObjectCreatedEvent>(Subscriber.Events), nullptr);
+}
+
+TEST(SceneLifecycleTests, CreateMeshObjectExpandsMultiMeshAssetIntoGeneratedChildren) {
+  EnsureLogInitialized();
+  Axiom::EditorSession Session = MakeWorldSession();
+  Session.SetContentDir(AXIOM_CONTENT_DIR);
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::CreateMeshObjectCommand{
+                      .AssetPath = "sponza_atrium_3.glb",
+                  }});
+  Session.Tick();
+
+  ASSERT_EQ(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+  const auto *Created = FindEvent<Axiom::ObjectCreatedEvent>(Subscriber.Events);
+  ASSERT_NE(Created, nullptr);
+
+  const auto *RootDetails = Session.FindObjectDetails(Created->ObjectId);
+  ASSERT_NE(RootDetails, nullptr);
+  EXPECT_EQ(RootDetails->AssetRelativePath, "sponza_atrium_3.glb");
+
+  const Axiom::EditorSceneItem *RootItem = Session.FindSceneItem(Created->ObjectId);
+  ASSERT_NE(RootItem, nullptr);
+  EXPECT_GT(RootItem->Children.size(), 1u);
+  EXPECT_EQ(CountGeneratedChildrenForRoot(Session, Created->ObjectId),
+            RootItem->Children.size());
+
+  const auto RootMeshInstance = std::find_if(
+      Session.GetState().Scene.MeshInstances.begin(),
+      Session.GetState().Scene.MeshInstances.end(),
+      [&](const Axiom::EditorSceneMeshInstance &Instance) {
+        return Instance.ObjectId == Created->ObjectId;
+      });
+  EXPECT_EQ(RootMeshInstance, Session.GetState().Scene.MeshInstances.end());
+
+  const auto *ChildDetails = Session.FindObjectDetails(RootItem->Children.front().Id);
+  ASSERT_NE(ChildDetails, nullptr);
+  EXPECT_TRUE(ChildDetails->IsGeneratedAssetChild);
+  EXPECT_TRUE(ChildDetails->TransformReadOnly);
 }
 
 TEST(SceneLifecycleTests, CreateWithUnknownTemplateIdIsRejected) {
@@ -1108,8 +1187,15 @@ TEST(SceneLifecycleTests, SetMeshAsset_CreatesInstanceForRuntimeCreatedMesh) {
   // A mesh created via CreateObject has no MeshInstance entry yet.
   // SetMeshAsset must create the entry rather than silently dropping the command.
   EnsureLogInitialized();
+  const auto TempRoot =
+      std::filesystem::temp_directory_path() / "wraithengine-single-mesh-assign-test";
+  std::error_code RemoveError;
+  std::filesystem::remove_all(TempRoot, RemoveError);
+  std::filesystem::create_directories(TempRoot / "Content");
+  WriteSingleMeshObj(TempRoot / "Content");
+
   Axiom::EditorSession Session(Axiom::SessionId{1});
-  Session.SetContentDir(AXIOM_CONTENT_DIR);
+  Session.SetContentDir(TempRoot / "Content");
   RecordingSubscriber Subscriber;
   Session.Subscribe(&Subscriber);
 
@@ -1127,7 +1213,7 @@ TEST(SceneLifecycleTests, SetMeshAsset_CreatesInstanceForRuntimeCreatedMesh) {
   Session.Submit(MakeContext(),
                  {.Payload = Axiom::SetMeshAssetCommand{
                       .ObjectId = NewId,
-                      .AssetPath = "basicmesh.glb",
+                      .AssetPath = "singlemesh.obj",
                   }});
   Session.Tick();
 
@@ -1143,7 +1229,7 @@ TEST(SceneLifecycleTests, SetMeshAsset_CreatesInstanceForRuntimeCreatedMesh) {
                                  return I.ObjectId == NewId;
                                });
   ASSERT_NE(It, Instances.end());
-  EXPECT_EQ(It->AssetRelativePath, "basicmesh.glb");
+  EXPECT_EQ(It->AssetRelativePath, "singlemesh.obj");
 }
 
 TEST(SceneLifecycleTests, SetMeshAsset_CooksMeshAssetManifestEntry) {
@@ -1187,6 +1273,99 @@ TEST(SceneLifecycleTests, SetMeshAsset_CooksMeshAssetManifestEntry) {
   EXPECT_EQ(Manifest->Entries[0].RelativePath, "basicmesh.glb");
   EXPECT_EQ(std::filesystem::path(Manifest->Entries[0].CookedPath).extension(),
             ".wmesh");
+}
+
+TEST(SceneLifecycleTests, SetMeshAsset_ReplacesGeneratedChildrenWhenSwitchingToSingleMesh) {
+  EnsureLogInitialized();
+  const auto TempRoot =
+      std::filesystem::temp_directory_path() / "wraithengine-multimesh-switch-test";
+  std::error_code RemoveError;
+  std::filesystem::remove_all(TempRoot, RemoveError);
+  std::filesystem::create_directories(TempRoot / "Content");
+  std::filesystem::copy_file(
+      std::filesystem::path(AXIOM_CONTENT_DIR) / "sponza_atrium_3.glb",
+      TempRoot / "Content" / "sponza_atrium_3.glb",
+      std::filesystem::copy_options::overwrite_existing);
+  WriteSingleMeshObj(TempRoot / "Content");
+
+  Axiom::EditorSession Session = MakeWorldSession();
+  Session.SetContentDir(TempRoot / "Content");
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::CreateObjectCommand{.TemplateId = "Mesh"}});
+  Session.Tick();
+  const auto *Created = FindEvent<Axiom::ObjectCreatedEvent>(Subscriber.Events);
+  ASSERT_NE(Created, nullptr);
+  const std::string RootObjectId = Created->ObjectId;
+  Subscriber.Events.clear();
+
+  Session.Submit(MakeContext(2),
+                 {.Payload = Axiom::SetMeshAssetCommand{
+                      .ObjectId = RootObjectId,
+                      .AssetPath = "sponza_atrium_3.glb",
+                  }});
+  Session.Tick();
+
+  const size_t GeneratedCount =
+      CountGeneratedChildrenForRoot(Session, RootObjectId);
+  ASSERT_GT(GeneratedCount, 1u);
+
+  Session.Submit(MakeContext(3),
+                 {.Payload = Axiom::SetMeshAssetCommand{
+                      .ObjectId = RootObjectId,
+                      .AssetPath = "singlemesh.obj",
+                  }});
+  Session.Tick();
+
+  EXPECT_EQ(CountGeneratedChildrenForRoot(Session, RootObjectId), 0u);
+  const Axiom::EditorSceneItem *RootItem = Session.FindSceneItem(RootObjectId);
+  ASSERT_NE(RootItem, nullptr);
+  EXPECT_TRUE(RootItem->Children.empty());
+
+  const auto RootMeshInstance = std::find_if(
+      Session.GetState().Scene.MeshInstances.begin(),
+      Session.GetState().Scene.MeshInstances.end(),
+      [&](const Axiom::EditorSceneMeshInstance &Instance) {
+        return Instance.ObjectId == RootObjectId;
+      });
+  ASSERT_NE(RootMeshInstance, Session.GetState().Scene.MeshInstances.end());
+  EXPECT_EQ(RootMeshInstance->AssetRelativePath, "singlemesh.obj");
+}
+
+TEST(SceneLifecycleTests, DeleteMultiMeshRootRemovesGeneratedChildren) {
+  EnsureLogInitialized();
+  Axiom::EditorSession Session = MakeWorldSession();
+  Session.SetContentDir(AXIOM_CONTENT_DIR);
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::CreateMeshObjectCommand{
+                      .AssetPath = "sponza_atrium_3.glb",
+                  }});
+  Session.Tick();
+
+  const auto *Created = FindEvent<Axiom::ObjectCreatedEvent>(Subscriber.Events);
+  ASSERT_NE(Created, nullptr);
+  const std::string RootObjectId = Created->ObjectId;
+  const Axiom::EditorSceneItem *RootItemBefore = Session.FindSceneItem(RootObjectId);
+  ASSERT_NE(RootItemBefore, nullptr);
+  ASSERT_FALSE(RootItemBefore->Children.empty());
+  const std::string ChildObjectId = RootItemBefore->Children.front().Id;
+  Subscriber.Events.clear();
+
+  Session.Submit(MakeContext(2),
+                 {.Payload = Axiom::DeleteObjectCommand{
+                      .ObjectId = RootObjectId,
+                  }});
+  Session.Tick();
+
+  EXPECT_EQ(Session.FindSceneItem(RootObjectId), nullptr);
+  EXPECT_EQ(Session.FindObjectDetails(RootObjectId), nullptr);
+  EXPECT_EQ(Session.FindSceneItem(ChildObjectId), nullptr);
+  EXPECT_EQ(Session.FindObjectDetails(ChildObjectId), nullptr);
 }
 
 TEST(SceneLifecycleTests, SetMaterialTexture_CooksTextureAssetManifestEntry) {
@@ -1259,10 +1438,7 @@ TEST(SceneLifecycleTests, SceneFile_SaveLoadRoundTripsCookedMaterialState) {
   std::error_code RemoveError;
   std::filesystem::remove_all(TempRoot, RemoveError);
   std::filesystem::create_directories(TempRoot / "Content" / "Engine");
-  std::filesystem::copy_file(
-      std::filesystem::path(AXIOM_CONTENT_DIR) / "basicmesh.glb",
-      TempRoot / "Content" / "basicmesh.glb",
-      std::filesystem::copy_options::overwrite_existing);
+  WriteSingleMeshObj(TempRoot / "Content");
   std::filesystem::copy_file(
       std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine" / "tf2 coconut.jpg",
       TempRoot / "Content" / "Engine" / "tf2 coconut.jpg",
@@ -1303,7 +1479,7 @@ TEST(SceneLifecycleTests, SceneFile_SaveLoadRoundTripsCookedMaterialState) {
       .Material = Mat,
       .RenderPath = Axiom::MeshRenderPath::Graphics,
       .Transform = glm::mat4(1.0f),
-      .AssetRelativePath = "basicmesh.glb",
+      .AssetRelativePath = "singlemesh.obj",
   }};
 
   const auto ScenePath = TempRoot / "Content" / "scene.json";
@@ -1320,4 +1496,79 @@ TEST(SceneLifecycleTests, SceneFile_SaveLoadRoundTripsCookedMaterialState) {
   ASSERT_TRUE(DetailsIt->second.Material->TextureAssetPath.has_value());
   EXPECT_EQ(*DetailsIt->second.Material->TextureAssetPath,
             "Engine/tf2 coconut.jpg");
+}
+
+TEST(SceneLifecycleTests, SceneFile_SaveLoadRegeneratesMultiMeshChildrenWithoutDuplicatingThem) {
+  EnsureLogInitialized();
+
+  const auto TempRoot =
+      std::filesystem::temp_directory_path() / "wraithengine-multimesh-scene-test";
+  std::error_code RemoveError;
+  std::filesystem::remove_all(TempRoot, RemoveError);
+  std::filesystem::create_directories(TempRoot / "Content");
+  std::filesystem::copy_file(
+      std::filesystem::path(AXIOM_CONTENT_DIR) / "sponza_atrium_3.glb",
+      TempRoot / "Content" / "sponza_atrium_3.glb",
+      std::filesystem::copy_options::overwrite_existing);
+
+  Axiom::EditorSceneState Scene;
+  Scene.Items = {{
+      .Id = "sponza-root",
+      .DisplayName = "Sponza",
+      .Kind = Axiom::EditorSceneItemKind::Mesh,
+      .Visible = true,
+      .Children = {{
+          .Id = "sponza-root__asset_0_Object_4",
+          .DisplayName = "Object_4",
+          .Kind = Axiom::EditorSceneItemKind::Mesh,
+          .Visible = true,
+      }},
+  }};
+  Scene.ObjectDetailsById["sponza-root"] = Axiom::EditorObjectDetails{
+      .ObjectId = "sponza-root",
+      .DisplayName = "Sponza",
+      .Kind = Axiom::EditorSceneItemKind::Mesh,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      .Transform = Axiom::EditorTransformDetails{},
+      .AssetRelativePath = "sponza_atrium_3.glb",
+  };
+  Scene.ObjectDetailsById["sponza-root__asset_0_Object_4"] =
+      Axiom::EditorObjectDetails{
+          .ObjectId = "sponza-root__asset_0_Object_4",
+          .DisplayName = "Object_4",
+          .Kind = Axiom::EditorSceneItemKind::Mesh,
+          .Visible = true,
+          .IsGeneratedAssetChild = true,
+          .SupportsTransform = true,
+          .TransformReadOnly = true,
+          .Transform = Axiom::EditorTransformDetails{},
+          .GeneratedFromAssetRootId = std::string("sponza-root"),
+      };
+
+  const auto ScenePath = TempRoot / "Content" / "scene.json";
+  ASSERT_TRUE(Axiom::Assets::SaveSceneToFile(ScenePath, Scene));
+
+  const auto Loaded = Axiom::Assets::LoadSceneFromFile(ScenePath);
+  ASSERT_TRUE(Loaded.has_value());
+  const auto RootDetailsIt = Loaded->ObjectDetailsById.find("sponza-root");
+  ASSERT_NE(RootDetailsIt, Loaded->ObjectDetailsById.end());
+  EXPECT_EQ(RootDetailsIt->second.AssetRelativePath, "sponza_atrium_3.glb");
+
+  size_t GeneratedCount = 0;
+  for (const auto &[ObjectId, Details] : Loaded->ObjectDetailsById) {
+    if (Details.IsGeneratedAssetChild &&
+        Details.GeneratedFromAssetRootId.has_value() &&
+        *Details.GeneratedFromAssetRootId == "sponza-root") {
+      ++GeneratedCount;
+    }
+  }
+  EXPECT_GT(GeneratedCount, 1u);
+
+  const auto LoadedRootItem = std::find_if(
+      Loaded->Items.begin(), Loaded->Items.end(),
+      [](const Axiom::EditorSceneItem &Item) { return Item.Id == "sponza-root"; });
+  ASSERT_NE(LoadedRootItem, Loaded->Items.end());
+  EXPECT_EQ(LoadedRootItem->Children.size(), GeneratedCount);
 }
