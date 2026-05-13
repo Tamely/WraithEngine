@@ -790,14 +790,21 @@ This does not require that every future game uses pure video streaming only. Som
 ### 23.1 Product Outputs
 The build/deployment pipeline should produce:
 
+- `Project Workspace`
+  - `project.wraith.json`
+  - project-local `Content/`
+  - project-local `Scripts/`
+  - generated script solution/project files
+  - per-project `Build/` and `Package/`
+
 - `Packaged Desktop Runtime`
   - executable
-  - cooked assets
+  - per-project cooked assets
   - runtime config
 
 - `Hosted Session Runtime`
   - headless executable or container image
-  - cooked assets
+  - per-project cooked assets
   - session bootstrap config
   - trust profile
 
@@ -813,6 +820,7 @@ Both outputs should share:
 Hosted runtimes will need launch descriptors such as:
 
 - project/build identifier
+- project root or packaged content root
 - asset manifest location
 - trust profile
 - requested runtime mode
@@ -855,8 +863,9 @@ Hosted runtimes will need launch descriptors such as:
 - engine-to-managed bridge contracts
 
 ### 24.6 Packaging and Deployment
-- project manifest
+- project manifest (`project.wraith.json`)
 - cooked asset manifest
+- package manifest
 - session launch config
 - trust profile descriptor
 
@@ -868,6 +877,7 @@ Suggested modules:
 - auth/session pages
 - project browser
 - editor workspace layout
+- script editor
 - outliner
 - inspector
 - asset/content browser
@@ -1062,8 +1072,8 @@ pipeline.
 
 Progress update:
 
-- `SetMeshAssetCommand { ObjectId, AssetPath }` lets any `SceneMeshObject` reference any discovered `.glb`/`.gltf`/`.fbx`/`.obj` asset; the handler resolves `ContentDir / AssetPath`, calls `LoadBasicMeshAsset`, and updates the live `MeshInstance`; if the object was created at runtime via `CreateObject` (which does not pre-populate `MeshInstances`), the handler now creates the entry rather than silently dropping the command
-- `SetMeshAsset` is fully serialized to `scene.json` via the `assetRelativePath` field on each mesh entry so assignments survive server restarts; the content browser double-click on a `.glb`/`.fbx`/`.obj` asset while a mesh object is selected sends the command end-to-end
+- `SetMeshAssetCommand { ObjectId, AssetPath }` now lets both `SceneMeshObject` and `SceneActor` roots reference any discovered `.glb`/`.gltf`/`.fbx`/`.obj` asset; the handler resolves `ContentDir / AssetPath`, calls `LoadBasicMeshAsset`, and updates the live `MeshInstance`; if the object was created at runtime via `CreateObject` (which does not pre-populate `MeshInstances`), the handler now creates the entry rather than silently dropping the command
+- `SetMeshAsset` is fully serialized to `scene.json` via the `assetRelativePath` field on each assigned object so assignments survive server restarts; the content browser double-click on a `.glb`/`.fbx`/`.obj` asset while a mesh or actor object is selected sends the command end-to-end
 - `SetLightPropertiesCommand { ObjectId, Color, Intensity, Direction }` drives the first visible `SceneLight` in the scene; direction is derived from the light object's world-space position each frame; the `CameraFrameUniform` UBO was extended with `lightDirectionAndIntensity` and `lightColorAndEnabled` fields consumed by `mesh.frag`
 - `mesh.frag` was rewritten with a Blinn-Phong specular model: half-vector `H = normalize(L + V)`, `shininess = mix(256, 2, roughness)`, specular color blended between dielectric F0 `vec3(0.04)` and base color via metallic factor; a separate metallic ambient floor (`0.35` at metallic=1/roughness=0) approximates environment reflections absent IBL so metallic surfaces are not black without a high-intensity light
 - `SetMaterialPropertiesCommand { ObjectId, BaseColorFactor, Metallic, Roughness }` updates both `ObjectDetailsById.Material` and the live `MeshInstance.Material`; values reach the shader as Vulkan push constants in `MeshGraphicsPushConstants`; both stage flags (`VERTEX_BIT | FRAGMENT_BIT`) are set so the layout is valid
@@ -1237,8 +1247,9 @@ Likely targets based on current trajectory:
 - CI passes without modifications to test code
 
 ### Phase 11: Packaging and Hosted Runtime Maturation
-- packaged desktop builds from cooked content (depends on finishing the remaining Phase 8 packaging/runtime cutover work)
+- dedicated packaged desktop runtime entrypoint built from per-project outputs
 - hosted session deployment descriptors
+- stricter packaged-content validation and startup UX
 - sample project proving shared runtime path via `CookedAssetSource`
 
 ## 29. Test Plan
@@ -1271,6 +1282,7 @@ Likely targets based on current trajectory:
 
 ### 29.6 Packaging
 - one sample project runs as a packaged desktop build and as a hosted authoritative runtime from the same cooked project content
+- cook/package flows surface actionable progress and error status in the editor shell
 
 ### 29.7 Regression Coverage
 - native application loop still supports desktop editor startup
@@ -1321,9 +1333,14 @@ Progress update:
 - reparent is implemented: any object can be dragged onto any other in the outliner; transforms are stored in local space and world transforms are recomputed for the entire moved subtree
 - Collaboration v1 is complete: object locking prevents simultaneous gizmo conflicts, presence roster shows connected users, and the heartbeat/timeout loop handles hard tab closes
 - Phase 5 (Reflection and Asset Evolution) is complete: `AssetId` stable identity, `IAssetSource` / `LocalAssetSource` VFS, `ListAssets` / `GetSchema` / `SetProperty` / `SaveScene` commands, `SceneFile` JSON persistence, content browser wired to live asset catalogue, details panel schema-driven, toolbar Save button with success/failure animation
-- Phase 7 (Asset Pipeline) is complete: `SetMeshAssetCommand` wires any discovered `.glb`/`.gltf`/`.fbx`/`.obj` to any `SceneMeshObject` with scene-file persistence; `SetLightPropertiesCommand` drives a Blinn-Phong directional light from `SceneLight` world position; `SetMaterialPropertiesCommand` exposes `BaseColorFactor`/`Metallic`/`Roughness` push constants end-to-end through the inspector; `SetMaterialTextureCommand` assigns PNG/JPG textures to mesh base-color slots with persistence, inspector display, and drag-drop from both the content browser and outliner; FBX/OBJ import is implemented via assimp with embedded and external texture handling; the content browser accepts OS file drag-drop and a file picker Import button that upload to `POST /assets/upload`; texture thumbnail previews are served by the remote viewport server; the content browser navigates folders non-recursively; 17 new tests cover all new commands, events, and the `CreateObject`→`SetMeshAsset` runtime-creation path
-- Phase 8 (Binary Asset Formats) first slice is now implemented: `.wmesh`, `.wtex`, and `.wmat` cooked formats exist; `AssetCookManifest` and `CookedAssetSource` resolve cooked content by stable `AssetId`; startup, scene reload, and mesh/texture editing flows all prefer cooked payloads while preserving source fallback; scene persistence now round-trips cooked material state through `materialAssetPath`
-- the next step is packaging/runtime cutover work: finish removing source-content assumptions from packaged runs and make importer-driven cooking the primary freshness path
+- the project system is now implemented as the active editor/runtime foundation: projects live under a managed host projects root, each project has its own `project.wraith.json`, `Content/`, `Scripts/`, C# solution/project files, `Build/`, and `Package/` directories, and the server tracks an active project instead of assuming one repo-global content root
+- project-scoped content routing is in place: scene load/save, asset upload/listing, script CRUD, cooking, and packaging resolve against the active project's `Content/`, while engine-owned shared assets remain available from the global read-only `Content/Engine/` namespace
+- browser project UX is now live: the editor opens through a project browser, `File -> New Project` and `File -> Open Project` return through the managed project flow, and the current project is shown in the shell
+- scripting authoring is now project-local: each project gets a generated `Scripts/` workspace plus `.sln`/`.csproj`, the browser has a script editor with file CRUD and syntax highlighting, scripts can be attached to actors, and inspector `Open Script` jumps into the editor
+- Phase 7 (Asset Pipeline) is complete: `SetMeshAssetCommand` wires any discovered `.glb`/`.gltf`/`.fbx`/`.obj` to mesh objects and actor roots with scene-file persistence; `SetLightPropertiesCommand` drives a Blinn-Phong directional light from `SceneLight` world position; `SetMaterialPropertiesCommand` exposes `BaseColorFactor`/`Metallic`/`Roughness` push constants end-to-end through the inspector; `SetMaterialTextureCommand` assigns PNG/JPG textures to mesh base-color slots with persistence, inspector display, and drag-drop from both the content browser and outliner; FBX/OBJ import is implemented via assimp with embedded and external texture handling; the content browser accepts OS file drag-drop and a file picker Import button that upload to `POST /assets/upload`; texture thumbnail previews are served by the remote viewport server; the content browser navigates folders non-recursively; regression coverage now includes the `CreateObject`→`SetMeshAsset` runtime-creation path and actor mesh assignment
+- Phase 8 (Binary Asset Formats) and the first packaging foundation are now implemented: `.wmesh`, `.wtex`, and `.wmat` cooked formats exist; `AssetCookManifest` and `CookedAssetSource` resolve cooked content by stable `AssetId`; startup, scene reload, and mesh/texture editing flows all prefer cooked payloads while preserving source fallback during editor use; scene persistence now round-trips cooked material state through `materialAssetPath`; projects now cook into per-project `Content/Cooked/` and stage packaged outputs under per-project `Package/` directories
+- packaged runtime cutover is partially implemented: staged packages include cooked project content, scene state, the asset cook manifest, shared engine content, and a package manifest; packaged content roots are now treated as cooked-only at runtime rather than silently recooking or falling back to source files
+- the next step is packaging/runtime hardening and editor polish: add a dedicated packaged app entrypoint, tighten packaged-scene/runtime validation, and continue improving build/package UX on top of the finished project system foundation
 
 That slice proves the core thesis:
 
