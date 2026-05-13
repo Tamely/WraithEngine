@@ -1,5 +1,6 @@
 #include "Session/EditorSession.h"
 
+#include "Assets/AssetCooker.h"
 #include "Assets/MeshAsset.h"
 
 #include <Core/Log.h>
@@ -15,6 +16,32 @@
 
 namespace Axiom {
 namespace {
+void CookMeshAssetBestEffort(const std::filesystem::path &ContentDir,
+                             std::string_view RelativeAssetPath) {
+  if (ContentDir.empty() || RelativeAssetPath.empty()) {
+    return;
+  }
+
+  const auto Cooked = Assets::CookMeshAsset(ContentDir, RelativeAssetPath);
+  if (!Cooked.has_value()) {
+    A_CORE_WARN("EditorSession: failed to cook mesh asset '{}'",
+                std::string(RelativeAssetPath));
+  }
+}
+
+void CookTextureAssetBestEffort(const std::filesystem::path &ContentDir,
+                                std::string_view RelativeAssetPath) {
+  if (ContentDir.empty() || RelativeAssetPath.empty()) {
+    return;
+  }
+
+  const auto Cooked = Assets::CookTextureAsset(ContentDir, RelativeAssetPath);
+  if (!Cooked.has_value()) {
+    A_CORE_WARN("EditorSession: failed to cook texture asset '{}'",
+                std::string(RelativeAssetPath));
+  }
+}
+
 std::string DefaultUserDisplayName(SessionUserId User) {
   if (User.Value == 1) {
     return "Host";
@@ -953,6 +980,7 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
       FailureReason = "CreateMeshObject requires a configured content directory.";
       return false;
     }
+    CookMeshAssetBestEffort(m_ContentDir, CreateMeshCmd->AssetPath);
     const std::filesystem::path FullPath = m_ContentDir / CreateMeshCmd->AssetPath;
     const auto SceneData = Assets::LoadBasicMeshAsset(FullPath);
     if (!SceneData.has_value() || SceneData->Instances.empty()) {
@@ -1479,6 +1507,7 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
     return;
   }
 
+  CookMeshAssetBestEffort(m_ContentDir, Command.AssetPath);
   const std::filesystem::path FullPath = m_ContentDir / Command.AssetPath;
   const auto SceneData = Assets::LoadBasicMeshAsset(FullPath);
   if (!SceneData.has_value() || SceneData->Instances.empty()) {
@@ -1604,6 +1633,7 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
       A_CORE_WARN("SetMaterialTexture: content directory not configured");
       return;
     }
+    CookTextureAssetBestEffort(m_ContentDir, Command.TextureAssetPath);
     const auto FullPath = m_ContentDir / Command.TextureAssetPath;
     auto Loaded = Assets::LoadTextureFromFile(FullPath);
     if (!Loaded) {

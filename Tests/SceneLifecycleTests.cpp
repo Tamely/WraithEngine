@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <Assets/AssetCookManifest.h>
+#include <Assets/SceneFile.h>
 #include <Core/Log.h>
 #include <Session/EditorSession.h>
 
@@ -1142,4 +1144,180 @@ TEST(SceneLifecycleTests, SetMeshAsset_CreatesInstanceForRuntimeCreatedMesh) {
                                });
   ASSERT_NE(It, Instances.end());
   EXPECT_EQ(It->AssetRelativePath, "basicmesh.glb");
+}
+
+TEST(SceneLifecycleTests, SetMeshAsset_CooksMeshAssetManifestEntry) {
+  EnsureLogInitialized();
+  Axiom::EditorSession Session = MakeWorldSession();
+
+  const auto TempRoot =
+      std::filesystem::temp_directory_path() / "wraithengine-scene-cook-test";
+  std::error_code RemoveError;
+  std::filesystem::remove_all(TempRoot, RemoveError);
+  std::filesystem::create_directories(TempRoot / "Content");
+  std::filesystem::copy_file(std::filesystem::path(AXIOM_CONTENT_DIR) / "basicmesh.glb",
+                             TempRoot / "Content" / "basicmesh.glb",
+                             std::filesystem::copy_options::overwrite_existing);
+  Session.SetContentDir(TempRoot / "Content");
+
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::CreateObjectCommand{.TemplateId = "Mesh"}});
+  Session.Tick();
+  const auto *Created = FindEvent<Axiom::ObjectCreatedEvent>(Subscriber.Events);
+  ASSERT_NE(Created, nullptr);
+  const std::string ObjectId = Created->ObjectId;
+  Subscriber.Events.clear();
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetMeshAssetCommand{
+                      .ObjectId = ObjectId,
+                      .AssetPath = "basicmesh.glb",
+                  }});
+  Session.Tick();
+
+  ASSERT_EQ(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+  const auto ManifestPath =
+      TempRoot / "Content" / "Cooked" / "AssetCookManifest.json";
+  const auto Manifest = Axiom::Assets::LoadAssetCookManifest(ManifestPath);
+  ASSERT_TRUE(Manifest.has_value());
+  ASSERT_EQ(Manifest->Entries.size(), 1u);
+  EXPECT_EQ(Manifest->Entries[0].RelativePath, "basicmesh.glb");
+  EXPECT_EQ(std::filesystem::path(Manifest->Entries[0].CookedPath).extension(),
+            ".wmesh");
+}
+
+TEST(SceneLifecycleTests, SetMaterialTexture_CooksTextureAssetManifestEntry) {
+  EnsureLogInitialized();
+
+  auto Mat = std::make_shared<Axiom::MaterialInstance>();
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  Session.SetSceneItems({{
+      .Id = "crate-1",
+      .DisplayName = "Crate",
+      .Kind = Axiom::EditorSceneItemKind::Mesh,
+      .Visible = true,
+      .Children = {},
+  }});
+  Session.SetObjectDetails({{
+      .ObjectId = "crate-1",
+      .DisplayName = "Crate",
+      .Kind = Axiom::EditorSceneItemKind::Mesh,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      .Material = Axiom::EditorMaterialProperties{},
+  }});
+  Session.SetSceneMeshInstances({{
+      .ObjectId = "crate-1",
+      .Mesh = {},
+      .Material = Mat,
+      .RenderPath = Axiom::MeshRenderPath::Graphics,
+      .Transform = glm::mat4(1.0f),
+  }});
+
+  const auto TempRoot =
+      std::filesystem::temp_directory_path() / "wraithengine-texture-cook-test";
+  std::error_code RemoveError;
+  std::filesystem::remove_all(TempRoot, RemoveError);
+  std::filesystem::create_directories(TempRoot / "Content" / "Engine");
+  std::filesystem::copy_file(
+      std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine" / "tf2 coconut.jpg",
+      TempRoot / "Content" / "Engine" / "tf2 coconut.jpg",
+      std::filesystem::copy_options::overwrite_existing);
+  Session.SetContentDir(TempRoot / "Content");
+
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetMaterialTextureCommand{
+                      .ObjectId = "crate-1",
+                      .TextureAssetPath = "Engine/tf2 coconut.jpg",
+                  }});
+  Session.Tick();
+
+  ASSERT_EQ(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+  const auto Manifest =
+      Axiom::Assets::LoadAssetCookManifest(TempRoot / "Content" / "Cooked" /
+                                           "AssetCookManifest.json");
+  ASSERT_TRUE(Manifest.has_value());
+  ASSERT_EQ(Manifest->Entries.size(), 1u);
+  EXPECT_EQ(Manifest->Entries[0].Kind, Axiom::Assets::AssetKind::Texture);
+  EXPECT_EQ(Manifest->Entries[0].RelativePath, "Engine/tf2 coconut.jpg");
+  EXPECT_EQ(std::filesystem::path(Manifest->Entries[0].CookedPath).extension(),
+            ".wtex");
+}
+
+TEST(SceneLifecycleTests, SceneFile_SaveLoadRoundTripsCookedMaterialState) {
+  EnsureLogInitialized();
+
+  const auto TempRoot =
+      std::filesystem::temp_directory_path() / "wraithengine-material-scene-test";
+  std::error_code RemoveError;
+  std::filesystem::remove_all(TempRoot, RemoveError);
+  std::filesystem::create_directories(TempRoot / "Content" / "Engine");
+  std::filesystem::copy_file(
+      std::filesystem::path(AXIOM_CONTENT_DIR) / "basicmesh.glb",
+      TempRoot / "Content" / "basicmesh.glb",
+      std::filesystem::copy_options::overwrite_existing);
+  std::filesystem::copy_file(
+      std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine" / "tf2 coconut.jpg",
+      TempRoot / "Content" / "Engine" / "tf2 coconut.jpg",
+      std::filesystem::copy_options::overwrite_existing);
+
+  Axiom::EditorSceneState Scene;
+  Scene.Items = {{
+      .Id = "crate-1",
+      .DisplayName = "Crate",
+      .Kind = Axiom::EditorSceneItemKind::Mesh,
+      .Visible = true,
+      .Children = {},
+  }};
+  Scene.ObjectDetailsById["crate-1"] = Axiom::EditorObjectDetails{
+      .ObjectId = "crate-1",
+      .DisplayName = "Crate",
+      .Kind = Axiom::EditorSceneItemKind::Mesh,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      .Transform = Axiom::EditorTransformDetails{},
+      .Material = Axiom::EditorMaterialProperties{
+          .BaseColorFactor = glm::vec4(0.8f, 0.2f, 0.1f, 1.0f),
+          .Metallic = 0.9f,
+          .Roughness = 0.05f,
+          .TextureAssetPath = std::string("Engine/tf2 coconut.jpg"),
+      },
+  };
+
+  auto Mat = std::make_shared<Axiom::MaterialInstance>();
+  Mat->BaseColorFactor = glm::vec4(0.8f, 0.2f, 0.1f, 1.0f);
+  Mat->Metallic = 0.9f;
+  Mat->Roughness = 0.05f;
+  Mat->TextureAssetPath = "Engine/tf2 coconut.jpg";
+  Scene.MeshInstances = {{
+      .ObjectId = "crate-1",
+      .Mesh = {},
+      .Material = Mat,
+      .RenderPath = Axiom::MeshRenderPath::Graphics,
+      .Transform = glm::mat4(1.0f),
+      .AssetRelativePath = "basicmesh.glb",
+  }};
+
+  const auto ScenePath = TempRoot / "Content" / "scene.json";
+  ASSERT_TRUE(Axiom::Assets::SaveSceneToFile(ScenePath, Scene));
+
+  const auto Loaded = Axiom::Assets::LoadSceneFromFile(ScenePath);
+  ASSERT_TRUE(Loaded.has_value());
+  const auto DetailsIt = Loaded->ObjectDetailsById.find("crate-1");
+  ASSERT_NE(DetailsIt, Loaded->ObjectDetailsById.end());
+  ASSERT_TRUE(DetailsIt->second.Material.has_value());
+  EXPECT_FLOAT_EQ(DetailsIt->second.Material->BaseColorFactor.r, 0.8f);
+  EXPECT_FLOAT_EQ(DetailsIt->second.Material->Metallic, 0.9f);
+  EXPECT_FLOAT_EQ(DetailsIt->second.Material->Roughness, 0.05f);
+  ASSERT_TRUE(DetailsIt->second.Material->TextureAssetPath.has_value());
+  EXPECT_EQ(*DetailsIt->second.Material->TextureAssetPath,
+            "Engine/tf2 coconut.jpg");
 }

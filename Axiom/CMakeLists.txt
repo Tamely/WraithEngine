@@ -1,7 +1,13 @@
 set(ENGINE_SOURCES
   Scripting/ScriptHost.cpp
   Scripting/InternalCalls.cpp
+  Assets/AssetCookManifest.cpp
+  Assets/AssetCooker.cpp
   Assets/AssimpImporter.cpp
+  Assets/CookedAssetRuntime.cpp
+  Assets/CookedMaterialAsset.cpp
+  Assets/CookedMeshAsset.cpp
+  Assets/CookedTextureAsset.cpp
   Assets/IAssetSource.cpp
   Assets/MeshAsset.cpp
   Assets/SceneFile.cpp

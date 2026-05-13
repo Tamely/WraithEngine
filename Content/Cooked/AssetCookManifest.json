@@ -1,0 +1,9 @@
+{
+  "entries": [
+    {"assetId":6124137011624734461,"kind":"mesh","relativePath":"basicmesh.glb","cookedPath":"Cooked/basicmesh.wmesh","formatVersion":1,"sourceHash":10769525362242101033},
+    {"assetId":18232260332646399803,"kind":"material","relativePath":"Generated/Materials/crate-1","cookedPath":"Cooked/Generated/Materials/crate-1.wmat","formatVersion":1,"sourceHash":7889859340775370464},
+    {"assetId":813026631983381292,"kind":"texture","relativePath":"Engine/tf2 coconut.jpg","cookedPath":"Cooked/Engine/tf2 coconut.wtex","formatVersion":1,"sourceHash":2819454596902807771},
+    {"assetId":13913950202207721753,"kind":"mesh","relativePath":"sponza_atrium_3.glb","cookedPath":"Cooked/sponza_atrium_3.wmesh","formatVersion":1,"sourceHash":13152113367551948137},
+    {"assetId":5770549793718642602,"kind":"mesh","relativePath":"structure.glb","cookedPath":"Cooked/structure.wmesh","formatVersion":1,"sourceHash":11410644714278776383}
+  ]
+}

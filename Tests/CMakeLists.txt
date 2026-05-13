@@ -1,4 +1,5 @@
 add_executable(AxiomTests
+  CookedAssetTests.cpp
   LayerTests.cpp
   HeadlessProtocolTests.cpp
   MeshPickingTests.cpp

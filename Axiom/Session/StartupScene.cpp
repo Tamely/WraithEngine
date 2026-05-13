@@ -1,5 +1,6 @@
 #include "Session/StartupScene.h"
 
+#include "Assets/AssetCooker.h"
 #include "Assets/IAssetSource.h"
 #include "Assets/MeshAsset.h"
 #include "Assets/SceneFile.h"
@@ -244,7 +245,9 @@ std::unordered_map<std::string, EditorObjectDetails> BuildObjectDetailsMap(
 
 std::vector<EditorSceneMeshInstance> BuildStartupSceneMeshInstances() {
   const Assets::LocalAssetSource ContentDir{AXIOM_CONTENT_DIR};
-  const auto MeshPath = ContentDir.ResolveRelative("basicmesh.glb");
+  const std::filesystem::path RelativeMeshPath = "basicmesh.glb";
+  const auto MeshPath = ContentDir.ResolveRelative(RelativeMeshPath.string());
+  Assets::CookMeshAsset(AXIOM_CONTENT_DIR, RelativeMeshPath);
   const auto SceneData = Assets::LoadBasicMeshAsset(MeshPath);
   if (!SceneData.has_value()) {
     A_CORE_ERROR("Failed to load startup mesh asset scene: {0}",

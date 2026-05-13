@@ -1,5 +1,8 @@
 #include "Assets/MeshAsset.h"
 #include "Assets/AssimpImporter.h"
+#include "Assets/CookedAssetRuntime.h"
+#include "Assets/CookedMeshAsset.h"
+#include "Assets/CookedTextureAsset.h"
 
 #include "Core/Log.h"
 
@@ -373,9 +376,11 @@ void AppendNodeMeshes(const fastgltf::Asset &Asset, size_t NodeIndex,
     AppendNodeMeshes(Asset, ChildIndex, WorldTransform, SceneData, ResolveMaterial);
   }
 }
+
 } // namespace
 
-std::optional<MeshSceneData> LoadBasicMeshAsset(const std::filesystem::path &Path) {
+std::optional<MeshSceneData>
+LoadBasicMeshAssetFromSource(const std::filesystem::path &Path) {
   const std::string Ext = ToLowerCopy(Path.extension().string());
   if (Ext == ".fbx" || Ext == ".obj") {
     AssimpImporter Importer;
@@ -512,8 +517,44 @@ std::optional<MeshSceneData> LoadBasicMeshAsset(const std::filesystem::path &Pat
   return SceneData;
 }
 
-TextureSourceDataRef LoadTextureFromFile(const std::filesystem::path &Path) {
+std::optional<MeshSceneData> LoadBasicMeshAsset(const std::filesystem::path &Path) {
+  const std::string Ext = ToLowerCopy(Path.extension().string());
+  if (Ext == ".wmesh") {
+    const auto CookedScene = LoadCookedMeshAsset(Path);
+    if (!CookedScene.has_value()) {
+      return std::nullopt;
+    }
+    return ToRuntimeMeshSceneData(*CookedScene);
+  }
+
+  if (auto CookedScene = LoadCookedMeshAssetIfAvailable(Path);
+      CookedScene.has_value()) {
+    return CookedScene;
+  }
+
+  return LoadBasicMeshAssetFromSource(Path);
+}
+
+TextureSourceDataRef LoadTextureFromSourceFile(const std::filesystem::path &Path) {
   return DecodeTextureFromFile(Path);
+}
+
+TextureSourceDataRef LoadTextureFromFile(const std::filesystem::path &Path) {
+  const std::string Ext = ToLowerCopy(Path.extension().string());
+  if (Ext == ".wtex") {
+    const auto CookedTexture = LoadCookedTextureAsset(Path);
+    if (!CookedTexture.has_value()) {
+      return nullptr;
+    }
+    return std::make_shared<TextureSourceData>(*CookedTexture);
+  }
+
+  if (auto CookedTexture = LoadCookedTextureAssetIfAvailable(Path);
+      CookedTexture != nullptr) {
+    return CookedTexture;
+  }
+
+  return LoadTextureFromSourceFile(Path);
 }
 
 TextureSourceDataRef LoadTextureFromMemory(const unsigned char *Bytes,
