@@ -4,7 +4,9 @@
 #include "Assets/MeshAsset.h"
 #include "Core/Log.h"
 
+#include <glm/common.hpp>
 #include <glm/ext/matrix_transform.hpp>
+#include <glm/geometric.hpp>
 #include <glm/trigonometric.hpp>
 
 #include <charconv>
@@ -46,6 +48,44 @@ std::string SerializeVec3(const glm::vec3 &V) {
   return S.str();
 }
 
+std::string SanitizeGeneratedAssetToken(std::string_view Value) {
+  std::string Out;
+  Out.reserve(Value.size());
+  for (const char Character : Value) {
+    if ((Character >= 'a' && Character <= 'z') ||
+        (Character >= 'A' && Character <= 'Z') ||
+        (Character >= '0' && Character <= '9')) {
+      Out.push_back(Character);
+    } else {
+      Out.push_back('_');
+    }
+  }
+
+  while (!Out.empty() && Out.back() == '_') {
+    Out.pop_back();
+  }
+
+  if (Out.empty()) {
+    return "mesh";
+  }
+  return Out;
+}
+
+std::string BuildGeneratedAssetChildId(std::string_view RootObjectId,
+                                       std::string_view InstanceName,
+                                       size_t InstanceIndex) {
+  return std::string(RootObjectId) + "__asset_" + std::to_string(InstanceIndex) +
+         "_" + SanitizeGeneratedAssetToken(InstanceName);
+}
+
+std::string ResolveGeneratedAssetChildDisplayName(std::string_view InstanceName,
+                                                  size_t InstanceIndex) {
+  if (!InstanceName.empty()) {
+    return std::string(InstanceName);
+  }
+  return "Mesh " + std::to_string(InstanceIndex + 1);
+}
+
 std::filesystem::path ResolveContentRootForScenePath(
     const std::filesystem::path &ScenePath) {
   if (const auto ContentRoot = FindContentRootForPath(ScenePath);
@@ -69,8 +109,13 @@ const char *KindStr(EditorSceneItemKind K) {
 
 void SerializeSceneItemsFlat(
     std::ostringstream &Out, const std::vector<EditorSceneItem> &Items,
+    const std::unordered_map<std::string, EditorObjectDetails> &DetailsById,
     const std::string &ParentId, bool &First) {
   for (const auto &Item : Items) {
+    const auto DetailsIt = DetailsById.find(Item.Id);
+    if (DetailsIt != DetailsById.end() && DetailsIt->second.IsGeneratedAssetChild) {
+      continue;
+    }
     if (!First) Out << ",\n";
     First = false;
     Out << "    {\"id\":" << EscStr(Item.Id)
@@ -78,7 +123,192 @@ void SerializeSceneItemsFlat(
         << ",\"displayName\":" << EscStr(Item.DisplayName)
         << ",\"kind\":\"" << KindStr(Item.Kind) << "\""
         << ",\"visible\":" << (Item.Visible ? "true" : "false") << "}";
-    SerializeSceneItemsFlat(Out, Item.Children, Item.Id, First);
+    SerializeSceneItemsFlat(Out, Item.Children, DetailsById, Item.Id, First);
+  }
+}
+
+EditorSceneItem *FindSceneItemMutable(std::vector<EditorSceneItem> &Items,
+                                      std::string_view ObjectId) {
+  for (auto &Item : Items) {
+    if (Item.Id == ObjectId) {
+      return &Item;
+    }
+    if (auto *Found = FindSceneItemMutable(Item.Children, ObjectId)) {
+      return Found;
+    }
+  }
+  return nullptr;
+}
+
+glm::mat4 BuildTransformMatrix(const EditorTransformDetails &Transform) {
+  glm::mat4 Matrix(1.0f);
+  Matrix = glm::translate(Matrix, Transform.Location);
+  Matrix = glm::rotate(Matrix, glm::radians(Transform.RotationDegrees.y),
+                       glm::vec3(0.0f, 1.0f, 0.0f));
+  Matrix = glm::rotate(Matrix, glm::radians(Transform.RotationDegrees.x),
+                       glm::vec3(1.0f, 0.0f, 0.0f));
+  Matrix = glm::rotate(Matrix, glm::radians(Transform.RotationDegrees.z),
+                       glm::vec3(0.0f, 0.0f, 1.0f));
+  Matrix = glm::scale(Matrix, Transform.Scale);
+  return Matrix;
+}
+
+EditorTransformDetails DecomposeMatrix(const glm::mat4 &Matrix) {
+  const glm::vec3 Location = glm::vec3(Matrix[3]);
+  glm::vec3 Col0 = glm::vec3(Matrix[0]);
+  glm::vec3 Col1 = glm::vec3(Matrix[1]);
+  glm::vec3 Col2 = glm::vec3(Matrix[2]);
+  const float ScaleX = glm::length(Col0);
+  const float ScaleY = glm::length(Col1);
+  const float ScaleZ = glm::length(Col2);
+  if (ScaleX > 0.0f) Col0 /= ScaleX;
+  if (ScaleY > 0.0f) Col1 /= ScaleY;
+  if (ScaleZ > 0.0f) Col2 /= ScaleZ;
+  const float AngleX = glm::degrees(glm::asin(glm::clamp(-Col2.y, -1.0f, 1.0f)));
+  const float AngleY = glm::degrees(glm::atan(Col2.x, Col2.z));
+  const float AngleZ = glm::degrees(glm::atan(Col0.y, Col1.y));
+  return EditorTransformDetails{
+      .Location = Location,
+      .RotationDegrees = {AngleX, AngleY, AngleZ},
+      .Scale = {ScaleX, ScaleY, ScaleZ},
+  };
+}
+
+void ExpandMeshAssetIntoScene(EditorSceneState &State, std::string_view RootObjectId,
+                              const MeshSceneData &SceneData,
+                              std::string_view AssetPath) {
+  auto DetailsIt = State.ObjectDetailsById.find(std::string(RootObjectId));
+  if (DetailsIt == State.ObjectDetailsById.end()) {
+    return;
+  }
+
+  EditorObjectDetails &RootDetails = DetailsIt->second;
+  RootDetails.IsGeneratedAssetChild = false;
+  RootDetails.GeneratedFromAssetRootId = std::nullopt;
+  RootDetails.AssetRelativePath = std::string(AssetPath);
+
+  auto *RootItem = FindSceneItemMutable(State.Items, RootObjectId);
+  if (RootItem == nullptr) {
+    return;
+  }
+
+  std::vector<std::string> GeneratedChildIds;
+  for (const auto &[ObjectId, Details] : State.ObjectDetailsById) {
+    if (Details.IsGeneratedAssetChild &&
+        Details.GeneratedFromAssetRootId.has_value() &&
+        *Details.GeneratedFromAssetRootId == RootObjectId) {
+      GeneratedChildIds.push_back(ObjectId);
+    }
+  }
+
+  for (const std::string &ChildId : GeneratedChildIds) {
+    State.ObjectDetailsById.erase(ChildId);
+    State.MeshInstances.erase(
+        std::remove_if(State.MeshInstances.begin(), State.MeshInstances.end(),
+                       [&](const EditorSceneMeshInstance &Instance) {
+                         return Instance.ObjectId == ChildId;
+                       }),
+        State.MeshInstances.end());
+  }
+
+  RootItem->Children.erase(
+      std::remove_if(
+          RootItem->Children.begin(), RootItem->Children.end(),
+          [&](const EditorSceneItem &Child) {
+            const auto It = State.ObjectDetailsById.find(Child.Id);
+            return It == State.ObjectDetailsById.end() ||
+                   (It->second.IsGeneratedAssetChild &&
+                    It->second.GeneratedFromAssetRootId.has_value() &&
+                    *It->second.GeneratedFromAssetRootId == RootObjectId);
+          }),
+      RootItem->Children.end());
+
+  State.MeshInstances.erase(
+      std::remove_if(State.MeshInstances.begin(), State.MeshInstances.end(),
+                     [&](const EditorSceneMeshInstance &Instance) {
+                       return Instance.ObjectId == RootObjectId;
+                     }),
+      State.MeshInstances.end());
+
+  if (SceneData.Instances.size() == 1) {
+    const auto &First = SceneData.Instances.front();
+    RootDetails.Material = First.Material
+                               ? std::optional<EditorMaterialProperties>(
+                                     EditorMaterialProperties{
+                                         .BaseColorFactor =
+                                             First.Material->BaseColorFactor,
+                                         .Metallic = First.Material->Metallic,
+                                         .Roughness = First.Material->Roughness,
+                                         .TextureAssetPath =
+                                             First.Material->TextureAssetPath
+                                                     .empty()
+                                                 ? std::nullopt
+                                                 : std::optional<std::string>(
+                                                       First.Material
+                                                           ->TextureAssetPath),
+                                     })
+                               : std::nullopt;
+    State.MeshInstances.push_back({
+        .ObjectId = std::string(RootObjectId),
+        .Mesh = First.Mesh,
+        .Material = First.Material,
+        .RenderPath = MeshRenderPath::Graphics,
+        .Transform = glm::mat4(1.0f),
+        .AssetRelativePath = std::string(AssetPath),
+    });
+    return;
+  }
+
+  RootDetails.Material = std::nullopt;
+
+  for (size_t InstanceIndex = 0; InstanceIndex < SceneData.Instances.size();
+       ++InstanceIndex) {
+    const auto &SourceInstance = SceneData.Instances[InstanceIndex];
+    const std::string ChildId = BuildGeneratedAssetChildId(
+        RootObjectId, SourceInstance.Name, InstanceIndex);
+    State.ObjectDetailsById[ChildId] = EditorObjectDetails{
+        .ObjectId = ChildId,
+        .DisplayName = ResolveGeneratedAssetChildDisplayName(
+            SourceInstance.Name, InstanceIndex),
+        .Kind = EditorSceneItemKind::Mesh,
+        .Visible = RootDetails.Visible,
+        .IsGeneratedAssetChild = true,
+        .SupportsTransform = true,
+        .TransformReadOnly = true,
+        .Transform = DecomposeMatrix(SourceInstance.Transform),
+        .Material = SourceInstance.Material
+                        ? std::optional<EditorMaterialProperties>(
+                              EditorMaterialProperties{
+                                  .BaseColorFactor =
+                                      SourceInstance.Material->BaseColorFactor,
+                                  .Metallic = SourceInstance.Material->Metallic,
+                                  .Roughness =
+                                      SourceInstance.Material->Roughness,
+                                  .TextureAssetPath =
+                                      SourceInstance.Material->TextureAssetPath
+                                              .empty()
+                                          ? std::nullopt
+                                          : std::optional<std::string>(
+                                                SourceInstance.Material
+                                                    ->TextureAssetPath),
+                              })
+                        : std::nullopt,
+        .GeneratedFromAssetRootId = std::string(RootObjectId),
+    };
+    RootItem->Children.push_back({
+        .Id = ChildId,
+        .DisplayName = ResolveGeneratedAssetChildDisplayName(
+            SourceInstance.Name, InstanceIndex),
+        .Kind = EditorSceneItemKind::Mesh,
+        .Visible = RootDetails.Visible,
+    });
+    State.MeshInstances.push_back({
+        .ObjectId = ChildId,
+        .Mesh = SourceInstance.Mesh,
+        .Material = SourceInstance.Material,
+        .RenderPath = MeshRenderPath::Graphics,
+        .Transform = SourceInstance.Transform,
+    });
   }
 }
 
@@ -91,36 +321,57 @@ void SerializeSceneItemsFlat(
 bool SaveSceneToFile(const std::filesystem::path &Path,
                      const EditorSceneState &Scene) {
   const std::filesystem::path ContentRoot = ResolveContentRootForScenePath(Path);
-
-  // Build per-object asset path lookup from MeshInstances.
   std::unordered_map<std::string, std::string> AssetPathByObjectId;
-  for (const auto &Inst : Scene.MeshInstances) {
-    if (!Inst.AssetRelativePath.empty()) {
-      AssetPathByObjectId[Inst.ObjectId] = Inst.AssetRelativePath;
+  for (const auto &[ObjectId, Details] : Scene.ObjectDetailsById) {
+    if (!Details.AssetRelativePath.empty()) {
+      AssetPathByObjectId.emplace(ObjectId, Details.AssetRelativePath);
+    }
+  }
+  for (const auto &Instance : Scene.MeshInstances) {
+    if (!Instance.AssetRelativePath.empty()) {
+      AssetPathByObjectId[Instance.ObjectId] = Instance.AssetRelativePath;
+    }
+  }
+  bool HasImplicitGlobalMeshAsset = false;
+  for (const auto &Instance : Scene.MeshInstances) {
+    const auto DetailsIt = Scene.ObjectDetailsById.find(Instance.ObjectId);
+    if (DetailsIt == Scene.ObjectDetailsById.end() ||
+        DetailsIt->second.IsGeneratedAssetChild) {
+      continue;
+    }
+    if (AssetPathByObjectId.find(Instance.ObjectId) == AssetPathByObjectId.end()) {
+      HasImplicitGlobalMeshAsset = true;
+      break;
     }
   }
 
   std::ostringstream Out;
   Out << "{\n";
   Out << "  \"version\": 1,\n";
-  Out << "  \"meshAsset\": \"basicmesh.glb\",\n";
+  Out << "  \"meshAsset\": "
+      << EscStr(HasImplicitGlobalMeshAsset ? "basicmesh.glb" : "") << ",\n";
 
   // Flat node list (scene tree + parent links)
   Out << "  \"nodes\": [\n";
   bool FirstNode = true;
-  SerializeSceneItemsFlat(Out, Scene.Items, "", FirstNode);
+  SerializeSceneItemsFlat(Out, Scene.Items, Scene.ObjectDetailsById, "", FirstNode);
   Out << "\n  ],\n";
 
   // Object details (transforms, visibility, mesh name mapping)
   Out << "  \"objects\": [\n";
   bool FirstObj = true;
   for (const auto &[Id, Details] : Scene.ObjectDetailsById) {
+    if (Details.IsGeneratedAssetChild) {
+      continue;
+    }
     if (!FirstObj) Out << ",\n";
     FirstObj = false;
     Out << "    {\"id\":" << EscStr(Id)
         << ",\"displayName\":" << EscStr(Details.DisplayName)
         << ",\"kind\":\"" << KindStr(Details.Kind) << "\""
         << ",\"visible\":" << (Details.Visible ? "true" : "false")
+        << ",\"isGeneratedAssetChild\":"
+        << (Details.IsGeneratedAssetChild ? "true" : "false")
         << ",\"supportsTransform\":" << (Details.SupportsTransform ? "true" : "false")
         << ",\"transformReadOnly\":" << (Details.TransformReadOnly ? "true" : "false");
     if (Details.Transform.has_value()) {
@@ -130,6 +381,10 @@ bool SaveSceneToFile(const std::filesystem::path &Path,
     }
     if (Details.ScriptClass.has_value()) {
       Out << ",\"scriptClass\":" << EscStr(*Details.ScriptClass);
+    }
+    if (Details.GeneratedFromAssetRootId.has_value()) {
+      Out << ",\"generatedFromAssetRootId\":"
+          << EscStr(*Details.GeneratedFromAssetRootId);
     }
     if (Details.Kind == EditorSceneItemKind::Mesh) {
       const auto AssetIt = AssetPathByObjectId.find(Id);
@@ -168,10 +423,14 @@ bool SaveSceneToFile(const std::filesystem::path &Path,
   Out << "  \"meshNameToObjectId\": {\n";
   bool FirstMesh = true;
   for (const auto &Instance : Scene.MeshInstances) {
+    const auto DetailsIt = Scene.ObjectDetailsById.find(Instance.ObjectId);
+    if (DetailsIt == Scene.ObjectDetailsById.end() ||
+        DetailsIt->second.IsGeneratedAssetChild) {
+      continue;
+    }
     // We stored the display name as the mesh source name via ResolveStartupObjectId
     // Look up the display name from ObjectDetailsById
-    const auto It = Scene.ObjectDetailsById.find(Instance.ObjectId);
-    if (It == Scene.ObjectDetailsById.end()) continue;
+    const auto It = DetailsIt;
     if (!FirstMesh) Out << ",\n";
     FirstMesh = false;
     Out << "    " << EscStr(It->second.DisplayName) << ": " << EscStr(Instance.ObjectId);
@@ -376,10 +635,12 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
     std::string DisplayName;
     EditorSceneItemKind Kind{EditorSceneItemKind::Folder};
     bool Visible{true};
+    bool IsGeneratedAssetChild{false};
     bool SupportsTransform{false};
     bool TransformReadOnly{true};
     std::optional<EditorTransformDetails> Transform;
     std::optional<std::string> ScriptClass;
+    std::optional<std::string> GeneratedFromAssetRootId;
     std::string AssetRelativePath;
     std::string MaterialAssetPath;
     std::string TextureAssetPath;
@@ -420,6 +681,7 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
           if (K == "displayName")      { auto V = P.ParseString(); if (V) Data.DisplayName         = *V; return true; }
           if (K == "kind")             { auto V = P.ParseString(); if (V) Data.Kind = KindFromStr(*V); return true; }
           if (K == "visible")          { auto V = P.ParseBool();   if (V) Data.Visible             = *V; return true; }
+          if (K == "isGeneratedAssetChild") { auto V = P.ParseBool(); if (V) Data.IsGeneratedAssetChild = *V; return true; }
           if (K == "supportsTransform"){ auto V = P.ParseBool();   if (V) Data.SupportsTransform   = *V; return true; }
           if (K == "transformReadOnly"){ auto V = P.ParseBool();   if (V) Data.TransformReadOnly   = *V; return true; }
           if (K == "location") {
@@ -449,6 +711,11 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
           if (K == "scriptClass") {
             P.SkipWs();
             if (P.Peek() == 'n') { P.ParseNull(); } else { auto V = P.ParseString(); if (V) Data.ScriptClass = *V; }
+            return true;
+          }
+          if (K == "generatedFromAssetRootId") {
+            P.SkipWs();
+            if (P.Peek() == 'n') { P.ParseNull(); } else { auto V = P.ParseString(); if (V) Data.GeneratedFromAssetRootId = *V; }
             return true;
           }
           if (K == "assetRelativePath") {
@@ -543,11 +810,14 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
     Details.DisplayName     = Data.DisplayName;
     Details.Kind            = Data.Kind;
     Details.Visible         = Data.Visible;
+    Details.IsGeneratedAssetChild = Data.IsGeneratedAssetChild;
     Details.SupportsTransform = Data.SupportsTransform;
     Details.TransformReadOnly = Data.TransformReadOnly;
     Details.Transform       = Data.Transform;
     Details.ScriptClass     = Data.ScriptClass;
     Details.Light           = Data.Light;
+    Details.GeneratedFromAssetRootId = Data.GeneratedFromAssetRootId;
+    Details.AssetRelativePath = Data.AssetRelativePath;
     State.ObjectDetailsById[Id] = std::move(Details);
   }
 
@@ -559,24 +829,11 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
     if (Data.Kind != EditorSceneItemKind::Mesh || Data.AssetRelativePath.empty()) continue;
     CookMeshAsset(ContentRoot, Data.AssetRelativePath);
     const auto FullPath = ContentRoot / Data.AssetRelativePath;
-    const auto SceneData = LoadBasicMeshAsset(FullPath);
+    auto SceneData = LoadBasicMeshAsset(FullPath);
     if (!SceneData.has_value() || SceneData->Instances.empty()) {
       A_CORE_WARN("SceneFile: failed to load asset '{}' for object '{}'",
                   Data.AssetRelativePath, ObjId);
       continue;
-    }
-    glm::mat4 Transform = SceneData->Instances[0].Transform;
-    const auto DetailsIt = State.ObjectDetailsById.find(ObjId);
-    if (DetailsIt != State.ObjectDetailsById.end() &&
-        DetailsIt->second.Transform.has_value()) {
-      const auto &T = *DetailsIt->second.Transform;
-      glm::mat4 M(1.0f);
-      M = glm::translate(M, T.Location);
-      M = glm::rotate(M, glm::radians(T.RotationDegrees.y), {0,1,0});
-      M = glm::rotate(M, glm::radians(T.RotationDegrees.x), {1,0,0});
-      M = glm::rotate(M, glm::radians(T.RotationDegrees.z), {0,0,1});
-      M = glm::scale(M, T.Scale);
-      Transform = M;
     }
     auto Material = SceneData->Instances[0].Material;
     if (!Data.MaterialAssetPath.empty()) {
@@ -609,14 +866,9 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
         Material->TextureAssetPath = Data.TextureAssetPath;
       }
     }
-    State.MeshInstances.push_back({
-        .ObjectId           = ObjId,
-        .Mesh               = SceneData->Instances[0].Mesh,
-        .Material           = std::move(Material),
-        .RenderPath         = MeshRenderPath::Graphics,
-        .Transform          = Transform,
-        .AssetRelativePath  = Data.AssetRelativePath,
-    });
+    if (SceneData->Instances.size() == 1 && Material != SceneData->Instances[0].Material) {
+      SceneData->Instances[0].Material = std::move(Material);
+    }
     // Propagate textureAssetPath into ObjectDetails so inspector shows it.
     {
       const auto DetailsIt = State.ObjectDetailsById.find(ObjId);
@@ -644,6 +896,7 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
         }
       }
     }
+    ExpandMeshAssetIntoScene(State, ObjId, *SceneData, Data.AssetRelativePath);
     LoadedByAssetPath.insert(ObjId);
   }
 
@@ -664,13 +917,7 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
         if (DetailsIt != State.ObjectDetailsById.end() &&
             DetailsIt->second.Transform.has_value()) {
           const auto &T = *DetailsIt->second.Transform;
-          glm::mat4 M(1.0f);
-          M = glm::translate(M, T.Location);
-          M = glm::rotate(M, glm::radians(T.RotationDegrees.y), {0,1,0});
-          M = glm::rotate(M, glm::radians(T.RotationDegrees.x), {1,0,0});
-          M = glm::rotate(M, glm::radians(T.RotationDegrees.z), {0,0,1});
-          M = glm::scale(M, T.Scale);
-          Transform = M;
+          Transform = BuildTransformMatrix(T);
         }
 
         State.MeshInstances.push_back({
