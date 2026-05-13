@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Assets/AssetCookManifest.h"
+#include "Assets/CookedMaterialAsset.h"
 
 #include <filesystem>
 #include <optional>
@@ -18,5 +19,12 @@ CookMeshAsset(const std::filesystem::path &ContentRoot,
 std::optional<AssetCookManifestEntry>
 CookTextureAsset(const std::filesystem::path &ContentRoot,
                  const std::filesystem::path &RelativeAssetPath);
+
+// Writes generated cooked material state under Content/Cooked and updates the
+// cook manifest for the provided logical material path.
+std::optional<AssetCookManifestEntry>
+CookMaterialAsset(const std::filesystem::path &ContentRoot,
+                  const std::filesystem::path &RelativeMaterialPath,
+                  const CookedMaterialData &Material);
 
 } // namespace Axiom::Assets

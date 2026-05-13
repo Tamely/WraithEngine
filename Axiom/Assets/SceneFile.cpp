@@ -1,5 +1,6 @@
 #include "Assets/SceneFile.h"
 #include "Assets/AssetCooker.h"
+#include "Assets/CookedMaterialAsset.h"
 #include "Assets/MeshAsset.h"
 #include "Core/Log.h"
 
@@ -122,6 +123,21 @@ bool SaveSceneToFile(const std::filesystem::path &Path,
       const auto AssetIt = AssetPathByObjectId.find(Id);
       if (AssetIt != AssetPathByObjectId.end()) {
         Out << ",\"assetRelativePath\":" << EscStr(AssetIt->second);
+      }
+      if (Details.Material.has_value()) {
+        const std::filesystem::path MaterialPath =
+            std::filesystem::path("Generated/Materials") / Id;
+        const auto MaterialCooked = CookMaterialAsset(
+            AXIOM_CONTENT_DIR, MaterialPath,
+            {.BaseColorFactor = Details.Material->BaseColorFactor,
+             .Metallic = Details.Material->Metallic,
+             .Roughness = Details.Material->Roughness,
+             .TextureAssetPath =
+                 Details.Material->TextureAssetPath.value_or("")});
+        if (MaterialCooked.has_value()) {
+          Out << ",\"materialAssetPath\":"
+              << EscStr(MaterialCooked->RelativePath);
+        }
       }
       if (Details.Material.has_value() && Details.Material->TextureAssetPath.has_value()) {
         Out << ",\"textureAssetPath\":" << EscStr(*Details.Material->TextureAssetPath);
@@ -351,6 +367,7 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
     std::optional<EditorTransformDetails> Transform;
     std::optional<std::string> ScriptClass;
     std::string AssetRelativePath;
+    std::string MaterialAssetPath;
     std::string TextureAssetPath;
     std::optional<EditorLightProperties> Light;
   };
@@ -422,6 +439,9 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
           }
           if (K == "assetRelativePath") {
             auto V = P.ParseString(); if (V) Data.AssetRelativePath = *V; return true;
+          }
+          if (K == "materialAssetPath") {
+            auto V = P.ParseString(); if (V) Data.MaterialAssetPath = *V; return true;
           }
           if (K == "textureAssetPath") {
             P.SkipWs();
@@ -546,6 +566,30 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
       Transform = M;
     }
     auto Material = SceneData->Instances[0].Material;
+    if (!Data.MaterialAssetPath.empty()) {
+      auto MaterialCookedPath =
+          std::filesystem::path(AXIOM_CONTENT_DIR) / "Cooked" / Data.MaterialAssetPath;
+      MaterialCookedPath.replace_extension(".wmat");
+      const auto CookedMaterial = LoadCookedMaterialAsset(MaterialCookedPath);
+      if (CookedMaterial.has_value()) {
+        if (!Material) {
+          Material = std::make_shared<MaterialInstance>();
+        }
+        Material->BaseColorFactor = CookedMaterial->BaseColorFactor;
+        Material->Metallic = CookedMaterial->Metallic;
+        Material->Roughness = CookedMaterial->Roughness;
+        if (!CookedMaterial->TextureAssetPath.empty()) {
+          const auto TexPath =
+              std::filesystem::path(AXIOM_CONTENT_DIR) /
+              CookedMaterial->TextureAssetPath;
+          auto Tex = LoadTextureFromFile(TexPath);
+          if (Tex) {
+            Material->BaseColorTexture = std::move(Tex);
+            Material->TextureAssetPath = CookedMaterial->TextureAssetPath;
+          }
+        }
+      }
+    }
     if (!Data.TextureAssetPath.empty()) {
       CookTextureAsset(AXIOM_CONTENT_DIR, Data.TextureAssetPath);
       const auto TexPath =
@@ -568,9 +612,29 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
     // Propagate textureAssetPath into ObjectDetails so inspector shows it.
     {
       const auto DetailsIt = State.ObjectDetailsById.find(ObjId);
-      if (DetailsIt != State.ObjectDetailsById.end() && !Data.TextureAssetPath.empty()) {
-        if (!DetailsIt->second.Material) DetailsIt->second.Material = EditorMaterialProperties{};
-        DetailsIt->second.Material->TextureAssetPath = Data.TextureAssetPath;
+      if (DetailsIt != State.ObjectDetailsById.end()) {
+        if (!DetailsIt->second.Material) {
+          DetailsIt->second.Material = EditorMaterialProperties{};
+        }
+        if (!Data.MaterialAssetPath.empty()) {
+          auto MaterialCookedPath =
+              std::filesystem::path(AXIOM_CONTENT_DIR) / "Cooked" / Data.MaterialAssetPath;
+          MaterialCookedPath.replace_extension(".wmat");
+          const auto CookedMaterial = LoadCookedMaterialAsset(MaterialCookedPath);
+          if (CookedMaterial.has_value()) {
+            DetailsIt->second.Material->BaseColorFactor =
+                CookedMaterial->BaseColorFactor;
+            DetailsIt->second.Material->Metallic = CookedMaterial->Metallic;
+            DetailsIt->second.Material->Roughness = CookedMaterial->Roughness;
+            if (!CookedMaterial->TextureAssetPath.empty()) {
+              DetailsIt->second.Material->TextureAssetPath =
+                  CookedMaterial->TextureAssetPath;
+            }
+          }
+        }
+        if (!Data.TextureAssetPath.empty()) {
+          DetailsIt->second.Material->TextureAssetPath = Data.TextureAssetPath;
+        }
       }
     }
     LoadedByAssetPath.insert(ObjId);

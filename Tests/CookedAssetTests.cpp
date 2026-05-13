@@ -2,6 +2,7 @@
 
 #include <Assets/AssetCookManifest.h>
 #include <Assets/AssetCooker.h>
+#include <Assets/CookedMaterialAsset.h>
 #include <Assets/CookedMeshAsset.h>
 #include <Assets/CookedTextureAsset.h>
 #include <Assets/IAssetSource.h>
@@ -141,4 +142,56 @@ TEST(CookedAssetTests, CookTextureAssetWritesManifestAndCookedLookupResolves) {
       Axiom::Assets::LoadTextureFromFile(ContentRoot / "Engine" / "tf2 coconut.jpg");
   ASSERT_TRUE(Loaded != nullptr);
   EXPECT_TRUE(Loaded->IsValid());
+}
+
+TEST(CookedAssetTests, CookedMaterialRoundTripsThroughBinaryFormat) {
+  const auto TempRoot = MakeUniqueTempRoot("material-roundtrip");
+  const auto CookedPath = TempRoot / "material.wmat";
+  const Axiom::Assets::CookedMaterialData Source{
+      .BaseColorFactor = glm::vec4(0.2f, 0.4f, 0.6f, 1.0f),
+      .Metallic = 0.7f,
+      .Roughness = 0.15f,
+      .TextureAssetPath = "Engine/tf2 coconut.jpg",
+  };
+
+  ASSERT_TRUE(
+      Axiom::Assets::SaveCookedMaterialAsset(CookedPath, Source, Axiom::AssetId{77}));
+  const auto Loaded = Axiom::Assets::LoadCookedMaterialAsset(CookedPath);
+  ASSERT_TRUE(Loaded.has_value());
+  EXPECT_FLOAT_EQ(Loaded->BaseColorFactor.r, 0.2f);
+  EXPECT_FLOAT_EQ(Loaded->BaseColorFactor.g, 0.4f);
+  EXPECT_FLOAT_EQ(Loaded->BaseColorFactor.b, 0.6f);
+  EXPECT_FLOAT_EQ(Loaded->Metallic, 0.7f);
+  EXPECT_FLOAT_EQ(Loaded->Roughness, 0.15f);
+  EXPECT_EQ(Loaded->TextureAssetPath, "Engine/tf2 coconut.jpg");
+}
+
+TEST(CookedAssetTests, CookMaterialAssetWritesManifestAndCookedLookupResolves) {
+  const auto TempRoot = MakeUniqueTempRoot("material-manifest");
+  const auto ContentRoot = TempRoot / "Content";
+  EnsureTempDirectory(ContentRoot);
+
+  const auto Entry = Axiom::Assets::CookMaterialAsset(
+      ContentRoot, std::filesystem::path("Generated/Materials/crate-1"),
+      {.BaseColorFactor = glm::vec4(0.8f, 0.2f, 0.1f, 1.0f),
+       .Metallic = 0.9f,
+       .Roughness = 0.05f,
+       .TextureAssetPath = "Engine/tf2 coconut.jpg"});
+  ASSERT_TRUE(Entry.has_value());
+  EXPECT_EQ(Entry->Kind, Axiom::Assets::AssetKind::Material);
+
+  const auto Manifest = Axiom::Assets::LoadAssetCookManifest(
+      ContentRoot / "Cooked" / "AssetCookManifest.json");
+  ASSERT_TRUE(Manifest.has_value());
+  ASSERT_EQ(Manifest->Entries.size(), 1u);
+
+  const Axiom::Assets::CookedAssetSource Cooked(ContentRoot);
+  const auto Resolved = Cooked.Resolve(Entry->Id);
+  ASSERT_TRUE(Resolved.has_value());
+  EXPECT_EQ(Resolved->extension(), ".wmat");
+
+  const auto Loaded = Axiom::Assets::LoadCookedMaterialAsset(*Resolved);
+  ASSERT_TRUE(Loaded.has_value());
+  EXPECT_FLOAT_EQ(Loaded->Metallic, 0.9f);
+  EXPECT_EQ(Loaded->TextureAssetPath, "Engine/tf2 coconut.jpg");
 }
