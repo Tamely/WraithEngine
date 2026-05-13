@@ -183,19 +183,30 @@ export function ContentBrowser() {
     return getDirectoryContents(assets, currentPath)
   }, [assets, currentPath, searchQuery])
 
-  const canAssignToSelection =
-    selectedObject?.kind === "mesh" && selectedObject.id !== undefined
+  const selectedObjectKind = selectedObject?.kind
+  const canAssignMeshToSelection =
+    (selectedObjectKind === "mesh" || selectedObjectKind === "actor") &&
+    selectedObject?.id !== undefined
+  const canAssignTextureToSelection =
+    selectedObjectKind === "mesh" && selectedObject?.id !== undefined
 
   const assignAssetToSelection = useCallback(
     async (asset: SessionAssetDescriptor) => {
-      if (!canAssignToSelection || !selectedObject) return
       if (asset.kind === "mesh") {
+        if (!canAssignMeshToSelection || !selectedObject) return
         await setMeshAsset(selectedObject.id, asset.path)
       } else if (asset.kind === "texture") {
+        if (!canAssignTextureToSelection || !selectedObject) return
         await setMaterialTexture(selectedObject.id, asset.path)
       }
     },
-    [canAssignToSelection, selectedObject, setMeshAsset, setMaterialTexture]
+    [
+      canAssignMeshToSelection,
+      canAssignTextureToSelection,
+      selectedObject,
+      setMaterialTexture,
+      setMeshAsset,
+    ]
   )
 
   const navigateTo = (path: string) => {
@@ -452,9 +463,9 @@ export function ContentBrowser() {
                       if (h) h(e.clientX, e.clientY, asset.kind, asset.path)
                     }}
                     title={
-                      canAssignToSelection && asset.kind === "mesh"
-                        ? "Double-click to assign, or drag into the viewport to add"
-                        : canAssignToSelection && asset.kind === "texture"
+                      canAssignMeshToSelection && asset.kind === "mesh"
+                        ? "Double-click to assign to the selected mesh or actor, or drag into the viewport to add"
+                        : canAssignTextureToSelection && asset.kind === "texture"
                           ? "Double-click or drag to assign texture to a mesh object"
                           : asset.path
                     }
@@ -510,9 +521,9 @@ export function ContentBrowser() {
                       if (h) h(e.clientX, e.clientY, asset.kind, asset.path)
                     }}
                     title={
-                      canAssignToSelection && asset.kind === "mesh"
-                        ? "Double-click to assign, or drag into the viewport to add"
-                        : canAssignToSelection && asset.kind === "texture"
+                      canAssignMeshToSelection && asset.kind === "mesh"
+                        ? "Double-click to assign to the selected mesh or actor, or drag into the viewport to add"
+                        : canAssignTextureToSelection && asset.kind === "texture"
                           ? "Double-click or drag to assign texture to a mesh object"
                           : asset.path
                     }

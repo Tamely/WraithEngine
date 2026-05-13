@@ -365,7 +365,7 @@ function ScriptSection({
   function openAttachedScript() {
     if (!attachedScriptPath) return
     requestOpenScript(attachedScriptPath)
-    setActiveTab("tg-content", "script-editor")
+    setActiveTab("tg-viewport", "script-editor")
   }
 
   return (

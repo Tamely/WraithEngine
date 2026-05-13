@@ -1314,8 +1314,9 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
       FailureReason = "SetMeshAsset targeted an unknown object.";
       return false;
     }
-    if (Details->Kind != EditorSceneItemKind::Mesh) {
-      FailureReason = "SetMeshAsset target must be a Mesh object.";
+    if (Details->Kind != EditorSceneItemKind::Mesh &&
+        Details->Kind != EditorSceneItemKind::Actor) {
+      FailureReason = "SetMeshAsset target must be a Mesh or Actor object.";
       return false;
     }
   }

@@ -1256,6 +1256,57 @@ TEST(SceneLifecycleTests, SetMeshAsset_CreatesInstanceForRuntimeCreatedMesh) {
   EXPECT_EQ(It->AssetRelativePath, "singlemesh.obj");
 }
 
+TEST(SceneLifecycleTests, SetMeshAsset_AssignsSingleMeshToActor) {
+  EnsureLogInitialized();
+  const auto TempRoot =
+      std::filesystem::temp_directory_path() / "wraithengine-actor-mesh-assign-test";
+  std::error_code RemoveError;
+  std::filesystem::remove_all(TempRoot, RemoveError);
+  std::filesystem::create_directories(TempRoot / "Content");
+  WriteSingleMeshObj(TempRoot / "Content");
+
+  Axiom::EditorSession Session = MakeWorldSession();
+  Session.SetContentDir(TempRoot / "Content");
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::CreateObjectCommand{.TemplateId = "Actor"}});
+  Session.Tick();
+
+  const auto *Created = FindEvent<Axiom::ObjectCreatedEvent>(Subscriber.Events);
+  ASSERT_NE(Created, nullptr);
+  const std::string ActorId = Created->ObjectId;
+  Subscriber.Events.clear();
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetMeshAssetCommand{
+                      .ObjectId = ActorId,
+                      .AssetPath = "singlemesh.obj",
+                  }});
+  Session.Tick();
+
+  ASSERT_EQ(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+  const auto *Changed = FindEvent<Axiom::MeshAssetChangedEvent>(Subscriber.Events);
+  ASSERT_NE(Changed, nullptr);
+  EXPECT_EQ(Changed->ObjectId, ActorId);
+  EXPECT_EQ(Changed->AssetPath, "singlemesh.obj");
+
+  const Axiom::EditorObjectDetails *Details = Session.FindObjectDetails(ActorId);
+  ASSERT_NE(Details, nullptr);
+  EXPECT_EQ(Details->Kind, Axiom::EditorSceneItemKind::Actor);
+  EXPECT_EQ(Details->AssetRelativePath, "singlemesh.obj");
+  ASSERT_TRUE(Details->Material.has_value());
+
+  const auto &Instances = Session.GetState().Scene.MeshInstances;
+  const auto It = std::find_if(Instances.begin(), Instances.end(),
+                               [&](const Axiom::EditorSceneMeshInstance &I) {
+                                 return I.ObjectId == ActorId;
+                               });
+  ASSERT_NE(It, Instances.end());
+  EXPECT_EQ(It->AssetRelativePath, "singlemesh.obj");
+}
+
 TEST(SceneLifecycleTests, SetMeshAsset_CooksMeshAssetManifestEntry) {
   EnsureLogInitialized();
   Axiom::EditorSession Session = MakeWorldSession();

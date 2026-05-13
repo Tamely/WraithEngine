@@ -76,7 +76,7 @@ struct EditorObjectDetails {
   bool TransformReadOnly{true};
   std::optional<EditorTransformDetails> Transform;      // local-space
   std::optional<EditorTransformDetails> WorldTransform; // world-space (computed)
-  std::optional<std::string> ScriptClass;               // C# script class name (Actors only)
+  std::optional<std::string> ScriptClass;               // C# script class name (Actor objects only)
   std::optional<EditorLightProperties> Light;           // Light objects only
   std::optional<EditorMaterialProperties> Material;     // Mesh objects only
   std::optional<std::string> GeneratedFromAssetRootId;
