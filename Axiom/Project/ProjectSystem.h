@@ -10,10 +10,12 @@
 namespace Axiom::Project {
 
 struct ProjectManifest {
-  std::uint32_t Version{1};
+  std::uint32_t Version{2};
   std::string ProjectId;
   std::string Name;
   std::string Slug;
+  std::string ScriptAssemblyName;
+  std::string ScriptRootNamespace;
 };
 
 struct ProjectRoot {
@@ -23,18 +25,34 @@ struct ProjectRoot {
   std::filesystem::path SceneFilePath;
 };
 
+struct ProjectScriptWorkspace {
+  std::filesystem::path ScriptsDir;
+  std::filesystem::path ScriptProjectPath;
+  std::filesystem::path ScriptSolutionPath;
+  std::filesystem::path StarterScriptPath;
+  std::string AssemblyName;
+  std::string RootNamespace;
+  std::string StarterScriptClassName;
+  std::string StarterScriptQualifiedClassName;
+};
+
 struct ProjectDescriptor {
   ProjectManifest Manifest;
   ProjectRoot Root;
+  ProjectScriptWorkspace ScriptWorkspace;
 };
 
 std::filesystem::path GetDefaultProjectsRoot();
 ProjectRoot ResolveProjectRoot(const std::filesystem::path &RootPath);
+ProjectScriptWorkspace ResolveProjectScriptWorkspace(const ProjectRoot &Root,
+                                                     const ProjectManifest &Manifest);
 
 bool IsPathWithinRoot(const std::filesystem::path &RootPath,
                       const std::filesystem::path &CandidatePath);
 bool IsValidProjectSlug(std::string_view Slug);
 std::string SlugifyProjectName(std::string_view Name);
+std::string BuildScriptAssemblyName(std::string_view ProjectName);
+std::string BuildScriptRootNamespace(std::string_view ProjectName);
 
 bool SaveProjectManifest(const std::filesystem::path &ManifestPath,
                          const ProjectManifest &Manifest);

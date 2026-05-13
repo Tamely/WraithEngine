@@ -46,10 +46,12 @@ TEST(ProjectSystemStandaloneTests, SlugifyProjectNameNormalizesInput) {
 TEST_F(ProjectSystemTests, SaveAndLoadProjectManifestRoundTrips) {
   const auto ProjectRoot = Axiom::Project::ResolveProjectRoot(Root / "alpha");
   const Axiom::Project::ProjectManifest Manifest{
-      .Version = 1,
+      .Version = 2,
       .ProjectId = "project-alpha",
       .Name = "Alpha",
       .Slug = "alpha",
+      .ScriptAssemblyName = "Alpha.Scripts",
+      .ScriptRootNamespace = "Alpha.Scripts",
   };
 
   ASSERT_TRUE(
@@ -62,6 +64,8 @@ TEST_F(ProjectSystemTests, SaveAndLoadProjectManifestRoundTrips) {
   EXPECT_EQ(Loaded->ProjectId, Manifest.ProjectId);
   EXPECT_EQ(Loaded->Name, Manifest.Name);
   EXPECT_EQ(Loaded->Slug, Manifest.Slug);
+  EXPECT_EQ(Loaded->ScriptAssemblyName, Manifest.ScriptAssemblyName);
+  EXPECT_EQ(Loaded->ScriptRootNamespace, Manifest.ScriptRootNamespace);
 }
 
 TEST_F(ProjectSystemTests, CreateProjectScaffoldBuildsInitialLayout) {
@@ -76,6 +80,17 @@ TEST_F(ProjectSystemTests, CreateProjectScaffoldBuildsInitialLayout) {
   EXPECT_TRUE(std::filesystem::exists(Created->Root.ManifestPath));
   EXPECT_TRUE(std::filesystem::exists(Created->Root.ContentDir));
   EXPECT_TRUE(std::filesystem::exists(Created->Root.SceneFilePath));
+  EXPECT_TRUE(std::filesystem::exists(Created->ScriptWorkspace.ScriptsDir));
+  EXPECT_TRUE(std::filesystem::exists(Created->ScriptWorkspace.ScriptProjectPath));
+  EXPECT_TRUE(std::filesystem::exists(Created->ScriptWorkspace.ScriptSolutionPath));
+  EXPECT_TRUE(std::filesystem::exists(Created->ScriptWorkspace.StarterScriptPath));
+  EXPECT_EQ(Created->Manifest.ScriptAssemblyName, "TestProject.Scripts");
+  EXPECT_EQ(Created->Manifest.ScriptRootNamespace, "TestProject.Scripts");
+  EXPECT_EQ(Created->ScriptWorkspace.AssemblyName, "TestProject.Scripts");
+  EXPECT_EQ(Created->ScriptWorkspace.RootNamespace, "TestProject.Scripts");
+  EXPECT_EQ(Created->ScriptWorkspace.StarterScriptClassName, "StarterScript");
+  EXPECT_EQ(Created->ScriptWorkspace.StarterScriptQualifiedClassName,
+            "TestProject.Scripts.StarterScript");
 
   std::ifstream SceneFile(Created->Root.SceneFilePath);
   ASSERT_TRUE(SceneFile.is_open());
@@ -83,6 +98,36 @@ TEST_F(ProjectSystemTests, CreateProjectScaffoldBuildsInitialLayout) {
                               std::istreambuf_iterator<char>());
   EXPECT_NE(SceneText.find("\"nodes\": []"), std::string::npos);
   EXPECT_NE(SceneText.find("\"objects\": []"), std::string::npos);
+
+  std::ifstream ScriptProjectFile(Created->ScriptWorkspace.ScriptProjectPath);
+  ASSERT_TRUE(ScriptProjectFile.is_open());
+  const std::string ScriptProjectText(
+      (std::istreambuf_iterator<char>(ScriptProjectFile)),
+      std::istreambuf_iterator<char>());
+  EXPECT_NE(ScriptProjectText.find("<AssemblyName>TestProject.Scripts</AssemblyName>"),
+            std::string::npos);
+  EXPECT_NE(ScriptProjectText.find("<RootNamespace>TestProject.Scripts</RootNamespace>"),
+            std::string::npos);
+  EXPECT_NE(ScriptProjectText.find("WraithEngine.Managed.dll"), std::string::npos);
+
+  std::ifstream SolutionFile(Created->ScriptWorkspace.ScriptSolutionPath);
+  ASSERT_TRUE(SolutionFile.is_open());
+  const std::string SolutionText((std::istreambuf_iterator<char>(SolutionFile)),
+                                 std::istreambuf_iterator<char>());
+  EXPECT_NE(SolutionText.find("TestProject.Scripts"), std::string::npos);
+  EXPECT_NE(SolutionText.find("Scripts/TestProject.Scripts.csproj"),
+            std::string::npos);
+
+  std::ifstream StarterScriptFile(Created->ScriptWorkspace.StarterScriptPath);
+  ASSERT_TRUE(StarterScriptFile.is_open());
+  const std::string StarterScriptText(
+      (std::istreambuf_iterator<char>(StarterScriptFile)),
+      std::istreambuf_iterator<char>());
+  EXPECT_NE(StarterScriptText.find("using WraithEngine;"), std::string::npos);
+  EXPECT_NE(StarterScriptText.find("namespace TestProject.Scripts;"),
+            std::string::npos);
+  EXPECT_NE(StarterScriptText.find("public class StarterScript : Script"),
+            std::string::npos);
 }
 
 TEST_F(ProjectSystemTests, DiscoverProjectsReturnsValidProjectsOnly) {
@@ -114,10 +159,35 @@ TEST_F(ProjectSystemTests, OpenProjectBySlugLoadsOnlyManagedProjects) {
   ASSERT_TRUE(Opened.has_value());
   EXPECT_EQ(Opened->Manifest.Name, "Gamma");
   EXPECT_EQ(Opened->Manifest.Slug, "gamma");
+  EXPECT_EQ(Opened->ScriptWorkspace.AssemblyName, "Gamma.Scripts");
+  EXPECT_EQ(Opened->ScriptWorkspace.RootNamespace, "Gamma.Scripts");
 
   EXPECT_FALSE(Axiom::Project::OpenProjectBySlug(Root, "../escape").has_value());
   EXPECT_FALSE(
       Axiom::Project::OpenProjectBySlug(Root, "missing-project").has_value());
+}
+
+TEST_F(ProjectSystemTests, LegacyManifestDefaultsScriptWorkspaceFields) {
+  const auto ProjectRoot = Axiom::Project::ResolveProjectRoot(Root / "legacy");
+  ASSERT_TRUE(std::filesystem::create_directories(ProjectRoot.RootPath));
+
+  std::ofstream ManifestFile(ProjectRoot.ManifestPath);
+  ASSERT_TRUE(ManifestFile.is_open());
+  ManifestFile << "{\n"
+               << "  \"version\": 1,\n"
+               << "  \"projectId\": \"project-legacy\",\n"
+               << "  \"name\": \"Legacy Project\",\n"
+               << "  \"slug\": \"legacy-project\"\n"
+               << "}\n";
+  ManifestFile.close();
+
+  const auto Loaded =
+      Axiom::Project::LoadProjectDescriptor(ProjectRoot.RootPath);
+  ASSERT_TRUE(Loaded.has_value());
+  EXPECT_EQ(Loaded->Manifest.ScriptAssemblyName, "LegacyProject.Scripts");
+  EXPECT_EQ(Loaded->Manifest.ScriptRootNamespace, "LegacyProject.Scripts");
+  EXPECT_EQ(Loaded->ScriptWorkspace.ScriptProjectPath.filename().string(),
+            "LegacyProject.Scripts.csproj");
 }
 
 TEST_F(ProjectSystemTests, EmptyProjectSceneLoadsWithoutFallbackContent) {

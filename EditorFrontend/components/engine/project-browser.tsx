@@ -9,6 +9,14 @@ export interface ProjectDescriptor {
   slug: string
   rootPath: string
   contentDir: string
+  scriptsDir: string
+  scriptProjectPath: string
+  scriptSolutionPath: string
+  scriptAssemblyName: string
+  scriptRootNamespace: string
+  starterScriptPath: string
+  starterScriptClassName: string
+  starterScriptQualifiedClassName: string
   engineContentDir: string
   sceneFilePath: string
 }

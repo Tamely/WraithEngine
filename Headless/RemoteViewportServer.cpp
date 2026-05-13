@@ -489,6 +489,23 @@ std::string SerializeProjectJson(const Project::ProjectDescriptor &Project) {
          << EscapeJsonString(Project.Root.RootPath.string())
          << "\",\"contentDir\":\""
          << EscapeJsonString(Project.Root.ContentDir.string())
+         << "\",\"scriptsDir\":\""
+         << EscapeJsonString(Project.ScriptWorkspace.ScriptsDir.string())
+         << "\",\"scriptProjectPath\":\""
+         << EscapeJsonString(Project.ScriptWorkspace.ScriptProjectPath.string())
+         << "\",\"scriptSolutionPath\":\""
+         << EscapeJsonString(Project.ScriptWorkspace.ScriptSolutionPath.string())
+         << "\",\"scriptAssemblyName\":\""
+         << EscapeJsonString(Project.ScriptWorkspace.AssemblyName)
+         << "\",\"scriptRootNamespace\":\""
+         << EscapeJsonString(Project.ScriptWorkspace.RootNamespace)
+         << "\",\"starterScriptPath\":\""
+         << EscapeJsonString(Project.ScriptWorkspace.StarterScriptPath.string())
+         << "\",\"starterScriptClassName\":\""
+         << EscapeJsonString(Project.ScriptWorkspace.StarterScriptClassName)
+         << "\",\"starterScriptQualifiedClassName\":\""
+         << EscapeJsonString(
+                Project.ScriptWorkspace.StarterScriptQualifiedClassName)
          << "\",\"engineContentDir\":\""
          << EscapeJsonString((std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine").string())
          << "\",\"sceneFilePath\":\""

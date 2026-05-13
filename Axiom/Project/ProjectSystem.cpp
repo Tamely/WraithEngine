@@ -6,6 +6,7 @@
 #include <array>
 #include <cctype>
 #include <charconv>
+#include <iomanip>
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
@@ -14,8 +15,15 @@
 #define AXIOM_PROJECTS_DIR "Projects"
 #endif
 
+#ifndef AXIOM_SOURCE_DIR
+#define AXIOM_SOURCE_DIR "."
+#endif
+
 namespace Axiom::Project {
 namespace {
+constexpr std::string_view kDefaultStarterScriptClassName = "StarterScript";
+constexpr std::string_view kCsProjectTypeGuid =
+    "{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}";
 
 std::string EscapeJsonString(std::string_view Value) {
   std::string Result;
@@ -204,6 +212,244 @@ std::optional<std::uint32_t> ParseUint32(std::string_view Value) {
   return Parsed;
 }
 
+std::string BuildIdentifierToken(std::string_view Value) {
+  std::string Result;
+  Result.reserve(Value.size());
+  bool Started = false;
+  bool CapitalizeNext = true;
+
+  for (const char Character : Value) {
+    const unsigned char UnsignedCharacter =
+        static_cast<unsigned char>(Character);
+    if (std::isalnum(UnsignedCharacter) == 0) {
+      CapitalizeNext = true;
+      continue;
+    }
+
+    if (!Started) {
+      if (std::isdigit(UnsignedCharacter) != 0) {
+        Result += "Project";
+      }
+      Result.push_back(
+          static_cast<char>(std::toupper(UnsignedCharacter)));
+      Started = true;
+      CapitalizeNext = false;
+      continue;
+    }
+
+    if (CapitalizeNext) {
+      Result.push_back(
+          static_cast<char>(std::toupper(UnsignedCharacter)));
+      CapitalizeNext = false;
+    } else {
+      Result.push_back(
+          static_cast<char>(std::tolower(UnsignedCharacter)));
+    }
+  }
+
+  if (Result.empty()) {
+    return "ProjectScripts";
+  }
+
+  return Result;
+}
+
+std::string BuildStableGuid(std::string_view Seed) {
+  const auto FirstHash =
+      static_cast<unsigned long long>(std::hash<std::string_view>{}(Seed));
+  const auto SecondHash = static_cast<unsigned long long>(
+      std::hash<std::string>{}(std::string(Seed) + "::wraith"));
+
+  std::array<unsigned char, 16> Bytes{};
+  for (size_t Index = 0; Index < 8; ++Index) {
+    Bytes[Index] =
+        static_cast<unsigned char>((FirstHash >> ((7 - Index) * 8)) & 0xffu);
+    Bytes[Index + 8] =
+        static_cast<unsigned char>((SecondHash >> ((7 - Index) * 8)) & 0xffu);
+  }
+
+  Bytes[6] = static_cast<unsigned char>((Bytes[6] & 0x0fu) | 0x40u);
+  Bytes[8] = static_cast<unsigned char>((Bytes[8] & 0x3fu) | 0x80u);
+
+  std::ostringstream Stream;
+  Stream << std::uppercase << std::hex << std::setfill('0')
+         << "{"
+         << std::setw(2) << static_cast<int>(Bytes[0])
+         << std::setw(2) << static_cast<int>(Bytes[1])
+         << std::setw(2) << static_cast<int>(Bytes[2])
+         << std::setw(2) << static_cast<int>(Bytes[3])
+         << "-"
+         << std::setw(2) << static_cast<int>(Bytes[4])
+         << std::setw(2) << static_cast<int>(Bytes[5])
+         << "-"
+         << std::setw(2) << static_cast<int>(Bytes[6])
+         << std::setw(2) << static_cast<int>(Bytes[7])
+         << "-"
+         << std::setw(2) << static_cast<int>(Bytes[8])
+         << std::setw(2) << static_cast<int>(Bytes[9])
+         << "-"
+         << std::setw(2) << static_cast<int>(Bytes[10])
+         << std::setw(2) << static_cast<int>(Bytes[11])
+         << std::setw(2) << static_cast<int>(Bytes[12])
+         << std::setw(2) << static_cast<int>(Bytes[13])
+         << std::setw(2) << static_cast<int>(Bytes[14])
+         << std::setw(2) << static_cast<int>(Bytes[15])
+         << "}";
+  return Stream.str();
+}
+
+bool WriteTextFile(const std::filesystem::path &Path,
+                   std::string_view Contents) {
+  std::error_code Error;
+  std::filesystem::create_directories(Path.parent_path(), Error);
+  if (Error) {
+    A_CORE_ERROR("ProjectSystem: failed to create parent directory '{}'",
+                 Path.parent_path().string());
+    return false;
+  }
+
+  std::ofstream File(Path);
+  if (!File.is_open()) {
+    A_CORE_ERROR("ProjectSystem: failed to open file '{}'", Path.string());
+    return false;
+  }
+
+  File << Contents;
+  return File.good();
+}
+
+bool SaveDefaultScriptProject(
+    const std::filesystem::path &ProjectPath,
+    const ProjectScriptWorkspace &ScriptWorkspace) {
+  const auto EngineManagedPath =
+      std::filesystem::path(AXIOM_SOURCE_DIR) / "Scripting" /
+      "WraithEngine.Managed" / "bin" / "Debug" / "WraithEngine.Managed.dll";
+
+  std::ostringstream Stream;
+  Stream << "<Project Sdk=\"Microsoft.NET.Sdk\">\n"
+         << "  <PropertyGroup>\n"
+         << "    <OutputType>Library</OutputType>\n"
+         << "    <AssemblyName>" << ScriptWorkspace.AssemblyName
+         << "</AssemblyName>\n"
+         << "    <RootNamespace>" << ScriptWorkspace.RootNamespace
+         << "</RootNamespace>\n"
+         << "    <TargetFramework>net9.0</TargetFramework>\n"
+         << "    <ImplicitUsings>enable</ImplicitUsings>\n"
+         << "    <Nullable>enable</Nullable>\n"
+         << "    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>\n"
+         << "  </PropertyGroup>\n\n"
+         << "  <ItemGroup>\n"
+         << "    <Reference Include=\"WraithEngine.Managed\">\n"
+         << "      <HintPath>" << EngineManagedPath.string()
+         << "</HintPath>\n"
+         << "      <Private>false</Private>\n"
+         << "    </Reference>\n"
+         << "  </ItemGroup>\n"
+         << "</Project>\n";
+  return WriteTextFile(ProjectPath, Stream.str());
+}
+
+bool SaveDefaultScriptSolution(
+    const std::filesystem::path &SolutionPath,
+    const ProjectScriptWorkspace &ScriptWorkspace) {
+  const auto ProjectGuid =
+      BuildStableGuid(ScriptWorkspace.AssemblyName + "::scripts-project");
+
+  std::ostringstream Stream;
+  Stream << "Microsoft Visual Studio Solution File, Format Version 12.00\n"
+         << "# Visual Studio Version 17\n"
+         << "VisualStudioVersion = 17.0.31903.59\n"
+         << "MinimumVisualStudioVersion = 10.0.40219.1\n"
+         << "Project(\"" << kCsProjectTypeGuid << "\") = \""
+         << ScriptWorkspace.AssemblyName << "\", \"Scripts/"
+         << ScriptWorkspace.ScriptProjectPath.filename().string() << "\", \""
+         << ProjectGuid << "\"\n"
+         << "EndProject\n"
+         << "Global\n"
+         << "\tGlobalSection(SolutionConfigurationPlatforms) = preSolution\n"
+         << "\t\tDebug|Any CPU = Debug|Any CPU\n"
+         << "\t\tRelease|Any CPU = Release|Any CPU\n"
+         << "\tEndGlobalSection\n"
+         << "\tGlobalSection(ProjectConfigurationPlatforms) = postSolution\n"
+         << "\t\t" << ProjectGuid
+         << ".Debug|Any CPU.ActiveCfg = Debug|Any CPU\n"
+         << "\t\t" << ProjectGuid
+         << ".Debug|Any CPU.Build.0 = Debug|Any CPU\n"
+         << "\t\t" << ProjectGuid
+         << ".Release|Any CPU.ActiveCfg = Release|Any CPU\n"
+         << "\t\t" << ProjectGuid
+         << ".Release|Any CPU.Build.0 = Release|Any CPU\n"
+         << "\tEndGlobalSection\n"
+         << "\tGlobalSection(SolutionProperties) = preSolution\n"
+         << "\t\tHideSolutionNode = FALSE\n"
+         << "\tEndGlobalSection\n"
+         << "EndGlobal\n";
+  return WriteTextFile(SolutionPath, Stream.str());
+}
+
+bool SaveDefaultStarterScript(
+    const std::filesystem::path &ScriptPath,
+    const ProjectScriptWorkspace &ScriptWorkspace) {
+  std::ostringstream Stream;
+  Stream << "using WraithEngine;\n\n"
+         << "namespace " << ScriptWorkspace.RootNamespace << ";\n\n"
+         << "public class " << ScriptWorkspace.StarterScriptClassName
+         << " : Script\n"
+         << "{\n"
+         << "    public override void OnCreate()\n"
+         << "    {\n"
+         << "    }\n\n"
+         << "    public override void OnTick(float dt)\n"
+         << "    {\n"
+         << "    }\n"
+         << "}\n";
+  return WriteTextFile(ScriptPath, Stream.str());
+}
+
+bool EnsureScriptWorkspaceScaffold(ProjectDescriptor &Descriptor) {
+  bool ManifestChanged = false;
+  if (Descriptor.Manifest.Version < 2) {
+    Descriptor.Manifest.Version = 2;
+    ManifestChanged = true;
+  }
+  if (Descriptor.Manifest.ScriptAssemblyName.empty()) {
+    Descriptor.Manifest.ScriptAssemblyName =
+        BuildScriptAssemblyName(Descriptor.Manifest.Name);
+    ManifestChanged = true;
+  }
+  if (Descriptor.Manifest.ScriptRootNamespace.empty()) {
+    Descriptor.Manifest.ScriptRootNamespace =
+        BuildScriptRootNamespace(Descriptor.Manifest.Name);
+    ManifestChanged = true;
+  }
+
+  Descriptor.ScriptWorkspace =
+      ResolveProjectScriptWorkspace(Descriptor.Root, Descriptor.Manifest);
+
+  if (ManifestChanged &&
+      !SaveProjectManifest(Descriptor.Root.ManifestPath, Descriptor.Manifest)) {
+    return false;
+  }
+
+  if (!std::filesystem::exists(Descriptor.ScriptWorkspace.ScriptProjectPath) &&
+      !SaveDefaultScriptProject(Descriptor.ScriptWorkspace.ScriptProjectPath,
+                                Descriptor.ScriptWorkspace)) {
+    return false;
+  }
+  if (!std::filesystem::exists(Descriptor.ScriptWorkspace.ScriptSolutionPath) &&
+      !SaveDefaultScriptSolution(Descriptor.ScriptWorkspace.ScriptSolutionPath,
+                                 Descriptor.ScriptWorkspace)) {
+    return false;
+  }
+  if (!std::filesystem::exists(Descriptor.ScriptWorkspace.StarterScriptPath) &&
+      !SaveDefaultStarterScript(Descriptor.ScriptWorkspace.StarterScriptPath,
+                                Descriptor.ScriptWorkspace)) {
+    return false;
+  }
+
+  return true;
+}
+
 } // namespace
 
 std::filesystem::path GetDefaultProjectsRoot() {
@@ -217,6 +463,33 @@ ProjectRoot ResolveProjectRoot(const std::filesystem::path &RootPath) {
       .ManifestPath = AbsoluteRoot / "project.wraith.json",
       .ContentDir = AbsoluteRoot / "Content",
       .SceneFilePath = AbsoluteRoot / "Content" / "scene.json",
+  };
+}
+
+ProjectScriptWorkspace ResolveProjectScriptWorkspace(const ProjectRoot &Root,
+                                                     const ProjectManifest &Manifest) {
+  const std::string AssemblyName =
+      Manifest.ScriptAssemblyName.empty()
+          ? BuildScriptAssemblyName(Manifest.Name)
+          : Manifest.ScriptAssemblyName;
+  const std::string RootNamespace =
+      Manifest.ScriptRootNamespace.empty()
+          ? BuildScriptRootNamespace(Manifest.Name)
+          : Manifest.ScriptRootNamespace;
+  const std::string StarterScriptClassName =
+      std::string(kDefaultStarterScriptClassName);
+
+  return {
+      .ScriptsDir = Root.RootPath / "Scripts",
+      .ScriptProjectPath = Root.RootPath / "Scripts" / (AssemblyName + ".csproj"),
+      .ScriptSolutionPath = Root.RootPath / (AssemblyName + ".sln"),
+      .StarterScriptPath =
+          Root.RootPath / "Scripts" / (StarterScriptClassName + ".cs"),
+      .AssemblyName = AssemblyName,
+      .RootNamespace = RootNamespace,
+      .StarterScriptClassName = StarterScriptClassName,
+      .StarterScriptQualifiedClassName =
+          RootNamespace + "." + StarterScriptClassName,
   };
 }
 
@@ -294,6 +567,14 @@ std::string SlugifyProjectName(std::string_view Name) {
   return Slug;
 }
 
+std::string BuildScriptAssemblyName(std::string_view ProjectName) {
+  return BuildIdentifierToken(ProjectName) + ".Scripts";
+}
+
+std::string BuildScriptRootNamespace(std::string_view ProjectName) {
+  return BuildIdentifierToken(ProjectName) + ".Scripts";
+}
+
 bool SaveProjectManifest(const std::filesystem::path &ManifestPath,
                          const ProjectManifest &Manifest) {
   std::error_code Error;
@@ -315,7 +596,11 @@ bool SaveProjectManifest(const std::filesystem::path &ManifestPath,
        << "  \"version\": " << Manifest.Version << ",\n"
        << "  \"projectId\": \"" << EscapeJsonString(Manifest.ProjectId) << "\",\n"
        << "  \"name\": \"" << EscapeJsonString(Manifest.Name) << "\",\n"
-       << "  \"slug\": \"" << EscapeJsonString(Manifest.Slug) << "\"\n"
+       << "  \"slug\": \"" << EscapeJsonString(Manifest.Slug) << "\",\n"
+       << "  \"scriptAssemblyName\": \""
+       << EscapeJsonString(Manifest.ScriptAssemblyName) << "\",\n"
+       << "  \"scriptRootNamespace\": \""
+       << EscapeJsonString(Manifest.ScriptRootNamespace) << "\"\n"
        << "}\n";
   return File.good();
 }
@@ -354,6 +639,18 @@ LoadProjectManifest(const std::filesystem::path &ManifestPath) {
       .ProjectId = ProjectIdIt->second,
       .Name = NameIt->second,
       .Slug = SlugIt->second,
+      .ScriptAssemblyName = [&Fields, &NameIt]() {
+        const auto ScriptAssemblyIt = Fields.find("scriptAssemblyName");
+        return ScriptAssemblyIt != Fields.end()
+                   ? ScriptAssemblyIt->second
+                   : BuildScriptAssemblyName(NameIt->second);
+      }(),
+      .ScriptRootNamespace = [&Fields, &NameIt]() {
+        const auto ScriptNamespaceIt = Fields.find("scriptRootNamespace");
+        return ScriptNamespaceIt != Fields.end()
+                   ? ScriptNamespaceIt->second
+                   : BuildScriptRootNamespace(NameIt->second);
+      }(),
   };
 }
 
@@ -393,6 +690,7 @@ LoadProjectDescriptor(const std::filesystem::path &RootPath) {
   return ProjectDescriptor{
       .Manifest = *Manifest,
       .Root = Root,
+      .ScriptWorkspace = ResolveProjectScriptWorkspace(Root, *Manifest),
   };
 }
 
@@ -436,10 +734,14 @@ OpenProjectBySlug(const std::filesystem::path &ProjectsRoot,
   if (!Descriptor.has_value()) {
     return std::nullopt;
   }
-  if (Descriptor->Manifest.Slug != ProjectSlug) {
+  auto Result = *Descriptor;
+  if (Result.Manifest.Slug != ProjectSlug) {
     return std::nullopt;
   }
-  return Descriptor;
+  if (!EnsureScriptWorkspaceScaffold(Result)) {
+    return std::nullopt;
+  }
+  return Result;
 }
 
 std::optional<ProjectDescriptor>
@@ -488,13 +790,22 @@ CreateProjectScaffold(const std::filesystem::path &ProjectsRoot,
   }
 
   const ProjectManifest Manifest{
-      .Version = 1,
+      .Version = 2,
       .ProjectId = BuildProjectId(Slug),
       .Name = std::string(ProjectName),
       .Slug = Slug,
+      .ScriptAssemblyName = BuildScriptAssemblyName(ProjectName),
+      .ScriptRootNamespace = BuildScriptRootNamespace(ProjectName),
   };
+  const auto ScriptWorkspace = ResolveProjectScriptWorkspace(Root, Manifest);
   if (!SaveProjectManifest(Root.ManifestPath, Manifest) ||
-      !SaveDefaultSceneFile(Root.SceneFilePath)) {
+      !SaveDefaultSceneFile(Root.SceneFilePath) ||
+      !SaveDefaultScriptProject(ScriptWorkspace.ScriptProjectPath,
+                                ScriptWorkspace) ||
+      !SaveDefaultScriptSolution(ScriptWorkspace.ScriptSolutionPath,
+                                 ScriptWorkspace) ||
+      !SaveDefaultStarterScript(ScriptWorkspace.StarterScriptPath,
+                                ScriptWorkspace)) {
     std::filesystem::remove_all(Root.RootPath, Error);
     if (FailureReason != nullptr) {
       *FailureReason = "Failed to write the initial project scaffold.";
@@ -505,6 +816,7 @@ CreateProjectScaffold(const std::filesystem::path &ProjectsRoot,
   return ProjectDescriptor{
       .Manifest = Manifest,
       .Root = Root,
+      .ScriptWorkspace = ScriptWorkspace,
   };
 }
 
