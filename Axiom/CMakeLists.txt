@@ -1,4 +1,5 @@
 set(ENGINE_SOURCES
+  Project/ProjectSystem.cpp
   Scripting/ScriptHost.cpp
   Scripting/InternalCalls.cpp
   Assets/AssetCookManifest.cpp
@@ -303,6 +304,7 @@ target_link_libraries(AxiomCore PUBLIC
 target_compile_definitions(AxiomCore PUBLIC
   VK_NO_PROTOTYPES
   AXIOM_CONTENT_DIR="${CMAKE_SOURCE_DIR}/Content"
+  AXIOM_PROJECTS_DIR="${CMAKE_SOURCE_DIR}/Projects"
 )
 
 if(AXIOM_ENABLE_WEBRTC)

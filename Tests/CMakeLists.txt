@@ -3,6 +3,7 @@ add_executable(AxiomTests
   LayerTests.cpp
   HeadlessProtocolTests.cpp
   MeshPickingTests.cpp
+  ProjectTests.cpp
   SceneLifecycleTests.cpp
   ../Headless/HeadlessSessionLayer.cpp
   ../Headless/HeadlessCommandProtocol.cpp
@@ -26,6 +27,7 @@ target_include_directories(AxiomTests PRIVATE
 
 target_compile_definitions(AxiomTests PRIVATE
   AXIOM_CONTENT_DIR="${CMAKE_SOURCE_DIR}/Content"
+  AXIOM_PROJECTS_DIR="${CMAKE_SOURCE_DIR}/Projects"
 )
 
 # ---------------------------------------------------------------------------
