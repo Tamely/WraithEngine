@@ -1031,7 +1031,7 @@ Progress update:
 - content browser replaced with a live server-driven implementation: `listAssets` is dispatched on connection, results populate grid/list views with mesh/texture filter tabs and a Refresh button
 - details panel now fetches schema dynamically via `getSchema` on each selection change; `className` badge is shown in the panel header; property `readOnly` flags gate transform editing
 - `SetProperty` dispatches per-property to the appropriate existing command (`RenameObject`, `SetObjectVisibility`, or `SetTransform`); vec3 properties patch the current transform so only the changed axis changes
-- cooked asset containers remain future work; `IAssetSource` and `AssetId` establish the identity foundation they will build on
+- `IAssetSource` and `AssetId` now also back the first cooked runtime path: `CookedAssetSource`, `AssetCookManifest`, and engine-owned cooked containers are implemented in the Phase 8 slice below
 
 ### Phase 6: C# Scripting
 - engine API assembly
@@ -1118,15 +1118,37 @@ editor-only metadata included.
 - Texture reference table: `{uint8 slot, AssetId textureId}[]` — slots map to binding points in the material descriptor set layout
 
 #### 8.3 Import Pipeline Integration
-- `IAssetImporter::Import()` now produces the appropriate `*.wmesh` / `*.wtex` / `*.wmat` file in `Content/Cooked/` in addition to writing the `.meta` sidecar
-- `LocalAssetSource` resolves `AssetId → cooked path` at runtime; source file paths are only consulted by the importer and editor tools, never by the renderer
-- Re-import regenerates the cooked binary; the `AssetId` (derived from the relative source path hash) remains stable across re-imports
+- Target design: `IAssetImporter::Import()` should eventually produce the appropriate `*.wmesh` / `*.wtex` / `*.wmat` file in `Content/Cooked/` in addition to writing the `.meta` sidecar
+- Current implementation: `CookMeshAsset`, `CookTextureAsset`, and `CookMaterialAsset` own the first cooking path; they are called from startup / scene reload / editor command flows while importer-driven cook orchestration remains follow-up work
+- `CookedAssetSource` resolves `AssetId → cooked path` at runtime; `LocalAssetSource` remains the editor/source-facing index during the transition
+- Re-import or re-cook regenerates the cooked binary; the `AssetId` (derived from the relative source path hash) remains stable across re-imports
 - `AssetCookManifest` (JSON alongside the cooked directory) maps `AssetId → {cookedPath, formatVersion, sourceHash}` for incremental cook decisions
 
 #### 8.4 Packaged Build Impact
 - The packager copies only `Content/Cooked/` and the `AssetCookManifest`; source assets, `.meta` files, and `scene.json` are excluded
 - The runtime loader switches to `CookedAssetSource` (parallel to `LocalAssetSource`) which reads from the manifest and never touches source files
 - This is the direct enabler for Phase 11 (Packaging and Hosted Runtime Maturation)
+
+Progress update:
+
+- first cooked asset containers are implemented:
+  - `.wmesh` stores versioned mesh instance payloads plus stable `AssetId`
+  - `.wtex` stores versioned raw RGBA texture payloads keyed by `AssetId`
+  - `.wmat` stores versioned material factors plus texture asset reference
+- `AssetCookManifest` now lives at `Content/Cooked/AssetCookManifest.json` and is populated for mesh, texture, and material cooks
+- `CookedAssetSource` is implemented parallel to `LocalAssetSource` and resolves cooked payloads by `AssetId` through the manifest
+- runtime load paths now prefer cooked assets for mesh and texture loads, with source-file fallback preserved during the transition
+- startup scene load, scene reload, `SetMeshAsset`, and `SetMaterialTexture` all exercise best-effort cook-first flows so normal editor usage continuously validates the cooked path
+- scene persistence now emits and restores `materialAssetPath` entries backed by cooked `.wmat` files
+- focused regression coverage now exists for:
+  - cooked mesh / texture / material binary round-trips
+  - manifest-backed cooked lookup resolution
+  - `SetMeshAsset` and `SetMaterialTexture` command-path cooking
+  - scene save/load round-trip of cooked material state
+- remaining Phase 8 work is mostly hardening and packaging-facing:
+  - importer-driven cook orchestration rather than today’s best-effort command/load triggers
+  - richer material/texture reference tables and GPU-oriented texture layout if needed
+  - packaged runtime path that excludes source content entirely
 
 ### Phase 9: Networking Refactor
 
@@ -1215,7 +1237,7 @@ Likely targets based on current trajectory:
 - CI passes without modifications to test code
 
 ### Phase 11: Packaging and Hosted Runtime Maturation
-- packaged desktop builds from cooked content (depends on Phase 8 binary asset formats)
+- packaged desktop builds from cooked content (depends on finishing the remaining Phase 8 packaging/runtime cutover work)
 - hosted session deployment descriptors
 - sample project proving shared runtime path via `CookedAssetSource`
 
@@ -1300,7 +1322,8 @@ Progress update:
 - Collaboration v1 is complete: object locking prevents simultaneous gizmo conflicts, presence roster shows connected users, and the heartbeat/timeout loop handles hard tab closes
 - Phase 5 (Reflection and Asset Evolution) is complete: `AssetId` stable identity, `IAssetSource` / `LocalAssetSource` VFS, `ListAssets` / `GetSchema` / `SetProperty` / `SaveScene` commands, `SceneFile` JSON persistence, content browser wired to live asset catalogue, details panel schema-driven, toolbar Save button with success/failure animation
 - Phase 7 (Asset Pipeline) is complete: `SetMeshAssetCommand` wires any discovered `.glb`/`.gltf`/`.fbx`/`.obj` to any `SceneMeshObject` with scene-file persistence; `SetLightPropertiesCommand` drives a Blinn-Phong directional light from `SceneLight` world position; `SetMaterialPropertiesCommand` exposes `BaseColorFactor`/`Metallic`/`Roughness` push constants end-to-end through the inspector; `SetMaterialTextureCommand` assigns PNG/JPG textures to mesh base-color slots with persistence, inspector display, and drag-drop from both the content browser and outliner; FBX/OBJ import is implemented via assimp with embedded and external texture handling; the content browser accepts OS file drag-drop and a file picker Import button that upload to `POST /assets/upload`; texture thumbnail previews are served by the remote viewport server; the content browser navigates folders non-recursively; 17 new tests cover all new commands, events, and the `CreateObject`→`SetMeshAsset` runtime-creation path
-- the next step is Phase 8: binary asset formats (`.wmesh`, `.wtex`, `.wmat`), the cook pipeline, and `CookedAssetSource`
+- Phase 8 (Binary Asset Formats) first slice is now implemented: `.wmesh`, `.wtex`, and `.wmat` cooked formats exist; `AssetCookManifest` and `CookedAssetSource` resolve cooked content by stable `AssetId`; startup, scene reload, and mesh/texture editing flows all prefer cooked payloads while preserving source fallback; scene persistence now round-trips cooked material state through `materialAssetPath`
+- the next step is packaging/runtime cutover work: finish removing source-content assumptions from packaged runs and make importer-driven cooking the primary freshness path
 
 That slice proves the core thesis:
 
