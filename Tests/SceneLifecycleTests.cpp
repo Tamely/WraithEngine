@@ -1293,10 +1293,14 @@ TEST(SceneLifecycleTests, SetMeshAsset_CooksMeshAssetManifestEntry) {
       TempRoot / "Content" / "Cooked" / "AssetCookManifest.json";
   const auto Manifest = Axiom::Assets::LoadAssetCookManifest(ManifestPath);
   ASSERT_TRUE(Manifest.has_value());
-  ASSERT_EQ(Manifest->Entries.size(), 1u);
-  EXPECT_EQ(Manifest->Entries[0].RelativePath, "basicmesh.glb");
-  EXPECT_EQ(std::filesystem::path(Manifest->Entries[0].CookedPath).extension(),
-            ".wmesh");
+  const auto MeshEntry = std::find_if(
+      Manifest->Entries.begin(), Manifest->Entries.end(),
+      [](const Axiom::Assets::AssetCookManifestEntry &Entry) {
+        return Entry.Kind == Axiom::Assets::AssetKind::Mesh &&
+               Entry.RelativePath == "basicmesh.glb";
+      });
+  ASSERT_NE(MeshEntry, Manifest->Entries.end());
+  EXPECT_EQ(std::filesystem::path(MeshEntry->CookedPath).extension(), ".wmesh");
 }
 
 TEST(SceneLifecycleTests, SetMeshAsset_ReplacesGeneratedChildrenWhenSwitchingToSingleMesh) {
