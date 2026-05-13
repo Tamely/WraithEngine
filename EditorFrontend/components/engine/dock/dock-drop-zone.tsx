@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { useDock, type DockZone, type PanelId } from "./dock-context"
 
 interface DockDropZoneProps {
@@ -47,6 +48,7 @@ interface ZoneProps {
 
 function Zone({ tabGroupId, zone, isFloating, onDropZone }: ZoneProps) {
     const { dropPanel, dockFloatingPanel, dragState } = useDock()
+    const [isHovered, setIsHovered] = useState(false)
 
     if (!dragState.panelId) return null
 
@@ -67,7 +69,9 @@ function Zone({ tabGroupId, zone, isFloating, onDropZone }: ZoneProps) {
             data-dock-drop-zone
             data-tab-group-id={tabGroupId}
             data-zone={zone}
-            className={`absolute z-50 flex items-center justify-center transition-colors duration-75 select-none group ${zoneStyles[zone]} ${zoneHighlightIdle[zone]} hover:${zoneHighlightHover[zone]}`}
+            className={`absolute z-50 flex items-center justify-center transition-colors duration-75 select-none group ${zoneStyles[zone]} ${isHovered ? zoneHighlightHover[zone] : zoneHighlightIdle[zone]}`}
+            onMouseEnter={() => setIsHovered(true)}
+            onMouseLeave={() => setIsHovered(false)}
             onMouseUp={handleMouseUp}
         >
             <span className="text-[9px] font-semibold uppercase tracking-widest text-white/30 group-hover:text-white/90 transition-colors pointer-events-none">

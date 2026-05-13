@@ -58,6 +58,8 @@ interface DragState {
     panelId: PanelId | null
     sourceTabGroupId: string | null
     isFloating: boolean
+    previewX: number
+    previewY: number
 }
 
 interface DockContextValue {
@@ -74,6 +76,14 @@ interface DockContextValue {
 }
 
 const DockContext = createContext<DockContextValue | null>(null)
+
+const defaultDragState: DragState = {
+    panelId: null,
+    sourceTabGroupId: null,
+    isFloating: false,
+    previewX: 0,
+    previewY: 0,
+}
 
 export function useDock() {
     const ctx = useContext(DockContext)
@@ -209,7 +219,11 @@ const initialLayout: DockState = {
                         id: "viewport-cell",
                         type: "cell",
                         weight: 3,
-                        tabGroup: { id: "tg-viewport", panels: ["viewport"], activePanel: "viewport" },
+                        tabGroup: {
+                            id: "tg-viewport",
+                            panels: ["viewport", "script-editor"],
+                            activePanel: "viewport",
+                        },
                     },
                     {
                         id: "content-cell",
@@ -217,7 +231,7 @@ const initialLayout: DockState = {
                         weight: 1,
                         tabGroup: {
                             id: "tg-content",
-                            panels: ["content-browser", "remote-viewport", "script-editor"],
+                            panels: ["content-browser", "remote-viewport"],
                             activePanel: "content-browser",
                         },
                     },
@@ -251,11 +265,7 @@ const initialLayout: DockState = {
 
 export function DockProvider({ children }: { children: React.ReactNode }) {
     const [layout, setLayout] = useState<DockState>(initialLayout)
-    const [dragState, setDragState] = useState<DragState>({
-        panelId: null,
-        sourceTabGroupId: null,
-        isFloating: false,
-    })
+    const [dragState, setDragState] = useState<DragState>(defaultDragState)
     const floatingDragRef = useRef<{ panelId: PanelId; offsetX: number; offsetY: number } | null>(null)
 
     const dropPanel = useCallback((panelId: PanelId, targetTabGroupId: string, zone: DockZone) => {
@@ -267,7 +277,7 @@ export function DockProvider({ children }: { children: React.ReactNode }) {
             const afterInsert = insertPanel(afterRemove, targetTabGroupId, panelId, zone)
             return { ...prev, root: afterInsert }
         })
-        setDragState({ panelId: null, sourceTabGroupId: null, isFloating: false })
+        setDragState(defaultDragState)
     }, [])
 
     const floatPanel = useCallback((panelId: PanelId, x: number, y: number) => {
@@ -282,7 +292,7 @@ export function DockProvider({ children }: { children: React.ReactNode }) {
                     : [...prev.floatingPanels, { panelId, x, y, width: 340, height: 420 }],
             }
         })
-        setDragState({ panelId: null, sourceTabGroupId: null, isFloating: false })
+        setDragState(defaultDragState)
     }, [])
 
     const dockFloatingPanel = useCallback((panelId: PanelId, targetTabGroupId: string, zone: DockZone) => {
@@ -291,7 +301,7 @@ export function DockProvider({ children }: { children: React.ReactNode }) {
             const afterInsert = insertPanel(prev.root, targetTabGroupId, panelId, zone)
             return { root: afterInsert, floatingPanels }
         })
-        setDragState({ panelId: null, sourceTabGroupId: null, isFloating: false })
+        setDragState(defaultDragState)
     }, [])
 
     const setActiveTab = useCallback((tabGroupId: string, panelId: PanelId) => {

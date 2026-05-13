@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react"
 import { GripHorizontal } from "lucide-react"
-import { useDock, type PanelId, type TabGroup, type DockZone } from "./dock-context"
+import { useDock, type PanelId, type TabGroup } from "./dock-context"
 import { DockDropZones } from "./dock-drop-zone"
 import { PanelContent } from "./panel-content"
 
@@ -25,28 +25,63 @@ export function DockPanel({ tabGroup, className = "", style }: DockPanelProps) {
     const { dragState, setDragState, floatPanel, setActiveTab } = useDock()
     const [isPanelHovered, setIsPanelHovered] = useState(false)
 
-    // A drag is active and the dragged panel is not the active panel in this group
-    const isDragging = dragState.panelId !== null && dragState.panelId !== tabGroup.activePanel
-    // Only show zones when dragging AND the mouse is over THIS panel
-    const showZones = isDragging && isPanelHovered
+    const isDragging = dragState.panelId !== null
+    const isSourceGroup = dragState.sourceTabGroupId === tabGroup.id
+    const showZones = isDragging && (!isSourceGroup || dragState.isFloating || isPanelHovered)
 
     const handleTabMouseDown = useCallback(
         (e: React.MouseEvent, panelId: PanelId) => {
             if (e.button !== 0) return
             e.preventDefault()
-            setDragState({ panelId, sourceTabGroupId: tabGroup.id, isFloating: false })
+            const startX = e.clientX
+            const startY = e.clientY
+            let didMove = false
+
+            setDragState({
+                panelId,
+                sourceTabGroupId: tabGroup.id,
+                isFloating: false,
+                previewX: e.clientX + 16,
+                previewY: e.clientY + 16,
+            })
+
+            const onMouseMove = (ev: MouseEvent) => {
+                const deltaX = ev.clientX - startX
+                const deltaY = ev.clientY - startY
+                if (!didMove && Math.hypot(deltaX, deltaY) > 4) {
+                    didMove = true
+                }
+                setDragState((prev) =>
+                    prev.panelId === panelId
+                        ? {
+                            ...prev,
+                            previewX: ev.clientX + 16,
+                            previewY: ev.clientY + 16,
+                        }
+                        : prev
+                )
+            }
 
             const onMouseUp = (ev: MouseEvent) => {
+                window.removeEventListener("mousemove", onMouseMove)
                 window.removeEventListener("mouseup", onMouseUp)
-                // If nothing handled the drop, float the panel
                 setDragState((prev) => {
                     if (prev.panelId === panelId) {
-                        floatPanel(panelId, ev.clientX - 100, ev.clientY - 16)
-                        return { panelId: null, sourceTabGroupId: null, isFloating: false }
+                        if (didMove) {
+                            floatPanel(panelId, ev.clientX - 140, ev.clientY - 18)
+                        }
+                        return {
+                            panelId: null,
+                            sourceTabGroupId: null,
+                            isFloating: false,
+                            previewX: 0,
+                            previewY: 0,
+                        }
                     }
                     return prev
                 })
             }
+            window.addEventListener("mousemove", onMouseMove)
             window.addEventListener("mouseup", onMouseUp)
         },
         [tabGroup.id, setDragState, floatPanel]
