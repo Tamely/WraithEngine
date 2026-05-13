@@ -1,5 +1,6 @@
 #include "CookedAssetRuntime.h"
 
+#include "Assets/CookedMaterialAsset.h"
 #include "Assets/CookedMeshAsset.h"
 #include "Assets/CookedTextureAsset.h"
 #include "Assets/IAssetSource.h"
@@ -90,6 +91,33 @@ LoadCookedTextureAssetIfAvailable(const std::filesystem::path &Path) {
   }
 
   return std::make_shared<TextureSourceData>(*CookedTexture);
+}
+
+std::optional<CookedMaterialData>
+LoadCookedMaterialAssetIfAvailable(const std::filesystem::path &Path) {
+  const auto ContentRoot = FindContentRootForPath(Path);
+  if (!ContentRoot.has_value()) {
+    return std::nullopt;
+  }
+
+  std::error_code Ec;
+  const auto RelativePath = std::filesystem::relative(Path, *ContentRoot, Ec);
+  if (Ec) {
+    return std::nullopt;
+  }
+
+  const CookedAssetSource CookedSource(*ContentRoot);
+  if (!CookedSource.HasManifest()) {
+    return std::nullopt;
+  }
+
+  const auto CookedPath =
+      CookedSource.Resolve(AssetIdFromRelativePath(RelativePath));
+  if (!CookedPath.has_value()) {
+    return std::nullopt;
+  }
+
+  return LoadCookedMaterialAsset(*CookedPath);
 }
 
 } // namespace Axiom::Assets

@@ -55,6 +55,7 @@ public:
 
 private:
   std::filesystem::path m_ContentRoot;
+  bool m_HasManifest{false};
   std::vector<AssetDescriptor> m_Index;
 };
 

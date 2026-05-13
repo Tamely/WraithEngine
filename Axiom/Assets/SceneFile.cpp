@@ -1,6 +1,6 @@
 #include "Assets/SceneFile.h"
 #include "Assets/AssetCooker.h"
-#include "Assets/CookedMaterialAsset.h"
+#include "Assets/CookedAssetRuntime.h"
 #include "Assets/MeshAsset.h"
 #include "Core/Log.h"
 
@@ -46,6 +46,16 @@ std::string SerializeVec3(const glm::vec3 &V) {
   return S.str();
 }
 
+std::filesystem::path ResolveContentRootForScenePath(
+    const std::filesystem::path &ScenePath) {
+  if (const auto ContentRoot = FindContentRootForPath(ScenePath);
+      ContentRoot.has_value()) {
+    return *ContentRoot;
+  }
+
+  return std::filesystem::path(AXIOM_CONTENT_DIR);
+}
+
 const char *KindStr(EditorSceneItemKind K) {
   switch (K) {
   case EditorSceneItemKind::Folder: return "Folder";
@@ -80,6 +90,8 @@ void SerializeSceneItemsFlat(
 
 bool SaveSceneToFile(const std::filesystem::path &Path,
                      const EditorSceneState &Scene) {
+  const std::filesystem::path ContentRoot = ResolveContentRootForScenePath(Path);
+
   // Build per-object asset path lookup from MeshInstances.
   std::unordered_map<std::string, std::string> AssetPathByObjectId;
   for (const auto &Inst : Scene.MeshInstances) {
@@ -128,7 +140,7 @@ bool SaveSceneToFile(const std::filesystem::path &Path,
         const std::filesystem::path MaterialPath =
             std::filesystem::path("Generated/Materials") / Id;
         const auto MaterialCooked = CookMaterialAsset(
-            AXIOM_CONTENT_DIR, MaterialPath,
+            ContentRoot, MaterialPath,
             {.BaseColorFactor = Details.Material->BaseColorFactor,
              .Metallic = Details.Material->Metallic,
              .Roughness = Details.Material->Roughness,
@@ -345,6 +357,8 @@ EditorSceneItemKind KindFromStr(std::string_view S) {
 
 std::optional<EditorSceneState>
 LoadSceneFromFile(const std::filesystem::path &Path) {
+  const std::filesystem::path ContentRoot = ResolveContentRootForScenePath(Path);
+
   std::ifstream File(Path);
   if (!File.is_open()) return std::nullopt;
   const std::string Text((std::istreambuf_iterator<char>(File)),
@@ -543,9 +557,8 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
   std::unordered_set<std::string> LoadedByAssetPath;
   for (const auto &[ObjId, Data] : Objects) {
     if (Data.Kind != EditorSceneItemKind::Mesh || Data.AssetRelativePath.empty()) continue;
-    CookMeshAsset(AXIOM_CONTENT_DIR, Data.AssetRelativePath);
-    const auto FullPath =
-        std::filesystem::path(AXIOM_CONTENT_DIR) / Data.AssetRelativePath;
+    CookMeshAsset(ContentRoot, Data.AssetRelativePath);
+    const auto FullPath = ContentRoot / Data.AssetRelativePath;
     const auto SceneData = LoadBasicMeshAsset(FullPath);
     if (!SceneData.has_value() || SceneData->Instances.empty()) {
       A_CORE_WARN("SceneFile: failed to load asset '{}' for object '{}'",
@@ -567,10 +580,8 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
     }
     auto Material = SceneData->Instances[0].Material;
     if (!Data.MaterialAssetPath.empty()) {
-      auto MaterialCookedPath =
-          std::filesystem::path(AXIOM_CONTENT_DIR) / "Cooked" / Data.MaterialAssetPath;
-      MaterialCookedPath.replace_extension(".wmat");
-      const auto CookedMaterial = LoadCookedMaterialAsset(MaterialCookedPath);
+      const auto CookedMaterial =
+          LoadCookedMaterialAssetIfAvailable(ContentRoot / Data.MaterialAssetPath);
       if (CookedMaterial.has_value()) {
         if (!Material) {
           Material = std::make_shared<MaterialInstance>();
@@ -579,9 +590,7 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
         Material->Metallic = CookedMaterial->Metallic;
         Material->Roughness = CookedMaterial->Roughness;
         if (!CookedMaterial->TextureAssetPath.empty()) {
-          const auto TexPath =
-              std::filesystem::path(AXIOM_CONTENT_DIR) /
-              CookedMaterial->TextureAssetPath;
+          const auto TexPath = ContentRoot / CookedMaterial->TextureAssetPath;
           auto Tex = LoadTextureFromFile(TexPath);
           if (Tex) {
             Material->BaseColorTexture = std::move(Tex);
@@ -591,9 +600,8 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
       }
     }
     if (!Data.TextureAssetPath.empty()) {
-      CookTextureAsset(AXIOM_CONTENT_DIR, Data.TextureAssetPath);
-      const auto TexPath =
-          std::filesystem::path(AXIOM_CONTENT_DIR) / Data.TextureAssetPath;
+      CookTextureAsset(ContentRoot, Data.TextureAssetPath);
+      const auto TexPath = ContentRoot / Data.TextureAssetPath;
       auto Tex = LoadTextureFromFile(TexPath);
       if (Tex) {
         if (!Material) Material = std::make_shared<MaterialInstance>();
@@ -617,10 +625,9 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
           DetailsIt->second.Material = EditorMaterialProperties{};
         }
         if (!Data.MaterialAssetPath.empty()) {
-          auto MaterialCookedPath =
-              std::filesystem::path(AXIOM_CONTENT_DIR) / "Cooked" / Data.MaterialAssetPath;
-          MaterialCookedPath.replace_extension(".wmat");
-          const auto CookedMaterial = LoadCookedMaterialAsset(MaterialCookedPath);
+          const auto CookedMaterial =
+              LoadCookedMaterialAssetIfAvailable(ContentRoot /
+                                                 Data.MaterialAssetPath);
           if (CookedMaterial.has_value()) {
             DetailsIt->second.Material->BaseColorFactor =
                 CookedMaterial->BaseColorFactor;
@@ -642,9 +649,8 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
 
   // --- Stage 4b: reload remaining mesh instances from the global mesh asset ---
   if (!MeshAsset.empty() && !MeshNameToObjectId.empty()) {
-    CookMeshAsset(AXIOM_CONTENT_DIR, MeshAsset);
-    const auto MeshPath =
-        std::filesystem::path(AXIOM_CONTENT_DIR) / MeshAsset;
+    CookMeshAsset(ContentRoot, MeshAsset);
+    const auto MeshPath = ContentRoot / MeshAsset;
     const auto SceneData = LoadBasicMeshAsset(MeshPath);
     if (SceneData.has_value()) {
       for (const auto &Instance : SceneData->Instances) {

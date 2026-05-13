@@ -82,6 +82,7 @@ CookedAssetSource::CookedAssetSource(std::filesystem::path ContentRoot)
   if (!Manifest.has_value())
     return;
 
+  m_HasManifest = true;
   m_Index.reserve(Manifest->Entries.size());
   for (const auto &Entry : Manifest->Entries) {
     AssetDescriptor Desc;
@@ -105,6 +106,6 @@ CookedAssetSource::Resolve(AssetId Id) const {
 
 std::vector<AssetDescriptor> CookedAssetSource::List() const { return m_Index; }
 
-bool CookedAssetSource::HasManifest() const { return !m_Index.empty(); }
+bool CookedAssetSource::HasManifest() const { return m_HasManifest; }
 
 } // namespace Axiom::Assets
