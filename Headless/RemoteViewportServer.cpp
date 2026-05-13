@@ -489,6 +489,8 @@ std::string SerializeProjectJson(const Project::ProjectDescriptor &Project) {
          << EscapeJsonString(Project.Root.RootPath.string())
          << "\",\"contentDir\":\""
          << EscapeJsonString(Project.Root.ContentDir.string())
+         << "\",\"engineContentDir\":\""
+         << EscapeJsonString((std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine").string())
          << "\",\"sceneFilePath\":\""
          << EscapeJsonString(Project.Root.SceneFilePath.string())
          << "\"}";
@@ -1390,9 +1392,14 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
       SendAll(ClientSocket, Response.data(), Response.size());
       return false;
     }
-    const Assets::LocalAssetSource ContentDir{GetActiveContentDir()};
-    const std::filesystem::path FullPath = ContentDir.ResolveRelative(*RelPath);
-    const std::vector<uint8_t> Jpeg = MakeThumbnailJpeg(FullPath);
+    const auto FullPath = ResolveVisibleAssetPath(*RelPath);
+    if (!FullPath.has_value()) {
+      const std::string Response =
+          JsonResponse("400 Bad Request", SerializeError("Invalid path."));
+      SendAll(ClientSocket, Response.data(), Response.size());
+      return false;
+    }
+    const std::vector<uint8_t> Jpeg = MakeThumbnailJpeg(*FullPath);
     if (Jpeg.empty()) {
       const std::string Response =
           JsonResponse("404 Not Found", SerializeError("Could not load thumbnail."));
@@ -1658,10 +1665,10 @@ bool RemoteViewportServer::HandleAssetUploadRequest(
   if (TargetDir.empty()) {
     DestDir = ContentRoot;
   } else {
+    const std::filesystem::path TargetDirPath{TargetDir};
     // Prevent path traversal: reject any component that starts with ".."
     bool Unsafe = false;
-    for (const auto &Part :
-         std::filesystem::path(TargetDir)) {
+    for (const auto &Part : TargetDirPath) {
       if (Part.string().find("..") != std::string::npos) {
         Unsafe = true;
         break;
@@ -1673,7 +1680,15 @@ bool RemoteViewportServer::HandleAssetUploadRequest(
       SendAll(ClientSocket, Response.data(), Response.size());
       return false;
     }
-    DestDir = ContentRoot / TargetDir;
+    if (TargetDirPath.begin() != TargetDirPath.end() &&
+        (*TargetDirPath.begin()).string() == "Engine") {
+      const std::string Response = JsonResponse(
+          "400 Bad Request",
+          SerializeError("Engine content is read-only and cannot be modified by project uploads."));
+      SendAll(ClientSocket, Response.data(), Response.size());
+      return false;
+    }
+    DestDir = ContentRoot / TargetDirPath;
   }
 
   // Split multipart body into parts.
@@ -1755,8 +1770,7 @@ bool RemoteViewportServer::HandleAssetUploadRequest(
 
   // Broadcast updated asset list to all WebSocket clients.
   {
-    const Assets::LocalAssetSource Refreshed{ContentRoot};
-    BroadcastTextMessage(SerializeAssetList(Refreshed.List()));
+    BroadcastTextMessage(SerializeAssetList(CollectVisibleAssets()));
   }
 
   // Build JSON response with saved paths.
@@ -1912,6 +1926,10 @@ std::filesystem::path RemoteViewportServer::GetActiveContentDir() const {
   return std::filesystem::path(AXIOM_CONTENT_DIR);
 }
 
+std::filesystem::path RemoteViewportServer::GetEngineContentDir() const {
+  return std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine";
+}
+
 bool RemoteViewportServer::LoadActiveProjectIntoSession(
     std::string *FailureReason) {
   if (m_Host.LoadStartupSceneIntoSession(GetActiveContentDir())) {
@@ -1923,6 +1941,57 @@ bool RemoteViewportServer::LoadActiveProjectIntoSession(
         "Failed to load the active project's startup scene into the session.";
   }
   return false;
+}
+
+std::vector<Assets::AssetDescriptor>
+RemoteViewportServer::CollectVisibleAssets() const {
+  std::vector<Assets::AssetDescriptor> Assets;
+
+  const Assets::LocalAssetSource ProjectSource{GetActiveContentDir()};
+  Assets = ProjectSource.List();
+
+  const Assets::LocalAssetSource EngineSource{GetEngineContentDir()};
+  for (auto EngineAsset : EngineSource.List()) {
+    EngineAsset.RelativePath =
+        (std::filesystem::path("Engine") / EngineAsset.RelativePath)
+            .generic_string();
+    EngineAsset.Name = std::filesystem::path(EngineAsset.RelativePath).stem().string();
+    EngineAsset.Id = Assets::AssetIdFromRelativePath(EngineAsset.RelativePath);
+    Assets.push_back(std::move(EngineAsset));
+  }
+
+  std::sort(Assets.begin(), Assets.end(),
+            [](const Assets::AssetDescriptor &Left,
+               const Assets::AssetDescriptor &Right) {
+              return Left.RelativePath < Right.RelativePath;
+            });
+  return Assets;
+}
+
+std::optional<std::filesystem::path>
+RemoteViewportServer::ResolveVisibleAssetPath(std::string_view RelativePath) const {
+  if (RelativePath.empty()) {
+    return std::nullopt;
+  }
+
+  const std::filesystem::path Relative{std::string(RelativePath)};
+  for (const auto &Part : Relative) {
+    if (Part == "..") {
+      return std::nullopt;
+    }
+  }
+
+  if (!Relative.empty() && *Relative.begin() == "Engine") {
+    std::filesystem::path EngineRelative;
+    auto It = Relative.begin();
+    ++It;
+    for (; It != Relative.end(); ++It) {
+      EngineRelative /= *It;
+    }
+    return GetEngineContentDir() / EngineRelative;
+  }
+
+  return GetActiveContentDir() / Relative;
 }
 
 void RemoteViewportServer::HandleClientEncodedVideoPacket(
@@ -2156,8 +2225,7 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   case HeadlessCommandType::Heartbeat:
     return false;
   case HeadlessCommandType::ListAssets: {
-    const Assets::LocalAssetSource ContentDir{GetActiveContentDir()};
-    SendTextMessage(ClientSocketValue, SerializeAssetList(ContentDir.List()));
+    SendTextMessage(ClientSocketValue, SerializeAssetList(CollectVisibleAssets()));
     return true;
   }
   case HeadlessCommandType::GetSchema: {
@@ -2251,10 +2319,9 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     return true;
   }
   case HeadlessCommandType::ListAssets: {
-    const Assets::LocalAssetSource ContentDir{GetActiveContentDir()};
     if (Client->WebRtcSession != nullptr) {
       Client->WebRtcSession->SendReliableMessage(
-          SerializeAssetList(ContentDir.List()));
+          SerializeAssetList(CollectVisibleAssets()));
     }
     return true;
   }

@@ -153,7 +153,11 @@ private:
   std::optional<Project::ProjectDescriptor>
   SetActiveProjectBySlug(std::string_view ProjectSlug);
   std::filesystem::path GetActiveContentDir() const;
+  std::filesystem::path GetEngineContentDir() const;
   bool LoadActiveProjectIntoSession(std::string *FailureReason = nullptr);
+  std::vector<Assets::AssetDescriptor> CollectVisibleAssets() const;
+  std::optional<std::filesystem::path>
+  ResolveVisibleAssetPath(std::string_view RelativePath) const;
 
 private:
   HeadlessSessionHost &m_Host;
