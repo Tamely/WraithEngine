@@ -216,6 +216,7 @@ private:
   // Instance tree management
   void InitSceneRoot();
   Instance *FindWorldFolder() const;
+  Instance *EnsureWorldFolder();
   void RebuildInstanceTree(const std::vector<EditorSceneItem> &Items,
                            Instance *Parent);
   void SyncItemsFromTree();

@@ -241,6 +241,35 @@ std::unordered_map<std::string, EditorObjectDetails> BuildObjectDetailsMap(
   }
   return DetailsByObjectId;
 }
+
+void EnsureWorldFolder(EditorSceneState &SceneState) {
+  const auto HasWorldItem = std::find_if(
+      SceneState.Items.begin(), SceneState.Items.end(),
+      [](const EditorSceneItem &Item) { return Item.Id == "world"; });
+  if (HasWorldItem == SceneState.Items.end()) {
+    SceneState.Items.insert(SceneState.Items.begin(),
+                            EditorSceneItem{
+                                .Id = "world",
+                                .DisplayName = "World",
+                                .Kind = EditorSceneItemKind::Folder,
+                                .Visible = true,
+                                .Children = {},
+                            });
+  }
+
+  if (SceneState.ObjectDetailsById.find("world") ==
+      SceneState.ObjectDetailsById.end()) {
+    SceneState.ObjectDetailsById.emplace(
+        "world", EditorObjectDetails{
+                     .ObjectId = "world",
+                     .DisplayName = "World",
+                     .Kind = EditorSceneItemKind::Folder,
+                     .Visible = true,
+                     .SupportsTransform = false,
+                     .TransformReadOnly = true,
+                 });
+  }
+}
 } // namespace
 
 std::vector<EditorSceneMeshInstance>
@@ -325,6 +354,7 @@ bool LoadStartupScene(EditorSession &Session) {
   if (std::filesystem::exists(SceneFilePath)) {
     auto Loaded = Assets::LoadSceneFromFile(SceneFilePath);
     if (Loaded.has_value()) {
+      EnsureWorldFolder(*Loaded);
       A_CORE_INFO("StartupScene: loaded saved scene from {0}",
                   SceneFilePath.string());
       Session.SetSceneState(std::move(*Loaded));

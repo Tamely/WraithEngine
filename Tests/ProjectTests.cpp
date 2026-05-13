@@ -96,8 +96,8 @@ TEST_F(ProjectSystemTests, CreateProjectScaffoldBuildsInitialLayout) {
   ASSERT_TRUE(SceneFile.is_open());
   const std::string SceneText((std::istreambuf_iterator<char>(SceneFile)),
                               std::istreambuf_iterator<char>());
-  EXPECT_NE(SceneText.find("\"nodes\": []"), std::string::npos);
-  EXPECT_NE(SceneText.find("\"objects\": []"), std::string::npos);
+  EXPECT_NE(SceneText.find("\"id\": \"world\""), std::string::npos);
+  EXPECT_NE(SceneText.find("\"kind\": \"Folder\""), std::string::npos);
 
   std::ifstream ScriptProjectFile(Created->ScriptWorkspace.ScriptProjectPath);
   ASSERT_TRUE(ScriptProjectFile.is_open());
@@ -209,8 +209,15 @@ TEST_F(ProjectSystemTests, EmptyProjectSceneLoadsWithoutFallbackContent) {
 
   ASSERT_TRUE(Axiom::LoadStartupScene(Session));
   EXPECT_TRUE(Session.GetState().Scene.MeshInstances.empty());
-  EXPECT_TRUE(Session.GetState().Scene.Items.empty());
-  EXPECT_TRUE(Session.GetState().Scene.ObjectDetailsById.empty());
+  const Axiom::EditorSceneItem *WorldItem = Session.FindSceneItem("world");
+  ASSERT_NE(WorldItem, nullptr);
+  EXPECT_EQ(WorldItem->Kind, Axiom::EditorSceneItemKind::Folder);
+  EXPECT_TRUE(WorldItem->Children.empty());
+  const Axiom::EditorObjectDetails *WorldDetails =
+      Session.FindObjectDetails("world");
+  ASSERT_NE(WorldDetails, nullptr);
+  EXPECT_EQ(WorldDetails->Kind, Axiom::EditorSceneItemKind::Folder);
+  EXPECT_FALSE(WorldDetails->SupportsTransform);
 }
 
 TEST_F(ProjectSystemTests, IsPathWithinRootRejectsEscapes) {

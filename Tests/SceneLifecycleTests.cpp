@@ -135,6 +135,30 @@ TEST(SceneLifecycleTests, CreateMeshAddsToWorldChildrenAndPublishesEvent) {
   EXPECT_EQ(Ack->CommandType, "create_object");
 }
 
+TEST(SceneLifecycleTests, CreateAutoCreatesWorldFolderWhenMissing) {
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::CreateObjectCommand{.TemplateId = "Mesh"}});
+  Session.Tick();
+
+  const auto *Created = FindEvent<Axiom::ObjectCreatedEvent>(Subscriber.Events);
+  ASSERT_NE(Created, nullptr);
+
+  const Axiom::EditorSceneItem *WorldItem = Session.FindSceneItem("world");
+  ASSERT_NE(WorldItem, nullptr);
+  ASSERT_EQ(WorldItem->Children.size(), 1u);
+  EXPECT_EQ(WorldItem->Children.front().Id, Created->ObjectId);
+  EXPECT_EQ(WorldItem->Children.front().Kind, Axiom::EditorSceneItemKind::Mesh);
+
+  const Axiom::EditorObjectDetails *WorldDetails =
+      Session.FindObjectDetails("world");
+  ASSERT_NE(WorldDetails, nullptr);
+  EXPECT_EQ(WorldDetails->Kind, Axiom::EditorSceneItemKind::Folder);
+}
+
 TEST(SceneLifecycleTests, CreateMeshHasTransformDetails) {
   Axiom::EditorSession Session = MakeWorldSession();
   RecordingSubscriber Subscriber;
