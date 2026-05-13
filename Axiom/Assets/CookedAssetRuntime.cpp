@@ -58,7 +58,7 @@ LoadCookedMeshAssetIfAvailable(const std::filesystem::path &Path) {
     return std::nullopt;
   }
 
-  return ToRuntimeMeshSceneData(*CookedScene);
+  return ToRuntimeMeshSceneData(*CookedScene, *ContentRoot);
 }
 
 TextureSourceDataRef

@@ -8,6 +8,7 @@
 #include <Assets/IAssetSource.h>
 #include <Assets/MeshAsset.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -99,8 +100,15 @@ TEST(CookedAssetTests, CookMeshAssetWritesManifestAndCookedLookupResolves) {
   const auto Manifest = Axiom::Assets::LoadAssetCookManifest(
       ContentRoot / "Cooked" / "AssetCookManifest.json");
   ASSERT_TRUE(Manifest.has_value());
-  ASSERT_EQ(Manifest->Entries.size(), 1u);
-  EXPECT_EQ(Manifest->Entries[0].Id.Value, Entry->Id.Value);
+  ASSERT_FALSE(Manifest->Entries.empty());
+  const auto MeshIt = std::find_if(
+      Manifest->Entries.begin(), Manifest->Entries.end(),
+      [&](const Axiom::Assets::AssetCookManifestEntry &Existing) {
+        return Existing.Id.Value == Entry->Id.Value;
+      });
+  ASSERT_NE(MeshIt, Manifest->Entries.end());
+  EXPECT_EQ(MeshIt->Kind, Axiom::Assets::AssetKind::Mesh);
+  EXPECT_GT(Manifest->Entries.size(), 1u);
 
   const Axiom::Assets::CookedAssetSource Cooked(ContentRoot);
   const auto Resolved = Cooked.Resolve(Entry->Id);
@@ -110,6 +118,33 @@ TEST(CookedAssetTests, CookMeshAssetWritesManifestAndCookedLookupResolves) {
   const auto Loaded = Axiom::Assets::LoadBasicMeshAsset(ContentRoot / "basicmesh.glb");
   ASSERT_TRUE(Loaded.has_value());
   EXPECT_FALSE(Loaded->Instances.empty());
+}
+
+TEST(CookedAssetTests, LoadBasicMeshAssetPrefersSourceWhenCookedMeshWouldDropMaterials) {
+  const auto TempRoot = MakeUniqueTempRoot("sponza-materials");
+  const auto ContentRoot = TempRoot / "Content";
+  EnsureTempDirectory(ContentRoot);
+
+  CopyFileChecked(std::filesystem::path(AXIOM_CONTENT_DIR) / "sponza_atrium_3.glb",
+                  ContentRoot / "sponza_atrium_3.glb");
+
+  const auto Entry = Axiom::Assets::CookMeshAsset(
+      ContentRoot, std::filesystem::path("sponza_atrium_3.glb"));
+  ASSERT_TRUE(Entry.has_value());
+
+  const auto Loaded =
+      Axiom::Assets::LoadBasicMeshAsset(ContentRoot / "sponza_atrium_3.glb");
+  ASSERT_TRUE(Loaded.has_value());
+  ASSERT_FALSE(Loaded->Instances.empty());
+
+  const auto It = std::find_if(
+      Loaded->Instances.begin(), Loaded->Instances.end(),
+      [](const Axiom::MeshSceneData::MeshInstanceData &Instance) {
+        return Instance.Material != nullptr &&
+               Instance.Material->BaseColorTexture != nullptr &&
+               Instance.Material->BaseColorTexture->IsValid();
+      });
+  EXPECT_NE(It, Loaded->Instances.end());
 }
 
 TEST(CookedAssetTests, CookTextureAssetWritesManifestAndCookedLookupResolves) {

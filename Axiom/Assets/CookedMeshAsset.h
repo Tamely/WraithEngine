@@ -10,11 +10,12 @@
 
 namespace Axiom::Assets {
 
-constexpr uint32_t kCookedMeshFormatVersion = 1;
+constexpr uint32_t kCookedMeshFormatVersion = 2;
 
 struct CookedMeshSceneData {
   struct InstanceData {
     std::string Name;
+    std::string MaterialAssetPath;
     MeshData Mesh;
     glm::mat4 Transform{1.0f};
   };
@@ -30,6 +31,7 @@ std::optional<CookedMeshSceneData>
 LoadCookedMeshAsset(const std::filesystem::path &Path);
 
 CookedMeshSceneData ToCookedMeshSceneData(const MeshSceneData &Scene);
-MeshSceneData ToRuntimeMeshSceneData(const CookedMeshSceneData &Scene);
+MeshSceneData ToRuntimeMeshSceneData(const CookedMeshSceneData &Scene,
+                                     const std::filesystem::path &ContentRoot);
 
 } // namespace Axiom::Assets

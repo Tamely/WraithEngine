@@ -92,11 +92,54 @@ CookMeshAsset(const std::filesystem::path &ContentRoot,
     return std::nullopt;
   }
 
-  const auto Scene = LoadBasicMeshAsset(SourcePath);
+  const auto Scene = LoadBasicMeshAssetFromSource(SourcePath);
   if (!Scene.has_value()) {
     A_CORE_WARN("AssetCooker: failed to import source mesh '{}'",
                 SourcePath.string());
     return std::nullopt;
+  }
+
+  MeshSceneData CookedScene = *Scene;
+  std::vector<std::string> MaterialAssetPaths(CookedScene.Instances.size());
+  const std::string AssetStem = RelativeAssetPath.stem().generic_string();
+  for (size_t InstanceIndex = 0; InstanceIndex < CookedScene.Instances.size();
+       ++InstanceIndex) {
+    auto &Instance = CookedScene.Instances[InstanceIndex];
+    if (!Instance.Material) {
+      continue;
+    }
+
+    std::string TextureAssetPath;
+    if (Instance.Material->BaseColorTexture &&
+        Instance.Material->BaseColorTexture->IsValid()) {
+      const std::filesystem::path RelativeTexturePath =
+          std::filesystem::path("Generated/MeshTextures") /
+          (AssetStem + "__" + std::to_string(InstanceIndex));
+      const auto TextureEntry = CookTextureAsset(
+          ContentRoot, RelativeTexturePath, *Instance.Material->BaseColorTexture);
+      if (TextureEntry.has_value()) {
+        TextureAssetPath = TextureEntry->RelativePath;
+      }
+    } else if (!Instance.Material->TextureAssetPath.empty()) {
+      const auto TextureEntry =
+          CookTextureAsset(ContentRoot, Instance.Material->TextureAssetPath);
+      if (TextureEntry.has_value()) {
+        TextureAssetPath = TextureEntry->RelativePath;
+      }
+    }
+
+    const std::filesystem::path RelativeMaterialPath =
+        std::filesystem::path("Generated/MeshMaterials") /
+        (AssetStem + "__" + std::to_string(InstanceIndex));
+    const auto MaterialEntry = CookMaterialAsset(
+        ContentRoot, RelativeMaterialPath,
+        {.BaseColorFactor = Instance.Material->BaseColorFactor,
+         .Metallic = Instance.Material->Metallic,
+         .Roughness = Instance.Material->Roughness,
+         .TextureAssetPath = TextureAssetPath});
+    if (MaterialEntry.has_value()) {
+      MaterialAssetPaths[InstanceIndex] = MaterialEntry->RelativePath;
+    }
   }
 
   const std::filesystem::path CookedRelativePath =
@@ -110,8 +153,20 @@ CookMeshAsset(const std::filesystem::path &ContentRoot,
     return std::nullopt;
   }
 
-  if (!SaveCookedMeshAsset(CookedAbsolutePath, ToCookedMeshSceneData(*Scene),
-                           Asset)) {
+  CookedMeshSceneData BinaryScene;
+  BinaryScene.Instances.reserve(CookedScene.Instances.size());
+  for (size_t InstanceIndex = 0; InstanceIndex < CookedScene.Instances.size();
+       ++InstanceIndex) {
+    const auto &Instance = CookedScene.Instances[InstanceIndex];
+    BinaryScene.Instances.push_back({
+        .Name = Instance.Name,
+        .MaterialAssetPath = MaterialAssetPaths[InstanceIndex],
+        .Mesh = Instance.Mesh,
+        .Transform = Instance.Transform,
+    });
+  }
+
+  if (!SaveCookedMeshAsset(CookedAbsolutePath, BinaryScene, Asset)) {
     return std::nullopt;
   }
 
@@ -140,7 +195,6 @@ CookMeshAsset(const std::filesystem::path &ContentRoot,
 std::optional<AssetCookManifestEntry>
 CookTextureAsset(const std::filesystem::path &ContentRoot,
                  const std::filesystem::path &RelativeAssetPath) {
-  const AssetId Asset = AssetIdFromRelativePath(RelativeAssetPath);
   const std::filesystem::path SourcePath = ContentRoot / RelativeAssetPath;
   const auto SourceHash = HashFileContents(SourcePath);
   if (!SourceHash.has_value()) {
@@ -156,8 +210,22 @@ CookTextureAsset(const std::filesystem::path &ContentRoot,
     return std::nullopt;
   }
 
+  return CookTextureAsset(ContentRoot, RelativeAssetPath, *Texture);
+}
+
+std::optional<AssetCookManifestEntry>
+CookTextureAsset(const std::filesystem::path &ContentRoot,
+                 const std::filesystem::path &RelativeTexturePath,
+                 const TextureSourceData &Texture) {
+  const AssetId Asset = AssetIdFromRelativePath(RelativeTexturePath);
+  if (!Texture.IsValid()) {
+    A_CORE_WARN("AssetCooker: invalid generated texture '{}'",
+                RelativeTexturePath.string());
+    return std::nullopt;
+  }
+
   const std::filesystem::path CookedRelativePath =
-      BuildCookedTextureRelativePath(RelativeAssetPath);
+      BuildCookedTextureRelativePath(RelativeTexturePath);
   const std::filesystem::path CookedAbsolutePath = ContentRoot / CookedRelativePath;
   std::error_code Ec;
   std::filesystem::create_directories(CookedAbsolutePath.parent_path(), Ec);
@@ -167,7 +235,7 @@ CookTextureAsset(const std::filesystem::path &ContentRoot,
     return std::nullopt;
   }
 
-  if (!SaveCookedTextureAsset(CookedAbsolutePath, *Texture, Asset)) {
+  if (!SaveCookedTextureAsset(CookedAbsolutePath, Texture, Asset)) {
     return std::nullopt;
   }
 
@@ -176,13 +244,17 @@ CookTextureAsset(const std::filesystem::path &ContentRoot,
   AssetCookManifest Manifest =
       LoadAssetCookManifest(ManifestPath).value_or(AssetCookManifest{});
 
+  const uint64_t SourceHash = HashString(std::to_string(Texture.Width) + "|" +
+                                         std::to_string(Texture.Height) + "|" +
+                                         std::to_string(Texture.Pixels.size()));
+
   AssetCookManifestEntry Entry{
       .Id = Asset,
       .Kind = AssetKind::Texture,
-      .RelativePath = RelativeAssetPath.generic_string(),
+      .RelativePath = RelativeTexturePath.generic_string(),
       .CookedPath = CookedRelativePath.generic_string(),
       .FormatVersion = kCookedTextureFormatVersion,
-      .SourceHash = *SourceHash,
+      .SourceHash = SourceHash,
   };
   UpsertManifestEntry(Manifest, Entry);
 
