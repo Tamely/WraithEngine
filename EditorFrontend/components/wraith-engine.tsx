@@ -54,6 +54,26 @@ interface CurrentProjectResponse {
   project: ProjectDescriptor | null
 }
 
+interface ProjectCookResponse {
+  type: "project_cooked"
+  project: ProjectDescriptor
+  cookedSourceAssetCount: number
+  manifestEntryCount: number
+  cookManifestPath: string
+}
+
+interface ProjectPackageResponse {
+  type: "project_packaged"
+  project: ProjectDescriptor
+  cookedSourceAssetCount: number
+  manifestEntryCount: number
+  packagedFileCount: number
+  includedSceneFile: boolean
+  includedEngineContent: boolean
+  packageDir: string
+  packageManifestPath: string
+}
+
 function formatProjectRequestError(serverOrigin: string, action: string, error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
   const normalizedMessage = message.toLowerCase()
@@ -79,6 +99,8 @@ export function WraithEngine() {
   const [projectsError, setProjectsError] = useState<string | null>(null)
   const [projectBrowserOpen, setProjectBrowserOpen] = useState(false)
   const [editorGeneration, setEditorGeneration] = useState(0)
+  const [buildBusy, setBuildBusy] = useState(false)
+  const [buildNotice, setBuildNotice] = useState<string | null>(null)
 
   const fetchJson = useCallback(
     async <T,>(path: string, init?: RequestInit) => {
@@ -182,6 +204,46 @@ export function WraithEngine() {
     setEditorGeneration((current) => current + 1)
   }, [])
 
+  const handleCookProject = useCallback(async () => {
+    setBuildBusy(true)
+    setBuildNotice(null)
+    try {
+      const payload = await fetchJson<ProjectCookResponse>("/projects/cook", {
+        method: "POST",
+      })
+      setBuildNotice(
+        `Cooked ${payload.cookedSourceAssetCount} source assets into ${payload.project.cookedDir}. Manifest entries: ${payload.manifestEntryCount}.`
+      )
+      setActiveProject(payload.project)
+      await refreshProjects()
+    } catch (error) {
+      setBuildNotice(formatProjectRequestError(serverOrigin, "cook the active project", error))
+    } finally {
+      setBuildBusy(false)
+    }
+  }, [fetchJson, refreshProjects, serverOrigin])
+
+  const handlePackageProject = useCallback(async () => {
+    setBuildBusy(true)
+    setBuildNotice(null)
+    try {
+      const payload = await fetchJson<ProjectPackageResponse>("/projects/package", {
+        method: "POST",
+      })
+      setBuildNotice(
+        `Packaged ${payload.project.name} to ${payload.packageDir}. ${payload.packagedFileCount} files staged with cooked assets${payload.includedSceneFile ? " and scene state" : ""}.`
+      )
+      setActiveProject(payload.project)
+      await refreshProjects()
+    } catch (error) {
+      setBuildNotice(
+        formatProjectRequestError(serverOrigin, "package the active project", error)
+      )
+    } finally {
+      setBuildBusy(false)
+    }
+  }, [fetchJson, refreshProjects, serverOrigin])
+
   const showProjectBrowser = projectBrowserOpen || activeProject === null
 
   return (
@@ -193,12 +255,20 @@ export function WraithEngine() {
               <div className="relative flex h-screen flex-col overflow-hidden bg-black text-white">
                 <MenuBar
                   activeProject={activeProject}
+                  buildBusy={buildBusy}
+                  onCookProject={handleCookProject}
                   onNewProject={handleShowNewProject}
                   onOpenProject={handleShowOpenProject}
+                  onPackageProject={handlePackageProject}
                 />
                 <Toolbar />
                 <DockLayout />
                 <ScriptErrorToastOverlay />
+                {buildNotice ? (
+                  <div className="pointer-events-none fixed bottom-4 left-4 z-50 max-w-xl rounded border border-neutral-800 bg-neutral-950/95 px-3 py-2 text-xs text-neutral-200 shadow-lg">
+                    {buildNotice}
+                  </div>
+                ) : null}
               </div>
             </ProjectSessionProvider>
           </DockProvider>

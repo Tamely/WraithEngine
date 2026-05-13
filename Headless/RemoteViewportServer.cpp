@@ -507,6 +507,22 @@ std::string SerializeProjectJson(const Project::ProjectDescriptor &Project) {
          << "\",\"starterScriptQualifiedClassName\":\""
          << EscapeJsonString(
                 Project.ScriptWorkspace.StarterScriptQualifiedClassName)
+         << "\",\"cookedDir\":\""
+         << EscapeJsonString(Project.Output.CookedDir.string())
+         << "\",\"cookManifestPath\":\""
+         << EscapeJsonString(Project.Output.CookManifestPath.string())
+         << "\",\"buildDir\":\""
+         << EscapeJsonString(Project.Output.BuildDir.string())
+         << "\",\"packageDir\":\""
+         << EscapeJsonString(Project.Output.PackageDir.string())
+         << "\",\"packagedContentDir\":\""
+         << EscapeJsonString(Project.Output.PackagedContentDir.string())
+         << "\",\"packagedCookedDir\":\""
+         << EscapeJsonString(Project.Output.PackagedCookedDir.string())
+         << "\",\"packagedSceneFilePath\":\""
+         << EscapeJsonString(Project.Output.PackagedSceneFilePath.string())
+         << "\",\"packageManifestPath\":\""
+         << EscapeJsonString(Project.Output.PackageManifestPath.string())
          << "\",\"engineContentDir\":\""
          << EscapeJsonString((std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine").string())
          << "\",\"sceneFilePath\":\""
@@ -546,6 +562,43 @@ std::string SerializeCurrentProject(
     Stream << "null";
   }
   Stream << "}";
+  return Stream.str();
+}
+
+std::string SerializeProjectCookResult(
+    const Project::ProjectDescriptor &Project,
+    const Project::ProjectCookResult &Result) {
+  std::ostringstream Stream;
+  Stream << "{"
+         << "\"type\":\"project_cooked\""
+         << ",\"project\":" << SerializeProjectJson(Project)
+         << ",\"cookedSourceAssetCount\":" << Result.CookedSourceAssetCount
+         << ",\"manifestEntryCount\":" << Result.ManifestEntryCount
+         << ",\"cookManifestPath\":\""
+         << EscapeJsonString(Result.Output.CookManifestPath.string())
+         << "\"}";
+  return Stream.str();
+}
+
+std::string SerializeProjectPackageResult(
+    const Project::ProjectDescriptor &Project,
+    const Project::ProjectPackageResult &Result) {
+  std::ostringstream Stream;
+  Stream << "{"
+         << "\"type\":\"project_packaged\""
+         << ",\"project\":" << SerializeProjectJson(Project)
+         << ",\"cookedSourceAssetCount\":" << Result.Cook.CookedSourceAssetCount
+         << ",\"manifestEntryCount\":" << Result.Cook.ManifestEntryCount
+         << ",\"packagedFileCount\":" << Result.PackagedFileCount
+         << ",\"includedSceneFile\":"
+         << (Result.IncludedSceneFile ? "true" : "false")
+         << ",\"includedEngineContent\":"
+         << (Result.IncludedEngineContent ? "true" : "false")
+         << ",\"packageDir\":\""
+         << EscapeJsonString(Result.Cook.Output.PackageDir.string())
+         << "\",\"packageManifestPath\":\""
+         << EscapeJsonString(Result.Cook.Output.PackageManifestPath.string())
+         << "\"}";
   return Stream.str();
 }
 
@@ -1166,6 +1219,12 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   if (Route == "/projects/open") {
     return HandleOpenProjectRequest(ClientSocketValue, Body);
   }
+  if (Route == "/projects/cook") {
+    return HandleCookProjectRequest(ClientSocketValue);
+  }
+  if (Route == "/projects/package") {
+    return HandlePackageProjectRequest(ClientSocketValue);
+  }
   if (Route == "/scripts/create") {
     return HandleCreateScriptFileRequest(ClientSocketValue, Body);
   }
@@ -1355,6 +1414,61 @@ bool RemoteViewportServer::HandleOpenProjectRequest(uintptr_t ClientSocketValue,
 
   const std::string Response =
       JsonResponse("200 OK", SerializeCurrentProject(Opened));
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
+bool RemoteViewportServer::HandleCookProjectRequest(uintptr_t ClientSocketValue) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  const auto ActiveProject = GetActiveProject();
+  if (!ActiveProject.has_value()) {
+    const std::string Response =
+        JsonResponse("400 Bad Request",
+                     SerializeError("No active project is selected."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  std::string FailureReason;
+  const auto Result =
+      Project::CookProjectContent(*ActiveProject, &FailureReason);
+  if (!Result.has_value()) {
+    const std::string Response =
+        JsonResponse("500 Internal Server Error", SerializeError(FailureReason));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const std::string Response =
+      JsonResponse("200 OK", SerializeProjectCookResult(*ActiveProject, *Result));
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
+bool RemoteViewportServer::HandlePackageProjectRequest(
+    uintptr_t ClientSocketValue) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  const auto ActiveProject = GetActiveProject();
+  if (!ActiveProject.has_value()) {
+    const std::string Response =
+        JsonResponse("400 Bad Request",
+                     SerializeError("No active project is selected."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  std::string FailureReason;
+  const auto Result =
+      Project::PackageProjectContent(*ActiveProject, &FailureReason);
+  if (!Result.has_value()) {
+    const std::string Response =
+        JsonResponse("500 Internal Server Error", SerializeError(FailureReason));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const std::string Response = JsonResponse(
+      "200 OK", SerializeProjectPackageResult(*ActiveProject, *Result));
   SendAll(ClientSocket, Response.data(), Response.size());
   return false;
 }

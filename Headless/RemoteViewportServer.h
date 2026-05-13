@@ -109,6 +109,8 @@ private:
                                   std::string_view Body);
   bool HandleOpenProjectRequest(uintptr_t ClientSocketValue,
                                 std::string_view Body);
+  bool HandleCookProjectRequest(uintptr_t ClientSocketValue);
+  bool HandlePackageProjectRequest(uintptr_t ClientSocketValue);
   bool HandleListScriptsRequest(uintptr_t ClientSocketValue);
   bool HandleListScriptClassesRequest(uintptr_t ClientSocketValue);
   bool HandleReadScriptFileRequest(uintptr_t ClientSocketValue,

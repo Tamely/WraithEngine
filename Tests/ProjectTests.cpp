@@ -84,6 +84,9 @@ TEST_F(ProjectSystemTests, CreateProjectScaffoldBuildsInitialLayout) {
   EXPECT_TRUE(std::filesystem::exists(Created->ScriptWorkspace.ScriptProjectPath));
   EXPECT_TRUE(std::filesystem::exists(Created->ScriptWorkspace.ScriptSolutionPath));
   EXPECT_TRUE(std::filesystem::exists(Created->ScriptWorkspace.StarterScriptPath));
+  EXPECT_TRUE(std::filesystem::exists(Created->Output.CookedDir));
+  EXPECT_TRUE(std::filesystem::exists(Created->Output.BuildDir));
+  EXPECT_TRUE(std::filesystem::exists(Created->Output.PackageDir));
   EXPECT_EQ(Created->Manifest.ScriptAssemblyName, "TestProject.Scripts");
   EXPECT_EQ(Created->Manifest.ScriptRootNamespace, "TestProject.Scripts");
   EXPECT_EQ(Created->ScriptWorkspace.AssemblyName, "TestProject.Scripts");
@@ -196,6 +199,9 @@ TEST_F(ProjectSystemTests, LegacyManifestDefaultsScriptWorkspaceFields) {
   EXPECT_TRUE(std::filesystem::exists(Opened->ScriptWorkspace.ScriptProjectPath));
   EXPECT_TRUE(std::filesystem::exists(Opened->ScriptWorkspace.ScriptSolutionPath));
   EXPECT_TRUE(std::filesystem::exists(Opened->ScriptWorkspace.StarterScriptPath));
+  EXPECT_TRUE(std::filesystem::exists(Opened->Output.CookedDir));
+  EXPECT_TRUE(std::filesystem::exists(Opened->Output.BuildDir));
+  EXPECT_TRUE(std::filesystem::exists(Opened->Output.PackageDir));
 }
 
 TEST_F(ProjectSystemTests, EmptyProjectSceneLoadsWithoutFallbackContent) {
@@ -228,4 +234,42 @@ TEST_F(ProjectSystemTests, IsPathWithinRootRejectsEscapes) {
   EXPECT_TRUE(Axiom::Project::IsPathWithinRoot(ManagedRoot, ManagedRoot / "nested"));
   EXPECT_FALSE(
       Axiom::Project::IsPathWithinRoot(ManagedRoot, Root.parent_path() / "outside"));
+}
+
+TEST_F(ProjectSystemTests, PackageProjectContentStagesCookedProjectOutput) {
+  std::string FailureReason;
+  const auto Created =
+      Axiom::Project::CreateProjectScaffold(Root, "Cook Package", &FailureReason);
+  ASSERT_TRUE(Created.has_value()) << FailureReason;
+
+  const auto SourceTexture =
+      std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine" / "tf2 coconut.jpg";
+  const auto ProjectTexture = Created->Root.ContentDir / "tf2 coconut.jpg";
+  std::filesystem::copy_file(SourceTexture, ProjectTexture,
+                             std::filesystem::copy_options::overwrite_existing);
+
+  const auto PackageResult =
+      Axiom::Project::PackageProjectContent(*Created, &FailureReason);
+  ASSERT_TRUE(PackageResult.has_value()) << FailureReason;
+  EXPECT_EQ(PackageResult->Cook.CookedSourceAssetCount, 1u);
+  EXPECT_GT(PackageResult->Cook.ManifestEntryCount, 0u);
+  EXPECT_TRUE(std::filesystem::exists(Created->Output.CookManifestPath));
+  EXPECT_TRUE(std::filesystem::exists(Created->Output.PackagedCookedDir));
+  EXPECT_TRUE(std::filesystem::exists(Created->Output.PackagedCookManifestPath));
+  EXPECT_TRUE(std::filesystem::exists(Created->Output.PackagedSceneFilePath));
+  EXPECT_TRUE(std::filesystem::exists(Created->Output.PackagedEngineContentDir));
+  EXPECT_TRUE(std::filesystem::exists(Created->Output.PackageManifestPath));
+  EXPECT_GT(PackageResult->PackagedFileCount, 0u);
+
+  std::ifstream PackageManifestFile(Created->Output.PackageManifestPath);
+  ASSERT_TRUE(PackageManifestFile.is_open());
+  const std::string PackageManifestText(
+      (std::istreambuf_iterator<char>(PackageManifestFile)),
+      std::istreambuf_iterator<char>());
+  EXPECT_NE(PackageManifestText.find(
+                "\"contentMode\": \"transitional-scene-plus-cooked-assets\""),
+            std::string::npos);
+  EXPECT_NE(PackageManifestText.find(
+                "\"assetCookManifest\": \"Content/Cooked/AssetCookManifest.json\""),
+            std::string::npos);
 }

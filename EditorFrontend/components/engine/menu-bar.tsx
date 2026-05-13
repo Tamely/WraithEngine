@@ -1,8 +1,10 @@
 "use client"
 
 import {
+  Archive,
   ChevronDown,
   FolderOpen,
+  Package,
   Plus,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
@@ -14,26 +16,38 @@ export function MenuBar({
   activeProject,
   onNewProject,
   onOpenProject,
+  onCookProject,
+  onPackageProject,
+  buildBusy,
 }: {
   activeProject: ProjectDescriptor | null
   onNewProject: () => void
   onOpenProject: () => void
+  onCookProject: () => void
+  onPackageProject: () => void
+  buildBusy: boolean
 }) {
   const [fileMenuOpen, setFileMenuOpen] = useState(false)
+  const [buildMenuOpen, setBuildMenuOpen] = useState(false)
   const fileMenuRef = useRef<HTMLDivElement | null>(null)
+  const buildMenuRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
-    if (!fileMenuOpen) return
+    if (!fileMenuOpen && !buildMenuOpen) return
 
     function handlePointerDown(event: MouseEvent) {
       if (!fileMenuRef.current?.contains(event.target as Node)) {
         setFileMenuOpen(false)
+      }
+      if (!buildMenuRef.current?.contains(event.target as Node)) {
+        setBuildMenuOpen(false)
       }
     }
 
     function handleEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setFileMenuOpen(false)
+        setBuildMenuOpen(false)
       }
     }
 
@@ -44,7 +58,7 @@ export function MenuBar({
       window.removeEventListener("mousedown", handlePointerDown)
       window.removeEventListener("keydown", handleEscape)
     }
-  }, [fileMenuOpen])
+  }, [buildMenuOpen, fileMenuOpen])
 
   return (
     <div className="flex items-center h-8 bg-neutral-950 border-b border-neutral-800 px-2">
@@ -88,6 +102,45 @@ export function MenuBar({
                   >
                     <FolderOpen className="h-3.5 w-3.5" />
                     <span>Open Project</span>
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : item === "Build" ? (
+            <div key={item} className="relative" ref={buildMenuRef}>
+              <button
+                aria-expanded={buildMenuOpen}
+                className="px-3 py-1 text-xs text-neutral-300 hover:bg-neutral-800 hover:text-white rounded transition-colors"
+                onClick={() => setBuildMenuOpen((current) => !current)}
+                type="button"
+              >
+                {item}
+              </button>
+              {buildMenuOpen ? (
+                <div className="absolute left-0 top-full z-50 mt-1 w-56 rounded-lg border border-neutral-800 bg-neutral-950/95 p-1 shadow-2xl backdrop-blur">
+                  <button
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-neutral-300 transition-colors hover:bg-neutral-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={!activeProject || buildBusy}
+                    onClick={() => {
+                      setBuildMenuOpen(false)
+                      onCookProject()
+                    }}
+                    type="button"
+                  >
+                    <Archive className="h-3.5 w-3.5" />
+                    <span>Cook Project</span>
+                  </button>
+                  <button
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-neutral-300 transition-colors hover:bg-neutral-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={!activeProject || buildBusy}
+                    onClick={() => {
+                      setBuildMenuOpen(false)
+                      onPackageProject()
+                    }}
+                    type="button"
+                  >
+                    <Package className="h-3.5 w-3.5" />
+                    <span>Package Project</span>
                   </button>
                 </div>
               ) : null}

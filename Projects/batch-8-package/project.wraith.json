@@ -1,0 +1,8 @@
+{
+  "version": 2,
+  "projectId": "project-ac96a07223079a43",
+  "name": "Batch 8 Package",
+  "slug": "batch-8-package",
+  "scriptAssemblyName": "Batch8Package.Scripts",
+  "scriptRootNamespace": "Batch8Package.Scripts"
+}

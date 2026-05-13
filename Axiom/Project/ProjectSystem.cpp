@@ -1,5 +1,7 @@
 #include "Project/ProjectSystem.h"
 
+#include "Assets/AssetCookManifest.h"
+#include "Assets/AssetCooker.h"
 #include "Core/Log.h"
 
 #include <algorithm>
@@ -17,6 +19,10 @@
 
 #ifndef AXIOM_SOURCE_DIR
 #define AXIOM_SOURCE_DIR "."
+#endif
+
+#ifndef AXIOM_CONTENT_DIR
+#define AXIOM_CONTENT_DIR "Content"
 #endif
 
 namespace Axiom::Project {
@@ -406,6 +412,22 @@ bool SaveDefaultStarterScript(
   return WriteTextFile(ScriptPath, Stream.str());
 }
 
+bool EnsureOutputLayoutScaffold(const ProjectOutputLayout &Output) {
+  std::error_code Error;
+  std::filesystem::create_directories(Output.CookedDir, Error);
+  if (Error) {
+    return false;
+  }
+  Error.clear();
+  std::filesystem::create_directories(Output.BuildDir, Error);
+  if (Error) {
+    return false;
+  }
+  Error.clear();
+  std::filesystem::create_directories(Output.PackageDir, Error);
+  return !Error;
+}
+
 bool EnsureScriptWorkspaceScaffold(ProjectDescriptor &Descriptor) {
   bool ManifestChanged = false;
   if (Descriptor.Manifest.Version < 2) {
@@ -425,6 +447,7 @@ bool EnsureScriptWorkspaceScaffold(ProjectDescriptor &Descriptor) {
 
   Descriptor.ScriptWorkspace =
       ResolveProjectScriptWorkspace(Descriptor.Root, Descriptor.Manifest);
+  Descriptor.Output = ResolveProjectOutputLayout(Descriptor.Root);
 
   if (ManifestChanged &&
       !SaveProjectManifest(Descriptor.Root.ManifestPath, Descriptor.Manifest)) {
@@ -446,8 +469,120 @@ bool EnsureScriptWorkspaceScaffold(ProjectDescriptor &Descriptor) {
                                 Descriptor.ScriptWorkspace)) {
     return false;
   }
+  if (!EnsureOutputLayoutScaffold(Descriptor.Output)) {
+    return false;
+  }
 
   return true;
+}
+
+bool IsCookableContentPath(const std::filesystem::path &RelativePath) {
+  const std::string Extension = RelativePath.extension().string();
+  return Extension == ".glb" || Extension == ".gltf" || Extension == ".fbx" ||
+         Extension == ".obj" || Extension == ".png" || Extension == ".jpg" ||
+         Extension == ".jpeg";
+}
+
+std::vector<std::filesystem::path>
+CollectCookableAssets(const std::filesystem::path &ContentDir) {
+  std::vector<std::filesystem::path> Results;
+  if (!std::filesystem::exists(ContentDir)) {
+    return Results;
+  }
+
+  for (const auto &Entry :
+       std::filesystem::recursive_directory_iterator(ContentDir)) {
+    if (!Entry.is_regular_file()) {
+      continue;
+    }
+    const auto RelativePath =
+        std::filesystem::relative(Entry.path(), ContentDir).lexically_normal();
+    if (!IsCookableContentPath(RelativePath)) {
+      continue;
+    }
+    Results.push_back(RelativePath);
+  }
+
+  std::sort(Results.begin(), Results.end());
+  return Results;
+}
+
+std::size_t CountPackagedFiles(const std::filesystem::path &RootPath) {
+  if (!std::filesystem::exists(RootPath)) {
+    return 0;
+  }
+
+  std::size_t Count = 0;
+  for (const auto &Entry :
+       std::filesystem::recursive_directory_iterator(RootPath)) {
+    if (Entry.is_regular_file()) {
+      ++Count;
+    }
+  }
+  return Count;
+}
+
+bool CopyDirectoryTree(const std::filesystem::path &Source,
+                       const std::filesystem::path &Destination) {
+  if (!std::filesystem::exists(Source)) {
+    return true;
+  }
+
+  std::error_code Error;
+  std::filesystem::create_directories(Destination, Error);
+  if (Error) {
+    return false;
+  }
+
+  for (const auto &Entry : std::filesystem::recursive_directory_iterator(Source)) {
+    const auto Relative =
+        std::filesystem::relative(Entry.path(), Source).lexically_normal();
+    const auto TargetPath = Destination / Relative;
+    if (Entry.is_directory()) {
+      std::filesystem::create_directories(TargetPath, Error);
+      if (Error) {
+        return false;
+      }
+      continue;
+    }
+    if (!Entry.is_regular_file()) {
+      continue;
+    }
+    std::filesystem::create_directories(TargetPath.parent_path(), Error);
+    if (Error) {
+      return false;
+    }
+    std::filesystem::copy_file(Entry.path(), TargetPath,
+                               std::filesystem::copy_options::overwrite_existing,
+                               Error);
+    if (Error) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool SavePackageManifestFile(const ProjectDescriptor &Project,
+                             const ProjectPackageResult &PackageResult) {
+  std::ostringstream Stream;
+  Stream << "{\n"
+         << "  \"version\": 1,\n"
+         << "  \"projectId\": \"" << EscapeJsonString(Project.Manifest.ProjectId)
+         << "\",\n"
+         << "  \"name\": \"" << EscapeJsonString(Project.Manifest.Name) << "\",\n"
+         << "  \"slug\": \"" << EscapeJsonString(Project.Manifest.Slug) << "\",\n"
+         << "  \"contentMode\": \"transitional-scene-plus-cooked-assets\",\n"
+         << "  \"sceneFile\": \"Content/scene.json\",\n"
+         << "  \"cookedDir\": \"Content/Cooked\",\n"
+         << "  \"assetCookManifest\": \"Content/Cooked/AssetCookManifest.json\",\n"
+         << "  \"engineContentDir\": \"Content/Engine\",\n"
+         << "  \"cookedSourceAssetCount\": "
+         << PackageResult.Cook.CookedSourceAssetCount << ",\n"
+         << "  \"manifestEntryCount\": " << PackageResult.Cook.ManifestEntryCount
+         << "\n"
+         << "}\n";
+  return WriteTextFile(Project.Output.PackageManifestPath, Stream.str());
 }
 
 } // namespace
@@ -490,6 +625,24 @@ ProjectScriptWorkspace ResolveProjectScriptWorkspace(const ProjectRoot &Root,
       .StarterScriptClassName = StarterScriptClassName,
       .StarterScriptQualifiedClassName =
           RootNamespace + "." + StarterScriptClassName,
+  };
+}
+
+ProjectOutputLayout ResolveProjectOutputLayout(const ProjectRoot &Root) {
+  return {
+      .CookedDir = Root.ContentDir / "Cooked",
+      .CookManifestPath = Root.ContentDir / "Cooked" / "AssetCookManifest.json",
+      .BuildDir = Root.RootPath / "Build",
+      .PackageDir = Root.RootPath / "Package",
+      .PackagedContentDir = Root.RootPath / "Package" / "Content",
+      .PackagedCookedDir = Root.RootPath / "Package" / "Content" / "Cooked",
+      .PackagedCookManifestPath =
+          Root.RootPath / "Package" / "Content" / "Cooked" /
+          "AssetCookManifest.json",
+      .PackagedSceneFilePath = Root.RootPath / "Package" / "Content" / "scene.json",
+      .PackagedEngineContentDir =
+          Root.RootPath / "Package" / "Content" / "Engine",
+      .PackageManifestPath = Root.RootPath / "Package" / "package.wraith.json",
   };
 }
 
@@ -708,6 +861,7 @@ LoadProjectDescriptor(const std::filesystem::path &RootPath) {
       .Manifest = *Manifest,
       .Root = Root,
       .ScriptWorkspace = ResolveProjectScriptWorkspace(Root, *Manifest),
+      .Output = ResolveProjectOutputLayout(Root),
   };
 }
 
@@ -815,6 +969,7 @@ CreateProjectScaffold(const std::filesystem::path &ProjectsRoot,
       .ScriptRootNamespace = BuildScriptRootNamespace(ProjectName),
   };
   const auto ScriptWorkspace = ResolveProjectScriptWorkspace(Root, Manifest);
+  const auto Output = ResolveProjectOutputLayout(Root);
   if (!SaveProjectManifest(Root.ManifestPath, Manifest) ||
       !SaveDefaultSceneFile(Root.SceneFilePath) ||
       !SaveDefaultScriptProject(ScriptWorkspace.ScriptProjectPath,
@@ -822,7 +977,8 @@ CreateProjectScaffold(const std::filesystem::path &ProjectsRoot,
       !SaveDefaultScriptSolution(ScriptWorkspace.ScriptSolutionPath,
                                  ScriptWorkspace) ||
       !SaveDefaultStarterScript(ScriptWorkspace.StarterScriptPath,
-                                ScriptWorkspace)) {
+                                ScriptWorkspace) ||
+      !EnsureOutputLayoutScaffold(Output)) {
     std::filesystem::remove_all(Root.RootPath, Error);
     if (FailureReason != nullptr) {
       *FailureReason = "Failed to write the initial project scaffold.";
@@ -834,7 +990,118 @@ CreateProjectScaffold(const std::filesystem::path &ProjectsRoot,
       .Manifest = Manifest,
       .Root = Root,
       .ScriptWorkspace = ScriptWorkspace,
+      .Output = Output,
   };
+}
+
+std::optional<ProjectCookResult>
+CookProjectContent(const ProjectDescriptor &Project, std::string *FailureReason) {
+  if (!EnsureOutputLayoutScaffold(Project.Output)) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Failed to create the project's output directories.";
+    }
+    return std::nullopt;
+  }
+
+  const auto AssetsToCook = CollectCookableAssets(Project.Root.ContentDir);
+  for (const auto &RelativeAssetPath : AssetsToCook) {
+    const auto Extension = RelativeAssetPath.extension().string();
+    if (Extension == ".glb" || Extension == ".gltf" || Extension == ".fbx" ||
+        Extension == ".obj") {
+      if (!Assets::CookMeshAsset(Project.Root.ContentDir, RelativeAssetPath)
+               .has_value()) {
+        if (FailureReason != nullptr) {
+          *FailureReason = "Failed to cook mesh asset '" +
+                           RelativeAssetPath.generic_string() + "'.";
+        }
+        return std::nullopt;
+      }
+      continue;
+    }
+
+    if (!Assets::CookTextureAsset(Project.Root.ContentDir, RelativeAssetPath)
+             .has_value()) {
+      if (FailureReason != nullptr) {
+        *FailureReason = "Failed to cook texture asset '" +
+                         RelativeAssetPath.generic_string() + "'.";
+      }
+      return std::nullopt;
+    }
+  }
+
+  const auto Manifest =
+      Assets::LoadAssetCookManifest(Project.Output.CookManifestPath)
+          .value_or(Assets::AssetCookManifest{});
+
+  return ProjectCookResult{
+      .Output = Project.Output,
+      .CookedSourceAssetCount = AssetsToCook.size(),
+      .ManifestEntryCount = Manifest.Entries.size(),
+  };
+}
+
+std::optional<ProjectPackageResult>
+PackageProjectContent(const ProjectDescriptor &Project,
+                      std::string *FailureReason) {
+  const auto CookResult = CookProjectContent(Project, FailureReason);
+  if (!CookResult.has_value()) {
+    return std::nullopt;
+  }
+
+  std::error_code Error;
+  std::filesystem::remove_all(Project.Output.PackageDir, Error);
+  Error.clear();
+  std::filesystem::create_directories(Project.Output.PackagedContentDir, Error);
+  if (Error) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Failed to create the package output directory.";
+    }
+    return std::nullopt;
+  }
+
+  if (!CopyDirectoryTree(Project.Output.CookedDir, Project.Output.PackagedCookedDir)) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Failed to copy cooked assets into the package output.";
+    }
+    return std::nullopt;
+  }
+
+  if (std::filesystem::exists(Project.Root.SceneFilePath)) {
+    std::filesystem::copy_file(
+        Project.Root.SceneFilePath, Project.Output.PackagedSceneFilePath,
+        std::filesystem::copy_options::overwrite_existing, Error);
+    if (Error) {
+      if (FailureReason != nullptr) {
+        *FailureReason = "Failed to copy the project scene into the package.";
+      }
+      return std::nullopt;
+    }
+  }
+
+  const auto EngineContentDir =
+      std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine";
+  if (!CopyDirectoryTree(EngineContentDir, Project.Output.PackagedEngineContentDir)) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Failed to copy shared engine content into the package.";
+    }
+    return std::nullopt;
+  }
+
+  ProjectPackageResult Result{
+      .Cook = *CookResult,
+      .PackagedFileCount = CountPackagedFiles(Project.Output.PackageDir),
+      .IncludedSceneFile = std::filesystem::exists(Project.Output.PackagedSceneFilePath),
+      .IncludedEngineContent =
+          std::filesystem::exists(Project.Output.PackagedEngineContentDir),
+  };
+  if (!SavePackageManifestFile(Project, Result)) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Failed to write the package manifest.";
+    }
+    return std::nullopt;
+  }
+  Result.PackagedFileCount = CountPackagedFiles(Project.Output.PackageDir);
+  return Result;
 }
 
 } // namespace Axiom::Project

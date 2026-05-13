@@ -36,16 +36,44 @@ struct ProjectScriptWorkspace {
   std::string StarterScriptQualifiedClassName;
 };
 
+struct ProjectOutputLayout {
+  std::filesystem::path CookedDir;
+  std::filesystem::path CookManifestPath;
+  std::filesystem::path BuildDir;
+  std::filesystem::path PackageDir;
+  std::filesystem::path PackagedContentDir;
+  std::filesystem::path PackagedCookedDir;
+  std::filesystem::path PackagedCookManifestPath;
+  std::filesystem::path PackagedSceneFilePath;
+  std::filesystem::path PackagedEngineContentDir;
+  std::filesystem::path PackageManifestPath;
+};
+
+struct ProjectCookResult {
+  ProjectOutputLayout Output;
+  std::size_t CookedSourceAssetCount{0};
+  std::size_t ManifestEntryCount{0};
+};
+
+struct ProjectPackageResult {
+  ProjectCookResult Cook;
+  std::size_t PackagedFileCount{0};
+  bool IncludedSceneFile{false};
+  bool IncludedEngineContent{false};
+};
+
 struct ProjectDescriptor {
   ProjectManifest Manifest;
   ProjectRoot Root;
   ProjectScriptWorkspace ScriptWorkspace;
+  ProjectOutputLayout Output;
 };
 
 std::filesystem::path GetDefaultProjectsRoot();
 ProjectRoot ResolveProjectRoot(const std::filesystem::path &RootPath);
 ProjectScriptWorkspace ResolveProjectScriptWorkspace(const ProjectRoot &Root,
                                                      const ProjectManifest &Manifest);
+ProjectOutputLayout ResolveProjectOutputLayout(const ProjectRoot &Root);
 
 bool IsPathWithinRoot(const std::filesystem::path &RootPath,
                       const std::filesystem::path &CandidatePath);
@@ -72,6 +100,14 @@ OpenProjectBySlug(const std::filesystem::path &ProjectsRoot,
 std::optional<ProjectDescriptor>
 CreateProjectScaffold(const std::filesystem::path &ProjectsRoot,
                       std::string_view ProjectName,
+                      std::string *FailureReason = nullptr);
+
+std::optional<ProjectCookResult>
+CookProjectContent(const ProjectDescriptor &Project,
+                   std::string *FailureReason = nullptr);
+
+std::optional<ProjectPackageResult>
+PackageProjectContent(const ProjectDescriptor &Project,
                       std::string *FailureReason = nullptr);
 
 } // namespace Axiom::Project

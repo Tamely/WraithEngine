@@ -17,6 +17,14 @@ export interface ProjectDescriptor {
   starterScriptPath: string
   starterScriptClassName: string
   starterScriptQualifiedClassName: string
+  cookedDir: string
+  cookManifestPath: string
+  buildDir: string
+  packageDir: string
+  packagedContentDir: string
+  packagedCookedDir: string
+  packagedSceneFilePath: string
+  packageManifestPath: string
   engineContentDir: string
   sceneFilePath: string
 }
