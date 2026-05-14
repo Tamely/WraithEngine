@@ -99,6 +99,9 @@ public:
 #endif
 
 private:
+  bool IsSimulationRunning() const;
+  void InstantiateAllEligibleScripts();
+
   // Instantiate a C# script class for the given objectId and call OnCreate().
   // Any existing instance for that objectId is destroyed first.
   void InstantiateScript(const std::string &ObjectId,
