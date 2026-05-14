@@ -43,4 +43,6 @@ struct AssetIdHash {
 };
 
 enum class EditorObjectLockState { Unlocked, Locked };
+
+enum class EditorRuntimeState { Edit, Playing, Paused };
 } // namespace Axiom

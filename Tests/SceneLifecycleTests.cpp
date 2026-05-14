@@ -20,10 +20,11 @@ public:
   std::vector<Axiom::PublishedEditorEvent> Events;
 };
 
-Axiom::CommandContext MakeContext(uint64_t FrameIndex = 1) {
+Axiom::CommandContext MakeContext(uint64_t FrameIndex = 1,
+                                  uint64_t UserId = 7) {
   return {
       .Session = Axiom::SessionId{1},
-      .User = Axiom::SessionUserId{7},
+      .User = Axiom::SessionUserId{UserId},
       .FrameIndex = FrameIndex,
       .DeltaTimeSeconds = 1.0f / 60.0f,
   };
@@ -96,6 +97,47 @@ std::filesystem::path WriteSingleMeshObj(const std::filesystem::path &ContentRoo
 }
 
 } // namespace
+
+TEST(SceneLifecycleTests, HostCanTransitionRuntimeStateThroughSimulationModes) {
+  Axiom::EditorSession Session = MakeWorldSession();
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(1, 1), {.Payload = Axiom::PlaySessionCommand{}});
+  Session.Tick();
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Playing);
+
+  Session.Submit(MakeContext(2, 1), {.Payload = Axiom::PauseSessionCommand{}});
+  Session.Tick();
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Paused);
+
+  Session.Submit(MakeContext(3, 1), {.Payload = Axiom::ResumeSessionCommand{}});
+  Session.Tick();
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Playing);
+
+  Session.Submit(MakeContext(4, 1), {.Payload = Axiom::StopSessionCommand{}});
+  Session.Tick();
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Edit);
+
+  const auto *RuntimeChanged =
+      FindEvent<Axiom::RuntimeStateChangedEvent>(Subscriber.Events);
+  ASSERT_NE(RuntimeChanged, nullptr);
+}
+
+TEST(SceneLifecycleTests, NonHostCannotControlRuntimeState) {
+  Axiom::EditorSession Session = MakeWorldSession();
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(), {.Payload = Axiom::PlaySessionCommand{}});
+  Session.Tick();
+
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Edit);
+  const auto *Rejected =
+      FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events);
+  ASSERT_NE(Rejected, nullptr);
+  EXPECT_NE(Rejected->Reason.find("host"), std::string::npos);
+}
 
 // ---------------------------------------------------------------------------
 // Create

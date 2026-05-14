@@ -176,6 +176,9 @@ std::string EventPayloadType(const EditorEventPayload &Payload) {
   if (std::holds_alternative<MaterialTextureChangedEvent>(Payload)) {
     return "material_texture_changed";
   }
+  if (std::holds_alternative<RuntimeStateChangedEvent>(Payload)) {
+    return "runtime_state_changed";
+  }
   return "object_transform_updated";
 }
 
@@ -207,6 +210,19 @@ std::string PresenceStateToString(EditorUserPresenceState State) {
   }
 
   return "connected";
+}
+
+std::string RuntimeStateToString(EditorRuntimeState State) {
+  switch (State) {
+  case EditorRuntimeState::Edit:
+    return "edit";
+  case EditorRuntimeState::Playing:
+    return "playing";
+  case EditorRuntimeState::Paused:
+    return "paused";
+  }
+
+  return "edit";
 }
 
 std::string LockStateToString(EditorObjectLockState State) {
@@ -499,6 +515,30 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
   }
   if (*Type == "quit") {
     return HeadlessCommand{.Type = HeadlessCommandType::Quit, .EditorPayload = {}};
+  }
+  if (*Type == "play_session") {
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::PlaySession,
+        .EditorPayload = {.Payload = PlaySessionCommand{}},
+    };
+  }
+  if (*Type == "pause_session") {
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::PauseSession,
+        .EditorPayload = {.Payload = PauseSessionCommand{}},
+    };
+  }
+  if (*Type == "resume_session") {
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::ResumeSession,
+        .EditorPayload = {.Payload = ResumeSessionCommand{}},
+    };
+  }
+  if (*Type == "stop_session") {
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::StopSession,
+        .EditorPayload = {.Payload = StopSessionCommand{}},
+    };
   }
   if (*Type == "set_look_active") {
     const auto BoolValue = MatchString(JsonLine, BoolPattern);
@@ -1031,6 +1071,10 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::SetLightProperties:
   case HeadlessCommandType::SetMaterialProperties:
   case HeadlessCommandType::SetMaterialTexture:
+  case HeadlessCommandType::PlaySession:
+  case HeadlessCommandType::PauseSession:
+  case HeadlessCommandType::ResumeSession:
+  case HeadlessCommandType::StopSession:
   case HeadlessCommandType::DropMesh:
   case HeadlessCommandType::DropTexture:
   case HeadlessCommandType::ReloadScripts:
@@ -1200,6 +1244,11 @@ std::string SerializeEvent(const PublishedEditorEvent &Event) {
                  std::get_if<MaterialTextureChangedEvent>(&Event.Event.Payload)) {
     Stream << ",\"objectId\":\"" << EscapeJson(TexEv->ObjectId)
            << "\",\"textureAssetPath\":\"" << EscapeJson(TexEv->TextureAssetPath) << "\"";
+  } else if (const auto *RuntimeState =
+                 std::get_if<RuntimeStateChangedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"user\":" << RuntimeState->User.Value
+           << ",\"runtimeState\":\""
+           << RuntimeStateToString(RuntimeState->State) << "\"";
   }
   Stream << "}";
   return Stream.str();
@@ -1360,6 +1409,8 @@ std::string SerializeSessionSnapshot(const EditorSessionState &State,
   std::ostringstream Stream;
   Stream << "{\"type\":\"session_snapshot\",\"sessionId\":" << State.Session.Value
          << ",\"currentUserId\":" << CurrentUser.Value
+         << ",\"runtimeState\":\"" << RuntimeStateToString(State.RuntimeState)
+         << "\""
          << ",\"transport\":{\"connected\":"
          << (TransportConnected ? "true" : "false") << ",\"state\":\""
          << EscapeJson(TransportState) << "\",\"webrtcConnectionState\":\""

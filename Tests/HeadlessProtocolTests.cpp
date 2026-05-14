@@ -169,6 +169,17 @@ TEST(HeadlessProtocolTests, RemoteViewportAcceptsSetGridSnapCommand) {
   EXPECT_FLOAT_EQ(Command->ScaleStep, 0.05f);
 }
 
+TEST(HeadlessProtocolTests, RemoteViewportAcceptsPlaySessionCommand) {
+  std::string Error;
+  const auto Command = Axiom::ParseRemoteViewportCommand(
+      R"json({"type":"play_session"})json", Error);
+
+  ASSERT_TRUE(Command.has_value()) << Error;
+  EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::PlaySession);
+  EXPECT_TRUE(
+      std::holds_alternative<Axiom::PlaySessionCommand>(Command->EditorPayload.Payload));
+}
+
 TEST(HeadlessProtocolTests, SerializesCommandRejectedEvent) {
   const Axiom::PublishedEditorEvent Event{
       .Id = Axiom::EventId{4},
@@ -284,6 +295,20 @@ TEST(HeadlessProtocolTests, SerializesObjectTransformUpdatedEvent) {
   EXPECT_NE(Json.find("\"scale\":[1,1.5,2]"), std::string::npos);
 }
 
+TEST(HeadlessProtocolTests, SerializesRuntimeStateChangedEvent) {
+  const Axiom::PublishedEditorEvent Event{
+      .Id = Axiom::EventId{17},
+      .Event = {.Payload = Axiom::RuntimeStateChangedEvent{
+                    .User = Axiom::SessionUserId{1},
+                    .State = Axiom::EditorRuntimeState::Playing,
+                }}};
+
+  const std::string Json = Axiom::SerializeEvent(Event);
+  EXPECT_NE(Json.find("\"payloadType\":\"runtime_state_changed\""),
+            std::string::npos);
+  EXPECT_NE(Json.find("\"runtimeState\":\"playing\""), std::string::npos);
+}
+
 TEST(HeadlessProtocolTests, SerializesRemoteViewportLifecycleMessages) {
   EXPECT_EQ(Axiom::SerializeConnected(), "{\"type\":\"connected\"}");
   EXPECT_EQ(Axiom::SerializeDisconnected(), "{\"type\":\"disconnected\"}");
@@ -366,6 +391,7 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
       State, Axiom::SessionUserId{1}, true, "connected", "connected");
   EXPECT_NE(Json.find("\"type\":\"session_snapshot\""), std::string::npos);
   EXPECT_NE(Json.find("\"currentUserId\":1"), std::string::npos);
+  EXPECT_NE(Json.find("\"runtimeState\":\"edit\""), std::string::npos);
   EXPECT_NE(Json.find("\"participants\""), std::string::npos);
   EXPECT_NE(Json.find("\"displayName\":\"Local User\""), std::string::npos);
   EXPECT_NE(Json.find("\"presenceState\":\"connected\""), std::string::npos);

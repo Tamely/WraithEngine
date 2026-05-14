@@ -134,6 +134,7 @@ struct EditorSceneState {
 
 struct EditorSessionState {
   SessionId Session;
+  EditorRuntimeState RuntimeState{EditorRuntimeState::Edit};
   std::unordered_map<SessionUserId, EditorViewportState, SessionUserIdHash>
       Viewports;
   std::unordered_map<SessionUserId, EditorUserPresence, SessionUserIdHash>
@@ -183,6 +184,7 @@ public:
   std::vector<EditorParticipant> BuildParticipants(SessionUserId CurrentUser) const;
   const EditorObjectCollaborationState *FindCollaborationState(
       std::string_view ObjectId) const;
+  EditorRuntimeState GetRuntimeState() const { return m_State.RuntimeState; }
 
   void AcquireLock(const std::string &ObjectId, SessionUserId User);
   void ReleaseLock(const std::string &ObjectId, SessionUserId User);
@@ -276,6 +278,14 @@ private:
                      const SetMaterialPropertiesCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SetMaterialTextureCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const PlaySessionCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const PauseSessionCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const ResumeSessionCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const StopSessionCommand &Command);
   void PublishEvent(const EditorEvent &Event);
 
 private:

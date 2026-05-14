@@ -62,6 +62,8 @@ std::string PresenceStateName(EditorUserPresenceState State) {
   return "connected";
 }
 
+bool IsHostUser(SessionUserId User) { return User.Value == 1; }
+
 std::string DefaultPresentationColor(SessionUserId User) {
   static constexpr const char *Palette[] = {
       "#F97316", "#22C55E", "#0EA5E9", "#F59E0B",
@@ -121,6 +123,18 @@ std::string CommandTypeName(const EditorCommandPayload &Payload) {
   }
   if (std::holds_alternative<SetMaterialTextureCommand>(Payload)) {
     return "set_material_texture";
+  }
+  if (std::holds_alternative<PlaySessionCommand>(Payload)) {
+    return "play_session";
+  }
+  if (std::holds_alternative<PauseSessionCommand>(Payload)) {
+    return "pause_session";
+  }
+  if (std::holds_alternative<ResumeSessionCommand>(Payload)) {
+    return "resume_session";
+  }
+  if (std::holds_alternative<StopSessionCommand>(Payload)) {
+    return "stop_session";
   }
   return "set_transform";
 }
@@ -1055,6 +1069,15 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
     return false;
   }
 
+  if ((std::holds_alternative<PlaySessionCommand>(QueuedCommand.Command.Payload) ||
+       std::holds_alternative<PauseSessionCommand>(QueuedCommand.Command.Payload) ||
+       std::holds_alternative<ResumeSessionCommand>(QueuedCommand.Command.Payload) ||
+       std::holds_alternative<StopSessionCommand>(QueuedCommand.Command.Payload)) &&
+      !IsHostUser(QueuedCommand.Context.User)) {
+    FailureReason = "Only the host can control simulation state.";
+    return false;
+  }
+
   const EditorViewportState &Viewport =
       const_cast<EditorSession *>(this)->EnsureViewport(QueuedCommand.Context.User);
 
@@ -1356,6 +1379,34 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
     }
     if (Details->Kind != EditorSceneItemKind::Mesh) {
       FailureReason = "SetMaterialTexture target must be a Mesh object.";
+      return false;
+    }
+  }
+
+  if (std::holds_alternative<PlaySessionCommand>(QueuedCommand.Command.Payload)) {
+    if (m_State.RuntimeState != EditorRuntimeState::Edit) {
+      FailureReason = "PlaySession is only valid while in edit mode.";
+      return false;
+    }
+  }
+
+  if (std::holds_alternative<PauseSessionCommand>(QueuedCommand.Command.Payload)) {
+    if (m_State.RuntimeState != EditorRuntimeState::Playing) {
+      FailureReason = "PauseSession is only valid while playing.";
+      return false;
+    }
+  }
+
+  if (std::holds_alternative<ResumeSessionCommand>(QueuedCommand.Command.Payload)) {
+    if (m_State.RuntimeState != EditorRuntimeState::Paused) {
+      FailureReason = "ResumeSession is only valid while paused.";
+      return false;
+    }
+  }
+
+  if (std::holds_alternative<StopSessionCommand>(QueuedCommand.Command.Payload)) {
+    if (m_State.RuntimeState == EditorRuntimeState::Edit) {
+      FailureReason = "StopSession is only valid while simulation is active.";
       return false;
     }
   }
@@ -1855,6 +1906,50 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
       .ObjectId         = Command.ObjectId,
       .TextureAssetPath = Command.TextureAssetPath,
   }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const PlaySessionCommand &Command) {
+  (void)Command;
+  EnsurePresence(QueuedCommand.Context.User);
+  m_State.RuntimeState = EditorRuntimeState::Playing;
+  PublishEvent({.Payload = RuntimeStateChangedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .State = m_State.RuntimeState,
+                }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const PauseSessionCommand &Command) {
+  (void)Command;
+  EnsurePresence(QueuedCommand.Context.User);
+  m_State.RuntimeState = EditorRuntimeState::Paused;
+  PublishEvent({.Payload = RuntimeStateChangedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .State = m_State.RuntimeState,
+                }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const ResumeSessionCommand &Command) {
+  (void)Command;
+  EnsurePresence(QueuedCommand.Context.User);
+  m_State.RuntimeState = EditorRuntimeState::Playing;
+  PublishEvent({.Payload = RuntimeStateChangedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .State = m_State.RuntimeState,
+                }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const StopSessionCommand &Command) {
+  (void)Command;
+  EnsurePresence(QueuedCommand.Context.User);
+  m_State.RuntimeState = EditorRuntimeState::Edit;
+  PublishEvent({.Payload = RuntimeStateChangedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .State = m_State.RuntimeState,
+                }});
 }
 
 void EditorSession::SetContentDir(std::filesystem::path ContentDir) {
