@@ -90,7 +90,7 @@ void HeadlessSessionLayer::OnAttach() {
 }
 
 void HeadlessSessionLayer::OnUpdate() {
-  m_Session.Tick();
+  m_Session.Tick(Application::Get().GetDeltaTime());
   if (m_ScriptHost != nullptr) {
     m_ScriptHost->Tick(Application::Get().GetDeltaTime());
   }

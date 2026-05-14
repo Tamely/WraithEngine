@@ -2,6 +2,7 @@
 
 #include "Assets/AssetCooker.h"
 #include "Assets/MeshAsset.h"
+#include "Physics/PhysicsWorld.h"
 
 #include <Core/Log.h>
 
@@ -284,16 +285,21 @@ EditorSession::EditorSession(SessionId Session, EditorSessionConfig Config)
   InitSceneRoot();
 }
 
+EditorSession::~EditorSession() = default;
+EditorSession::EditorSession(EditorSession &&) noexcept = default;
+EditorSession &EditorSession::operator=(EditorSession &&) noexcept = default;
+
 void EditorSession::Submit(const CommandContext &Context,
                            const EditorCommand &Command) {
   m_MessageBus.EnqueueCommand(Context, Command);
 }
 
-void EditorSession::Tick() {
+void EditorSession::Tick(float DeltaTimeSeconds) {
   m_MessageBus.DispatchQueuedCommands(
       [this](const QueuedEditorCommand &QueuedCommand) {
         ProcessCommand(QueuedCommand);
       });
+  StepRuntimePhysics(DeltaTimeSeconds);
 }
 
 void EditorSession::Subscribe(IEditorEventSubscriber *Subscriber) {
@@ -1734,21 +1740,29 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
 void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                   const SetTransformCommand &Command) {
   EnsurePresence(QueuedCommand.Context.User);
-  auto DetailsIt = m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
+  ApplyWorldTransform(
+      Command.ObjectId,
+      EditorTransformDetails{
+          .Location = Command.Location,
+          .RotationDegrees = Command.RotationDegrees,
+          .Scale = Command.Scale,
+      },
+      QueuedCommand.Context.User, true);
+}
+
+void EditorSession::ApplyWorldTransform(std::string_view ObjectId,
+                                        const EditorTransformDetails &WorldTD,
+                                        SessionUserId User,
+                                        bool ShouldPublish) {
+  auto DetailsIt = m_State.Scene.ObjectDetailsById.find(std::string(ObjectId));
   if (DetailsIt == m_State.Scene.ObjectDetailsById.end()) {
     return;
   }
 
-  const EditorTransformDetails WorldTD{
-      .Location = Command.Location,
-      .RotationDegrees = Command.RotationDegrees,
-      .Scale = Command.Scale,
-  };
   const glm::mat4 WorldMatrix = BuildTransformMatrix(WorldTD);
 
-  // Convert world-space command to local-space for storage
   EditorTransformDetails LocalTD = WorldTD;
-  const Instance *Node = FindInstanceById(m_SceneRoot.get(), Command.ObjectId);
+  const Instance *Node = FindInstanceById(m_SceneRoot.get(), ObjectId);
   if (Node && Node->GetParent() && Node->GetParent() != m_SceneRoot.get()) {
     const glm::mat4 ParentWorld = ComputeWorldTransformMatrix(Node->GetParent());
     LocalTD = DecomposeMatrix(glm::inverse(ParentWorld) * WorldMatrix);
@@ -1758,25 +1772,27 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
   DetailsIt->second.WorldTransform = WorldTD;
 
   for (EditorSceneMeshInstance &Inst : m_State.Scene.MeshInstances) {
-    if (Inst.ObjectId == Command.ObjectId) {
+    if (Inst.ObjectId == ObjectId) {
       Inst.Transform = WorldMatrix;
       break;
     }
   }
 
-  // Propagate to children whose world positions depend on this object
   if (Node) {
-    for (const Instance *Child : Node->GetChildren())
+    for (const Instance *Child : Node->GetChildren()) {
       RecomputeSubtreeWorldTransforms(Child);
+    }
   }
 
-  PublishEvent({.Payload = ObjectTransformUpdatedEvent{
-                    .User = QueuedCommand.Context.User,
-                    .ObjectId = Command.ObjectId,
-                    .Location = Command.Location,
-                    .RotationDegrees = Command.RotationDegrees,
-                    .Scale = Command.Scale,
-                }});
+  if (ShouldPublish) {
+    PublishEvent({.Payload = ObjectTransformUpdatedEvent{
+                      .User = User,
+                      .ObjectId = std::string(ObjectId),
+                      .Location = WorldTD.Location,
+                      .RotationDegrees = WorldTD.RotationDegrees,
+                      .Scale = WorldTD.Scale,
+                  }});
+  }
 }
 
 void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
@@ -1943,6 +1959,45 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
   }});
 }
 
+void EditorSession::EnsurePhysicsWorldStarted() {
+  if (m_PhysicsWorld == nullptr) {
+    m_PhysicsWorld = std::make_unique<PhysicsWorld>();
+  }
+  if (!m_PhysicsWorld->IsAvailable()) {
+    A_CORE_WARN("EditorSession: physics requested but backend is unavailable");
+    return;
+  }
+  m_PhysicsWorld->Start(m_State.Scene);
+}
+
+void EditorSession::StopPhysicsWorld() {
+  if (m_PhysicsWorld != nullptr) {
+    m_PhysicsWorld->Stop();
+  }
+}
+
+void EditorSession::StepRuntimePhysics(float DeltaTimeSeconds) {
+  if (m_State.RuntimeState != EditorRuntimeState::Playing ||
+      m_PhysicsWorld == nullptr || !m_PhysicsWorld->IsRunning()) {
+    return;
+  }
+
+  for (const PhysicsTransformUpdate &Update : m_PhysicsWorld->Step(DeltaTimeSeconds)) {
+    const EditorObjectDetails *Existing = FindObjectDetails(Update.ObjectId);
+    if (Existing == nullptr) {
+      continue;
+    }
+
+    EditorTransformDetails Applied = Update.WorldTransform;
+    if (Existing->WorldTransform.has_value()) {
+      Applied.Scale = Existing->WorldTransform->Scale;
+    } else if (Existing->Transform.has_value()) {
+      Applied.Scale = Existing->Transform->Scale;
+    }
+    ApplyWorldTransform(Update.ObjectId, Applied, SessionUserId{1}, true);
+  }
+}
+
 void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                   const PlaySessionCommand &Command) {
   (void)Command;
@@ -1952,6 +2007,7 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
       .SelectedObjectIds = m_State.SelectedObjectIds,
   };
   m_State.RuntimeState = EditorRuntimeState::Playing;
+  EnsurePhysicsWorldStarted();
   PublishEvent({.Payload = RuntimeStateChangedEvent{
                     .User = QueuedCommand.Context.User,
                     .State = m_State.RuntimeState,
@@ -1984,6 +2040,7 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                   const StopSessionCommand &Command) {
   (void)Command;
   EnsurePresence(QueuedCommand.Context.User);
+  StopPhysicsWorld();
   if (m_RuntimeSceneSnapshot.has_value()) {
     SetSceneState(std::move(m_RuntimeSceneSnapshot->Scene));
     m_State.SelectedObjectIds = std::move(m_RuntimeSceneSnapshot->SelectedObjectIds);

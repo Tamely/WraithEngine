@@ -45,4 +45,8 @@ struct AssetIdHash {
 enum class EditorObjectLockState { Unlocked, Locked };
 
 enum class EditorRuntimeState { Edit, Playing, Paused };
+
+enum class EditorPhysicsBodyType { None, Static, Dynamic };
+
+enum class EditorPhysicsColliderType { None, Box, Sphere };
 } // namespace Axiom

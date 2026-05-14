@@ -139,6 +139,226 @@ TEST(SceneLifecycleTests, NonHostCannotControlRuntimeState) {
   EXPECT_NE(Rejected->Reason.find("host"), std::string::npos);
 }
 
+TEST(SceneLifecycleTests, PhysicsStepsDynamicBodiesOnlyWhilePlaying) {
+#if !AXIOM_ENABLE_PHYSICS
+  GTEST_SKIP() << "Physics backend disabled for this build.";
+#else
+  Axiom::EditorSession Session = MakeWorldSession();
+  Session.SetObjectDetails({
+      {
+          .ObjectId = "world",
+          .DisplayName = "World",
+          .Kind = Axiom::EditorSceneItemKind::Folder,
+          .Visible = true,
+          .SupportsTransform = false,
+          .TransformReadOnly = true,
+      },
+      {
+          .ObjectId = "floor",
+          .DisplayName = "Floor",
+          .Kind = Axiom::EditorSceneItemKind::Mesh,
+          .Visible = true,
+          .SupportsTransform = true,
+          .TransformReadOnly = false,
+          .Transform = Axiom::EditorTransformDetails{
+              .Location = glm::vec3(0.0f, -1.0f, 0.0f),
+              .RotationDegrees = glm::vec3(0.0f),
+              .Scale = glm::vec3(1.0f),
+          },
+          .Physics = Axiom::EditorPhysicsProperties{
+              .BodyType = Axiom::EditorPhysicsBodyType::Static,
+              .ColliderType = Axiom::EditorPhysicsColliderType::Box,
+              .BoxHalfExtents = glm::vec3(8.0f, 0.5f, 8.0f),
+          },
+      },
+      {
+          .ObjectId = "ball",
+          .DisplayName = "Ball",
+          .Kind = Axiom::EditorSceneItemKind::Actor,
+          .Visible = true,
+          .SupportsTransform = true,
+          .TransformReadOnly = false,
+          .Transform = Axiom::EditorTransformDetails{
+              .Location = glm::vec3(0.0f, 5.0f, 0.0f),
+              .RotationDegrees = glm::vec3(0.0f),
+              .Scale = glm::vec3(1.0f),
+          },
+          .Physics = Axiom::EditorPhysicsProperties{
+              .BodyType = Axiom::EditorPhysicsBodyType::Dynamic,
+              .ColliderType = Axiom::EditorPhysicsColliderType::Sphere,
+              .SphereRadius = 0.5f,
+              .Mass = 1.0f,
+          },
+      },
+  });
+  Session.SetSceneItems({{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {{
+                       .Id = "floor",
+                       .DisplayName = "Floor",
+                       .Kind = Axiom::EditorSceneItemKind::Mesh,
+                       .Visible = true,
+                   },
+                   {
+                       .Id = "ball",
+                       .DisplayName = "Ball",
+                       .Kind = Axiom::EditorSceneItemKind::Actor,
+                       .Visible = true,
+                   }},
+  }});
+
+  Session.Submit(MakeContext(1, 1), {.Payload = Axiom::PlaySessionCommand{}});
+  Session.Tick(1.0f / 60.0f);
+  for (int Step = 0; Step < 60; ++Step) {
+    Session.Tick(1.0f / 60.0f);
+  }
+
+  const auto *Ball = Session.FindObjectDetails("ball");
+  ASSERT_NE(Ball, nullptr);
+  ASSERT_TRUE(Ball->WorldTransform.has_value() || Ball->Transform.has_value());
+  const Axiom::EditorTransformDetails &Transform =
+      Ball->WorldTransform.has_value() ? *Ball->WorldTransform : *Ball->Transform;
+  EXPECT_LT(Transform.Location.y, 5.0f);
+#endif
+}
+
+TEST(SceneLifecycleTests, PhysicsPauseFreezesDynamicBodies) {
+#if !AXIOM_ENABLE_PHYSICS
+  GTEST_SKIP() << "Physics backend disabled for this build.";
+#else
+  Axiom::EditorSession Session = MakeWorldSession();
+  Session.SetObjectDetails({
+      {
+          .ObjectId = "world",
+          .DisplayName = "World",
+          .Kind = Axiom::EditorSceneItemKind::Folder,
+          .Visible = true,
+          .SupportsTransform = false,
+          .TransformReadOnly = true,
+      },
+      {
+          .ObjectId = "ball",
+          .DisplayName = "Ball",
+          .Kind = Axiom::EditorSceneItemKind::Actor,
+          .Visible = true,
+          .SupportsTransform = true,
+          .TransformReadOnly = false,
+          .Transform = Axiom::EditorTransformDetails{
+              .Location = glm::vec3(0.0f, 3.0f, 0.0f),
+              .RotationDegrees = glm::vec3(0.0f),
+              .Scale = glm::vec3(1.0f),
+          },
+          .Physics = Axiom::EditorPhysicsProperties{
+              .BodyType = Axiom::EditorPhysicsBodyType::Dynamic,
+              .ColliderType = Axiom::EditorPhysicsColliderType::Sphere,
+              .SphereRadius = 0.5f,
+              .Mass = 1.0f,
+          },
+      },
+  });
+  Session.SetSceneItems({{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {{
+          .Id = "ball",
+          .DisplayName = "Ball",
+          .Kind = Axiom::EditorSceneItemKind::Actor,
+          .Visible = true,
+      }},
+  }});
+
+  Session.Submit(MakeContext(1, 1), {.Payload = Axiom::PlaySessionCommand{}});
+  for (int Step = 0; Step < 20; ++Step) {
+    Session.Tick(1.0f / 60.0f);
+  }
+  Session.Submit(MakeContext(2, 1), {.Payload = Axiom::PauseSessionCommand{}});
+  Session.Tick(1.0f / 60.0f);
+
+  const auto *BeforePause = Session.FindObjectDetails("ball");
+  ASSERT_NE(BeforePause, nullptr);
+  const float BeforeY =
+      (BeforePause->WorldTransform.has_value() ? BeforePause->WorldTransform->Location.y
+                                               : BeforePause->Transform->Location.y);
+
+  for (int Step = 0; Step < 30; ++Step) {
+    Session.Tick(1.0f / 60.0f);
+  }
+
+  const auto *AfterPause = Session.FindObjectDetails("ball");
+  ASSERT_NE(AfterPause, nullptr);
+  const float AfterY =
+      (AfterPause->WorldTransform.has_value() ? AfterPause->WorldTransform->Location.y
+                                              : AfterPause->Transform->Location.y);
+  EXPECT_NEAR(AfterY, BeforeY, 0.0001f);
+#endif
+}
+
+TEST(SceneLifecycleTests, PhysicsStopRestoresPrePlayTransformState) {
+#if !AXIOM_ENABLE_PHYSICS
+  GTEST_SKIP() << "Physics backend disabled for this build.";
+#else
+  Axiom::EditorSession Session = MakeWorldSession();
+  Session.SetObjectDetails({
+      {
+          .ObjectId = "world",
+          .DisplayName = "World",
+          .Kind = Axiom::EditorSceneItemKind::Folder,
+          .Visible = true,
+          .SupportsTransform = false,
+          .TransformReadOnly = true,
+      },
+      {
+          .ObjectId = "ball",
+          .DisplayName = "Ball",
+          .Kind = Axiom::EditorSceneItemKind::Actor,
+          .Visible = true,
+          .SupportsTransform = true,
+          .TransformReadOnly = false,
+          .Transform = Axiom::EditorTransformDetails{
+              .Location = glm::vec3(1.0f, 4.0f, 0.0f),
+              .RotationDegrees = glm::vec3(0.0f),
+              .Scale = glm::vec3(1.0f),
+          },
+          .Physics = Axiom::EditorPhysicsProperties{
+              .BodyType = Axiom::EditorPhysicsBodyType::Dynamic,
+              .ColliderType = Axiom::EditorPhysicsColliderType::Sphere,
+              .SphereRadius = 0.5f,
+              .Mass = 1.0f,
+          },
+      },
+  });
+  Session.SetSceneItems({{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {{
+          .Id = "ball",
+          .DisplayName = "Ball",
+          .Kind = Axiom::EditorSceneItemKind::Actor,
+          .Visible = true,
+      }},
+  }});
+
+  Session.Submit(MakeContext(1, 1), {.Payload = Axiom::PlaySessionCommand{}});
+  for (int Step = 0; Step < 20; ++Step) {
+    Session.Tick(1.0f / 60.0f);
+  }
+  Session.Submit(MakeContext(2, 1), {.Payload = Axiom::StopSessionCommand{}});
+  Session.Tick(1.0f / 60.0f);
+
+  const auto *Ball = Session.FindObjectDetails("ball");
+  ASSERT_NE(Ball, nullptr);
+  ASSERT_TRUE(Ball->Transform.has_value());
+  EXPECT_EQ(Ball->Transform->Location, glm::vec3(1.0f, 4.0f, 0.0f));
+#endif
+}
+
 TEST(SceneLifecycleTests, StopSessionRestoresPrePlayTransformState) {
   Axiom::EditorSession Session = MakeWorldSession();
   Session.SetObjectDetails({

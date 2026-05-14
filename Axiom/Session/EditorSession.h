@@ -19,6 +19,8 @@
 #include <vector>
 
 namespace Axiom {
+class PhysicsWorld;
+
 struct EditorSessionConfig {
   glm::vec3 InitialCameraPosition{0.0f, 0.8f, 3.5f};
   glm::vec3 InitialCameraTarget{0.0f, 0.3f, 0.0f};
@@ -66,6 +68,14 @@ struct EditorMaterialProperties {
   std::optional<std::string> TextureAssetPath; // content-relative path, nullopt = embedded
 };
 
+struct EditorPhysicsProperties {
+  EditorPhysicsBodyType BodyType{EditorPhysicsBodyType::None};
+  EditorPhysicsColliderType ColliderType{EditorPhysicsColliderType::None};
+  glm::vec3 BoxHalfExtents{0.5f, 0.5f, 0.5f};
+  float SphereRadius{0.5f};
+  float Mass{1.0f};
+};
+
 struct EditorObjectDetails {
   std::string ObjectId;
   std::string DisplayName;
@@ -79,6 +89,7 @@ struct EditorObjectDetails {
   std::optional<std::string> ScriptClass;               // C# script class name (Actor objects only)
   std::optional<EditorLightProperties> Light;           // Light objects only
   std::optional<EditorMaterialProperties> Material;     // Mesh objects only
+  std::optional<EditorPhysicsProperties> Physics;
   std::optional<std::string> GeneratedFromAssetRootId;
   std::string AssetRelativePath; // content-relative path when assigned directly to this object
 };
@@ -148,10 +159,15 @@ class EditorSession final : public IEditorCommandSink {
 public:
   EditorSession(SessionId Session,
                 EditorSessionConfig Config = EditorSessionConfig{});
+  ~EditorSession();
+  EditorSession(const EditorSession &) = delete;
+  EditorSession &operator=(const EditorSession &) = delete;
+  EditorSession(EditorSession &&) noexcept;
+  EditorSession &operator=(EditorSession &&) noexcept;
 
   void Submit(const CommandContext &Context,
               const EditorCommand &Command) override;
-  void Tick();
+  void Tick(float DeltaTimeSeconds = 1.0f / 60.0f);
 
   void Subscribe(IEditorEventSubscriber *Subscriber);
   void Unsubscribe(IEditorEventSubscriber *Subscriber);
@@ -286,6 +302,12 @@ private:
                      const ResumeSessionCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const StopSessionCommand &Command);
+  void ApplyWorldTransform(std::string_view ObjectId,
+                           const EditorTransformDetails &WorldTransform,
+                           SessionUserId User, bool PublishEvent);
+  void EnsurePhysicsWorldStarted();
+  void StopPhysicsWorld();
+  void StepRuntimePhysics(float DeltaTimeSeconds);
   void PublishEvent(const EditorEvent &Event);
 
 private:
@@ -301,5 +323,6 @@ private:
   std::unique_ptr<DataModel> m_SceneRoot;
   std::filesystem::path m_ContentDir;
   std::optional<RuntimeSceneSnapshot> m_RuntimeSceneSnapshot;
+  std::unique_ptr<PhysicsWorld> m_PhysicsWorld;
 };
 } // namespace Axiom
