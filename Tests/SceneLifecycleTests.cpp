@@ -139,6 +139,155 @@ TEST(SceneLifecycleTests, NonHostCannotControlRuntimeState) {
   EXPECT_NE(Rejected->Reason.find("host"), std::string::npos);
 }
 
+TEST(SceneLifecycleTests, StopSessionRestoresPrePlayTransformState) {
+  Axiom::EditorSession Session = MakeWorldSession();
+  Session.SetObjectDetails({
+      {
+          .ObjectId = "world",
+          .DisplayName = "World",
+          .Kind = Axiom::EditorSceneItemKind::Folder,
+          .Visible = true,
+          .SupportsTransform = false,
+          .TransformReadOnly = true,
+      },
+      {
+          .ObjectId = "crate-1",
+          .DisplayName = "Crate",
+          .Kind = Axiom::EditorSceneItemKind::Mesh,
+          .Visible = true,
+          .SupportsTransform = true,
+          .TransformReadOnly = false,
+          .Transform = Axiom::EditorTransformDetails{
+              .Location = glm::vec3(1.0f, 2.0f, 3.0f),
+              .RotationDegrees = glm::vec3(0.0f, 0.0f, 0.0f),
+              .Scale = glm::vec3(1.0f),
+          },
+      },
+  });
+  Session.SetSceneItems({{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {{
+          .Id = "crate-1",
+          .DisplayName = "Crate",
+          .Kind = Axiom::EditorSceneItemKind::Mesh,
+          .Visible = true,
+          .Children = {},
+      }},
+  }});
+
+  Session.Submit(MakeContext(1, 1), {.Payload = Axiom::PlaySessionCommand{}});
+  Session.Tick();
+  Session.Submit(MakeContext(2, 1),
+                 {.Payload = Axiom::SetTransformCommand{
+                      .ObjectId = "crate-1",
+                      .Location = glm::vec3(9.0f, 8.0f, 7.0f),
+                      .RotationDegrees = glm::vec3(10.0f, 20.0f, 30.0f),
+                      .Scale = glm::vec3(2.0f),
+                  }});
+  Session.Tick();
+  Session.Submit(MakeContext(3, 1), {.Payload = Axiom::StopSessionCommand{}});
+  Session.Tick();
+
+  const auto *Details = Session.FindObjectDetails("crate-1");
+  ASSERT_NE(Details, nullptr);
+  ASSERT_TRUE(Details->Transform.has_value());
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Edit);
+  EXPECT_EQ(Details->Transform->Location, glm::vec3(1.0f, 2.0f, 3.0f));
+  EXPECT_EQ(Details->Transform->RotationDegrees, glm::vec3(0.0f, 0.0f, 0.0f));
+  EXPECT_EQ(Details->Transform->Scale, glm::vec3(1.0f));
+}
+
+TEST(SceneLifecycleTests, StopSessionRemovesObjectsCreatedDuringPlay) {
+  Axiom::EditorSession Session = MakeWorldSession();
+
+  Session.Submit(MakeContext(1, 1), {.Payload = Axiom::PlaySessionCommand{}});
+  Session.Tick();
+  Session.Submit(MakeContext(2, 1),
+                 {.Payload = Axiom::CreateObjectCommand{.TemplateId = "Mesh"}});
+  Session.Tick();
+
+  const auto *WorldBeforeStop = Session.FindSceneItem("world");
+  ASSERT_NE(WorldBeforeStop, nullptr);
+  ASSERT_EQ(WorldBeforeStop->Children.size(), 1u);
+  const std::string CreatedId = WorldBeforeStop->Children.front().Id;
+
+  Session.Submit(MakeContext(3, 1), {.Payload = Axiom::StopSessionCommand{}});
+  Session.Tick();
+
+  const auto *WorldAfterStop = Session.FindSceneItem("world");
+  ASSERT_NE(WorldAfterStop, nullptr);
+  EXPECT_TRUE(WorldAfterStop->Children.empty());
+  EXPECT_EQ(Session.FindSceneItem(CreatedId), nullptr);
+  EXPECT_EQ(Session.FindObjectDetails(CreatedId), nullptr);
+}
+
+TEST(SceneLifecycleTests, StopSessionRestoresPrePlayMaterialState) {
+  auto Mat = std::make_shared<Axiom::MaterialInstance>();
+  Mat->BaseColorFactor = glm::vec4(0.2f, 0.3f, 0.4f, 1.0f);
+  Mat->Metallic = 0.1f;
+  Mat->Roughness = 0.8f;
+
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  Session.SetSceneItems({{
+      .Id = "crate-1",
+      .DisplayName = "Crate",
+      .Kind = Axiom::EditorSceneItemKind::Mesh,
+      .Visible = true,
+      .Children = {},
+  }});
+  Session.SetObjectDetails({{
+      .ObjectId = "crate-1",
+      .DisplayName = "Crate",
+      .Kind = Axiom::EditorSceneItemKind::Mesh,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      .Transform = Axiom::EditorTransformDetails{},
+      .Material = Axiom::EditorMaterialProperties{
+          .BaseColorFactor = glm::vec4(0.2f, 0.3f, 0.4f, 1.0f),
+          .Metallic = 0.1f,
+          .Roughness = 0.8f,
+      },
+  }});
+  Session.SetSceneMeshInstances({{
+      .ObjectId = "crate-1",
+      .Mesh = {},
+      .Material = Mat,
+      .RenderPath = Axiom::MeshRenderPath::Graphics,
+      .Transform = glm::mat4(1.0f),
+  }});
+
+  Session.Submit(MakeContext(1, 1), {.Payload = Axiom::PlaySessionCommand{}});
+  Session.Tick();
+  Session.Submit(MakeContext(2, 1),
+                 {.Payload = Axiom::SetMaterialPropertiesCommand{
+                      .ObjectId = "crate-1",
+                      .BaseColorFactor = glm::vec4(0.9f, 0.1f, 0.2f, 1.0f),
+                      .Metallic = 0.95f,
+                      .Roughness = 0.05f,
+                  }});
+  Session.Tick();
+  Session.Submit(MakeContext(3, 1), {.Payload = Axiom::StopSessionCommand{}});
+  Session.Tick();
+
+  const auto *Details = Session.FindObjectDetails("crate-1");
+  ASSERT_NE(Details, nullptr);
+  ASSERT_TRUE(Details->Material.has_value());
+  EXPECT_FLOAT_EQ(Details->Material->BaseColorFactor.r, 0.2f);
+  EXPECT_FLOAT_EQ(Details->Material->Metallic, 0.1f);
+  EXPECT_FLOAT_EQ(Details->Material->Roughness, 0.8f);
+
+  const auto &Instances = Session.GetState().Scene.MeshInstances;
+  ASSERT_EQ(Instances.size(), 1u);
+  ASSERT_TRUE(Instances[0].Material != nullptr);
+  EXPECT_FLOAT_EQ(Instances[0].Material->BaseColorFactor.r, 0.2f);
+  EXPECT_FLOAT_EQ(Instances[0].Material->Metallic, 0.1f);
+  EXPECT_FLOAT_EQ(Instances[0].Material->Roughness, 0.8f);
+}
+
 // ---------------------------------------------------------------------------
 // Create
 // ---------------------------------------------------------------------------

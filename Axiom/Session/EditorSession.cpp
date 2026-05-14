@@ -242,6 +242,41 @@ glm::mat4 BuildTransformMatrix(const EditorTransformDetails &Transform) {
   Matrix = glm::scale(Matrix, Transform.Scale);
   return Matrix;
 }
+
+TextureSourceDataRef CloneTextureSourceData(
+    const TextureSourceDataRef &Texture) {
+  if (!Texture) {
+    return nullptr;
+  }
+
+  auto Copy = std::make_shared<TextureSourceData>();
+  Copy->Width = Texture->Width;
+  Copy->Height = Texture->Height;
+  Copy->Pixels = Texture->Pixels;
+  return Copy;
+}
+
+MaterialInstanceRef CloneMaterialInstance(const MaterialInstanceRef &Material) {
+  if (!Material) {
+    return nullptr;
+  }
+
+  auto Copy = std::make_shared<MaterialInstance>();
+  Copy->BaseColorTexture = CloneTextureSourceData(Material->BaseColorTexture);
+  Copy->BaseColorFactor = Material->BaseColorFactor;
+  Copy->Metallic = Material->Metallic;
+  Copy->Roughness = Material->Roughness;
+  Copy->TextureAssetPath = Material->TextureAssetPath;
+  return Copy;
+}
+
+EditorSceneState CloneEditorSceneState(const EditorSceneState &Scene) {
+  EditorSceneState Copy = Scene;
+  for (auto &MeshInstance : Copy.MeshInstances) {
+    MeshInstance.Material = CloneMaterialInstance(MeshInstance.Material);
+  }
+  return Copy;
+}
 } // namespace
 
 EditorSession::EditorSession(SessionId Session, EditorSessionConfig Config)
@@ -1912,6 +1947,10 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                   const PlaySessionCommand &Command) {
   (void)Command;
   EnsurePresence(QueuedCommand.Context.User);
+  m_RuntimeSceneSnapshot = RuntimeSceneSnapshot{
+      .Scene = CloneEditorSceneState(m_State.Scene),
+      .SelectedObjectIds = m_State.SelectedObjectIds,
+  };
   m_State.RuntimeState = EditorRuntimeState::Playing;
   PublishEvent({.Payload = RuntimeStateChangedEvent{
                     .User = QueuedCommand.Context.User,
@@ -1945,6 +1984,12 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                   const StopSessionCommand &Command) {
   (void)Command;
   EnsurePresence(QueuedCommand.Context.User);
+  if (m_RuntimeSceneSnapshot.has_value()) {
+    SetSceneState(std::move(m_RuntimeSceneSnapshot->Scene));
+    m_State.SelectedObjectIds = std::move(m_RuntimeSceneSnapshot->SelectedObjectIds);
+    PruneInvalidSelections();
+    m_RuntimeSceneSnapshot.reset();
+  }
   m_State.RuntimeState = EditorRuntimeState::Edit;
   PublishEvent({.Payload = RuntimeStateChangedEvent{
                     .User = QueuedCommand.Context.User,

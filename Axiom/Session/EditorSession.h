@@ -289,10 +289,17 @@ private:
   void PublishEvent(const EditorEvent &Event);
 
 private:
+  struct RuntimeSceneSnapshot {
+    EditorSceneState Scene;
+    std::unordered_map<SessionUserId, std::string, SessionUserIdHash>
+        SelectedObjectIds;
+  };
+
   EditorSessionConfig m_Config;
   EditorSessionState m_State;
   EditorMessageBus m_MessageBus;
   std::unique_ptr<DataModel> m_SceneRoot;
   std::filesystem::path m_ContentDir;
+  std::optional<RuntimeSceneSnapshot> m_RuntimeSceneSnapshot;
 };
 } // namespace Axiom
