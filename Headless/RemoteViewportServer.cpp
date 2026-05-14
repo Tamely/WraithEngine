@@ -2959,6 +2959,73 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
         }
         return true;
       }
+    } else if (Name == "physicsBodyType" || Name == "physicsColliderType" ||
+               Name == "physicsBoxHalfExtents" || Name == "physicsSphereRadius" ||
+               Name == "physicsMass") {
+      const auto &DetailsById =
+          m_Host.GetHeadlessLayer().GetSession().GetState().Scene.ObjectDetailsById;
+      const auto It = DetailsById.find(ObjId);
+      if (It == DetailsById.end() || !It->second.SupportsTransform) {
+        return false;
+      }
+
+      Axiom::EditorPhysicsProperties Physics =
+          It->second.Physics.value_or(Axiom::EditorPhysicsProperties{});
+      if (Name == "physicsBodyType") {
+        const auto *S = std::get_if<std::string>(&Val);
+        if (S == nullptr) {
+          return false;
+        }
+        if (*S == "none") {
+          Physics.BodyType = Axiom::EditorPhysicsBodyType::None;
+        } else if (*S == "static") {
+          Physics.BodyType = Axiom::EditorPhysicsBodyType::Static;
+        } else if (*S == "dynamic") {
+          Physics.BodyType = Axiom::EditorPhysicsBodyType::Dynamic;
+        } else {
+          return false;
+        }
+      } else if (Name == "physicsColliderType") {
+        const auto *S = std::get_if<std::string>(&Val);
+        if (S == nullptr) {
+          return false;
+        }
+        if (*S == "none") {
+          Physics.ColliderType = Axiom::EditorPhysicsColliderType::None;
+        } else if (*S == "box") {
+          Physics.ColliderType = Axiom::EditorPhysicsColliderType::Box;
+        } else if (*S == "sphere") {
+          Physics.ColliderType = Axiom::EditorPhysicsColliderType::Sphere;
+        } else {
+          return false;
+        }
+      } else if (Name == "physicsBoxHalfExtents") {
+        const auto *V = std::get_if<glm::vec3>(&Val);
+        if (V == nullptr) {
+          return false;
+        }
+        Physics.BoxHalfExtents = *V;
+      } else if (Name == "physicsSphereRadius") {
+        const auto *Number = std::get_if<float>(&Val);
+        if (Number == nullptr) {
+          return false;
+        }
+        Physics.SphereRadius = *Number;
+      } else if (Name == "physicsMass") {
+        const auto *Number = std::get_if<float>(&Val);
+        if (Number == nullptr) {
+          return false;
+        }
+        Physics.Mass = *Number;
+      }
+
+      m_Host.SubmitRemoteCommand(
+          Client->User,
+          EditorCommand{SetPhysicsPropertiesCommand{
+              .ObjectId = ObjId,
+              .Physics = Physics,
+          }});
+      return true;
     } else if (Name == "location" || Name == "rotationDegrees" || Name == "scale") {
       if (const auto *V = std::get_if<glm::vec3>(&Val)) {
         const auto &DetailsById =

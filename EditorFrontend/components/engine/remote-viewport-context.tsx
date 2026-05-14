@@ -52,7 +52,7 @@ export interface SessionAssetDescriptor {
 
 export interface SessionPropertyDescriptor {
   name: string
-  type: "string" | "bool" | "vec3"
+  type: "string" | "bool" | "number" | "vec3" | "enum"
   readOnly: boolean
   value?: string
 }
@@ -115,6 +115,14 @@ export interface SessionMaterialDetails {
   textureAssetPath: string | null
 }
 
+export interface SessionPhysicsDetails {
+  bodyType: "none" | "static" | "dynamic"
+  colliderType: "none" | "box" | "sphere"
+  boxHalfExtents: [number, number, number]
+  sphereRadius: number
+  mass: number
+}
+
 export interface SessionObjectDetails {
   objectId: string
   displayName: string
@@ -127,6 +135,7 @@ export interface SessionObjectDetails {
   transform: SessionTransformDetails | null
   light: SessionLightDetails | null
   material: SessionMaterialDetails | null
+  physics: SessionPhysicsDetails | null
   collaboration: {
     selectedByUserIds: number[]
     lockState: "unlocked" | "locked"
@@ -160,7 +169,7 @@ interface RemoteViewportActions {
   setProperty: (
     objectId: string,
     property: string,
-    value: string | boolean | [number, number, number]
+    value: string | number | boolean | [number, number, number]
   ) => Promise<boolean>
   reloadScripts: () => Promise<void>
   setMeshAsset: (objectId: string, assetPath: string) => Promise<boolean>
@@ -250,7 +259,7 @@ interface RemoteViewportContextValue {
   setProperty: (
     objectId: string,
     property: string,
-    value: string | boolean | [number, number, number]
+    value: string | number | boolean | [number, number, number]
   ) => Promise<boolean>
   reloadScripts: () => Promise<void>
   setMeshAsset: (objectId: string, assetPath: string) => Promise<boolean>
@@ -557,7 +566,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     async (
       objectId: string,
       property: string,
-      value: string | boolean | [number, number, number]
+      value: string | number | boolean | [number, number, number]
     ) => actionsRef.current.setProperty(objectId, property, value),
     []
   )

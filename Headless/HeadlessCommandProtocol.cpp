@@ -176,6 +176,9 @@ std::string EventPayloadType(const EditorEventPayload &Payload) {
   if (std::holds_alternative<MaterialTextureChangedEvent>(Payload)) {
     return "material_texture_changed";
   }
+  if (std::holds_alternative<PhysicsPropertiesChangedEvent>(Payload)) {
+    return "physics_properties_changed";
+  }
   if (std::holds_alternative<RuntimeStateChangedEvent>(Payload)) {
     return "runtime_state_changed";
   }
@@ -223,6 +226,32 @@ std::string RuntimeStateToString(EditorRuntimeState State) {
   }
 
   return "edit";
+}
+
+std::string PhysicsBodyTypeToString(EditorPhysicsBodyType Type) {
+  switch (Type) {
+  case EditorPhysicsBodyType::None:
+    return "none";
+  case EditorPhysicsBodyType::Static:
+    return "static";
+  case EditorPhysicsBodyType::Dynamic:
+    return "dynamic";
+  }
+
+  return "none";
+}
+
+std::string PhysicsColliderTypeToString(EditorPhysicsColliderType Type) {
+  switch (Type) {
+  case EditorPhysicsColliderType::None:
+    return "none";
+  case EditorPhysicsColliderType::Box:
+    return "box";
+  case EditorPhysicsColliderType::Sphere:
+    return "sphere";
+  }
+
+  return "none";
 }
 
 std::string LockStateToString(EditorObjectLockState State) {
@@ -359,6 +388,20 @@ void SerializeObjectDetails(std::ostringstream &Stream,
     Stream << "}";
   } else {
     Stream << ",\"material\":null";
+  }
+  if (Details.Physics.has_value()) {
+    Stream << ",\"physics\":{\"bodyType\":\""
+           << PhysicsBodyTypeToString(Details.Physics->BodyType)
+           << "\",\"colliderType\":\""
+           << PhysicsColliderTypeToString(Details.Physics->ColliderType)
+           << "\",\"boxHalfExtents\":["
+           << Details.Physics->BoxHalfExtents.x << ","
+           << Details.Physics->BoxHalfExtents.y << ","
+           << Details.Physics->BoxHalfExtents.z
+           << "],\"sphereRadius\":" << Details.Physics->SphereRadius
+           << ",\"mass\":" << Details.Physics->Mass << "}";
+  } else {
+    Stream << ",\"physics\":null";
   }
   Stream << ",\"collaboration\":{\"selectedByUserIds\":[";
   bool FirstSelectionOwner = true;
@@ -957,6 +1000,8 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
     static const std::regex PropPattern(R"json("property"\s*:\s*"([^"]+)")json");
     static const std::regex StringValPattern(R"json("value"\s*:\s*"([^"]*)")json");
     static const std::regex BoolValPattern(R"json("value"\s*:\s*(true|false))json");
+    static const std::regex NumberValPattern(
+        R"json("value"\s*:\s*(-?[0-9Ee.+-]+))json");
     static const std::regex Vec3ValPattern(
         R"json("value"\s*:\s*\[\s*(-?[0-9Ee.+-]+)\s*,\s*(-?[0-9Ee.+-]+)\s*,\s*(-?[0-9Ee.+-]+)\s*\])json");
 
@@ -968,6 +1013,10 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
       Val = PropertyValue{*StrVal};
     } else if (const auto BoolStr = MatchString(JsonLine, BoolValPattern)) {
       Val = PropertyValue{*BoolStr == "true"};
+    } else if (const auto NumberStr = MatchString(JsonLine, NumberValPattern)) {
+      if (const auto Number = ParseDouble(*NumberStr)) {
+        Val = PropertyValue{static_cast<float>(*Number)};
+      }
     } else {
       std::match_results<std::string_view::const_iterator> M;
       if (std::regex_search(JsonLine.begin(), JsonLine.end(), M, Vec3ValPattern) &&
@@ -1244,6 +1293,19 @@ std::string SerializeEvent(const PublishedEditorEvent &Event) {
                  std::get_if<MaterialTextureChangedEvent>(&Event.Event.Payload)) {
     Stream << ",\"objectId\":\"" << EscapeJson(TexEv->ObjectId)
            << "\",\"textureAssetPath\":\"" << EscapeJson(TexEv->TextureAssetPath) << "\"";
+  } else if (const auto *PhysicsProps =
+                 std::get_if<PhysicsPropertiesChangedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"objectId\":\"" << EscapeJson(PhysicsProps->ObjectId)
+           << "\",\"bodyType\":\""
+           << PhysicsBodyTypeToString(PhysicsProps->Physics.BodyType)
+           << "\",\"colliderType\":\""
+           << PhysicsColliderTypeToString(PhysicsProps->Physics.ColliderType)
+           << "\",\"boxHalfExtents\":["
+           << PhysicsProps->Physics.BoxHalfExtents.x << ","
+           << PhysicsProps->Physics.BoxHalfExtents.y << ","
+           << PhysicsProps->Physics.BoxHalfExtents.z
+           << "],\"sphereRadius\":" << PhysicsProps->Physics.SphereRadius
+           << ",\"mass\":" << PhysicsProps->Physics.Mass;
   } else if (const auto *RuntimeState =
                  std::get_if<RuntimeStateChangedEvent>(&Event.Event.Payload)) {
     Stream << ",\"user\":" << RuntimeState->User.Value
@@ -1605,6 +1667,20 @@ std::string SerializeObjectSchema(const EditorObjectDetails &Details) {
             ? *Details.Material->TextureAssetPath
             : std::string_view{};
     AppendProp("baseColorTexture", "texture_ref", false, TexPath);
+  }
+
+  if (Details.SupportsTransform) {
+    const EditorPhysicsProperties Physics =
+        Details.Physics.value_or(EditorPhysicsProperties{});
+    AppendProp("physicsBodyType", "enum", Details.TransformReadOnly,
+               PhysicsBodyTypeToString(Physics.BodyType));
+    AppendProp("physicsColliderType", "enum", Details.TransformReadOnly,
+               PhysicsColliderTypeToString(Physics.ColliderType));
+    AppendProp("physicsBoxHalfExtents", "vec3", Details.TransformReadOnly);
+    AppendProp("physicsSphereRadius", "number", Details.TransformReadOnly,
+               std::to_string(Physics.SphereRadius));
+    AppendProp("physicsMass", "number", Details.TransformReadOnly,
+               std::to_string(Physics.Mass));
   }
 
   Stream << "]}";

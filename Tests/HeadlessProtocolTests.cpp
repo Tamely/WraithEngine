@@ -180,6 +180,20 @@ TEST(HeadlessProtocolTests, RemoteViewportAcceptsPlaySessionCommand) {
       std::holds_alternative<Axiom::PlaySessionCommand>(Command->EditorPayload.Payload));
 }
 
+TEST(HeadlessProtocolTests, RemoteViewportAcceptsNumericSetPropertyCommand) {
+  std::string Error;
+  const auto Command = Axiom::ParseRemoteViewportCommand(
+      R"json({"type":"set_property","objectId":"ball","property":"physicsMass","value":2.5})json",
+      Error);
+
+  ASSERT_TRUE(Command.has_value()) << Error;
+  EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::SetProperty);
+  ASSERT_TRUE(Command->PropertyVal.has_value());
+  const auto *Value = std::get_if<float>(&*Command->PropertyVal);
+  ASSERT_NE(Value, nullptr);
+  EXPECT_FLOAT_EQ(*Value, 2.5f);
+}
+
 TEST(HeadlessProtocolTests, SerializesCommandRejectedEvent) {
   const Axiom::PublishedEditorEvent Event{
       .Id = Axiom::EventId{4},
@@ -373,6 +387,13 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
                           .RotationDegrees = glm::vec3(4.0f, 5.0f, 6.0f),
                           .Scale = glm::vec3(1.0f, 1.0f, 1.0f),
                       },
+                      .Physics = Axiom::EditorPhysicsProperties{
+                          .BodyType = Axiom::EditorPhysicsBodyType::Dynamic,
+                          .ColliderType = Axiom::EditorPhysicsColliderType::Sphere,
+                          .BoxHalfExtents = glm::vec3(0.5f, 0.75f, 1.0f),
+                          .SphereRadius = 1.25f,
+                          .Mass = 3.5f,
+                      },
                   },
               }},
               .CollaborationByObjectId = {{
@@ -407,6 +428,11 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
   EXPECT_NE(Json.find("\"supportsTransform\":true"), std::string::npos);
   EXPECT_NE(Json.find("\"transformReadOnly\":true"), std::string::npos);
   EXPECT_NE(Json.find("\"location\":[1,2,3]"), std::string::npos);
+  EXPECT_NE(Json.find("\"physics\":{\"bodyType\":\"dynamic\""),
+            std::string::npos);
+  EXPECT_NE(Json.find("\"colliderType\":\"sphere\""), std::string::npos);
+  EXPECT_NE(Json.find("\"sphereRadius\":1.25"), std::string::npos);
+  EXPECT_NE(Json.find("\"mass\":3.5"), std::string::npos);
   EXPECT_NE(Json.find("\"selectedByUserIds\":[1]"), std::string::npos);
   EXPECT_NE(Json.find("\"lockState\":\"locked\""), std::string::npos);
   EXPECT_NE(Json.find("\"lockOwnerUserId\":1"), std::string::npos);

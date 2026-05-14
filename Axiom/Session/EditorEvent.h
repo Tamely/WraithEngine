@@ -123,6 +123,11 @@ struct MaterialTextureChangedEvent {
   std::string TextureAssetPath; // empty = cleared back to mesh asset's embedded texture
 };
 
+struct PhysicsPropertiesChangedEvent {
+  std::string ObjectId;
+  EditorPhysicsProperties Physics;
+};
+
 struct RuntimeStateChangedEvent {
   SessionUserId User;
   EditorRuntimeState State{EditorRuntimeState::Edit};
@@ -147,6 +152,7 @@ using EditorEventPayload = std::variant<ViewportCameraUpdatedEvent,
                                         LightPropertiesChangedEvent,
                                         MaterialPropertiesChangedEvent,
                                         MaterialTextureChangedEvent,
+                                        PhysicsPropertiesChangedEvent,
                                         RuntimeStateChangedEvent>;
 
 struct EditorEvent {

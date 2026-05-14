@@ -114,6 +114,11 @@ struct SetMaterialTextureCommand {
   std::string TextureAssetPath;
 };
 
+struct SetPhysicsPropertiesCommand {
+  std::string ObjectId;
+  EditorPhysicsProperties Physics;
+};
+
 struct PlaySessionCommand {};
 
 struct PauseSessionCommand {};
@@ -133,7 +138,8 @@ using EditorCommandPayload =
                  DetachScriptCommand, SetMeshAssetCommand,
                  SetLightPropertiesCommand,
                  SetMaterialPropertiesCommand,
-                 SetMaterialTextureCommand, PlaySessionCommand,
+                 SetMaterialTextureCommand, SetPhysicsPropertiesCommand,
+                 PlaySessionCommand,
                  PauseSessionCommand, ResumeSessionCommand,
                  StopSessionCommand>;
 

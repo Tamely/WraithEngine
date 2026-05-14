@@ -186,7 +186,7 @@ type RemoteViewportCommand =
     type: "set_property"
     objectId: string
     property: string
-    value: string | boolean | [number, number, number]
+    value: string | number | boolean | [number, number, number]
   }
   | { type: "reload_scripts" }
   | {
@@ -784,7 +784,16 @@ export function Viewport() {
               .filter((p): p is Record<string, unknown> => !!p && typeof p === "object")
               .map((p) => ({
                 name: typeof p.name === "string" ? p.name : "",
-                type: p.type === "bool" ? "bool" : p.type === "vec3" ? "vec3" : "string",
+                type:
+                  p.type === "bool"
+                    ? "bool"
+                    : p.type === "vec3"
+                      ? "vec3"
+                      : p.type === "number"
+                        ? "number"
+                        : p.type === "enum"
+                          ? "enum"
+                          : "string",
                 readOnly: p.readOnly === true,
                 value: typeof p.value === "string" ? p.value : undefined,
               })),
@@ -820,6 +829,11 @@ export function Viewport() {
       }
 
       if (message.payloadType === "material_texture_changed") {
+        void refreshSessionSnapshotSafely("event")
+        return
+      }
+
+      if (message.payloadType === "physics_properties_changed") {
         void refreshSessionSnapshotSafely("event")
         return
       }
@@ -1632,7 +1646,14 @@ export function Viewport() {
         return accepted
       },
       setProperty: async (objectId, property, value) => {
-        return sendCommand({ type: "set_property", objectId, property, value }, "reliable")
+        const accepted = await sendCommand(
+          { type: "set_property", objectId, property, value },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
       },
       reloadScripts: async () => {
         await sendCommand({ type: "reload_scripts" }, "reliable")

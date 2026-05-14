@@ -68,14 +68,6 @@ struct EditorMaterialProperties {
   std::optional<std::string> TextureAssetPath; // content-relative path, nullopt = embedded
 };
 
-struct EditorPhysicsProperties {
-  EditorPhysicsBodyType BodyType{EditorPhysicsBodyType::None};
-  EditorPhysicsColliderType ColliderType{EditorPhysicsColliderType::None};
-  glm::vec3 BoxHalfExtents{0.5f, 0.5f, 0.5f};
-  float SphereRadius{0.5f};
-  float Mass{1.0f};
-};
-
 struct EditorObjectDetails {
   std::string ObjectId;
   std::string DisplayName;
@@ -294,6 +286,8 @@ private:
                      const SetMaterialPropertiesCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SetMaterialTextureCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const SetPhysicsPropertiesCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const PlaySessionCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,

@@ -230,6 +230,15 @@ function DetailsContent({
         />
       )}
 
+      {details.capabilities.supportsTransform && !details.capabilities.transformReadOnly && (
+        <PhysicsSection
+          objectId={details.objectId}
+          physics={details.physics ?? null}
+          isSaving={isSaving}
+          setIsSaving={setIsSaving}
+        />
+      )}
+
       <section className="rounded border border-neutral-800 bg-neutral-950/60 p-3">
         <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">Transform</p>
         {details.capabilities.supportsTransform && details.transform ? (
@@ -674,6 +683,204 @@ function MaterialSection({
   )
 }
 
+function PhysicsSection({
+  objectId,
+  physics,
+  isSaving,
+  setIsSaving,
+}: {
+  objectId: string
+  physics: {
+    bodyType: "none" | "static" | "dynamic"
+    colliderType: "none" | "box" | "sphere"
+    boxHalfExtents: [number, number, number]
+    sphereRadius: number
+    mass: number
+  } | null
+  isSaving: boolean
+  setIsSaving: (value: boolean) => void
+}) {
+  const { setProperty } = useRemoteViewport()
+  const [bodyType, setBodyType] = useState<"none" | "static" | "dynamic">(
+    physics?.bodyType ?? "none"
+  )
+  const [colliderType, setColliderType] = useState<"none" | "box" | "sphere">(
+    physics?.colliderType ?? "none"
+  )
+  const [boxHalfExtents, setBoxHalfExtents] = useState<[string, string, string]>(
+    physics
+      ? [
+          String(physics.boxHalfExtents[0]),
+          String(physics.boxHalfExtents[1]),
+          String(physics.boxHalfExtents[2]),
+        ]
+      : ["0.5", "0.5", "0.5"]
+  )
+  const [sphereRadius, setSphereRadius] = useState(String(physics?.sphereRadius ?? 0.5))
+  const [mass, setMass] = useState(String(physics?.mass ?? 1))
+
+  useEffect(() => {
+    setBodyType(physics?.bodyType ?? "none")
+    setColliderType(physics?.colliderType ?? "none")
+    setBoxHalfExtents(
+      physics
+        ? [
+            String(physics.boxHalfExtents[0]),
+            String(physics.boxHalfExtents[1]),
+            String(physics.boxHalfExtents[2]),
+          ]
+        : ["0.5", "0.5", "0.5"]
+    )
+    setSphereRadius(String(physics?.sphereRadius ?? 0.5))
+    setMass(String(physics?.mass ?? 1))
+  }, [
+    objectId,
+    physics?.bodyType,
+    physics?.colliderType,
+    physics?.boxHalfExtents[0],
+    physics?.boxHalfExtents[1],
+    physics?.boxHalfExtents[2],
+    physics?.sphereRadius,
+    physics?.mass,
+  ])
+
+  async function applyPhysicsProperty(
+    property: string,
+    value: string | number | [number, number, number]
+  ) {
+    setIsSaving(true)
+    try {
+      await setProperty(objectId, property, value)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  async function applyBoxHalfExtents() {
+    const next = boxHalfExtents.map((value) => Number(value)) as [number, number, number]
+    if (next.some((value) => Number.isNaN(value) || value <= 0)) {
+      return
+    }
+    await applyPhysicsProperty("physicsBoxHalfExtents", next)
+  }
+
+  async function applySphereRadius() {
+    const next = Number(sphereRadius)
+    if (Number.isNaN(next) || next <= 0) {
+      return
+    }
+    await applyPhysicsProperty("physicsSphereRadius", next)
+  }
+
+  async function applyMass() {
+    const next = Number(mass)
+    if (Number.isNaN(next) || next <= 0) {
+      return
+    }
+    await applyPhysicsProperty("physicsMass", next)
+  }
+
+  return (
+    <section className="rounded border border-neutral-800 bg-neutral-950/60 p-3">
+      <div className="mb-3 flex items-center gap-1.5">
+        <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">Physics</p>
+      </div>
+      <div className="space-y-3">
+        <LabeledSelect
+          disabled={isSaving}
+          label="Body"
+          onChange={(value) => {
+            const next = value as "none" | "static" | "dynamic"
+            setBodyType(next)
+            void applyPhysicsProperty("physicsBodyType", next)
+          }}
+          options={[
+            { label: "None", value: "none" },
+            { label: "Static", value: "static" },
+            { label: "Dynamic", value: "dynamic" },
+          ]}
+          value={bodyType}
+        />
+        <LabeledSelect
+          disabled={isSaving}
+          label="Collider"
+          onChange={(value) => {
+            const next = value as "none" | "box" | "sphere"
+            setColliderType(next)
+            void applyPhysicsProperty("physicsColliderType", next)
+          }}
+          options={[
+            { label: "None", value: "none" },
+            { label: "Box", value: "box" },
+            { label: "Sphere", value: "sphere" },
+          ]}
+          value={colliderType}
+        />
+        {colliderType === "box" ? (
+          <VectorEditor
+            disabled={isSaving}
+            label="Half Extents"
+            value={boxHalfExtents}
+            onChange={setBoxHalfExtents}
+          />
+        ) : null}
+        {colliderType === "box" ? (
+          <div className="flex justify-end">
+            <button
+              className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isSaving}
+              onClick={() => void applyBoxHalfExtents()}
+              type="button"
+            >
+              Apply Box
+            </button>
+          </div>
+        ) : null}
+        {colliderType === "sphere" ? (
+          <LabeledNumberInput
+            disabled={isSaving}
+            label="Radius"
+            onChange={setSphereRadius}
+            value={sphereRadius}
+          />
+        ) : null}
+        {colliderType === "sphere" ? (
+          <div className="flex justify-end">
+            <button
+              className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isSaving}
+              onClick={() => void applySphereRadius()}
+              type="button"
+            >
+              Apply Radius
+            </button>
+          </div>
+        ) : null}
+        {bodyType === "dynamic" ? (
+          <LabeledNumberInput
+            disabled={isSaving}
+            label="Mass"
+            onChange={setMass}
+            value={mass}
+          />
+        ) : null}
+        {bodyType === "dynamic" ? (
+          <div className="flex justify-end">
+            <button
+              className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isSaving}
+              onClick={() => void applyMass()}
+              type="button"
+            >
+              Apply Mass
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  )
+}
+
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center gap-3">
@@ -737,6 +944,64 @@ function toDraft(details: SessionObjectDetails): DraftTransform {
     rotationDegrees: toStringVec3(details.transform?.rotationDegrees ?? [0, 0, 0]),
     scale: toStringVec3(details.transform?.scale ?? [1, 1, 1]),
   }
+}
+
+function LabeledSelect({
+  label,
+  value,
+  options,
+  onChange,
+  disabled,
+}: {
+  label: string
+  value: string
+  options: Array<{ label: string; value: string }>
+  onChange: (value: string) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="w-20 shrink-0 text-xs text-neutral-500">{label}</span>
+      <select
+        className="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 outline-none focus:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        value={value}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
+function LabeledNumberInput({
+  label,
+  value,
+  onChange,
+  disabled,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="w-20 shrink-0 text-xs text-neutral-500">{label}</span>
+      <input
+        className="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 outline-none focus:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        step={0.1}
+        type="number"
+        value={value}
+      />
+    </div>
+  )
 }
 
 function toStringVec3(value: [number, number, number]): [string, string, string] {

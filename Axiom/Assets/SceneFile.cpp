@@ -415,6 +415,24 @@ bool SaveSceneToFile(const std::filesystem::path &Path,
           << ",\"lightIntensity\":" << Details.Light->Intensity
           << ",\"lightDirection\":" << SerializeVec3(Details.Light->Direction);
     }
+    if (Details.Physics.has_value()) {
+      Out << ",\"physicsBodyType\":"
+          << EscStr(Details.Physics->BodyType == EditorPhysicsBodyType::Dynamic
+                        ? "dynamic"
+                        : (Details.Physics->BodyType == EditorPhysicsBodyType::Static
+                               ? "static"
+                               : "none"))
+          << ",\"physicsColliderType\":"
+          << EscStr(Details.Physics->ColliderType == EditorPhysicsColliderType::Sphere
+                        ? "sphere"
+                        : (Details.Physics->ColliderType == EditorPhysicsColliderType::Box
+                               ? "box"
+                               : "none"))
+          << ",\"physicsBoxHalfExtents\":"
+          << SerializeVec3(Details.Physics->BoxHalfExtents)
+          << ",\"physicsSphereRadius\":" << Details.Physics->SphereRadius
+          << ",\"physicsMass\":" << Details.Physics->Mass;
+    }
     Out << "}";
   }
   Out << "\n  ],\n";
@@ -646,6 +664,7 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
     std::string MaterialAssetPath;
     std::string TextureAssetPath;
     std::optional<EditorLightProperties> Light;
+    std::optional<EditorPhysicsProperties> Physics;
   };
 
   std::string MeshAsset;
@@ -745,6 +764,58 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
             if (V) { if (!Data.Light) Data.Light = EditorLightProperties{}; Data.Light->Direction = *V; }
             return true;
           }
+          if (K == "physicsBodyType") {
+            auto V = P.ParseString();
+            if (V) {
+              if (!Data.Physics) Data.Physics = EditorPhysicsProperties{};
+              if (*V == "static") {
+                Data.Physics->BodyType = EditorPhysicsBodyType::Static;
+              } else if (*V == "dynamic") {
+                Data.Physics->BodyType = EditorPhysicsBodyType::Dynamic;
+              } else {
+                Data.Physics->BodyType = EditorPhysicsBodyType::None;
+              }
+            }
+            return true;
+          }
+          if (K == "physicsColliderType") {
+            auto V = P.ParseString();
+            if (V) {
+              if (!Data.Physics) Data.Physics = EditorPhysicsProperties{};
+              if (*V == "box") {
+                Data.Physics->ColliderType = EditorPhysicsColliderType::Box;
+              } else if (*V == "sphere") {
+                Data.Physics->ColliderType = EditorPhysicsColliderType::Sphere;
+              } else {
+                Data.Physics->ColliderType = EditorPhysicsColliderType::None;
+              }
+            }
+            return true;
+          }
+          if (K == "physicsBoxHalfExtents") {
+            auto V = P.ParseVec3();
+            if (V) {
+              if (!Data.Physics) Data.Physics = EditorPhysicsProperties{};
+              Data.Physics->BoxHalfExtents = *V;
+            }
+            return true;
+          }
+          if (K == "physicsSphereRadius") {
+            auto V = P.ParseNumber();
+            if (V) {
+              if (!Data.Physics) Data.Physics = EditorPhysicsProperties{};
+              Data.Physics->SphereRadius = static_cast<float>(*V);
+            }
+            return true;
+          }
+          if (K == "physicsMass") {
+            auto V = P.ParseNumber();
+            if (V) {
+              if (!Data.Physics) Data.Physics = EditorPhysicsProperties{};
+              Data.Physics->Mass = static_cast<float>(*V);
+            }
+            return true;
+          }
           return false;
         });
         if (!ObjId.empty()) Objects[ObjId] = std::move(Data);
@@ -817,6 +888,7 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
     Details.Transform       = Data.Transform;
     Details.ScriptClass     = Data.ScriptClass;
     Details.Light           = Data.Light;
+    Details.Physics         = Data.Physics;
     Details.GeneratedFromAssetRootId = Data.GeneratedFromAssetRootId;
     Details.AssetRelativePath = Data.AssetRelativePath;
     State.ObjectDetailsById[Id] = std::move(Details);

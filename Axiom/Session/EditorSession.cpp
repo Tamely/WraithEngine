@@ -125,6 +125,9 @@ std::string CommandTypeName(const EditorCommandPayload &Payload) {
   if (std::holds_alternative<SetMaterialTextureCommand>(Payload)) {
     return "set_material_texture";
   }
+  if (std::holds_alternative<SetPhysicsPropertiesCommand>(Payload)) {
+    return "set_physics_properties";
+  }
   if (std::holds_alternative<PlaySessionCommand>(Payload)) {
     return "play_session";
   }
@@ -186,6 +189,10 @@ bool ShouldPublishCommandAcknowledgedEvent(const EditorCommandPayload &Payload) 
 
 bool IsNearlyZero(const glm::vec3 &Value) {
   return glm::dot(Value, Value) <= 0.0f;
+}
+
+bool IsPositive(const glm::vec3 &Value) {
+  return Value.x > 0.0f && Value.y > 0.0f && Value.z > 0.0f;
 }
 
 bool IsWhitespace(char Value) {
@@ -1157,6 +1164,8 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
       SingleId = C->ObjectId;
     else if (const auto *C = std::get_if<ReparentObjectCommand>(&QueuedCommand.Command.Payload))
       SingleId = C->ObjectId;
+    else if (const auto *C = std::get_if<SetPhysicsPropertiesCommand>(&QueuedCommand.Command.Payload))
+      SingleId = C->ObjectId;
     if (!SingleId.empty()) {
       const auto CollabIt = m_State.Scene.CollaborationByObjectId.find(SingleId);
       if (CollabIt != m_State.Scene.CollaborationByObjectId.end() &&
@@ -1192,6 +1201,39 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
     if (TransformCommand->Scale.x <= 0.0f || TransformCommand->Scale.y <= 0.0f ||
         TransformCommand->Scale.z <= 0.0f) {
       FailureReason = "Scale values must be greater than zero.";
+      return false;
+    }
+  }
+
+  if (const auto *PhysicsCommand =
+          std::get_if<SetPhysicsPropertiesCommand>(&QueuedCommand.Command.Payload)) {
+    if (PhysicsCommand->ObjectId.empty()) {
+      FailureReason = "Physics commands require a non-empty object id.";
+      return false;
+    }
+
+    const EditorObjectDetails *Details = FindObjectDetails(PhysicsCommand->ObjectId);
+    if (Details == nullptr) {
+      FailureReason = "Physics targeted an unknown object.";
+      return false;
+    }
+    if (!Details->SupportsTransform) {
+      FailureReason = "Physics can only be assigned to transformable objects.";
+      return false;
+    }
+    if (PhysicsCommand->Physics.BodyType == EditorPhysicsBodyType::Dynamic &&
+        PhysicsCommand->Physics.Mass <= 0.0f) {
+      FailureReason = "Dynamic physics bodies require a positive mass.";
+      return false;
+    }
+    if (PhysicsCommand->Physics.ColliderType == EditorPhysicsColliderType::Box &&
+        !IsPositive(PhysicsCommand->Physics.BoxHalfExtents)) {
+      FailureReason = "Box colliders require positive half extents.";
+      return false;
+    }
+    if (PhysicsCommand->Physics.ColliderType == EditorPhysicsColliderType::Sphere &&
+        PhysicsCommand->Physics.SphereRadius <= 0.0f) {
+      FailureReason = "Sphere colliders require a positive radius.";
       return false;
     }
   }
@@ -1956,6 +1998,27 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
   PublishEvent({.Payload = MaterialTextureChangedEvent{
       .ObjectId         = Command.ObjectId,
       .TextureAssetPath = Command.TextureAssetPath,
+  }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const SetPhysicsPropertiesCommand &Command) {
+  (void)QueuedCommand;
+
+  auto DetailsIt = m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
+  if (DetailsIt == m_State.Scene.ObjectDetailsById.end()) {
+    return;
+  }
+
+  DetailsIt->second.Physics = Command.Physics;
+  if (Command.Physics.BodyType == EditorPhysicsBodyType::None &&
+      Command.Physics.ColliderType == EditorPhysicsColliderType::None) {
+    DetailsIt->second.Physics.reset();
+  }
+
+  PublishEvent({.Payload = PhysicsPropertiesChangedEvent{
+      .ObjectId = Command.ObjectId,
+      .Physics = DetailsIt->second.Physics.value_or(EditorPhysicsProperties{}),
   }});
 }
 

@@ -1988,6 +1988,126 @@ TEST(SceneLifecycleTests, SceneFile_SaveLoadRoundTripsCookedMaterialState) {
             "Engine/tf2 coconut.jpg");
 }
 
+TEST(SceneLifecycleTests, SetPhysicsPropertiesUpdatesAuthoritativeDetails) {
+  Axiom::EditorSession Session = MakeWorldSession();
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.SetObjectDetails({
+      {
+          .ObjectId = "world",
+          .DisplayName = "World",
+          .Kind = Axiom::EditorSceneItemKind::Folder,
+          .Visible = true,
+          .SupportsTransform = false,
+          .TransformReadOnly = true,
+      },
+      {
+          .ObjectId = "ball",
+          .DisplayName = "Ball",
+          .Kind = Axiom::EditorSceneItemKind::Actor,
+          .Visible = true,
+          .SupportsTransform = true,
+          .TransformReadOnly = false,
+          .Transform = Axiom::EditorTransformDetails{},
+      },
+  });
+  Session.SetSceneItems({{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {{
+          .Id = "ball",
+          .DisplayName = "Ball",
+          .Kind = Axiom::EditorSceneItemKind::Actor,
+          .Visible = true,
+      }},
+  }});
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetPhysicsPropertiesCommand{
+                      .ObjectId = "ball",
+                      .Physics = Axiom::EditorPhysicsProperties{
+                          .BodyType = Axiom::EditorPhysicsBodyType::Dynamic,
+                          .ColliderType = Axiom::EditorPhysicsColliderType::Sphere,
+                          .SphereRadius = 0.75f,
+                          .Mass = 2.5f,
+                      },
+                  }});
+  Session.Tick();
+
+  ASSERT_EQ(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+  const auto *Details = Session.FindObjectDetails("ball");
+  ASSERT_NE(Details, nullptr);
+  ASSERT_TRUE(Details->Physics.has_value());
+  EXPECT_EQ(Details->Physics->BodyType, Axiom::EditorPhysicsBodyType::Dynamic);
+  EXPECT_EQ(Details->Physics->ColliderType, Axiom::EditorPhysicsColliderType::Sphere);
+  EXPECT_FLOAT_EQ(Details->Physics->SphereRadius, 0.75f);
+  EXPECT_FLOAT_EQ(Details->Physics->Mass, 2.5f);
+
+  const auto *Changed =
+      FindEvent<Axiom::PhysicsPropertiesChangedEvent>(Subscriber.Events);
+  ASSERT_NE(Changed, nullptr);
+  EXPECT_EQ(Changed->ObjectId, "ball");
+  EXPECT_EQ(Changed->Physics.BodyType, Axiom::EditorPhysicsBodyType::Dynamic);
+}
+
+TEST(SceneLifecycleTests, SceneFile_SaveLoadRoundTripsPhysicsState) {
+  EnsureLogInitialized();
+
+  const auto TempRoot =
+      std::filesystem::temp_directory_path() / "wraithengine-physics-scene-test";
+  std::error_code RemoveError;
+  std::filesystem::remove_all(TempRoot, RemoveError);
+  std::filesystem::create_directories(TempRoot / "Content");
+
+  Axiom::EditorSceneState Scene;
+  Scene.Items = {{
+      .Id = "ball",
+      .DisplayName = "Ball",
+      .Kind = Axiom::EditorSceneItemKind::Actor,
+      .Visible = true,
+      .Children = {},
+  }};
+  Scene.ObjectDetailsById["ball"] = Axiom::EditorObjectDetails{
+      .ObjectId = "ball",
+      .DisplayName = "Ball",
+      .Kind = Axiom::EditorSceneItemKind::Actor,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      .Transform = Axiom::EditorTransformDetails{
+          .Location = glm::vec3(1.0f, 2.0f, 3.0f),
+          .RotationDegrees = glm::vec3(0.0f),
+          .Scale = glm::vec3(1.0f),
+      },
+      .Physics = Axiom::EditorPhysicsProperties{
+          .BodyType = Axiom::EditorPhysicsBodyType::Dynamic,
+          .ColliderType = Axiom::EditorPhysicsColliderType::Sphere,
+          .BoxHalfExtents = glm::vec3(0.25f, 0.5f, 0.75f),
+          .SphereRadius = 0.6f,
+          .Mass = 4.0f,
+      },
+  };
+
+  const auto ScenePath = TempRoot / "Content" / "scene.json";
+  ASSERT_TRUE(Axiom::Assets::SaveSceneToFile(ScenePath, Scene));
+
+  const auto Loaded = Axiom::Assets::LoadSceneFromFile(ScenePath);
+  ASSERT_TRUE(Loaded.has_value());
+  const auto DetailsIt = Loaded->ObjectDetailsById.find("ball");
+  ASSERT_NE(DetailsIt, Loaded->ObjectDetailsById.end());
+  ASSERT_TRUE(DetailsIt->second.Physics.has_value());
+  EXPECT_EQ(DetailsIt->second.Physics->BodyType,
+            Axiom::EditorPhysicsBodyType::Dynamic);
+  EXPECT_EQ(DetailsIt->second.Physics->ColliderType,
+            Axiom::EditorPhysicsColliderType::Sphere);
+  EXPECT_FLOAT_EQ(DetailsIt->second.Physics->BoxHalfExtents.y, 0.5f);
+  EXPECT_FLOAT_EQ(DetailsIt->second.Physics->SphereRadius, 0.6f);
+  EXPECT_FLOAT_EQ(DetailsIt->second.Physics->Mass, 4.0f);
+}
+
 TEST(SceneLifecycleTests, SceneFile_SaveLoadRegeneratesMultiMeshChildrenWithoutDuplicatingThem) {
   EnsureLogInitialized();
 

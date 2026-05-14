@@ -64,7 +64,7 @@ enum class HeadlessCommandType {
   Quit,
 };
 
-using PropertyValue = std::variant<std::string, bool, glm::vec3>;
+using PropertyValue = std::variant<std::string, bool, float, glm::vec3>;
 
 struct HeadlessCommand {
   HeadlessCommandType Type;
