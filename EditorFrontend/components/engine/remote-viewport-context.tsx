@@ -30,6 +30,8 @@ export type RemoteSessionState =
   | "command-rejected"
   | "error"
 
+export type RemoteRuntimeState = "edit" | "playing" | "paused"
+
 export type RemoteViewportViewMode = "lit" | "unlit" | "wireframe"
 export type RemoteViewportGizmoMode = "translate" | "scale" | "rotate"
 export type SessionSceneItemKind = "folder" | "mesh" | "light" | "camera" | "actor"
@@ -151,6 +153,10 @@ interface RemoteViewportActions {
   listAssets: () => Promise<void>
   getSchema: (objectId: string) => Promise<void>
   saveScene: () => Promise<void>
+  playSession: () => Promise<boolean>
+  pauseSession: () => Promise<boolean>
+  resumeSession: () => Promise<boolean>
+  stopSession: () => Promise<boolean>
   setProperty: (
     objectId: string,
     property: string,
@@ -187,6 +193,8 @@ interface RemoteViewportContextValue {
   frameText: string
   sessionStatusText: string
   sessionDetailText: string
+  runtimeState: RemoteRuntimeState
+  canControlRuntime: boolean
   viewMode: RemoteViewportViewMode
   gizmoMode: RemoteViewportGizmoMode
   gridSnapSettings: RemoteViewportGridSnapSettings
@@ -233,6 +241,10 @@ interface RemoteViewportContextValue {
   setObjectSchema: (schema: SessionObjectSchema) => void
   getSchema: (objectId: string) => Promise<void>
   saveScene: () => Promise<void>
+  playSession: () => Promise<boolean>
+  pauseSession: () => Promise<boolean>
+  resumeSession: () => Promise<boolean>
+  stopSession: () => Promise<boolean>
   saveStatus: "idle" | "saving" | "saved" | "failed"
   setSaveStatus: (status: "idle" | "saving" | "saved" | "failed") => void
   setProperty: (
@@ -278,6 +290,7 @@ interface RemoteViewportContextValue {
 
 interface SessionSnapshot {
   currentUserId: number
+  runtimeState: RemoteRuntimeState
   participants: SessionParticipant[]
   sceneTree: SessionSceneItem[]
   selections: SessionSelection[]
@@ -334,6 +347,10 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     listAssets: async () => {},
     getSchema: async () => {},
     saveScene: async () => {},
+    playSession: async () => false,
+    pauseSession: async () => false,
+    resumeSession: async () => false,
+    stopSession: async () => false,
     setProperty: async () => false,
     reloadScripts: async () => {},
     setMeshAsset: async () => false,
@@ -351,6 +368,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
   const [sessionDetailText, setSessionDetailText] = useState(
     "Waiting for authoritative session state"
   )
+  const [runtimeState, setRuntimeState] = useState<RemoteRuntimeState>("edit")
   const [viewMode, setViewMode] = useState<RemoteViewportViewMode>("lit")
   const [gizmoMode, setGizmoModeState] = useState<RemoteViewportGizmoMode>("translate")
   const [gridSnapSettings, setGridSnapSettingsState] =
@@ -385,6 +403,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
 
   const setSessionSnapshot = useCallback((snapshot: SessionSnapshot) => {
     setCurrentUserId(snapshot.currentUserId)
+    setRuntimeState(snapshot.runtimeState)
     setParticipants(snapshot.participants)
     setSceneTree(snapshot.sceneTree)
     setSelections(
@@ -400,6 +419,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
 
   const clearSessionSnapshot = useCallback(() => {
     setCurrentUserId(null)
+    setRuntimeState("edit")
     setParticipants([])
     setSceneTree([])
     setSelections([])
@@ -525,6 +545,14 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     await actionsRef.current.saveScene()
   }, [])
 
+  const playSession = useCallback(async () => actionsRef.current.playSession(), [])
+
+  const pauseSession = useCallback(async () => actionsRef.current.pauseSession(), [])
+
+  const resumeSession = useCallback(async () => actionsRef.current.resumeSession(), [])
+
+  const stopSession = useCallback(async () => actionsRef.current.stopSession(), [])
+
   const setProperty = useCallback(
     async (
       objectId: string,
@@ -581,6 +609,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       ? selections.find((selection) => selection.userId === currentUserId)?.objectId ?? null
       : null
   const selectedObject = findSceneItem(sceneTree, selectedObjectId)
+  const canControlRuntime = currentUserId === 1
 
   const value = useMemo(
     () => ({
@@ -591,6 +620,8 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       frameText,
       sessionStatusText,
       sessionDetailText,
+      runtimeState,
+      canControlRuntime,
       viewMode,
       gizmoMode,
       gridSnapSettings,
@@ -612,6 +643,10 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       setObjectSchema,
       getSchema,
       saveScene,
+      playSession,
+      pauseSession,
+      resumeSession,
+      stopSession,
       saveStatus,
       setSaveStatus,
       setProperty,
@@ -677,6 +712,8 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       sessionDetailText,
       sessionState,
       sessionStatusText,
+      runtimeState,
+      canControlRuntime,
       reconnect,
       refreshSessionSnapshot,
       registerActions,
@@ -695,6 +732,10 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       objectSchema,
       getSchema,
       saveScene,
+      playSession,
+      pauseSession,
+      resumeSession,
+      stopSession,
       saveStatus,
       setProperty,
       reloadScripts,

@@ -79,6 +79,7 @@ interface SessionSnapshotResponse {
   sceneTree: SessionSceneItem[]
   selections: SessionSelection[]
   selectedObjectDetails: SessionObjectDetails | null
+  runtimeState: "edit" | "playing" | "paused"
 }
 
 interface SessionConnectResponse {
@@ -177,6 +178,10 @@ type RemoteViewportCommand =
   | { type: "list_assets" }
   | { type: "get_schema"; objectId: string }
   | { type: "save_scene" }
+  | { type: "play_session" }
+  | { type: "pause_session" }
+  | { type: "resume_session" }
+  | { type: "stop_session" }
   | {
     type: "set_property"
     objectId: string
@@ -550,6 +555,7 @@ export function Viewport() {
 
       setSessionSnapshot({
         currentUserId: snapshot.currentUserId,
+        runtimeState: snapshot.runtimeState ?? "edit",
         participants: snapshot.participants ?? [],
         sceneTree: snapshot.sceneTree ?? [],
         selections: snapshot.selections ?? [],
@@ -663,6 +669,24 @@ export function Viewport() {
           )
           void refreshSessionSnapshotSafely("event")
         }
+        return
+      }
+
+      if (message.payloadType === "runtime_state_changed") {
+        const runtimeState =
+          message.runtimeState === "playing" ||
+            message.runtimeState === "paused" ||
+            message.runtimeState === "edit"
+            ? message.runtimeState
+            : "edit"
+        const detail =
+          runtimeState === "playing"
+            ? "Simulation started."
+            : runtimeState === "paused"
+              ? "Simulation paused."
+              : "Simulation stopped."
+        setSessionUi("session-ready", "Session ready", detail)
+        void refreshSessionSnapshotSafely("event")
         return
       }
 
@@ -1578,6 +1602,34 @@ export function Viewport() {
       },
       saveScene: async () => {
         await sendCommand({ type: "save_scene" }, "reliable")
+      },
+      playSession: async () => {
+        const accepted = await sendCommand({ type: "play_session" }, "reliable")
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
+      pauseSession: async () => {
+        const accepted = await sendCommand({ type: "pause_session" }, "reliable")
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
+      resumeSession: async () => {
+        const accepted = await sendCommand({ type: "resume_session" }, "reliable")
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
+      stopSession: async () => {
+        const accepted = await sendCommand({ type: "stop_session" }, "reliable")
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
       },
       setProperty: async (objectId, property, value) => {
         return sendCommand({ type: "set_property", objectId, property, value }, "reliable")
