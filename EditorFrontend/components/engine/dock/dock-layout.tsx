@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useCallback } from "react"
-import { useDock, type DockNode, type DockCell, type DockRow, type DockColumn } from "./dock-context"
+import { useDock, type DockNode, type DockCell, type DockRow, type DockColumn, type PanelId } from "./dock-context"
 import { DockPanel } from "./dock-panel"
 import { FloatingPanel } from "./floating-panel"
 
@@ -125,11 +125,36 @@ function RenderNode({ node }: { node: DockNode }) {
 
 // ─── global drag cursor overlay ───────────────────────────────────────────────
 
+const PANEL_LABELS: Record<PanelId, string> = {
+    viewport: "Viewport",
+    outliner: "Outliner",
+    details: "Details",
+    "content-browser": "Content Browser",
+    "remote-viewport": "Remote Viewport",
+    "script-editor": "Script Editor",
+}
+
 function DragCursorOverlay() {
     const { dragState } = useDock()
     if (!dragState.panelId) return null
     return (
-        <div className="fixed inset-0 z-30 cursor-grabbing" style={{ pointerEvents: "none" }} />
+        <>
+            <div className="fixed inset-0 z-30 cursor-grabbing" style={{ pointerEvents: "none" }} />
+            <div
+                className="fixed z-40 flex min-w-40 items-center gap-2 rounded-lg border border-sky-400/40 bg-neutral-950/92 px-3 py-2 text-xs text-white shadow-2xl backdrop-blur-sm"
+                style={{
+                    left: dragState.previewX,
+                    top: dragState.previewY,
+                    pointerEvents: "none",
+                }}
+            >
+                <div className="h-2 w-2 rounded-full bg-sky-300" />
+                <span>{PANEL_LABELS[dragState.panelId]}</span>
+                <span className="ml-auto text-[10px] uppercase tracking-[0.16em] text-neutral-400">
+                    Dragging
+                </span>
+            </div>
+        </>
     )
 }
 

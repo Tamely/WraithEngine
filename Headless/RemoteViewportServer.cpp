@@ -1,6 +1,7 @@
 #include "RemoteViewportServer.h"
 
 #include <Core/Platform.h>
+#include <Project/ProjectSystem.h>
 
 #ifndef AXIOM_CONTENT_DIR
 #define AXIOM_CONTENT_DIR "Content"
@@ -24,6 +25,7 @@
 #include <fstream>
 #include <iostream>
 #include <optional>
+#include <regex>
 #include <sstream>
 #include <string_view>
 #include <vector>
@@ -390,6 +392,280 @@ std::string JsonResponse(std::string_view Status, std::string_view Payload) {
   return BuildHttpResponse(Status, "application/json; charset=utf-8", Payload);
 }
 
+std::optional<std::string> ExtractJsonStringField(std::string_view Body,
+                                                  std::string_view FieldName) {
+  const std::string Needle = "\"" + std::string(FieldName) + "\"";
+  const size_t KeyPos = Body.find(Needle);
+  if (KeyPos == std::string_view::npos) {
+    return std::nullopt;
+  }
+
+  const size_t ColonPos = Body.find(':', KeyPos + Needle.size());
+  if (ColonPos == std::string_view::npos) {
+    return std::nullopt;
+  }
+
+  size_t ValuePos = ColonPos + 1;
+  while (ValuePos < Body.size() &&
+         std::isspace(static_cast<unsigned char>(Body[ValuePos])) != 0) {
+    ++ValuePos;
+  }
+  if (ValuePos >= Body.size() || Body[ValuePos] != '"') {
+    return std::nullopt;
+  }
+  ++ValuePos;
+
+  std::string Result;
+  while (ValuePos < Body.size()) {
+    const char Character = Body[ValuePos++];
+    if (Character == '"') {
+      return Result;
+    }
+    if (Character == '\\') {
+      if (ValuePos >= Body.size()) {
+        return std::nullopt;
+      }
+      const char Escaped = Body[ValuePos++];
+      switch (Escaped) {
+      case '\\':
+      case '"':
+      case '/':
+        Result.push_back(Escaped);
+        break;
+      case 'n':
+        Result.push_back('\n');
+        break;
+      case 'r':
+        Result.push_back('\r');
+        break;
+      case 't':
+        Result.push_back('\t');
+        break;
+      default:
+        return std::nullopt;
+      }
+      continue;
+    }
+    Result.push_back(Character);
+  }
+
+  return std::nullopt;
+}
+
+std::string EscapeJsonString(std::string_view Value) {
+  std::string Result;
+  Result.reserve(Value.size() + 4);
+  for (const char Character : Value) {
+    switch (Character) {
+    case '\\':
+      Result += "\\\\";
+      break;
+    case '"':
+      Result += "\\\"";
+      break;
+    case '\n':
+      Result += "\\n";
+      break;
+    case '\r':
+      Result += "\\r";
+      break;
+    case '\t':
+      Result += "\\t";
+      break;
+    default:
+      Result.push_back(Character);
+      break;
+    }
+  }
+  return Result;
+}
+
+std::string SerializeProjectJson(const Project::ProjectDescriptor &Project) {
+  std::ostringstream Stream;
+  Stream << "{"
+         << "\"projectId\":\"" << EscapeJsonString(Project.Manifest.ProjectId)
+         << "\",\"name\":\"" << EscapeJsonString(Project.Manifest.Name)
+         << "\",\"slug\":\"" << EscapeJsonString(Project.Manifest.Slug)
+         << "\",\"rootPath\":\""
+         << EscapeJsonString(Project.Root.RootPath.string())
+         << "\",\"contentDir\":\""
+         << EscapeJsonString(Project.Root.ContentDir.string())
+         << "\",\"scriptsDir\":\""
+         << EscapeJsonString(Project.ScriptWorkspace.ScriptsDir.string())
+         << "\",\"scriptProjectPath\":\""
+         << EscapeJsonString(Project.ScriptWorkspace.ScriptProjectPath.string())
+         << "\",\"scriptSolutionPath\":\""
+         << EscapeJsonString(Project.ScriptWorkspace.ScriptSolutionPath.string())
+         << "\",\"scriptAssemblyName\":\""
+         << EscapeJsonString(Project.ScriptWorkspace.AssemblyName)
+         << "\",\"scriptRootNamespace\":\""
+         << EscapeJsonString(Project.ScriptWorkspace.RootNamespace)
+         << "\",\"starterScriptPath\":\""
+         << EscapeJsonString(Project.ScriptWorkspace.StarterScriptPath.string())
+         << "\",\"starterScriptClassName\":\""
+         << EscapeJsonString(Project.ScriptWorkspace.StarterScriptClassName)
+         << "\",\"starterScriptQualifiedClassName\":\""
+         << EscapeJsonString(
+                Project.ScriptWorkspace.StarterScriptQualifiedClassName)
+         << "\",\"cookedDir\":\""
+         << EscapeJsonString(Project.Output.CookedDir.string())
+         << "\",\"cookManifestPath\":\""
+         << EscapeJsonString(Project.Output.CookManifestPath.string())
+         << "\",\"buildDir\":\""
+         << EscapeJsonString(Project.Output.BuildDir.string())
+         << "\",\"packageDir\":\""
+         << EscapeJsonString(Project.Output.PackageDir.string())
+         << "\",\"packagedContentDir\":\""
+         << EscapeJsonString(Project.Output.PackagedContentDir.string())
+         << "\",\"packagedCookedDir\":\""
+         << EscapeJsonString(Project.Output.PackagedCookedDir.string())
+         << "\",\"packagedSceneFilePath\":\""
+         << EscapeJsonString(Project.Output.PackagedSceneFilePath.string())
+         << "\",\"packageManifestPath\":\""
+         << EscapeJsonString(Project.Output.PackageManifestPath.string())
+         << "\",\"engineContentDir\":\""
+         << EscapeJsonString((std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine").string())
+         << "\",\"sceneFilePath\":\""
+         << EscapeJsonString(Project.Root.SceneFilePath.string())
+         << "\"}";
+  return Stream.str();
+}
+
+std::string SerializeProjectList(
+    const std::vector<Project::ProjectDescriptor> &Projects,
+    const std::optional<Project::ProjectDescriptor> &ActiveProject) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"projects\",\"activeProjectSlug\":";
+  if (ActiveProject.has_value()) {
+    Stream << "\"" << EscapeJsonString(ActiveProject->Manifest.Slug) << "\"";
+  } else {
+    Stream << "null";
+  }
+  Stream << ",\"projects\":[";
+  for (size_t Index = 0; Index < Projects.size(); ++Index) {
+    if (Index > 0) {
+      Stream << ",";
+    }
+    Stream << SerializeProjectJson(Projects[Index]);
+  }
+  Stream << "]}";
+  return Stream.str();
+}
+
+std::string SerializeCurrentProject(
+    const std::optional<Project::ProjectDescriptor> &ActiveProject) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"current_project\",\"project\":";
+  if (ActiveProject.has_value()) {
+    Stream << SerializeProjectJson(*ActiveProject);
+  } else {
+    Stream << "null";
+  }
+  Stream << "}";
+  return Stream.str();
+}
+
+std::string SerializeProjectCookResult(
+    const Project::ProjectDescriptor &Project,
+    const Project::ProjectCookResult &Result) {
+  std::ostringstream Stream;
+  Stream << "{"
+         << "\"type\":\"project_cooked\""
+         << ",\"project\":" << SerializeProjectJson(Project)
+         << ",\"cookedSourceAssetCount\":" << Result.CookedSourceAssetCount
+         << ",\"manifestEntryCount\":" << Result.ManifestEntryCount
+         << ",\"cookManifestPath\":\""
+         << EscapeJsonString(Result.Output.CookManifestPath.string())
+         << "\"}";
+  return Stream.str();
+}
+
+std::string SerializeProjectPackageResult(
+    const Project::ProjectDescriptor &Project,
+    const Project::ProjectPackageResult &Result) {
+  std::ostringstream Stream;
+  Stream << "{"
+         << "\"type\":\"project_packaged\""
+         << ",\"project\":" << SerializeProjectJson(Project)
+         << ",\"cookedSourceAssetCount\":" << Result.Cook.CookedSourceAssetCount
+         << ",\"manifestEntryCount\":" << Result.Cook.ManifestEntryCount
+         << ",\"packagedFileCount\":" << Result.PackagedFileCount
+         << ",\"includedSceneFile\":"
+         << (Result.IncludedSceneFile ? "true" : "false")
+         << ",\"includedEngineContent\":"
+         << (Result.IncludedEngineContent ? "true" : "false")
+         << ",\"packageDir\":\""
+         << EscapeJsonString(Result.Cook.Output.PackageDir.string())
+         << "\",\"packageManifestPath\":\""
+         << EscapeJsonString(Result.Cook.Output.PackageManifestPath.string())
+         << "\"}";
+  return Stream.str();
+}
+
+bool IsValidScriptRelativePath(std::filesystem::path RelativePath) {
+  RelativePath = RelativePath.lexically_normal();
+  if (RelativePath.empty() || RelativePath.is_absolute()) {
+    return false;
+  }
+  if (RelativePath.filename().empty() || RelativePath.extension() != ".cs") {
+    return false;
+  }
+
+  for (const auto &Part : RelativePath) {
+    const auto Token = Part.string();
+    if (Token.empty() || Token == "." || Token == "..") {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::string SerializeScriptListJson(const std::vector<std::string> &Files) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"scripts_list\",\"files\":[";
+  for (size_t Index = 0; Index < Files.size(); ++Index) {
+    if (Index > 0) {
+      Stream << ",";
+    }
+    Stream << "\"" << EscapeJsonString(Files[Index]) << "\"";
+  }
+  Stream << "]}";
+  return Stream.str();
+}
+
+std::string SerializeScriptFileJson(std::string_view RelativePath,
+                                    std::string_view Content) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"script_file\",\"path\":\""
+         << EscapeJsonString(RelativePath) << "\",\"content\":\""
+         << EscapeJsonString(Content) << "\"}";
+  return Stream.str();
+}
+
+std::string SerializeScriptMutationJson(std::string_view MutationType,
+                                        std::string_view RelativePath) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"" << MutationType << "\",\"path\":\""
+         << EscapeJsonString(RelativePath) << "\"}";
+  return Stream.str();
+}
+
+std::string SerializeScriptClassesJson(
+    const std::vector<std::pair<std::string, std::string>> &Classes) {
+  std::ostringstream Stream;
+  Stream << "{\"type\":\"script_classes\",\"classes\":[";
+  for (size_t Index = 0; Index < Classes.size(); ++Index) {
+    if (Index > 0) {
+      Stream << ",";
+    }
+    Stream << "{\"className\":\"" << EscapeJsonString(Classes[Index].first)
+           << "\",\"path\":\"" << EscapeJsonString(Classes[Index].second)
+           << "\"}";
+  }
+  Stream << "]}";
+  return Stream.str();
+}
+
 // Loads an image file, scales it to fit within MaxDim x MaxDim (preserving
 // aspect ratio), and encodes as JPEG. Returns empty vector on any failure.
 std::vector<uint8_t> MakeThumbnailJpeg(const std::filesystem::path &Path,
@@ -616,7 +892,9 @@ struct RemoteViewportServer::RemoteClientSession::PacketOutput final
 
 RemoteViewportServer::RemoteViewportServer(
     HeadlessSessionHost &Host, const RemoteViewportServerOptions &Options)
-    : m_Host(Host), m_Options(Options) {
+    : m_Host(Host),
+      m_Options(Options),
+      m_ProjectsRoot(Project::GetDefaultProjectsRoot()) {
   m_Host.SetTransportVideoEncoder(nullptr);
 }
 
@@ -935,6 +1213,30 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
                                              std::string_view Body) {
   const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
   const std::string_view Route = StripQuery(Path);
+  if (Route == "/projects/create") {
+    return HandleCreateProjectRequest(ClientSocketValue, Body);
+  }
+  if (Route == "/projects/open") {
+    return HandleOpenProjectRequest(ClientSocketValue, Body);
+  }
+  if (Route == "/projects/cook") {
+    return HandleCookProjectRequest(ClientSocketValue);
+  }
+  if (Route == "/projects/package") {
+    return HandlePackageProjectRequest(ClientSocketValue);
+  }
+  if (Route == "/scripts/create") {
+    return HandleCreateScriptFileRequest(ClientSocketValue, Body);
+  }
+  if (Route == "/scripts/save") {
+    return HandleSaveScriptFileRequest(ClientSocketValue, Body);
+  }
+  if (Route == "/scripts/rename") {
+    return HandleRenameScriptFileRequest(ClientSocketValue, Body);
+  }
+  if (Route == "/scripts/delete") {
+    return HandleDeleteScriptFileRequest(ClientSocketValue, Body);
+  }
   if (Route == "/session/connect") {
     return HandleSessionConnectRequest(ClientSocketValue, HeaderBlock, Body);
   }
@@ -1040,6 +1342,397 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   return false;
 }
 
+bool RemoteViewportServer::HandleCreateProjectRequest(
+    uintptr_t ClientSocketValue, std::string_view Body) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  const auto ProjectName = ExtractJsonStringField(Body, "name");
+  if (!ProjectName.has_value() || ProjectName->empty()) {
+    const std::string Response = JsonResponse(
+        "400 Bad Request",
+        SerializeError("Missing required 'name' field."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  std::string FailureReason;
+  const auto Created = Project::CreateProjectScaffold(m_ProjectsRoot, *ProjectName,
+                                                      &FailureReason);
+  if (!Created.has_value()) {
+    const std::string Response = JsonResponse(
+        "400 Bad Request", SerializeError(FailureReason));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  {
+    std::scoped_lock Lock(m_ProjectMutex);
+    m_ActiveProject = *Created;
+  }
+
+  FailureReason.clear();
+  if (!LoadActiveProjectIntoSession(&FailureReason)) {
+    const std::string Response = JsonResponse(
+        "500 Internal Server Error", SerializeError(FailureReason));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const std::string Response =
+      JsonResponse("201 Created", SerializeCurrentProject(Created));
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
+bool RemoteViewportServer::HandleOpenProjectRequest(uintptr_t ClientSocketValue,
+                                                    std::string_view Body) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  const auto ProjectSlug = ExtractJsonStringField(Body, "slug");
+  if (!ProjectSlug.has_value() || ProjectSlug->empty()) {
+    const std::string Response = JsonResponse(
+        "400 Bad Request",
+        SerializeError("Missing required 'slug' field."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const auto Opened = SetActiveProjectBySlug(*ProjectSlug);
+  if (!Opened.has_value()) {
+    const std::string Response = JsonResponse(
+        "404 Not Found",
+        SerializeError("Project was not found in the managed projects directory."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  std::string FailureReason;
+  if (!LoadActiveProjectIntoSession(&FailureReason)) {
+    const std::string Response = JsonResponse(
+        "500 Internal Server Error", SerializeError(FailureReason));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const std::string Response =
+      JsonResponse("200 OK", SerializeCurrentProject(Opened));
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
+bool RemoteViewportServer::HandleCookProjectRequest(uintptr_t ClientSocketValue) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  const auto ActiveProject = GetActiveProject();
+  if (!ActiveProject.has_value()) {
+    const std::string Response =
+        JsonResponse("400 Bad Request",
+                     SerializeError("No active project is selected."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  std::string FailureReason;
+  const auto Result =
+      Project::CookProjectContent(*ActiveProject, &FailureReason);
+  if (!Result.has_value()) {
+    const std::string Response =
+        JsonResponse("500 Internal Server Error", SerializeError(FailureReason));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const std::string Response =
+      JsonResponse("200 OK", SerializeProjectCookResult(*ActiveProject, *Result));
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
+bool RemoteViewportServer::HandlePackageProjectRequest(
+    uintptr_t ClientSocketValue) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  const auto ActiveProject = GetActiveProject();
+  if (!ActiveProject.has_value()) {
+    const std::string Response =
+        JsonResponse("400 Bad Request",
+                     SerializeError("No active project is selected."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  std::string FailureReason;
+  const auto Result =
+      Project::PackageProjectContent(*ActiveProject, &FailureReason);
+  if (!Result.has_value()) {
+    const std::string Response =
+        JsonResponse("500 Internal Server Error", SerializeError(FailureReason));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const std::string Response = JsonResponse(
+      "200 OK", SerializeProjectPackageResult(*ActiveProject, *Result));
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
+bool RemoteViewportServer::HandleListScriptsRequest(uintptr_t ClientSocketValue) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  const std::string Response =
+      JsonResponse("200 OK", SerializeScriptListJson(ListScriptFiles()));
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
+bool RemoteViewportServer::HandleListScriptClassesRequest(
+    uintptr_t ClientSocketValue) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  const std::string Response =
+      JsonResponse("200 OK", SerializeScriptClassesJson(ListScriptClasses()));
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
+bool RemoteViewportServer::HandleReadScriptFileRequest(uintptr_t ClientSocketValue,
+                                                       std::string_view Path) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  const auto RelativePath = GetQueryParam(Path, "path");
+  if (!RelativePath.has_value() || RelativePath->empty()) {
+    const std::string Response = JsonResponse(
+        "400 Bad Request", SerializeError("Missing required 'path' query parameter."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const auto FilePath = ResolveActiveScriptPath(*RelativePath);
+  if (!FilePath.has_value() || !std::filesystem::exists(*FilePath)) {
+    const std::string Response = JsonResponse(
+        "404 Not Found", SerializeError("Script file was not found."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  std::ifstream File(*FilePath);
+  if (!File.is_open()) {
+    const std::string Response = JsonResponse(
+        "500 Internal Server Error", SerializeError("Failed to open script file."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const std::string Content((std::istreambuf_iterator<char>(File)),
+                            std::istreambuf_iterator<char>());
+  const std::string Response =
+      JsonResponse("200 OK", SerializeScriptFileJson(*RelativePath, Content));
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
+bool RemoteViewportServer::HandleCreateScriptFileRequest(
+    uintptr_t ClientSocketValue, std::string_view Body) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  const auto RelativePath = ExtractJsonStringField(Body, "path");
+  if (!RelativePath.has_value() || RelativePath->empty()) {
+    const std::string Response =
+        JsonResponse("400 Bad Request",
+                     SerializeError("Missing required 'path' field."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const auto FilePath = ResolveActiveScriptPath(*RelativePath, true);
+  if (!FilePath.has_value()) {
+    const std::string Response = JsonResponse(
+        "400 Bad Request",
+        SerializeError("Script path must stay inside the active project's Scripts directory and end in .cs."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+  if (std::filesystem::exists(*FilePath)) {
+    const std::string Response = JsonResponse(
+        "409 Conflict", SerializeError("A script file with that path already exists."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  std::error_code Error;
+  std::filesystem::create_directories(FilePath->parent_path(), Error);
+  if (Error) {
+    const std::string Response = JsonResponse(
+        "500 Internal Server Error",
+        SerializeError("Failed to create the script directory."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  std::ofstream File(*FilePath);
+  if (!File.is_open()) {
+    const std::string Response = JsonResponse(
+        "500 Internal Server Error", SerializeError("Failed to create script file."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const auto ActiveProject = GetActiveProject();
+  const std::string Namespace = ActiveProject.has_value()
+                                    ? ActiveProject->ScriptWorkspace.RootNamespace
+                                    : "Project.Scripts";
+  const std::string ClassName = FilePath->stem().string();
+  std::ostringstream Template;
+  Template << "using WraithEngine;\n\n"
+           << "namespace " << Namespace << ";\n\n"
+           << "public class " << ClassName << " : Script\n"
+           << "{\n"
+           << "    public override void OnCreate()\n"
+           << "    {\n"
+           << "    }\n\n"
+           << "    public override void OnTick(float dt)\n"
+           << "    {\n"
+           << "    }\n"
+           << "}\n";
+  File << Template.str();
+  File.close();
+
+  const std::string Response =
+      JsonResponse("201 Created", SerializeScriptMutationJson("script_created", *RelativePath));
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
+bool RemoteViewportServer::HandleSaveScriptFileRequest(uintptr_t ClientSocketValue,
+                                                       std::string_view Body) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  const auto RelativePath = ExtractJsonStringField(Body, "path");
+  const auto Content = ExtractJsonStringField(Body, "content");
+  if (!RelativePath.has_value() || !Content.has_value()) {
+    const std::string Response =
+        JsonResponse("400 Bad Request",
+                     SerializeError("Missing required 'path' or 'content' field."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const auto FilePath = ResolveActiveScriptPath(*RelativePath, true);
+  if (!FilePath.has_value()) {
+    const std::string Response = JsonResponse(
+        "400 Bad Request",
+        SerializeError("Script path must stay inside the active project's Scripts directory and end in .cs."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  std::error_code Error;
+  std::filesystem::create_directories(FilePath->parent_path(), Error);
+  if (Error) {
+    const std::string Response = JsonResponse(
+        "500 Internal Server Error",
+        SerializeError("Failed to create the script directory."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  std::ofstream File(*FilePath);
+  if (!File.is_open()) {
+    const std::string Response = JsonResponse(
+        "500 Internal Server Error", SerializeError("Failed to save script file."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+  File << *Content;
+  File.close();
+
+  const std::string Response =
+      JsonResponse("200 OK", SerializeScriptMutationJson("script_saved", *RelativePath));
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
+bool RemoteViewportServer::HandleRenameScriptFileRequest(
+    uintptr_t ClientSocketValue, std::string_view Body) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  const auto RelativePath = ExtractJsonStringField(Body, "path");
+  const auto NewRelativePath = ExtractJsonStringField(Body, "newPath");
+  if (!RelativePath.has_value() || !NewRelativePath.has_value() ||
+      RelativePath->empty() || NewRelativePath->empty()) {
+    const std::string Response =
+        JsonResponse("400 Bad Request",
+                     SerializeError("Missing required 'path' or 'newPath' field."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const auto OldPath = ResolveActiveScriptPath(*RelativePath);
+  const auto NewPath = ResolveActiveScriptPath(*NewRelativePath, true);
+  if (!OldPath.has_value() || !NewPath.has_value() ||
+      !std::filesystem::exists(*OldPath)) {
+    const std::string Response = JsonResponse(
+        "400 Bad Request",
+        SerializeError("Script rename must stay inside the active project's Scripts directory and target an existing .cs file."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+  if (std::filesystem::exists(*NewPath)) {
+    const std::string Response = JsonResponse(
+        "409 Conflict", SerializeError("A script file with the destination path already exists."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  std::error_code Error;
+  std::filesystem::create_directories(NewPath->parent_path(), Error);
+  if (Error) {
+    const std::string Response = JsonResponse(
+        "500 Internal Server Error",
+        SerializeError("Failed to create the destination script directory."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+  std::filesystem::rename(*OldPath, *NewPath, Error);
+  if (Error) {
+    const std::string Response = JsonResponse(
+        "500 Internal Server Error", SerializeError("Failed to rename script file."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const std::string Response =
+      JsonResponse("200 OK", SerializeScriptMutationJson("script_renamed", *NewRelativePath));
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
+bool RemoteViewportServer::HandleDeleteScriptFileRequest(
+    uintptr_t ClientSocketValue, std::string_view Body) {
+  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
+  const auto RelativePath = ExtractJsonStringField(Body, "path");
+  if (!RelativePath.has_value() || RelativePath->empty()) {
+    const std::string Response =
+        JsonResponse("400 Bad Request",
+                     SerializeError("Missing required 'path' field."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const auto FilePath = ResolveActiveScriptPath(*RelativePath);
+  if (!FilePath.has_value() || !std::filesystem::exists(*FilePath)) {
+    const std::string Response = JsonResponse(
+        "404 Not Found", SerializeError("Script file was not found."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  std::error_code Error;
+  const bool Removed = std::filesystem::remove(*FilePath, Error);
+  if (Error || !Removed) {
+    const std::string Response = JsonResponse(
+        "500 Internal Server Error", SerializeError("Failed to delete script file."));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+
+  const std::string Response =
+      JsonResponse("200 OK", SerializeScriptMutationJson("script_deleted", *RelativePath));
+  SendAll(ClientSocket, Response.data(), Response.size());
+  return false;
+}
+
 bool RemoteViewportServer::HandleSessionConnectRequest(
     uintptr_t ClientSocketValue, std::string_view HeaderBlock,
     std::string_view Body) {
@@ -1077,6 +1770,30 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
                                             std::string_view HeaderBlock) {
   const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
   const std::string_view Route = StripQuery(Path);
+  if (Route == "/projects") {
+    const auto Projects = ListProjects();
+    const auto ActiveProject = GetActiveProject();
+    const std::string Response =
+        JsonResponse("200 OK", SerializeProjectList(Projects, ActiveProject));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+  if (Route == "/projects/current") {
+    const auto ActiveProject = GetActiveProject();
+    const std::string Response =
+        JsonResponse("200 OK", SerializeCurrentProject(ActiveProject));
+    SendAll(ClientSocket, Response.data(), Response.size());
+    return false;
+  }
+  if (Route == "/scripts") {
+    return HandleListScriptsRequest(ClientSocketValue);
+  }
+  if (Route == "/scripts/classes") {
+    return HandleListScriptClassesRequest(ClientSocketValue);
+  }
+  if (Route == "/scripts/file") {
+    return HandleReadScriptFileRequest(ClientSocketValue, Path);
+  }
   if (Route == "/health") {
     const std::string Body = SerializeReady(m_Options.Width, m_Options.Height);
     const std::string Response = JsonResponse("200 OK", Body);
@@ -1152,9 +1869,14 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
       SendAll(ClientSocket, Response.data(), Response.size());
       return false;
     }
-    const Assets::LocalAssetSource ContentDir{AXIOM_CONTENT_DIR};
-    const std::filesystem::path FullPath = ContentDir.ResolveRelative(*RelPath);
-    const std::vector<uint8_t> Jpeg = MakeThumbnailJpeg(FullPath);
+    const auto FullPath = ResolveVisibleAssetPath(*RelPath);
+    if (!FullPath.has_value()) {
+      const std::string Response =
+          JsonResponse("400 Bad Request", SerializeError("Invalid path."));
+      SendAll(ClientSocket, Response.data(), Response.size());
+      return false;
+    }
+    const std::vector<uint8_t> Jpeg = MakeThumbnailJpeg(*FullPath);
     if (Jpeg.empty()) {
       const std::string Response =
           JsonResponse("404 Not Found", SerializeError("Could not load thumbnail."));
@@ -1412,17 +2134,18 @@ bool RemoteViewportServer::HandleAssetUploadRequest(
   // Optional target subdirectory from ?dir= query parameter.
   const std::string TargetDir = GetQueryParam(Path, "dir").value_or("");
 
-  const Assets::LocalAssetSource ContentSource{AXIOM_CONTENT_DIR};
+  const auto ContentRoot = GetActiveContentDir();
+  const Assets::LocalAssetSource ContentSource{ContentRoot};
 
   // Resolve and validate destination directory.
   std::filesystem::path DestDir;
   if (TargetDir.empty()) {
-    DestDir = std::filesystem::path(AXIOM_CONTENT_DIR);
+    DestDir = ContentRoot;
   } else {
+    const std::filesystem::path TargetDirPath{TargetDir};
     // Prevent path traversal: reject any component that starts with ".."
     bool Unsafe = false;
-    for (const auto &Part :
-         std::filesystem::path(TargetDir)) {
+    for (const auto &Part : TargetDirPath) {
       if (Part.string().find("..") != std::string::npos) {
         Unsafe = true;
         break;
@@ -1434,7 +2157,15 @@ bool RemoteViewportServer::HandleAssetUploadRequest(
       SendAll(ClientSocket, Response.data(), Response.size());
       return false;
     }
-    DestDir = std::filesystem::path(AXIOM_CONTENT_DIR) / TargetDir;
+    if (TargetDirPath.begin() != TargetDirPath.end() &&
+        (*TargetDirPath.begin()).string() == "Engine") {
+      const std::string Response = JsonResponse(
+          "400 Bad Request",
+          SerializeError("Engine content is read-only and cannot be modified by project uploads."));
+      SendAll(ClientSocket, Response.data(), Response.size());
+      return false;
+    }
+    DestDir = ContentRoot / TargetDirPath;
   }
 
   // Split multipart body into parts.
@@ -1510,14 +2241,13 @@ bool RemoteViewportServer::HandleAssetUploadRequest(
 
     // Build content-relative path for the response.
     const auto Rel = std::filesystem::relative(OutPath,
-                                               std::filesystem::path(AXIOM_CONTENT_DIR), Ec);
+                                               ContentRoot, Ec);
     if (!Ec) Saved.push_back(Rel.string());
   }
 
   // Broadcast updated asset list to all WebSocket clients.
   {
-    const Assets::LocalAssetSource Refreshed{AXIOM_CONTENT_DIR};
-    BroadcastTextMessage(SerializeAssetList(Refreshed.List()));
+    BroadcastTextMessage(SerializeAssetList(CollectVisibleAssets()));
   }
 
   // Build JSON response with saved paths.
@@ -1640,6 +2370,205 @@ void RemoteViewportServer::TouchClientSession(const std::string &ClientId) {
     It->second.LastActivity = std::chrono::steady_clock::now();
   }
   m_Host.FocusRemoteRenderView(ClientId);
+}
+
+std::vector<Project::ProjectDescriptor> RemoteViewportServer::ListProjects() const {
+  return Project::DiscoverProjects(m_ProjectsRoot);
+}
+
+std::optional<Project::ProjectDescriptor>
+RemoteViewportServer::GetActiveProject() const {
+  std::scoped_lock Lock(m_ProjectMutex);
+  return m_ActiveProject;
+}
+
+std::optional<Project::ProjectDescriptor>
+RemoteViewportServer::SetActiveProjectBySlug(std::string_view ProjectSlug) {
+  const auto Opened = Project::OpenProjectBySlug(m_ProjectsRoot, ProjectSlug);
+  if (!Opened.has_value()) {
+    return std::nullopt;
+  }
+
+  {
+    std::scoped_lock Lock(m_ProjectMutex);
+    m_ActiveProject = *Opened;
+  }
+  return Opened;
+}
+
+std::filesystem::path RemoteViewportServer::GetActiveContentDir() const {
+  if (const auto ActiveProject = GetActiveProject(); ActiveProject.has_value()) {
+    return ActiveProject->Root.ContentDir;
+  }
+  return std::filesystem::path(AXIOM_CONTENT_DIR);
+}
+
+std::filesystem::path RemoteViewportServer::GetActiveScriptsDir() const {
+  if (const auto ActiveProject = GetActiveProject(); ActiveProject.has_value()) {
+    return ActiveProject->ScriptWorkspace.ScriptsDir;
+  }
+  return std::filesystem::path(AXIOM_PROJECTS_DIR) / "__default__" / "Scripts";
+}
+
+std::filesystem::path RemoteViewportServer::GetEngineContentDir() const {
+  return std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine";
+}
+
+bool RemoteViewportServer::LoadActiveProjectIntoSession(
+    std::string *FailureReason) {
+  if (m_Host.LoadStartupSceneIntoSession(GetActiveContentDir())) {
+    return true;
+  }
+
+  if (FailureReason != nullptr) {
+    *FailureReason =
+        "Failed to load the active project's startup scene into the session.";
+  }
+  return false;
+}
+
+std::vector<std::string> RemoteViewportServer::ListScriptFiles() const {
+  std::vector<std::string> Results;
+  const auto ScriptsDir = GetActiveScriptsDir();
+  if (!std::filesystem::exists(ScriptsDir)) {
+    return Results;
+  }
+
+  for (const auto &Entry :
+       std::filesystem::recursive_directory_iterator(ScriptsDir)) {
+    if (!Entry.is_regular_file() || Entry.path().extension() != ".cs") {
+      continue;
+    }
+
+    std::error_code Error;
+    const auto Relative =
+        std::filesystem::relative(Entry.path(), ScriptsDir, Error);
+    if (Error) {
+      continue;
+    }
+    Results.push_back(Relative.generic_string());
+  }
+
+  std::sort(Results.begin(), Results.end());
+  return Results;
+}
+
+std::vector<std::pair<std::string, std::string>>
+RemoteViewportServer::ListScriptClasses() const {
+  std::vector<std::pair<std::string, std::string>> Results;
+  const auto ScriptFiles = ListScriptFiles();
+  const auto ActiveProject = GetActiveProject();
+  const std::string DefaultNamespace =
+      ActiveProject.has_value() ? ActiveProject->ScriptWorkspace.RootNamespace
+                                : "Project.Scripts";
+  const std::regex NamespacePattern(
+      R"(namespace\s+([A-Za-z_][A-Za-z0-9_\.]*)\s*[;{])");
+  const std::regex ClassPattern(
+      R"(public\s+class\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*Script\b)");
+
+  for (const auto &RelativePath : ScriptFiles) {
+    const auto AbsolutePath = ResolveActiveScriptPath(RelativePath);
+    if (!AbsolutePath.has_value()) {
+      continue;
+    }
+
+    std::ifstream File(*AbsolutePath);
+    if (!File.is_open()) {
+      continue;
+    }
+
+    const std::string Content((std::istreambuf_iterator<char>(File)),
+                              std::istreambuf_iterator<char>());
+    std::string Namespace = DefaultNamespace;
+    if (std::smatch NamespaceMatch;
+        std::regex_search(Content, NamespaceMatch, NamespacePattern) &&
+        NamespaceMatch.size() > 1) {
+      Namespace = NamespaceMatch[1].str();
+    }
+
+    auto ClassBegin = std::sregex_iterator(Content.begin(), Content.end(), ClassPattern);
+    const auto ClassEnd = std::sregex_iterator();
+    for (auto It = ClassBegin; It != ClassEnd; ++It) {
+      const std::string ClassName = (*It)[1].str();
+      Results.emplace_back(Namespace + "." + ClassName, RelativePath);
+    }
+  }
+
+  std::sort(Results.begin(), Results.end(),
+            [](const auto &Left, const auto &Right) {
+              return Left.first < Right.first;
+            });
+  return Results;
+}
+
+std::optional<std::filesystem::path>
+RemoteViewportServer::ResolveActiveScriptPath(std::string_view RelativePath,
+                                              bool AllowMissingLeaf) const {
+  const std::filesystem::path Relative =
+      std::filesystem::path(RelativePath).lexically_normal();
+  if (!IsValidScriptRelativePath(Relative)) {
+    return std::nullopt;
+  }
+
+  const auto ScriptsDir = GetActiveScriptsDir();
+  const auto Candidate = (ScriptsDir / Relative).lexically_normal();
+  const auto ValidationPath =
+      AllowMissingLeaf ? Candidate.parent_path() : Candidate;
+  if (!Project::IsPathWithinRoot(ScriptsDir, ValidationPath)) {
+    return std::nullopt;
+  }
+  return Candidate;
+}
+
+std::vector<Assets::AssetDescriptor>
+RemoteViewportServer::CollectVisibleAssets() const {
+  std::vector<Assets::AssetDescriptor> Assets;
+
+  const Assets::LocalAssetSource ProjectSource{GetActiveContentDir()};
+  Assets = ProjectSource.List();
+
+  const Assets::LocalAssetSource EngineSource{GetEngineContentDir()};
+  for (auto EngineAsset : EngineSource.List()) {
+    EngineAsset.RelativePath =
+        (std::filesystem::path("Engine") / EngineAsset.RelativePath)
+            .generic_string();
+    EngineAsset.Name = std::filesystem::path(EngineAsset.RelativePath).stem().string();
+    EngineAsset.Id = Assets::AssetIdFromRelativePath(EngineAsset.RelativePath);
+    Assets.push_back(std::move(EngineAsset));
+  }
+
+  std::sort(Assets.begin(), Assets.end(),
+            [](const Assets::AssetDescriptor &Left,
+               const Assets::AssetDescriptor &Right) {
+              return Left.RelativePath < Right.RelativePath;
+            });
+  return Assets;
+}
+
+std::optional<std::filesystem::path>
+RemoteViewportServer::ResolveVisibleAssetPath(std::string_view RelativePath) const {
+  if (RelativePath.empty()) {
+    return std::nullopt;
+  }
+
+  const std::filesystem::path Relative{std::string(RelativePath)};
+  for (const auto &Part : Relative) {
+    if (Part == "..") {
+      return std::nullopt;
+    }
+  }
+
+  if (!Relative.empty() && *Relative.begin() == "Engine") {
+    std::filesystem::path EngineRelative;
+    auto It = Relative.begin();
+    ++It;
+    for (; It != Relative.end(); ++It) {
+      EngineRelative /= *It;
+    }
+    return GetEngineContentDir() / EngineRelative;
+  }
+
+  return GetActiveContentDir() / Relative;
 }
 
 void RemoteViewportServer::HandleClientEncodedVideoPacket(
@@ -1873,8 +2802,7 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   case HeadlessCommandType::Heartbeat:
     return false;
   case HeadlessCommandType::ListAssets: {
-    const Assets::LocalAssetSource ContentDir{AXIOM_CONTENT_DIR};
-    SendTextMessage(ClientSocketValue, SerializeAssetList(ContentDir.List()));
+    SendTextMessage(ClientSocketValue, SerializeAssetList(CollectVisibleAssets()));
     return true;
   }
   case HeadlessCommandType::GetSchema: {
@@ -1889,7 +2817,7 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetProperty:
     return false;
   case HeadlessCommandType::SaveScene: {
-    const Assets::LocalAssetSource ContentDir{AXIOM_CONTENT_DIR};
+    const Assets::LocalAssetSource ContentDir{GetActiveContentDir()};
     const auto ScenePath = ContentDir.ResolveRelative("scene.json");
     const bool Ok = Assets::SaveSceneToFile(
         ScenePath,
@@ -1968,10 +2896,9 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     return true;
   }
   case HeadlessCommandType::ListAssets: {
-    const Assets::LocalAssetSource ContentDir{AXIOM_CONTENT_DIR};
     if (Client->WebRtcSession != nullptr) {
       Client->WebRtcSession->SendReliableMessage(
-          SerializeAssetList(ContentDir.List()));
+          SerializeAssetList(CollectVisibleAssets()));
     }
     return true;
   }
@@ -1986,7 +2913,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     return true;
   }
   case HeadlessCommandType::SaveScene: {
-    const Assets::LocalAssetSource ContentDir{AXIOM_CONTENT_DIR};
+    const Assets::LocalAssetSource ContentDir{GetActiveContentDir()};
     const auto ScenePath = ContentDir.ResolveRelative("scene.json");
     const bool Ok = Assets::SaveSceneToFile(
         ScenePath,

@@ -438,6 +438,40 @@ Instance *EditorSession::FindWorldFolder() const {
   return nullptr;
 }
 
+Instance *EditorSession::EnsureWorldFolder() {
+  if (!m_SceneRoot) {
+    InitSceneRoot();
+  }
+
+  auto EnsureWorldDetails = [this]() {
+    if (m_State.Scene.ObjectDetailsById.find("world") !=
+        m_State.Scene.ObjectDetailsById.end()) {
+      return;
+    }
+    m_State.Scene.ObjectDetailsById.emplace(
+        "world", EditorObjectDetails{
+                     .ObjectId = "world",
+                     .DisplayName = "World",
+                     .Kind = EditorSceneItemKind::Folder,
+                     .Visible = true,
+                     .SupportsTransform = false,
+                     .TransformReadOnly = true,
+                 });
+  };
+
+  if (Instance *World = FindWorldFolder(); World != nullptr) {
+    EnsureWorldDetails();
+    return World;
+  }
+
+  EnsureWorldDetails();
+
+  Instance *World = Instance::Create<SceneFolder>("world");
+  World->SetParent(m_SceneRoot.get());
+  SyncItemsFromTree();
+  return World;
+}
+
 void EditorSession::RebuildInstanceTree(const std::vector<EditorSceneItem> &Items,
                                         Instance *Parent) {
   if (!Parent) return;
@@ -1138,20 +1172,12 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
       FailureReason = "Unknown TemplateId: " + CreateCmd->TemplateId + ".";
       return false;
     }
-    if (FindWorldFolder() == nullptr) {
-      FailureReason = "No world folder found in scene root.";
-      return false;
-    }
   }
 
   if (const auto *CreateMeshCmd =
           std::get_if<CreateMeshObjectCommand>(&QueuedCommand.Command.Payload)) {
     if (CreateMeshCmd->AssetPath.empty()) {
       FailureReason = "CreateMeshObject requires a non-empty asset path.";
-      return false;
-    }
-    if (FindWorldFolder() == nullptr) {
-      FailureReason = "No world folder found in scene root.";
       return false;
     }
     if (CreateMeshCmd->Scale.x <= 0.0f || CreateMeshCmd->Scale.y <= 0.0f ||
@@ -1288,8 +1314,9 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
       FailureReason = "SetMeshAsset targeted an unknown object.";
       return false;
     }
-    if (Details->Kind != EditorSceneItemKind::Mesh) {
-      FailureReason = "SetMeshAsset target must be a Mesh object.";
+    if (Details->Kind != EditorSceneItemKind::Mesh &&
+        Details->Kind != EditorSceneItemKind::Actor) {
+      FailureReason = "SetMeshAsset target must be a Mesh or Actor object.";
       return false;
     }
   }
@@ -1473,6 +1500,10 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
 void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                   const CreateObjectCommand &Command) {
   EnsurePresence(QueuedCommand.Context.User);
+  Instance *WorldFolder = EnsureWorldFolder();
+  if (WorldFolder == nullptr) {
+    return;
+  }
   const EditorSceneItemKind Kind = KindForTemplateId(Command.TemplateId);
   const std::string ObjectId = BuildUniqueObjectId(Command.TemplateId);
   const std::string DisplayName = BuildUniqueDisplayName(Command.TemplateId);
@@ -1494,7 +1525,7 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
       });
 
   if (Instance *Node = CreateInstanceForTemplate(Command.TemplateId, ObjectId))
-    Node->SetParent(FindWorldFolder());
+    Node->SetParent(WorldFolder);
 
   SyncItemsFromTree();
   PublishEvent({.Payload = ObjectCreatedEvent{
@@ -1507,6 +1538,10 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
 void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                   const CreateMeshObjectCommand &Command) {
   EnsurePresence(QueuedCommand.Context.User);
+  Instance *WorldFolder = EnsureWorldFolder();
+  if (WorldFolder == nullptr) {
+    return;
+  }
 
   const std::string ObjectId = BuildUniqueObjectId("Mesh");
   const std::string DisplayName = BuildUniqueDisplayName("Mesh");
@@ -1530,7 +1565,7 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
       });
 
   if (Instance *Node = CreateInstanceForTemplate("Mesh", ObjectId)) {
-    Node->SetParent(FindWorldFolder());
+    Node->SetParent(WorldFolder);
   }
 
   SyncItemsFromTree();

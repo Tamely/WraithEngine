@@ -23,6 +23,7 @@ public:
   bool Step();
 
   bool LoadStartupSceneIntoSession();
+  bool LoadStartupSceneIntoSession(const std::filesystem::path &ContentDir);
   void SubmitLocalCommand(const EditorCommand &Command);
   void SubmitRemoteCommand(const EditorCommand &Command);
   void SubmitRemoteCommand(SessionUserId User, const EditorCommand &Command);

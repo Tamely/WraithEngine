@@ -12,6 +12,8 @@ namespace Axiom::Assets {
 std::optional<std::filesystem::path>
 FindContentRootForPath(const std::filesystem::path &Path);
 
+bool IsCookedOnlyContentPath(const std::filesystem::path &Path);
+
 std::optional<MeshSceneData>
 LoadCookedMeshAssetIfAvailable(const std::filesystem::path &Path);
 

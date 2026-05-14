@@ -76,7 +76,7 @@ struct EditorObjectDetails {
   bool TransformReadOnly{true};
   std::optional<EditorTransformDetails> Transform;      // local-space
   std::optional<EditorTransformDetails> WorldTransform; // world-space (computed)
-  std::optional<std::string> ScriptClass;               // C# script class name (Actors only)
+  std::optional<std::string> ScriptClass;               // C# script class name (Actor objects only)
   std::optional<EditorLightProperties> Light;           // Light objects only
   std::optional<EditorMaterialProperties> Material;     // Mesh objects only
   std::optional<std::string> GeneratedFromAssetRootId;
@@ -157,6 +157,7 @@ public:
 
   // Must be called before SetMeshAssetCommand can be processed.
   void SetContentDir(std::filesystem::path ContentDir);
+  const std::filesystem::path &GetContentDir() const { return m_ContentDir; }
 
   void EnsureViewportState(SessionUserId User);
   void SetPresenceState(SessionUserId User, EditorUserPresenceState State);
@@ -215,6 +216,7 @@ private:
   // Instance tree management
   void InitSceneRoot();
   Instance *FindWorldFolder() const;
+  Instance *EnsureWorldFolder();
   void RebuildInstanceTree(const std::vector<EditorSceneItem> &Items,
                            Instance *Parent);
   void SyncItemsFromTree();

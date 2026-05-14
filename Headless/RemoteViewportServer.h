@@ -5,6 +5,7 @@
 #include "WebRtcSession.h"
 
 #include <Assets/IAssetSource.h>
+#include <Project/ProjectSystem.h>
 #include <Remote/SessionTransport.h>
 #include <Renderer/RendererBackend.h>
 #include <Renderer/RenderScene.h>
@@ -104,6 +105,24 @@ private:
   bool HandlePostRequest(uintptr_t ClientSocketValue, std::string_view Path,
                          std::string_view HeaderBlock,
                          std::string_view Body);
+  bool HandleCreateProjectRequest(uintptr_t ClientSocketValue,
+                                  std::string_view Body);
+  bool HandleOpenProjectRequest(uintptr_t ClientSocketValue,
+                                std::string_view Body);
+  bool HandleCookProjectRequest(uintptr_t ClientSocketValue);
+  bool HandlePackageProjectRequest(uintptr_t ClientSocketValue);
+  bool HandleListScriptsRequest(uintptr_t ClientSocketValue);
+  bool HandleListScriptClassesRequest(uintptr_t ClientSocketValue);
+  bool HandleReadScriptFileRequest(uintptr_t ClientSocketValue,
+                                   std::string_view Path);
+  bool HandleCreateScriptFileRequest(uintptr_t ClientSocketValue,
+                                     std::string_view Body);
+  bool HandleSaveScriptFileRequest(uintptr_t ClientSocketValue,
+                                   std::string_view Body);
+  bool HandleRenameScriptFileRequest(uintptr_t ClientSocketValue,
+                                     std::string_view Body);
+  bool HandleDeleteScriptFileRequest(uintptr_t ClientSocketValue,
+                                     std::string_view Body);
   bool HandleSessionConnectRequest(uintptr_t ClientSocketValue,
                                    std::string_view HeaderBlock,
                                    std::string_view Body);
@@ -143,6 +162,22 @@ private:
   ClientSessionResolution CreateOrResumeClientSession(
       const std::optional<std::string> &ClientIdHint);
   void TouchClientSession(const std::string &ClientId);
+  std::vector<Project::ProjectDescriptor> ListProjects() const;
+  std::optional<Project::ProjectDescriptor> GetActiveProject() const;
+  std::optional<Project::ProjectDescriptor>
+  SetActiveProjectBySlug(std::string_view ProjectSlug);
+  std::filesystem::path GetActiveContentDir() const;
+  std::filesystem::path GetActiveScriptsDir() const;
+  std::filesystem::path GetEngineContentDir() const;
+  bool LoadActiveProjectIntoSession(std::string *FailureReason = nullptr);
+  std::vector<std::string> ListScriptFiles() const;
+  std::vector<std::pair<std::string, std::string>> ListScriptClasses() const;
+  std::optional<std::filesystem::path>
+  ResolveActiveScriptPath(std::string_view RelativePath,
+                          bool AllowMissingLeaf = false) const;
+  std::vector<Assets::AssetDescriptor> CollectVisibleAssets() const;
+  std::optional<std::filesystem::path>
+  ResolveVisibleAssetPath(std::string_view RelativePath) const;
 
 private:
   HeadlessSessionHost &m_Host;
@@ -158,6 +193,9 @@ private:
   std::unordered_map<std::string, RemoteClientSession> m_RemoteClientsById;
   uint64_t m_NextRemoteUserId{2};
   mutable std::mutex m_SendMutex;
+  const std::filesystem::path m_ProjectsRoot;
+  mutable std::mutex m_ProjectMutex;
+  std::optional<Project::ProjectDescriptor> m_ActiveProject;
 };
 
 bool ParseRemoteViewportServerOptions(int argc, char **argv,

@@ -617,6 +617,7 @@ EditorSceneItemKind KindFromStr(std::string_view S) {
 std::optional<EditorSceneState>
 LoadSceneFromFile(const std::filesystem::path &Path) {
   const std::filesystem::path ContentRoot = ResolveContentRootForScenePath(Path);
+  const bool CookedOnlyContent = IsCookedOnlyContentPath(ContentRoot);
 
   std::ifstream File(Path);
   if (!File.is_open()) return std::nullopt;
@@ -827,7 +828,9 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
   std::unordered_set<std::string> LoadedByAssetPath;
   for (const auto &[ObjId, Data] : Objects) {
     if (Data.Kind != EditorSceneItemKind::Mesh || Data.AssetRelativePath.empty()) continue;
-    CookMeshAsset(ContentRoot, Data.AssetRelativePath);
+    if (!CookedOnlyContent) {
+      CookMeshAsset(ContentRoot, Data.AssetRelativePath);
+    }
     const auto FullPath = ContentRoot / Data.AssetRelativePath;
     auto SceneData = LoadBasicMeshAsset(FullPath);
     if (!SceneData.has_value() || SceneData->Instances.empty()) {
@@ -857,7 +860,9 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
       }
     }
     if (!Data.TextureAssetPath.empty()) {
-      CookTextureAsset(ContentRoot, Data.TextureAssetPath);
+      if (!CookedOnlyContent) {
+        CookTextureAsset(ContentRoot, Data.TextureAssetPath);
+      }
       const auto TexPath = ContentRoot / Data.TextureAssetPath;
       auto Tex = LoadTextureFromFile(TexPath);
       if (Tex) {
@@ -902,7 +907,9 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
 
   // --- Stage 4b: reload remaining mesh instances from the global mesh asset ---
   if (!MeshAsset.empty() && !MeshNameToObjectId.empty()) {
-    CookMeshAsset(ContentRoot, MeshAsset);
+    if (!CookedOnlyContent) {
+      CookMeshAsset(ContentRoot, MeshAsset);
+    }
     const auto MeshPath = ContentRoot / MeshAsset;
     const auto SceneData = LoadBasicMeshAsset(MeshPath);
     if (SceneData.has_value()) {

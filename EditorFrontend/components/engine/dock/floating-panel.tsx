@@ -11,6 +11,7 @@ const PANEL_LABELS: Record<PanelId, string> = {
     details: "Details",
     "content-browser": "Content Browser",
     "remote-viewport": "Remote Viewport",
+    "script-editor": "Script Editor",
 }
 
 interface FloatingPanelProps {
@@ -65,11 +66,26 @@ export function FloatingPanel({ floating }: FloatingPanelProps) {
             dragging.current = true
             offset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y }
 
-            setDragState({ panelId: floating.panelId, sourceTabGroupId: null, isFloating: true })
+            setDragState({
+                panelId: floating.panelId,
+                sourceTabGroupId: null,
+                isFloating: true,
+                previewX: e.clientX + 16,
+                previewY: e.clientY + 16,
+            })
 
             const onMove = (ev: MouseEvent) => {
                 if (!dragging.current) return
                 setPos({ x: ev.clientX - offset.current.x, y: ev.clientY - offset.current.y })
+                setDragState((prev) =>
+                    prev.panelId === floating.panelId
+                        ? {
+                            ...prev,
+                            previewX: ev.clientX + 16,
+                            previewY: ev.clientY + 16,
+                        }
+                        : prev
+                )
             }
 
             const onUp = (ev: MouseEvent) => {
@@ -88,7 +104,13 @@ export function FloatingPanel({ floating }: FloatingPanelProps) {
                         ev.clientX - offset.current.x,
                         ev.clientY - offset.current.y
                     )
-                    setDragState({ panelId: null, sourceTabGroupId: null, isFloating: false })
+                    setDragState({
+                        panelId: null,
+                        sourceTabGroupId: null,
+                        isFloating: false,
+                        previewX: 0,
+                        previewY: 0,
+                    })
                 }
             }
 
@@ -152,7 +174,7 @@ export function FloatingPanel({ floating }: FloatingPanelProps) {
 
     return (
         <div
-            className="fixed z-50 flex flex-col border border-neutral-700 shadow-2xl bg-neutral-950 rounded overflow-hidden"
+            className={`fixed z-50 flex flex-col rounded border border-neutral-700 bg-neutral-950 shadow-2xl overflow-hidden ${dragState.panelId === floating.panelId ? "opacity-80 ring-1 ring-sky-400/40" : ""}`}
             style={{ left: pos.x, top: pos.y, width: size.w, height: size.h }}
         >
             {/* Title bar */}

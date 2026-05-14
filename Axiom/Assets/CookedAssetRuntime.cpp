@@ -7,6 +7,16 @@
 
 namespace Axiom::Assets {
 
+bool IsCookedOnlyContentPath(const std::filesystem::path &Path) {
+  const auto ContentRoot = FindContentRootForPath(Path);
+  if (!ContentRoot.has_value()) {
+    return false;
+  }
+
+  const auto PackageManifestPath = ContentRoot->parent_path() / "package.wraith.json";
+  return std::filesystem::exists(PackageManifestPath);
+}
+
 std::optional<std::filesystem::path>
 FindContentRootForPath(const std::filesystem::path &Path) {
   if (Path.empty()) {

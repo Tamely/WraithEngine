@@ -1,6 +1,7 @@
 #include "Session/StartupScene.h"
 
 #include "Assets/AssetCooker.h"
+#include "Assets/CookedAssetRuntime.h"
 #include "Assets/IAssetSource.h"
 #include "Assets/MeshAsset.h"
 #include "Assets/SceneFile.h"
@@ -241,13 +242,43 @@ std::unordered_map<std::string, EditorObjectDetails> BuildObjectDetailsMap(
   }
   return DetailsByObjectId;
 }
+
+void EnsureWorldFolder(EditorSceneState &SceneState) {
+  const auto HasWorldItem = std::find_if(
+      SceneState.Items.begin(), SceneState.Items.end(),
+      [](const EditorSceneItem &Item) { return Item.Id == "world"; });
+  if (HasWorldItem == SceneState.Items.end()) {
+    SceneState.Items.insert(SceneState.Items.begin(),
+                            EditorSceneItem{
+                                .Id = "world",
+                                .DisplayName = "World",
+                                .Kind = EditorSceneItemKind::Folder,
+                                .Visible = true,
+                                .Children = {},
+                            });
+  }
+
+  if (SceneState.ObjectDetailsById.find("world") ==
+      SceneState.ObjectDetailsById.end()) {
+    SceneState.ObjectDetailsById.emplace(
+        "world", EditorObjectDetails{
+                     .ObjectId = "world",
+                     .DisplayName = "World",
+                     .Kind = EditorSceneItemKind::Folder,
+                     .Visible = true,
+                     .SupportsTransform = false,
+                     .TransformReadOnly = true,
+                 });
+  }
+}
 } // namespace
 
-std::vector<EditorSceneMeshInstance> BuildStartupSceneMeshInstances() {
-  const Assets::LocalAssetSource ContentDir{AXIOM_CONTENT_DIR};
+std::vector<EditorSceneMeshInstance>
+BuildStartupSceneMeshInstances(const std::filesystem::path &ContentRoot) {
+  const Assets::LocalAssetSource ContentDir{ContentRoot};
   const std::filesystem::path RelativeMeshPath = "basicmesh.glb";
   const auto MeshPath = ContentDir.ResolveRelative(RelativeMeshPath.string());
-  Assets::CookMeshAsset(AXIOM_CONTENT_DIR, RelativeMeshPath);
+  Assets::CookMeshAsset(ContentRoot, RelativeMeshPath);
   const auto SceneData = Assets::LoadBasicMeshAsset(MeshPath);
   if (!SceneData.has_value()) {
     A_CORE_ERROR("Failed to load startup mesh asset scene: {0}",
@@ -294,9 +325,13 @@ std::vector<EditorSceneMeshInstance> BuildStartupSceneMeshInstances() {
   return Instances;
 }
 
-EditorSceneState BuildStartupSceneState() {
+std::vector<EditorSceneMeshInstance> BuildStartupSceneMeshInstances() {
+  return BuildStartupSceneMeshInstances(std::filesystem::path(AXIOM_CONTENT_DIR));
+}
+
+EditorSceneState BuildStartupSceneState(const std::filesystem::path &ContentDir) {
   EditorSceneState SceneState{};
-  SceneState.MeshInstances = BuildStartupSceneMeshInstances();
+  SceneState.MeshInstances = BuildStartupSceneMeshInstances(ContentDir);
   if (SceneState.MeshInstances.empty()) {
     return SceneState;
   }
@@ -306,13 +341,22 @@ EditorSceneState BuildStartupSceneState() {
   return SceneState;
 }
 
+EditorSceneState BuildStartupSceneState() {
+  return BuildStartupSceneState(std::filesystem::path(AXIOM_CONTENT_DIR));
+}
+
 bool LoadStartupScene(EditorSession &Session) {
-  const Assets::LocalAssetSource ContentDir{AXIOM_CONTENT_DIR};
+  const std::filesystem::path ContentRoot =
+      Session.GetContentDir().empty() ? std::filesystem::path(AXIOM_CONTENT_DIR)
+                                      : Session.GetContentDir();
+  const bool CookedOnlyContent = Assets::IsCookedOnlyContentPath(ContentRoot);
+  const Assets::LocalAssetSource ContentDir{ContentRoot};
   const auto SceneFilePath = ContentDir.ResolveRelative("scene.json");
 
   if (std::filesystem::exists(SceneFilePath)) {
     auto Loaded = Assets::LoadSceneFromFile(SceneFilePath);
-    if (Loaded.has_value() && !Loaded->MeshInstances.empty()) {
+    if (Loaded.has_value()) {
+      EnsureWorldFolder(*Loaded);
       A_CORE_INFO("StartupScene: loaded saved scene from {0}",
                   SceneFilePath.string());
       Session.SetSceneState(std::move(*Loaded));
@@ -322,7 +366,14 @@ bool LoadStartupScene(EditorSession &Session) {
                 "falling back to defaults");
   }
 
-  EditorSceneState SceneState = BuildStartupSceneState();
+  if (CookedOnlyContent) {
+    A_CORE_ERROR(
+        "StartupScene: packaged cooked-only content at '{}' requires a valid scene.json and will not fall back to editor defaults",
+        ContentRoot.string());
+    return false;
+  }
+
+  EditorSceneState SceneState = BuildStartupSceneState(ContentRoot);
   if (SceneState.MeshInstances.empty()) {
     return false;
   }

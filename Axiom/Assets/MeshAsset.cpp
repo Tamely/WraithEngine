@@ -534,6 +534,13 @@ std::optional<MeshSceneData> LoadBasicMeshAsset(const std::filesystem::path &Pat
     return CookedScene;
   }
 
+  if (IsCookedOnlyContentPath(Path)) {
+    A_CORE_WARN(
+        "Cooked runtime: missing cooked mesh asset for '{}' and source fallback is disabled",
+        Path.string());
+    return std::nullopt;
+  }
+
   return LoadBasicMeshAssetFromSource(Path);
 }
 
@@ -554,6 +561,13 @@ TextureSourceDataRef LoadTextureFromFile(const std::filesystem::path &Path) {
   if (auto CookedTexture = LoadCookedTextureAssetIfAvailable(Path);
       CookedTexture != nullptr) {
     return CookedTexture;
+  }
+
+  if (IsCookedOnlyContentPath(Path)) {
+    A_CORE_WARN(
+        "Cooked runtime: missing cooked texture asset for '{}' and source fallback is disabled",
+        Path.string());
+    return nullptr;
   }
 
   return LoadTextureFromSourceFile(Path);
