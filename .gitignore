@@ -37,3 +37,7 @@ Tests/TestScripts/**/bin/
 Tests/TestScripts/**/obj/
 # Coral is a git submodule — its own .gitignore handles bin/ and obj/ internally.
 # Listing Coral sub-paths here is redundant and interferes with submodule commits.
+EditorFrontend/next-env.d.ts
+*.wtex
+*.wmat
+*.wmesh
