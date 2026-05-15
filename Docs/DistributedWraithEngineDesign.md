@@ -75,6 +75,14 @@
 - `GET /assets/thumbnail?path=` endpoint on the remote viewport server decodes the URL-encoded path, loads the image via stb_image, scales to 128×128 via nearest-neighbor, and returns a JPEG; the content browser fetches and displays thumbnails for texture assets in grid view
 - Content browser is now non-recursive: only immediate children of the current path are shown; the sidebar renders a dynamic tree derived from actual asset paths; breadcrumb navigation and folder double-click update `currentPath`; search bypasses the folder filter and matches recursively
 - 17 new Google Test cases added across `HeadlessProtocolTests` (protocol parse/serialize coverage for all Phase 7 commands and events) and `SceneLifecycleTests` (session behavior for `SetLightPropertiesCommand`, `SetMaterialPropertiesCommand`, `SetSceneState` material backfill, `SetMeshAsset` validation, and the `CreateObject`→`SetMeshAsset` runtime-creation regression)
+- Shared simulation runtime controls are now implemented: `PlaySession`, `PauseSession`, `ResumeSession`, and `StopSession` flow through the authoritative command/event path, the browser toolbar is live, and `Stop` restores the exact pre-play edit snapshot
+- Hosted simulation is session-wide, not per-user: all collaborators observe the same `Edit` / `Playing` / `Paused` state, and authoring mutations are rejected while simulation is active
+- Simulation control authority is now explicit and separate from the headless renderer's reserved local render user: the first connected browser collaborator becomes the `runtimeControllerUserId`, while the headless app keeps `SessionUserId{1}` for local rendering
+- Scripts now sit behind the runtime boundary: they instantiate and tick only while playing, freeze while paused, and tear down on stop
+- Jolt physics is now integrated as a runtime-only service that is created on play, stepped only while playing, frozen while paused, and destroyed on stop
+- Physics authoring is now available through authoritative scene details: body type, collider type, box half extents, sphere radius, mass, friction, and restitution persist through save/load
+- Imported mesh assets now default to static box collision that covers the authored mesh bounds; older scenes are migrated to that default on load only when the mesh had no authored physics yet
+- Generated mesh children from multi-mesh imports remain read-only and inherit physics authoring from their imported root mesh object; the browser inspector now surfaces that inheritance instead of hiding physics entirely
 
 ## 1. Executive Summary
 WraithEngine will evolve from a single-process native editor into a distributed platform with one shared C++ engine runtime that supports two execution styles:

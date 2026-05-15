@@ -206,6 +206,11 @@
     {"assetId":12140336635836207652,"kind":"material","relativePath":"Generated/MeshMaterials/sponza_atrium_3__101","cookedPath":"Cooked/Generated/MeshMaterials/sponza_atrium_3__101.wmat","formatVersion":1,"sourceHash":3586948860202070916},
     {"assetId":16670649961235633850,"kind":"texture","relativePath":"Generated/MeshTextures/sponza_atrium_3__102","cookedPath":"Cooked/Generated/MeshTextures/sponza_atrium_3__102.wtex","formatVersion":1,"sourceHash":1136906439044749114},
     {"assetId":5457201860838636531,"kind":"material","relativePath":"Generated/MeshMaterials/sponza_atrium_3__102","cookedPath":"Cooked/Generated/MeshMaterials/sponza_atrium_3__102.wmat","formatVersion":1,"sourceHash":6145656221699350966},
-    {"assetId":13913950202207721753,"kind":"mesh","relativePath":"sponza_atrium_3.glb","cookedPath":"Cooked/sponza_atrium_3.wmesh","formatVersion":2,"sourceHash":13152113367551948137}
+    {"assetId":13913950202207721753,"kind":"mesh","relativePath":"sponza_atrium_3.glb","cookedPath":"Cooked/sponza_atrium_3.wmesh","formatVersion":2,"sourceHash":13152113367551948137},
+    {"assetId":6419001625350043339,"kind":"texture","relativePath":"Generated/MeshTextures/trout__0","cookedPath":"Cooked/Generated/MeshTextures/trout__0.wtex","formatVersion":1,"sourceHash":5886763761298696808},
+    {"assetId":7556121013933574936,"kind":"material","relativePath":"Generated/MeshMaterials/trout__0","cookedPath":"Cooked/Generated/MeshMaterials/trout__0.wmat","formatVersion":1,"sourceHash":17660163787741318390},
+    {"assetId":7899683460070073077,"kind":"texture","relativePath":"Generated/MeshTextures/trout__1","cookedPath":"Cooked/Generated/MeshTextures/trout__1.wtex","formatVersion":1,"sourceHash":12699784328467437287},
+    {"assetId":3547444530683706770,"kind":"material","relativePath":"Generated/MeshMaterials/trout__1","cookedPath":"Cooked/Generated/MeshMaterials/trout__1.wmat","formatVersion":1,"sourceHash":15174070660722794267},
+    {"assetId":4629282750075033978,"kind":"mesh","relativePath":"trout.glb","cookedPath":"Cooked/trout.wmesh","formatVersion":2,"sourceHash":4135491888657007981}
   ]
 }

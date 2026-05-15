@@ -24,6 +24,7 @@ set(ENGINE_SOURCES
   Core/Log.cpp
   Core/VulkanLoader.cpp
   Remote/AxiomSessionEndpoint.cpp
+  Physics/PhysicsWorld.cpp
   Session/BufferedEditorInputSource.cpp
   Session/EditorMessageBus.cpp
   Session/EditorSceneRendererAdapter.cpp
@@ -293,6 +294,7 @@ target_include_directories(AxiomCore PUBLIC
   "${CMAKE_SOURCE_DIR}/ThirdParty/vma"
   "${CMAKE_SOURCE_DIR}/ThirdParty/volk"
   "${CMAKE_SOURCE_DIR}/ThirdParty/spdlog/include"
+  "$<$<BOOL:${AXIOM_ENABLE_PHYSICS}>:${AXIOM_JOLT_SOURCE_DIR}>"
   "${Vulkan_INCLUDE_DIRS}"
 )
 
@@ -312,6 +314,13 @@ if(AXIOM_ENABLE_WEBRTC)
   target_compile_definitions(AxiomCore PUBLIC AXIOM_ENABLE_WEBRTC=1)
 else()
   target_compile_definitions(AxiomCore PUBLIC AXIOM_ENABLE_WEBRTC=0)
+endif()
+
+if(AXIOM_ENABLE_PHYSICS)
+  target_link_libraries(AxiomCore PUBLIC Jolt)
+  target_compile_definitions(AxiomCore PUBLIC AXIOM_ENABLE_PHYSICS=1)
+else()
+  target_compile_definitions(AxiomCore PUBLIC AXIOM_ENABLE_PHYSICS=0)
 endif()
 
 if(AXIOM_ENABLE_SCRIPTING)

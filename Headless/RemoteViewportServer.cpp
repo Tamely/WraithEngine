@@ -1286,6 +1286,9 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetViewMode:
     m_Host.SetRemoteViewMode(*User, Command->ViewMode);
     break;
+  case HeadlessCommandType::SetShowColliders:
+    m_Host.SetRemoteShowColliders(*User, Command->ShowColliders);
+    break;
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
   case HeadlessCommandType::UpdateViewportCamera:
@@ -1299,6 +1302,10 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::AttachScript:
   case HeadlessCommandType::DetachScript:
+  case HeadlessCommandType::PlaySession:
+  case HeadlessCommandType::PauseSession:
+  case HeadlessCommandType::ResumeSession:
+  case HeadlessCommandType::StopSession:
   case HeadlessCommandType::SetMeshAsset:
   case HeadlessCommandType::SetLightProperties:
   case HeadlessCommandType::SetMaterialProperties:
@@ -1755,9 +1762,18 @@ bool RemoteViewportServer::HandleSessionConnectRequest(
   const WebRtcSessionStatus Status =
       Client.WebRtcSession != nullptr ? Client.WebRtcSession->GetStatus()
                                       : WebRtcSessionStatus{};
+  const bool ShowColliders =
+      [&]() -> bool {
+        if (const HeadlessRenderViewState *View =
+                m_Host.FindRemoteRenderView(Client.ClientId);
+            View != nullptr) {
+          return View->ShowColliders;
+        }
+        return true;
+      }();
   const std::string Payload = SerializeSessionConnectResponse(
       Client.ClientId, m_Host.GetHeadlessLayer().GetSession().GetState(),
-      Client.User, m_TransportConnected.load(),
+      Client.User, ShowColliders, m_TransportConnected.load(),
       m_TransportConnected.load() ? "connected" : "disconnected",
       Status.ConnectionState);
   const std::string Response = JsonResponse("200 OK", Payload);
@@ -1845,8 +1861,24 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
     const WebRtcSessionStatus Status =
         ClientId.has_value() ? GetClientWebRtcStatus(*ClientId)
                              : WebRtcSessionStatus{};
+    const bool ShowColliders =
+        [&]() -> bool {
+          if (ClientId.has_value()) {
+            if (const HeadlessRenderViewState *View =
+                    m_Host.FindRemoteRenderView(*ClientId);
+                View != nullptr) {
+              return View->ShowColliders;
+            }
+          }
+          if (const HeadlessRenderViewState *View = m_Host.FindRenderView(*User);
+              View != nullptr) {
+            return View->ShowColliders;
+          }
+          return true;
+        }();
     const std::string Body = SerializeSessionSnapshot(
         m_Host.GetHeadlessLayer().GetSession().GetState(), *User,
+        ShowColliders,
         m_TransportConnected.load(),
         m_TransportConnected.load() ? "connected" : "disconnected",
         Status.ConnectionState);
@@ -2769,6 +2801,9 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetViewMode:
     m_Host.SetRemoteViewMode(Command->ViewMode);
     return true;
+  case HeadlessCommandType::SetShowColliders:
+    m_Host.SetRemoteShowColliders(Command->ShowColliders);
+    return true;
   case HeadlessCommandType::DropMesh:
     HandleMeshDropCommand(m_Host.GetHeadlessLayer().GetLocalUserId(), *Command);
     return true;
@@ -2787,6 +2822,10 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::AttachScript:
   case HeadlessCommandType::DetachScript:
+  case HeadlessCommandType::PlaySession:
+  case HeadlessCommandType::PauseSession:
+  case HeadlessCommandType::ResumeSession:
+  case HeadlessCommandType::StopSession:
   case HeadlessCommandType::SetMeshAsset:
   case HeadlessCommandType::SetLightProperties:
   case HeadlessCommandType::SetMaterialProperties:
@@ -2856,6 +2895,9 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::SetViewMode:
     m_Host.SetRemoteViewMode(Client->User, Command->ViewMode);
     return true;
+  case HeadlessCommandType::SetShowColliders:
+    m_Host.SetRemoteShowColliders(Client->User, Command->ShowColliders);
+    return true;
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
   case HeadlessCommandType::UpdateViewportCamera:
@@ -2869,6 +2911,10 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::AttachScript:
   case HeadlessCommandType::DetachScript:
+  case HeadlessCommandType::PlaySession:
+  case HeadlessCommandType::PauseSession:
+  case HeadlessCommandType::ResumeSession:
+  case HeadlessCommandType::StopSession:
   case HeadlessCommandType::SetMeshAsset:
   case HeadlessCommandType::SetLightProperties:
   case HeadlessCommandType::SetMaterialProperties:
@@ -2878,6 +2924,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::DropMesh:
     HandleMeshDropCommand(Client->User, *Command);
     return true;
+
   case HeadlessCommandType::ReloadScripts: {
     m_Host.ReloadUserScripts();
     if (Client->WebRtcSession != nullptr) {
@@ -2959,6 +3006,86 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
         }
         return true;
       }
+    } else if (Name == "physicsBodyType" || Name == "physicsColliderType" ||
+               Name == "physicsBoxHalfExtents" || Name == "physicsSphereRadius" ||
+               Name == "physicsMass" || Name == "physicsFriction" ||
+               Name == "physicsRestitution") {
+      const auto &DetailsById =
+          m_Host.GetHeadlessLayer().GetSession().GetState().Scene.ObjectDetailsById;
+      const auto It = DetailsById.find(ObjId);
+      if (It == DetailsById.end() || !It->second.SupportsTransform) {
+        return false;
+      }
+
+      Axiom::EditorPhysicsProperties Physics =
+          It->second.Physics.value_or(Axiom::EditorPhysicsProperties{});
+      if (Name == "physicsBodyType") {
+        const auto *S = std::get_if<std::string>(&Val);
+        if (S == nullptr) {
+          return false;
+        }
+        if (*S == "none") {
+          Physics.BodyType = Axiom::EditorPhysicsBodyType::None;
+        } else if (*S == "static") {
+          Physics.BodyType = Axiom::EditorPhysicsBodyType::Static;
+        } else if (*S == "dynamic") {
+          Physics.BodyType = Axiom::EditorPhysicsBodyType::Dynamic;
+        } else {
+          return false;
+        }
+      } else if (Name == "physicsColliderType") {
+        const auto *S = std::get_if<std::string>(&Val);
+        if (S == nullptr) {
+          return false;
+        }
+        if (*S == "none") {
+          Physics.ColliderType = Axiom::EditorPhysicsColliderType::None;
+        } else if (*S == "box") {
+          Physics.ColliderType = Axiom::EditorPhysicsColliderType::Box;
+        } else if (*S == "sphere") {
+          Physics.ColliderType = Axiom::EditorPhysicsColliderType::Sphere;
+        } else {
+          return false;
+        }
+      } else if (Name == "physicsBoxHalfExtents") {
+        const auto *V = std::get_if<glm::vec3>(&Val);
+        if (V == nullptr) {
+          return false;
+        }
+        Physics.BoxHalfExtents = *V;
+      } else if (Name == "physicsSphereRadius") {
+        const auto *Number = std::get_if<float>(&Val);
+        if (Number == nullptr) {
+          return false;
+        }
+        Physics.SphereRadius = *Number;
+      } else if (Name == "physicsMass") {
+        const auto *Number = std::get_if<float>(&Val);
+        if (Number == nullptr) {
+          return false;
+        }
+        Physics.Mass = *Number;
+      } else if (Name == "physicsFriction") {
+        const auto *Number = std::get_if<float>(&Val);
+        if (Number == nullptr) {
+          return false;
+        }
+        Physics.Friction = *Number;
+      } else if (Name == "physicsRestitution") {
+        const auto *Number = std::get_if<float>(&Val);
+        if (Number == nullptr) {
+          return false;
+        }
+        Physics.Restitution = *Number;
+      }
+
+      m_Host.SubmitRemoteCommand(
+          Client->User,
+          EditorCommand{SetPhysicsPropertiesCommand{
+              .ObjectId = ObjId,
+              .Physics = Physics,
+          }});
+      return true;
     } else if (Name == "location" || Name == "rotationDegrees" || Name == "scale") {
       if (const auto *V = std::get_if<glm::vec3>(&Val)) {
         const auto &DetailsById =
@@ -2997,6 +3124,11 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     return true;
   }
   case HeadlessCommandType::GizmoHover: {
+    if (m_Host.GetHeadlessLayer().GetSession().GetRuntimeState() !=
+        EditorRuntimeState::Edit) {
+      m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
+      return true;
+    }
     if (Client->GizmoDrag.has_value()) {
       return true;
     }
@@ -3029,6 +3161,10 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     return true;
   }
   case HeadlessCommandType::GizmoDragStart: {
+    if (m_Host.GetHeadlessLayer().GetSession().GetRuntimeState() !=
+        EditorRuntimeState::Edit) {
+      return true;
+    }
     if (Client->GizmoDrag.has_value()) {
       return true;
     }
@@ -3103,6 +3239,17 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     return true;
   }
   case HeadlessCommandType::GizmoDragUpdate: {
+    if (m_Host.GetHeadlessLayer().GetSession().GetRuntimeState() !=
+        EditorRuntimeState::Edit) {
+      if (Client->GizmoDrag.has_value()) {
+        EditorSession &Session = m_Host.GetHeadlessLayer().GetSession();
+        const std::string DragObjectId = Client->GizmoDrag->ObjectId;
+        Client->GizmoDrag.reset();
+        Session.ReleaseLock(DragObjectId, Client->User);
+        m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
+      }
+      return true;
+    }
     if (!Client->GizmoDrag.has_value()) {
       return true;
     }

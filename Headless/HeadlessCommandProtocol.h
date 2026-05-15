@@ -25,6 +25,7 @@ namespace Axiom {
 enum class HeadlessCommandType {
   LoadStartupScene,
   SetViewMode,
+  SetShowColliders,
   SetLookActive,
   SetViewportCameraPose,
   SelectObject,
@@ -53,6 +54,10 @@ enum class HeadlessCommandType {
   SetLightProperties,
   SetMaterialProperties,
   SetMaterialTexture,
+  PlaySession,
+  PauseSession,
+  ResumeSession,
+  StopSession,
   DropMesh,
   DropTexture,
   Heartbeat,
@@ -60,12 +65,13 @@ enum class HeadlessCommandType {
   Quit,
 };
 
-using PropertyValue = std::variant<std::string, bool, glm::vec3>;
+using PropertyValue = std::variant<std::string, bool, float, glm::vec3>;
 
 struct HeadlessCommand {
   HeadlessCommandType Type;
   EditorCommand EditorPayload;
   RendererViewMode ViewMode{RendererViewMode::Lit};
+  bool ShowColliders{true};
   glm::vec2 MousePosition{0.0f};
   GizmoMode Mode{GizmoMode::Translate};
   bool Enabled{false};
@@ -146,12 +152,14 @@ std::string SerializeWebRtcIceCandidateList(
     std::span<const WebRtcIceCandidate> Candidates);
 std::string SerializeSessionSnapshot(const EditorSessionState &State,
                                      SessionUserId CurrentUser,
+                                     bool ShowColliders,
                                      bool TransportConnected,
                                      std::string_view TransportState,
                                      std::string_view WebRtcConnectionState);
 std::string SerializeSessionConnectResponse(std::string_view ClientId,
                                             const EditorSessionState &State,
                                             SessionUserId CurrentUser,
+                                            bool ShowColliders,
                                             bool TransportConnected,
                                             std::string_view TransportState,
                                             std::string_view WebRtcConnectionState);

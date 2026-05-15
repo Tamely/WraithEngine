@@ -17,6 +17,7 @@ struct CommandContext {
   SessionUserId User;
   uint64_t FrameIndex{0};
   float DeltaTimeSeconds{0.0f};
+  bool IsScriptContext{false};
 };
 
 struct UpdateViewportCameraCommand {
@@ -114,6 +115,19 @@ struct SetMaterialTextureCommand {
   std::string TextureAssetPath;
 };
 
+struct SetPhysicsPropertiesCommand {
+  std::string ObjectId;
+  EditorPhysicsProperties Physics;
+};
+
+struct PlaySessionCommand {};
+
+struct PauseSessionCommand {};
+
+struct ResumeSessionCommand {};
+
+struct StopSessionCommand {};
+
 using EditorCommandPayload =
     std::variant<UpdateViewportCameraCommand, SetViewportCameraPoseCommand,
                  SetLookActiveCommand, SelectObjectCommand,
@@ -125,7 +139,10 @@ using EditorCommandPayload =
                  DetachScriptCommand, SetMeshAssetCommand,
                  SetLightPropertiesCommand,
                  SetMaterialPropertiesCommand,
-                 SetMaterialTextureCommand>;
+                 SetMaterialTextureCommand, SetPhysicsPropertiesCommand,
+                 PlaySessionCommand,
+                 PauseSessionCommand, ResumeSessionCommand,
+                 StopSessionCommand>;
 
 struct EditorCommand {
   EditorCommandPayload Payload;

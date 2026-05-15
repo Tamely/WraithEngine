@@ -863,6 +863,27 @@ void VulkanRendererBackend::InitMeshPipelines() {
                                      &PipelineInfo, VK_NULL_HANDLE,
                                      &m_MeshGraphicsPipeline));
 
+  VkPipelineColorBlendAttachmentState AlphaBlendAttachment = ColorBlendAttachment;
+  AlphaBlendAttachment.blendEnable = VK_TRUE;
+  AlphaBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+  AlphaBlendAttachment.dstColorBlendFactor =
+      VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+  AlphaBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+  AlphaBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+  AlphaBlendAttachment.dstAlphaBlendFactor =
+      VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+  AlphaBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+  VkPipelineColorBlendStateCreateInfo AlphaBlending = ColorBlending;
+  AlphaBlending.pAttachments = &AlphaBlendAttachment;
+  VkPipelineDepthStencilStateCreateInfo AlphaDepthStencil = DepthStencil;
+  AlphaDepthStencil.depthWriteEnable = VK_FALSE;
+  VkGraphicsPipelineCreateInfo AlphaPipelineInfo = PipelineInfo;
+  AlphaPipelineInfo.pColorBlendState = &AlphaBlending;
+  AlphaPipelineInfo.pDepthStencilState = &AlphaDepthStencil;
+  VK_CHECK(vkCreateGraphicsPipelines(m_Device.Device, VK_NULL_HANDLE, 1,
+                                     &AlphaPipelineInfo, VK_NULL_HANDLE,
+                                     &m_MeshGraphicsAlphaBlendPipeline));
+
   VkPipelineColorBlendAttachmentState DepthOnlyColorAttachment{};
   DepthOnlyColorAttachment.colorWriteMask = 0;
   VkPipelineColorBlendStateCreateInfo DepthOnlyBlending = ColorBlending;
@@ -914,6 +935,8 @@ void VulkanRendererBackend::InitMeshPipelines() {
                             VK_NULL_HANDLE);
     vkDestroyPipeline(m_Device.Device, m_MeshDepthPipeline, VK_NULL_HANDLE);
     vkDestroyPipeline(m_Device.Device, m_MeshWireframePipeline,
+                      VK_NULL_HANDLE);
+    vkDestroyPipeline(m_Device.Device, m_MeshGraphicsAlphaBlendPipeline,
                       VK_NULL_HANDLE);
     vkDestroyPipelineLayout(m_Device.Device, m_MeshGraphicsPipelineLayout,
                             VK_NULL_HANDLE);
@@ -1145,6 +1168,7 @@ void VulkanRendererBackend::DrawMeshes(VkCommandBuffer CommandBuffer,
        .MeshPipeline = m_MeshPipeline,
        .MeshPipelineLayout = m_MeshPipelineLayout,
        .MeshGraphicsPipeline = m_MeshGraphicsPipeline,
+       .MeshGraphicsAlphaBlendPipeline = m_MeshGraphicsAlphaBlendPipeline,
        .MeshGraphicsPipelineLayout = m_MeshGraphicsPipelineLayout,
        .MeshWireframePipeline = m_MeshWireframePipeline,
        .MeshDepthPipeline = m_MeshDepthPipeline,

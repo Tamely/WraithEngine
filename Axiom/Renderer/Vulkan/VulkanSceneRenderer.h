@@ -37,6 +37,7 @@ public:
     VkPipeline MeshPipeline{VK_NULL_HANDLE};
     VkPipelineLayout MeshPipelineLayout{VK_NULL_HANDLE};
     VkPipeline MeshGraphicsPipeline{VK_NULL_HANDLE};
+    VkPipeline MeshGraphicsAlphaBlendPipeline{VK_NULL_HANDLE};
     VkPipelineLayout MeshGraphicsPipelineLayout{VK_NULL_HANDLE};
     VkPipeline MeshWireframePipeline{VK_NULL_HANDLE};
     VkPipeline MeshDepthPipeline{VK_NULL_HANDLE};
@@ -53,6 +54,7 @@ private:
   struct VisibleMeshSubmission {
     const RenderMeshSubmission *Submission{nullptr};
     std::shared_ptr<VulkanMesh> Mesh;
+    float SortDepth{0.0f};
   };
 
   struct CandidateSubmission {
@@ -85,6 +87,11 @@ private:
       const RenderContext &Context,
       const std::vector<VisibleMeshSubmission> &ComputeSubmissions);
   static void RecordGraphicsPass(
+      const RenderContext &Context, const VkViewport &Viewport,
+      const VkRect2D &Scissor,
+      const std::vector<VisibleMeshSubmission> &GraphicsSubmissions,
+      const VkDescriptorBufferInfo &CameraBufferInfo, bool ForceWireframe);
+  static void RecordTranslucentGraphicsPass(
       const RenderContext &Context, const VkViewport &Viewport,
       const VkRect2D &Scissor,
       const std::vector<VisibleMeshSubmission> &GraphicsSubmissions,

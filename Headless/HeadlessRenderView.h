@@ -14,6 +14,7 @@ struct HeadlessRenderViewState {
   std::string ClientId;
   SessionUserId User;
   RendererViewMode ViewMode{RendererViewMode::Lit};
+  bool ShowColliders{true};
   bool IsLocal{false};
 };
 
@@ -40,6 +41,7 @@ public:
     if (Inserted) {
       View.ClientId = It->first;
       View.ViewMode = RendererViewMode::Lit;
+      View.ShowColliders = true;
     }
     View.User = User;
     View.IsLocal = false;
@@ -96,6 +98,32 @@ public:
     return true;
   }
 
+  bool SetShowColliders(SessionUserId User, bool ShowColliders) {
+    if (m_LocalView.User.Value == User.Value) {
+      m_LocalView.ShowColliders = ShowColliders;
+      return true;
+    }
+
+    for (auto &[ClientId, View] : m_RemoteViewsByClientId) {
+      (void)ClientId;
+      if (View.User.Value == User.Value) {
+        View.ShowColliders = ShowColliders;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool SetRemoteShowColliders(std::string_view ClientId, bool ShowColliders) {
+    auto It = m_RemoteViewsByClientId.find(std::string(ClientId));
+    if (It == m_RemoteViewsByClientId.end()) {
+      return false;
+    }
+
+    It->second.ShowColliders = ShowColliders;
+    return true;
+  }
+
   const HeadlessRenderViewState *FindRemoteView(
       std::string_view ClientId) const {
     const auto It = m_RemoteViewsByClientId.find(std::string(ClientId));
@@ -143,6 +171,7 @@ private:
       .ClientId = "",
       .User = SessionUserId{1},
       .ViewMode = RendererViewMode::Lit,
+      .ShowColliders = true,
       .IsLocal = true,
   };
   std::unordered_map<std::string, HeadlessRenderViewState> m_RemoteViewsByClientId;

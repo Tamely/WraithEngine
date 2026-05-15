@@ -2,6 +2,7 @@
 
 #include "Assets/AssetCooker.h"
 #include "Assets/MeshAsset.h"
+#include "Physics/PhysicsWorld.h"
 
 #include <Core/Log.h>
 
@@ -12,6 +13,7 @@
 #include <glm/trigonometric.hpp>
 
 #include <algorithm>
+#include <array>
 #include <utility>
 
 namespace Axiom {
@@ -60,6 +62,66 @@ std::string PresenceStateName(EditorUserPresenceState State) {
   }
 
   return "connected";
+}
+
+bool IsHostUser(SessionUserId User) { return User.Value == 1; }
+
+glm::vec3 AbsVec3(const glm::vec3 &Value) {
+  return glm::vec3(std::abs(Value.x), std::abs(Value.y), std::abs(Value.z));
+}
+
+void ExpandBounds(const glm::vec3 &BoundsMin, const glm::vec3 &BoundsMax,
+                  const glm::mat4 &Transform, glm::vec3 &OutMin,
+                  glm::vec3 &OutMax, bool &HasBounds) {
+  const std::array<glm::vec3, 8> Corners = {
+      glm::vec3(BoundsMin.x, BoundsMin.y, BoundsMin.z),
+      glm::vec3(BoundsMax.x, BoundsMin.y, BoundsMin.z),
+      glm::vec3(BoundsMin.x, BoundsMax.y, BoundsMin.z),
+      glm::vec3(BoundsMax.x, BoundsMax.y, BoundsMin.z),
+      glm::vec3(BoundsMin.x, BoundsMin.y, BoundsMax.z),
+      glm::vec3(BoundsMax.x, BoundsMin.y, BoundsMax.z),
+      glm::vec3(BoundsMin.x, BoundsMax.y, BoundsMax.z),
+      glm::vec3(BoundsMax.x, BoundsMax.y, BoundsMax.z),
+  };
+
+  for (const glm::vec3 &Corner : Corners) {
+    const glm::vec3 WorldCorner = glm::vec3(Transform * glm::vec4(Corner, 1.0f));
+    if (!HasBounds) {
+      OutMin = WorldCorner;
+      OutMax = WorldCorner;
+      HasBounds = true;
+      continue;
+    }
+    OutMin = glm::min(OutMin, WorldCorner);
+    OutMax = glm::max(OutMax, WorldCorner);
+  }
+}
+
+std::optional<EditorPhysicsProperties>
+BuildDefaultStaticMeshPhysics(const MeshSceneData &SceneData,
+                              const EditorTransformDetails &RootTransform) {
+  glm::vec3 CombinedMin(0.0f);
+  glm::vec3 CombinedMax(0.0f);
+  bool HasBounds = false;
+
+  for (const auto &Instance : SceneData.Instances) {
+    ExpandBounds(Instance.Mesh.BoundsMin, Instance.Mesh.BoundsMax,
+                 Instance.Transform, CombinedMin, CombinedMax, HasBounds);
+  }
+
+  if (!HasBounds) {
+    return std::nullopt;
+  }
+
+  glm::vec3 HalfExtents = glm::max(glm::abs(CombinedMin), glm::abs(CombinedMax));
+  HalfExtents *= AbsVec3(RootTransform.Scale);
+  HalfExtents = glm::max(HalfExtents, glm::vec3(0.01f));
+
+  return EditorPhysicsProperties{
+      .BodyType = EditorPhysicsBodyType::Static,
+      .ColliderType = EditorPhysicsColliderType::Box,
+      .BoxHalfExtents = HalfExtents,
+  };
 }
 
 std::string DefaultPresentationColor(SessionUserId User) {
@@ -122,7 +184,40 @@ std::string CommandTypeName(const EditorCommandPayload &Payload) {
   if (std::holds_alternative<SetMaterialTextureCommand>(Payload)) {
     return "set_material_texture";
   }
+  if (std::holds_alternative<SetPhysicsPropertiesCommand>(Payload)) {
+    return "set_physics_properties";
+  }
+  if (std::holds_alternative<PlaySessionCommand>(Payload)) {
+    return "play_session";
+  }
+  if (std::holds_alternative<PauseSessionCommand>(Payload)) {
+    return "pause_session";
+  }
+  if (std::holds_alternative<ResumeSessionCommand>(Payload)) {
+    return "resume_session";
+  }
+  if (std::holds_alternative<StopSessionCommand>(Payload)) {
+    return "stop_session";
+  }
   return "set_transform";
+}
+
+bool IsAuthoringMutationCommand(const EditorCommandPayload &Payload) {
+  return std::holds_alternative<RenameObjectCommand>(Payload) ||
+         std::holds_alternative<SetObjectVisibilityCommand>(Payload) ||
+         std::holds_alternative<CreateObjectCommand>(Payload) ||
+         std::holds_alternative<CreateMeshObjectCommand>(Payload) ||
+         std::holds_alternative<DuplicateObjectCommand>(Payload) ||
+         std::holds_alternative<DeleteObjectCommand>(Payload) ||
+         std::holds_alternative<ReparentObjectCommand>(Payload) ||
+         std::holds_alternative<SetTransformCommand>(Payload) ||
+         std::holds_alternative<AttachScriptCommand>(Payload) ||
+         std::holds_alternative<DetachScriptCommand>(Payload) ||
+         std::holds_alternative<SetMeshAssetCommand>(Payload) ||
+         std::holds_alternative<SetLightPropertiesCommand>(Payload) ||
+         std::holds_alternative<SetMaterialPropertiesCommand>(Payload) ||
+         std::holds_alternative<SetMaterialTextureCommand>(Payload) ||
+         std::holds_alternative<SetPhysicsPropertiesCommand>(Payload);
 }
 
 EditorSceneItemKind KindForClassName(std::string_view ClassName) {
@@ -171,6 +266,10 @@ bool ShouldPublishCommandAcknowledgedEvent(const EditorCommandPayload &Payload) 
 
 bool IsNearlyZero(const glm::vec3 &Value) {
   return glm::dot(Value, Value) <= 0.0f;
+}
+
+bool IsPositive(const glm::vec3 &Value) {
+  return Value.x > 0.0f && Value.y > 0.0f && Value.z > 0.0f;
 }
 
 bool IsWhitespace(char Value) {
@@ -228,6 +327,41 @@ glm::mat4 BuildTransformMatrix(const EditorTransformDetails &Transform) {
   Matrix = glm::scale(Matrix, Transform.Scale);
   return Matrix;
 }
+
+TextureSourceDataRef CloneTextureSourceData(
+    const TextureSourceDataRef &Texture) {
+  if (!Texture) {
+    return nullptr;
+  }
+
+  auto Copy = std::make_shared<TextureSourceData>();
+  Copy->Width = Texture->Width;
+  Copy->Height = Texture->Height;
+  Copy->Pixels = Texture->Pixels;
+  return Copy;
+}
+
+MaterialInstanceRef CloneMaterialInstance(const MaterialInstanceRef &Material) {
+  if (!Material) {
+    return nullptr;
+  }
+
+  auto Copy = std::make_shared<MaterialInstance>();
+  Copy->BaseColorTexture = CloneTextureSourceData(Material->BaseColorTexture);
+  Copy->BaseColorFactor = Material->BaseColorFactor;
+  Copy->Metallic = Material->Metallic;
+  Copy->Roughness = Material->Roughness;
+  Copy->TextureAssetPath = Material->TextureAssetPath;
+  return Copy;
+}
+
+EditorSceneState CloneEditorSceneState(const EditorSceneState &Scene) {
+  EditorSceneState Copy = Scene;
+  for (auto &MeshInstance : Copy.MeshInstances) {
+    MeshInstance.Material = CloneMaterialInstance(MeshInstance.Material);
+  }
+  return Copy;
+}
 } // namespace
 
 EditorSession::EditorSession(SessionId Session, EditorSessionConfig Config)
@@ -235,16 +369,21 @@ EditorSession::EditorSession(SessionId Session, EditorSessionConfig Config)
   InitSceneRoot();
 }
 
+EditorSession::~EditorSession() = default;
+EditorSession::EditorSession(EditorSession &&) noexcept = default;
+EditorSession &EditorSession::operator=(EditorSession &&) noexcept = default;
+
 void EditorSession::Submit(const CommandContext &Context,
                            const EditorCommand &Command) {
   m_MessageBus.EnqueueCommand(Context, Command);
 }
 
-void EditorSession::Tick() {
+void EditorSession::Tick(float DeltaTimeSeconds) {
   m_MessageBus.DispatchQueuedCommands(
       [this](const QueuedEditorCommand &QueuedCommand) {
         ProcessCommand(QueuedCommand);
       });
+  StepRuntimePhysics(DeltaTimeSeconds);
 }
 
 void EditorSession::Subscribe(IEditorEventSubscriber *Subscriber) {
@@ -403,6 +542,30 @@ std::vector<EditorParticipant> EditorSession::BuildParticipants(
   }
 
   return Participants;
+}
+
+SessionUserId EditorSession::ResolveRuntimeControllerUser() const {
+  if (m_State.RuntimeControllerUser.has_value()) {
+    const SessionUserId User = *m_State.RuntimeControllerUser;
+    if (const EditorUserPresence *Presence = FindPresence(User);
+        Presence != nullptr &&
+        Presence->State != EditorUserPresenceState::Disconnected) {
+      return User;
+    }
+  }
+
+  std::optional<SessionUserId> Candidate;
+  for (const auto &[User, Presence] : m_State.PresenceByUser) {
+    if (Presence.State == EditorUserPresenceState::Disconnected ||
+        IsHostUser(User)) {
+      continue;
+    }
+    if (!Candidate.has_value() || User.Value < Candidate->Value) {
+      Candidate = User;
+    }
+  }
+
+  return Candidate.value_or(SessionUserId{1});
 }
 
 const EditorObjectCollaborationState *EditorSession::FindCollaborationState(
@@ -748,6 +911,11 @@ void EditorSession::ExpandMeshAssetIntoScene(std::string_view RootObjectId,
   RootDetails.IsGeneratedAssetChild = false;
   RootDetails.GeneratedFromAssetRootId = std::nullopt;
   RootDetails.AssetRelativePath = std::string(AssetPath);
+  if (!RootDetails.Physics.has_value()) {
+    const EditorTransformDetails RootTransform =
+        RootDetails.Transform.value_or(EditorTransformDetails{});
+    RootDetails.Physics = BuildDefaultStaticMeshPhysics(SceneData, RootTransform);
+  }
 
   if (SceneData.Instances.size() == 1) {
     const auto &First = SceneData.Instances.front();
@@ -1055,6 +1223,24 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
     return false;
   }
 
+  if ((std::holds_alternative<PlaySessionCommand>(QueuedCommand.Command.Payload) ||
+       std::holds_alternative<PauseSessionCommand>(QueuedCommand.Command.Payload) ||
+       std::holds_alternative<ResumeSessionCommand>(QueuedCommand.Command.Payload) ||
+       std::holds_alternative<StopSessionCommand>(QueuedCommand.Command.Payload)) &&
+      QueuedCommand.Context.User.Value != ResolveRuntimeControllerUser().Value) {
+    FailureReason =
+        "Only the current simulation host can control simulation state.";
+    return false;
+  }
+
+  if (!QueuedCommand.Context.IsScriptContext &&
+      m_State.RuntimeState != EditorRuntimeState::Edit &&
+      IsAuthoringMutationCommand(QueuedCommand.Command.Payload)) {
+    FailureReason =
+        "Authoring edits are disabled while shared simulation is active.";
+    return false;
+  }
+
   const EditorViewportState &Viewport =
       const_cast<EditorSession *>(this)->EnsureViewport(QueuedCommand.Context.User);
 
@@ -1093,6 +1279,8 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
       SingleId = C->ObjectId;
     else if (const auto *C = std::get_if<ReparentObjectCommand>(&QueuedCommand.Command.Payload))
       SingleId = C->ObjectId;
+    else if (const auto *C = std::get_if<SetPhysicsPropertiesCommand>(&QueuedCommand.Command.Payload))
+      SingleId = C->ObjectId;
     if (!SingleId.empty()) {
       const auto CollabIt = m_State.Scene.CollaborationByObjectId.find(SingleId);
       if (CollabIt != m_State.Scene.CollaborationByObjectId.end() &&
@@ -1128,6 +1316,47 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
     if (TransformCommand->Scale.x <= 0.0f || TransformCommand->Scale.y <= 0.0f ||
         TransformCommand->Scale.z <= 0.0f) {
       FailureReason = "Scale values must be greater than zero.";
+      return false;
+    }
+  }
+
+  if (const auto *PhysicsCommand =
+          std::get_if<SetPhysicsPropertiesCommand>(&QueuedCommand.Command.Payload)) {
+    if (PhysicsCommand->ObjectId.empty()) {
+      FailureReason = "Physics commands require a non-empty object id.";
+      return false;
+    }
+
+    const EditorObjectDetails *Details = FindObjectDetails(PhysicsCommand->ObjectId);
+    if (Details == nullptr) {
+      FailureReason = "Physics targeted an unknown object.";
+      return false;
+    }
+    if (!Details->SupportsTransform) {
+      FailureReason = "Physics can only be assigned to transformable objects.";
+      return false;
+    }
+    if (PhysicsCommand->Physics.BodyType == EditorPhysicsBodyType::Dynamic &&
+        PhysicsCommand->Physics.Mass <= 0.0f) {
+      FailureReason = "Dynamic physics bodies require a positive mass.";
+      return false;
+    }
+    if (PhysicsCommand->Physics.ColliderType == EditorPhysicsColliderType::Box &&
+        !IsPositive(PhysicsCommand->Physics.BoxHalfExtents)) {
+      FailureReason = "Box colliders require positive half extents.";
+      return false;
+    }
+    if (PhysicsCommand->Physics.ColliderType == EditorPhysicsColliderType::Sphere &&
+        PhysicsCommand->Physics.SphereRadius <= 0.0f) {
+      FailureReason = "Sphere colliders require a positive radius.";
+      return false;
+    }
+    if (PhysicsCommand->Physics.Friction < 0.0f) {
+      FailureReason = "Physics friction must be zero or greater.";
+      return false;
+    }
+    if (PhysicsCommand->Physics.Restitution < 0.0f) {
+      FailureReason = "Physics restitution must be zero or greater.";
       return false;
     }
   }
@@ -1356,6 +1585,34 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
     }
     if (Details->Kind != EditorSceneItemKind::Mesh) {
       FailureReason = "SetMaterialTexture target must be a Mesh object.";
+      return false;
+    }
+  }
+
+  if (std::holds_alternative<PlaySessionCommand>(QueuedCommand.Command.Payload)) {
+    if (m_State.RuntimeState != EditorRuntimeState::Edit) {
+      FailureReason = "PlaySession is only valid while in edit mode.";
+      return false;
+    }
+  }
+
+  if (std::holds_alternative<PauseSessionCommand>(QueuedCommand.Command.Payload)) {
+    if (m_State.RuntimeState != EditorRuntimeState::Playing) {
+      FailureReason = "PauseSession is only valid while playing.";
+      return false;
+    }
+  }
+
+  if (std::holds_alternative<ResumeSessionCommand>(QueuedCommand.Command.Payload)) {
+    if (m_State.RuntimeState != EditorRuntimeState::Paused) {
+      FailureReason = "ResumeSession is only valid while paused.";
+      return false;
+    }
+  }
+
+  if (std::holds_alternative<StopSessionCommand>(QueuedCommand.Command.Payload)) {
+    if (m_State.RuntimeState == EditorRuntimeState::Edit) {
+      FailureReason = "StopSession is only valid while simulation is active.";
       return false;
     }
   }
@@ -1648,21 +1905,29 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
 void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                   const SetTransformCommand &Command) {
   EnsurePresence(QueuedCommand.Context.User);
-  auto DetailsIt = m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
+  ApplyWorldTransform(
+      Command.ObjectId,
+      EditorTransformDetails{
+          .Location = Command.Location,
+          .RotationDegrees = Command.RotationDegrees,
+          .Scale = Command.Scale,
+      },
+      QueuedCommand.Context.User, true);
+}
+
+void EditorSession::ApplyWorldTransform(std::string_view ObjectId,
+                                        const EditorTransformDetails &WorldTD,
+                                        SessionUserId User,
+                                        bool ShouldPublish) {
+  auto DetailsIt = m_State.Scene.ObjectDetailsById.find(std::string(ObjectId));
   if (DetailsIt == m_State.Scene.ObjectDetailsById.end()) {
     return;
   }
 
-  const EditorTransformDetails WorldTD{
-      .Location = Command.Location,
-      .RotationDegrees = Command.RotationDegrees,
-      .Scale = Command.Scale,
-  };
   const glm::mat4 WorldMatrix = BuildTransformMatrix(WorldTD);
 
-  // Convert world-space command to local-space for storage
   EditorTransformDetails LocalTD = WorldTD;
-  const Instance *Node = FindInstanceById(m_SceneRoot.get(), Command.ObjectId);
+  const Instance *Node = FindInstanceById(m_SceneRoot.get(), ObjectId);
   if (Node && Node->GetParent() && Node->GetParent() != m_SceneRoot.get()) {
     const glm::mat4 ParentWorld = ComputeWorldTransformMatrix(Node->GetParent());
     LocalTD = DecomposeMatrix(glm::inverse(ParentWorld) * WorldMatrix);
@@ -1672,25 +1937,27 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
   DetailsIt->second.WorldTransform = WorldTD;
 
   for (EditorSceneMeshInstance &Inst : m_State.Scene.MeshInstances) {
-    if (Inst.ObjectId == Command.ObjectId) {
+    if (Inst.ObjectId == ObjectId) {
       Inst.Transform = WorldMatrix;
       break;
     }
   }
 
-  // Propagate to children whose world positions depend on this object
   if (Node) {
-    for (const Instance *Child : Node->GetChildren())
+    for (const Instance *Child : Node->GetChildren()) {
       RecomputeSubtreeWorldTransforms(Child);
+    }
   }
 
-  PublishEvent({.Payload = ObjectTransformUpdatedEvent{
-                    .User = QueuedCommand.Context.User,
-                    .ObjectId = Command.ObjectId,
-                    .Location = Command.Location,
-                    .RotationDegrees = Command.RotationDegrees,
-                    .Scale = Command.Scale,
-                }});
+  if (ShouldPublish) {
+    PublishEvent({.Payload = ObjectTransformUpdatedEvent{
+                      .User = User,
+                      .ObjectId = std::string(ObjectId),
+                      .Location = WorldTD.Location,
+                      .RotationDegrees = WorldTD.RotationDegrees,
+                      .Scale = WorldTD.Scale,
+                  }});
+  }
 }
 
 void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
@@ -1855,6 +2122,122 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
       .ObjectId         = Command.ObjectId,
       .TextureAssetPath = Command.TextureAssetPath,
   }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const SetPhysicsPropertiesCommand &Command) {
+  (void)QueuedCommand;
+
+  auto DetailsIt = m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
+  if (DetailsIt == m_State.Scene.ObjectDetailsById.end()) {
+    return;
+  }
+
+  DetailsIt->second.Physics = Command.Physics;
+  if (Command.Physics.BodyType == EditorPhysicsBodyType::None &&
+      Command.Physics.ColliderType == EditorPhysicsColliderType::None) {
+    DetailsIt->second.Physics.reset();
+  }
+
+  PublishEvent({.Payload = PhysicsPropertiesChangedEvent{
+      .ObjectId = Command.ObjectId,
+      .Physics = DetailsIt->second.Physics.value_or(EditorPhysicsProperties{}),
+  }});
+}
+
+void EditorSession::EnsurePhysicsWorldStarted() {
+  if (m_PhysicsWorld == nullptr) {
+    m_PhysicsWorld = std::make_unique<PhysicsWorld>();
+  }
+  if (!m_PhysicsWorld->IsAvailable()) {
+    A_CORE_WARN("EditorSession: physics requested but backend is unavailable");
+    return;
+  }
+  m_PhysicsWorld->Start(m_State.Scene);
+}
+
+void EditorSession::StopPhysicsWorld() {
+  if (m_PhysicsWorld != nullptr) {
+    m_PhysicsWorld->Stop();
+  }
+}
+
+void EditorSession::StepRuntimePhysics(float DeltaTimeSeconds) {
+  if (m_State.RuntimeState != EditorRuntimeState::Playing ||
+      m_PhysicsWorld == nullptr || !m_PhysicsWorld->IsRunning()) {
+    return;
+  }
+
+  for (const PhysicsTransformUpdate &Update : m_PhysicsWorld->Step(DeltaTimeSeconds)) {
+    const EditorObjectDetails *Existing = FindObjectDetails(Update.ObjectId);
+    if (Existing == nullptr) {
+      continue;
+    }
+
+    EditorTransformDetails Applied = Update.WorldTransform;
+    if (Existing->WorldTransform.has_value()) {
+      Applied.Scale = Existing->WorldTransform->Scale;
+    } else if (Existing->Transform.has_value()) {
+      Applied.Scale = Existing->Transform->Scale;
+    }
+    ApplyWorldTransform(Update.ObjectId, Applied, SessionUserId{1}, true);
+  }
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const PlaySessionCommand &Command) {
+  (void)Command;
+  EnsurePresence(QueuedCommand.Context.User);
+  m_RuntimeSceneSnapshot = RuntimeSceneSnapshot{
+      .Scene = CloneEditorSceneState(m_State.Scene),
+      .SelectedObjectIds = m_State.SelectedObjectIds,
+  };
+  m_State.RuntimeState = EditorRuntimeState::Playing;
+  EnsurePhysicsWorldStarted();
+  PublishEvent({.Payload = RuntimeStateChangedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .State = m_State.RuntimeState,
+                }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const PauseSessionCommand &Command) {
+  (void)Command;
+  EnsurePresence(QueuedCommand.Context.User);
+  m_State.RuntimeState = EditorRuntimeState::Paused;
+  PublishEvent({.Payload = RuntimeStateChangedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .State = m_State.RuntimeState,
+                }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const ResumeSessionCommand &Command) {
+  (void)Command;
+  EnsurePresence(QueuedCommand.Context.User);
+  m_State.RuntimeState = EditorRuntimeState::Playing;
+  PublishEvent({.Payload = RuntimeStateChangedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .State = m_State.RuntimeState,
+                }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const StopSessionCommand &Command) {
+  (void)Command;
+  EnsurePresence(QueuedCommand.Context.User);
+  StopPhysicsWorld();
+  if (m_RuntimeSceneSnapshot.has_value()) {
+    SetSceneState(std::move(m_RuntimeSceneSnapshot->Scene));
+    m_State.SelectedObjectIds = std::move(m_RuntimeSceneSnapshot->SelectedObjectIds);
+    PruneInvalidSelections();
+    m_RuntimeSceneSnapshot.reset();
+  }
+  m_State.RuntimeState = EditorRuntimeState::Edit;
+  PublishEvent({.Payload = RuntimeStateChangedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .State = m_State.RuntimeState,
+                }});
 }
 
 void EditorSession::SetContentDir(std::filesystem::path ContentDir) {

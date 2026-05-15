@@ -30,6 +30,8 @@ export type RemoteSessionState =
   | "command-rejected"
   | "error"
 
+export type RemoteRuntimeState = "edit" | "playing" | "paused"
+
 export type RemoteViewportViewMode = "lit" | "unlit" | "wireframe"
 export type RemoteViewportGizmoMode = "translate" | "scale" | "rotate"
 export type SessionSceneItemKind = "folder" | "mesh" | "light" | "camera" | "actor"
@@ -50,7 +52,7 @@ export interface SessionAssetDescriptor {
 
 export interface SessionPropertyDescriptor {
   name: string
-  type: "string" | "bool" | "vec3"
+  type: "string" | "bool" | "number" | "vec3" | "enum"
   readOnly: boolean
   value?: string
 }
@@ -113,11 +115,23 @@ export interface SessionMaterialDetails {
   textureAssetPath: string | null
 }
 
+export interface SessionPhysicsDetails {
+  bodyType: "none" | "static" | "dynamic"
+  colliderType: "none" | "box" | "sphere"
+  boxHalfExtents: [number, number, number]
+  sphereRadius: number
+  mass: number
+  friction: number
+  restitution: number
+}
+
 export interface SessionObjectDetails {
   objectId: string
   displayName: string
   kind: SessionSceneItemKind
   visible: boolean
+  isGeneratedAssetChild: boolean
+  generatedFromAssetRootId: string | null
   capabilities: {
     supportsTransform: boolean
     transformReadOnly: boolean
@@ -125,6 +139,7 @@ export interface SessionObjectDetails {
   transform: SessionTransformDetails | null
   light: SessionLightDetails | null
   material: SessionMaterialDetails | null
+  physics: SessionPhysicsDetails | null
   collaboration: {
     selectedByUserIds: number[]
     lockState: "unlocked" | "locked"
@@ -136,6 +151,7 @@ interface RemoteViewportActions {
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
+  setShowColliders: (showColliders: boolean) => Promise<void>
   setGizmoMode: (mode: RemoteViewportGizmoMode) => Promise<void>
   setGridSnapSettings: (settings: RemoteViewportGridSnapSettings) => Promise<void>
   refreshSessionSnapshot: () => Promise<void>
@@ -151,10 +167,14 @@ interface RemoteViewportActions {
   listAssets: () => Promise<void>
   getSchema: (objectId: string) => Promise<void>
   saveScene: () => Promise<void>
+  playSession: () => Promise<boolean>
+  pauseSession: () => Promise<boolean>
+  resumeSession: () => Promise<boolean>
+  stopSession: () => Promise<boolean>
   setProperty: (
     objectId: string,
     property: string,
-    value: string | boolean | [number, number, number]
+    value: string | number | boolean | [number, number, number]
   ) => Promise<boolean>
   reloadScripts: () => Promise<void>
   setMeshAsset: (objectId: string, assetPath: string) => Promise<boolean>
@@ -187,7 +207,10 @@ interface RemoteViewportContextValue {
   frameText: string
   sessionStatusText: string
   sessionDetailText: string
+  runtimeState: RemoteRuntimeState
+  canControlRuntime: boolean
   viewMode: RemoteViewportViewMode
+  showColliders: boolean
   gizmoMode: RemoteViewportGizmoMode
   gridSnapSettings: RemoteViewportGridSnapSettings
   isLooking: boolean
@@ -208,6 +231,7 @@ interface RemoteViewportContextValue {
   setSessionStatusText: (value: string) => void
   setSessionDetailText: (value: string) => void
   setViewMode: (value: RemoteViewportViewMode) => void
+  setShowCollidersState: (value: boolean) => void
   setIsLooking: (value: boolean) => void
   setServerOrigin: (value: string) => void
   appendEventLog: (value: string) => void
@@ -233,12 +257,16 @@ interface RemoteViewportContextValue {
   setObjectSchema: (schema: SessionObjectSchema) => void
   getSchema: (objectId: string) => Promise<void>
   saveScene: () => Promise<void>
+  playSession: () => Promise<boolean>
+  pauseSession: () => Promise<boolean>
+  resumeSession: () => Promise<boolean>
+  stopSession: () => Promise<boolean>
   saveStatus: "idle" | "saving" | "saved" | "failed"
   setSaveStatus: (status: "idle" | "saving" | "saved" | "failed") => void
   setProperty: (
     objectId: string,
     property: string,
-    value: string | boolean | [number, number, number]
+    value: string | number | boolean | [number, number, number]
   ) => Promise<boolean>
   reloadScripts: () => Promise<void>
   setMeshAsset: (objectId: string, assetPath: string) => Promise<boolean>
@@ -262,6 +290,7 @@ interface RemoteViewportContextValue {
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
+  setShowColliders: (showColliders: boolean) => Promise<void>
   setGizmoMode: (mode: RemoteViewportGizmoMode) => Promise<void>
   setGridSnapSettings: (settings: RemoteViewportGridSnapSettings) => Promise<void>
   refreshSessionSnapshot: () => Promise<void>
@@ -278,6 +307,9 @@ interface RemoteViewportContextValue {
 
 interface SessionSnapshot {
   currentUserId: number
+  runtimeControllerUserId: number
+  runtimeState: RemoteRuntimeState
+  showColliders: boolean
   participants: SessionParticipant[]
   sceneTree: SessionSceneItem[]
   selections: SessionSelection[]
@@ -319,6 +351,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     reconnect: async () => {},
     toggleLook: async () => {},
     setMode: async () => {},
+    setShowColliders: async () => {},
     setGizmoMode: async () => {},
     setGridSnapSettings: async () => {},
     refreshSessionSnapshot: async () => {},
@@ -334,6 +367,10 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     listAssets: async () => {},
     getSchema: async () => {},
     saveScene: async () => {},
+    playSession: async () => false,
+    pauseSession: async () => false,
+    resumeSession: async () => false,
+    stopSession: async () => false,
     setProperty: async () => false,
     reloadScripts: async () => {},
     setMeshAsset: async () => false,
@@ -351,7 +388,9 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
   const [sessionDetailText, setSessionDetailText] = useState(
     "Waiting for authoritative session state"
   )
+  const [runtimeState, setRuntimeState] = useState<RemoteRuntimeState>("edit")
   const [viewMode, setViewMode] = useState<RemoteViewportViewMode>("lit")
+  const [showColliders, setShowCollidersState] = useState(true)
   const [gizmoMode, setGizmoModeState] = useState<RemoteViewportGizmoMode>("translate")
   const [gridSnapSettings, setGridSnapSettingsState] =
     useState<RemoteViewportGridSnapSettings>(defaultGridSnapSettings)
@@ -359,6 +398,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
   const [eventLog, setEventLog] = useState<string[]>([])
   const [serverOrigin, setServerOrigin] = useState("")
   const [currentUserId, setCurrentUserId] = useState<number | null>(null)
+  const [runtimeControllerUserId, setRuntimeControllerUserId] = useState<number | null>(null)
   const [participants, setParticipants] = useState<SessionParticipant[]>([])
   const [sceneTree, setSceneTree] = useState<SessionSceneItem[]>([])
   const [selections, setSelections] = useState<SessionSelection[]>([])
@@ -385,6 +425,9 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
 
   const setSessionSnapshot = useCallback((snapshot: SessionSnapshot) => {
     setCurrentUserId(snapshot.currentUserId)
+    setRuntimeControllerUserId(snapshot.runtimeControllerUserId)
+    setRuntimeState(snapshot.runtimeState)
+    setShowCollidersState(snapshot.showColliders)
     setParticipants(snapshot.participants)
     setSceneTree(snapshot.sceneTree)
     setSelections(
@@ -400,6 +443,9 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
 
   const clearSessionSnapshot = useCallback(() => {
     setCurrentUserId(null)
+    setRuntimeControllerUserId(null)
+    setRuntimeState("edit")
+    setShowCollidersState(true)
     setParticipants([])
     setSceneTree([])
     setSelections([])
@@ -460,6 +506,11 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
 
   const setMode = useCallback(async (mode: RemoteViewportViewMode) => {
     await actionsRef.current.setMode(mode)
+  }, [])
+
+  const setShowColliders = useCallback(async (nextValue: boolean) => {
+    setShowCollidersState(nextValue)
+    await actionsRef.current.setShowColliders(nextValue)
   }, [])
 
   const setGizmoModeAction = useCallback(async (mode: RemoteViewportGizmoMode) => {
@@ -525,11 +576,19 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     await actionsRef.current.saveScene()
   }, [])
 
+  const playSession = useCallback(async () => actionsRef.current.playSession(), [])
+
+  const pauseSession = useCallback(async () => actionsRef.current.pauseSession(), [])
+
+  const resumeSession = useCallback(async () => actionsRef.current.resumeSession(), [])
+
+  const stopSession = useCallback(async () => actionsRef.current.stopSession(), [])
+
   const setProperty = useCallback(
     async (
       objectId: string,
       property: string,
-      value: string | boolean | [number, number, number]
+      value: string | number | boolean | [number, number, number]
     ) => actionsRef.current.setProperty(objectId, property, value),
     []
   )
@@ -581,6 +640,10 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       ? selections.find((selection) => selection.userId === currentUserId)?.objectId ?? null
       : null
   const selectedObject = findSceneItem(sceneTree, selectedObjectId)
+  const canControlRuntime =
+    currentUserId !== null &&
+    runtimeControllerUserId !== null &&
+    currentUserId === runtimeControllerUserId
 
   const value = useMemo(
     () => ({
@@ -591,7 +654,10 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       frameText,
       sessionStatusText,
       sessionDetailText,
+      runtimeState,
+      canControlRuntime,
       viewMode,
+      showColliders,
       gizmoMode,
       gridSnapSettings,
       isLooking,
@@ -612,6 +678,10 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       setObjectSchema,
       getSchema,
       saveScene,
+      playSession,
+      pauseSession,
+      resumeSession,
+      stopSession,
       saveStatus,
       setSaveStatus,
       setProperty,
@@ -633,6 +703,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       setSessionStatusText,
       setSessionDetailText,
       setViewMode,
+      setShowCollidersState,
       setIsLooking,
       setServerOrigin,
       appendEventLog,
@@ -646,6 +717,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       reconnect,
       toggleLook,
       setMode,
+      setShowColliders,
       setGizmoMode: setGizmoModeAction,
       setGridSnapSettings,
       refreshSessionSnapshot,
@@ -668,6 +740,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       connectionState,
       clearSessionSnapshot,
       currentUserId,
+      runtimeControllerUserId,
       detailText,
       eventLog,
       frameText,
@@ -677,6 +750,8 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       sessionDetailText,
       sessionState,
       sessionStatusText,
+      runtimeState,
+      canControlRuntime,
       reconnect,
       refreshSessionSnapshot,
       registerActions,
@@ -695,6 +770,10 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       objectSchema,
       getSchema,
       saveScene,
+      playSession,
+      pauseSession,
+      resumeSession,
+      stopSession,
       saveStatus,
       setProperty,
       reloadScripts,
@@ -708,7 +787,9 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       dismissScriptErrorToast,
       serverOrigin,
       gizmoMode,
+      showColliders,
       setMode,
+      setShowColliders,
       setGizmoModeAction,
       setGridSnapSettings,
       setSessionDetailText,

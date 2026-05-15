@@ -169,6 +169,31 @@ TEST(HeadlessProtocolTests, RemoteViewportAcceptsSetGridSnapCommand) {
   EXPECT_FLOAT_EQ(Command->ScaleStep, 0.05f);
 }
 
+TEST(HeadlessProtocolTests, RemoteViewportAcceptsPlaySessionCommand) {
+  std::string Error;
+  const auto Command = Axiom::ParseRemoteViewportCommand(
+      R"json({"type":"play_session"})json", Error);
+
+  ASSERT_TRUE(Command.has_value()) << Error;
+  EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::PlaySession);
+  EXPECT_TRUE(
+      std::holds_alternative<Axiom::PlaySessionCommand>(Command->EditorPayload.Payload));
+}
+
+TEST(HeadlessProtocolTests, RemoteViewportAcceptsNumericSetPropertyCommand) {
+  std::string Error;
+  const auto Command = Axiom::ParseRemoteViewportCommand(
+      R"json({"type":"set_property","objectId":"ball","property":"physicsMass","value":2.5})json",
+      Error);
+
+  ASSERT_TRUE(Command.has_value()) << Error;
+  EXPECT_EQ(Command->Type, Axiom::HeadlessCommandType::SetProperty);
+  ASSERT_TRUE(Command->PropertyVal.has_value());
+  const auto *Value = std::get_if<float>(&*Command->PropertyVal);
+  ASSERT_NE(Value, nullptr);
+  EXPECT_FLOAT_EQ(*Value, 2.5f);
+}
+
 TEST(HeadlessProtocolTests, SerializesCommandRejectedEvent) {
   const Axiom::PublishedEditorEvent Event{
       .Id = Axiom::EventId{4},
@@ -284,6 +309,20 @@ TEST(HeadlessProtocolTests, SerializesObjectTransformUpdatedEvent) {
   EXPECT_NE(Json.find("\"scale\":[1,1.5,2]"), std::string::npos);
 }
 
+TEST(HeadlessProtocolTests, SerializesRuntimeStateChangedEvent) {
+  const Axiom::PublishedEditorEvent Event{
+      .Id = Axiom::EventId{17},
+      .Event = {.Payload = Axiom::RuntimeStateChangedEvent{
+                    .User = Axiom::SessionUserId{1},
+                    .State = Axiom::EditorRuntimeState::Playing,
+                }}};
+
+  const std::string Json = Axiom::SerializeEvent(Event);
+  EXPECT_NE(Json.find("\"payloadType\":\"runtime_state_changed\""),
+            std::string::npos);
+  EXPECT_NE(Json.find("\"runtimeState\":\"playing\""), std::string::npos);
+}
+
 TEST(HeadlessProtocolTests, SerializesRemoteViewportLifecycleMessages) {
   EXPECT_EQ(Axiom::SerializeConnected(), "{\"type\":\"connected\"}");
   EXPECT_EQ(Axiom::SerializeDisconnected(), "{\"type\":\"disconnected\"}");
@@ -348,6 +387,15 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
                           .RotationDegrees = glm::vec3(4.0f, 5.0f, 6.0f),
                           .Scale = glm::vec3(1.0f, 1.0f, 1.0f),
                       },
+                      .Physics = Axiom::EditorPhysicsProperties{
+                          .BodyType = Axiom::EditorPhysicsBodyType::Dynamic,
+                          .ColliderType = Axiom::EditorPhysicsColliderType::Sphere,
+                          .BoxHalfExtents = glm::vec3(0.5f, 0.75f, 1.0f),
+                          .SphereRadius = 1.25f,
+                          .Mass = 3.5f,
+                          .Friction = 0.6f,
+                          .Restitution = 0.4f,
+                      },
                   },
               }},
               .CollaborationByObjectId = {{
@@ -363,9 +411,12 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
   };
 
   const std::string Json = Axiom::SerializeSessionSnapshot(
-      State, Axiom::SessionUserId{1}, true, "connected", "connected");
+      State, Axiom::SessionUserId{1}, true, true, "connected", "connected");
   EXPECT_NE(Json.find("\"type\":\"session_snapshot\""), std::string::npos);
   EXPECT_NE(Json.find("\"currentUserId\":1"), std::string::npos);
+  EXPECT_NE(Json.find("\"runtimeControllerUserId\":1"), std::string::npos);
+  EXPECT_NE(Json.find("\"showColliders\":true"), std::string::npos);
+  EXPECT_NE(Json.find("\"runtimeState\":\"edit\""), std::string::npos);
   EXPECT_NE(Json.find("\"participants\""), std::string::npos);
   EXPECT_NE(Json.find("\"displayName\":\"Local User\""), std::string::npos);
   EXPECT_NE(Json.find("\"presenceState\":\"connected\""), std::string::npos);
@@ -381,6 +432,13 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
   EXPECT_NE(Json.find("\"supportsTransform\":true"), std::string::npos);
   EXPECT_NE(Json.find("\"transformReadOnly\":true"), std::string::npos);
   EXPECT_NE(Json.find("\"location\":[1,2,3]"), std::string::npos);
+  EXPECT_NE(Json.find("\"physics\":{\"bodyType\":\"dynamic\""),
+            std::string::npos);
+  EXPECT_NE(Json.find("\"colliderType\":\"sphere\""), std::string::npos);
+  EXPECT_NE(Json.find("\"sphereRadius\":1.25"), std::string::npos);
+  EXPECT_NE(Json.find("\"mass\":3.5"), std::string::npos);
+  EXPECT_NE(Json.find("\"friction\":0.6"), std::string::npos);
+  EXPECT_NE(Json.find("\"restitution\":0.4"), std::string::npos);
   EXPECT_NE(Json.find("\"selectedByUserIds\":[1]"), std::string::npos);
   EXPECT_NE(Json.find("\"lockState\":\"locked\""), std::string::npos);
   EXPECT_NE(Json.find("\"lockOwnerUserId\":1"), std::string::npos);
@@ -402,7 +460,7 @@ TEST(HeadlessProtocolTests, SerializesSessionConnectResponse) {
   };
 
   const std::string Json = Axiom::SerializeSessionConnectResponse(
-      "client-7", State, Axiom::SessionUserId{7}, true, "connected",
+      "client-7", State, Axiom::SessionUserId{7}, true, true, "connected",
       "new");
   EXPECT_NE(Json.find("\"type\":\"session_connect\""), std::string::npos);
   EXPECT_NE(Json.find("\"clientId\":\"client-7\""), std::string::npos);
@@ -686,7 +744,7 @@ TEST(HeadlessProtocolTests, SerializesObjectDetailsWithMaterial) {
   State.SelectedObjectIds[Axiom::SessionUserId{1}] = "crate-1";
 
   const std::string Json = Axiom::SerializeSessionSnapshot(
-      State, Axiom::SessionUserId{1}, true, "connected", "connected");
+      State, Axiom::SessionUserId{1}, true, true, "connected", "connected");
   EXPECT_NE(Json.find("\"material\":{"), std::string::npos);
   EXPECT_NE(Json.find("\"baseColorFactor\":[0.5,0.5,0.5,1]"), std::string::npos);
   EXPECT_NE(Json.find("\"metallic\":0"), std::string::npos);
@@ -706,6 +764,6 @@ TEST(HeadlessProtocolTests, SerializesObjectDetailsWithNullMaterialForLights) {
   State.SelectedObjectIds[Axiom::SessionUserId{1}] = "sun";
 
   const std::string Json = Axiom::SerializeSessionSnapshot(
-      State, Axiom::SessionUserId{1}, true, "connected", "connected");
+      State, Axiom::SessionUserId{1}, true, true, "connected", "connected");
   EXPECT_NE(Json.find("\"material\":null"), std::string::npos);
 }

@@ -10,6 +10,8 @@
 
 Wraith Engine is a C++/Vulkan game engine runtime paired with a browser-based editor shell. The engine runs headless on a server, streams rendered viewports to browser clients via WebRTC with H.264, and processes editing commands through an authoritative command/event model. One shared runtime supports both local native editing and remotely hosted collaborative sessions.
 
+Collaborative simulation is session-wide: when the simulation host presses `Play`, `Pause`, or `Stop`, every connected collaborator sees the same runtime state. In the current model, the first connected browser collaborator becomes the simulation host for that session, while the headless renderer keeps its reserved local render user.
+
 ## Architecture
 
 ```
@@ -35,6 +37,9 @@ AxiomRemoteViewportServer  (C++)
 - WebRTC streaming to browser
 - C# scripting via [Coral](https://github.com/StudioCherno/Coral) (.NET 9, hot reload, two trust tiers)
 - Scene persistence — `scene.json` save/load across restarts
+- Session-wide Play / Pause / Stop with authoritative edit-snapshot restore
+- Runtime-only Jolt physics stepping with pause / resume support
+- Default static box collision for imported mesh assets, with load-time migration for older meshes that had no authored physics yet
 
 **Browser editor**
 - Dockable panels: outliner, details/property inspector, content browser, toolbar
@@ -45,6 +50,8 @@ AxiomRemoteViewportServer  (C++)
 - Light icons render as color-tinted billboards and are selectable from the remote viewport
 - User presence and camera visualization
 - Script class attachment and hot-reload button
+- Inspector-driven physics authoring: body type, collider type, extents/radius, mass, friction, bounce
+- Read-only physics visibility for generated mesh children, with inheritance hints pointing back to the authored root mesh object
 
 ## Prerequisites
 
@@ -71,6 +78,23 @@ AxiomRemoteViewportServer  (C++)
 ```bash
 cmake --preset debug
 cmake --build build/debug
+```
+
+### With physics enabled
+
+Physics uses Jolt and is currently enabled by default, but this is the explicit build if you want to guarantee it is on:
+
+```bash
+cmake --preset debug -DAXIOM_ENABLE_PHYSICS=ON
+cmake --build build/debug
+```
+
+To build tests against the physics-enabled runtime:
+
+```bash
+cmake --preset debug -DBUILD_TESTING=ON -DAXIOM_ENABLE_PHYSICS=ON
+cmake --build build/debug
+ctest --test-dir build/debug
 ```
 
 ### With C# scripting enabled
@@ -158,6 +182,7 @@ cmake --build build/release
 | `AXIOM_SCRIPTING_WATCH` | `BOOL` | `OFF` | Auto-reload user scripts on disk change (macOS kqueue). Requires `AXIOM_ENABLE_SCRIPTING=ON` |
 | `AXIOM_SCRIPTING_TRUST_DEFAULT` | `STRING` | `Restricted` | Default sandbox tier for user scripts. `Restricted` (hosted — blocks `System.Net.*`, `System.Reflection.Emit`, etc.) or `Trusted` (local dev — full BCL access) |
 | `AXIOM_ENABLE_WEBRTC` | `BOOL` | `OFF` | Enable the macOS WebRTC transport |
+| `AXIOM_ENABLE_PHYSICS` | `BOOL` | `ON` | Enable the JoltPhysics runtime simulation seam |
 | `AXIOM_WEBRTC_FRAMEWORK_PATH` | `PATH` | _(empty)_ | Path to a `WebRTC.framework` bundle (macOS framework variant) |
 | `AXIOM_WEBRTC_LIBRARY_PATH` | `FILEPATH` | _(empty)_ | Path to a `libwebrtc` static/shared binary (non-framework variant) |
 | `AXIOM_WEBRTC_INCLUDE_DIR` | `PATH` | _(empty)_ | Include directory for the non-framework libwebrtc variant |

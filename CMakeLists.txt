@@ -15,6 +15,8 @@ set(AXIOM_SCRIPTING_TRUST_DEFAULT "Restricted" CACHE STRING
 set_property(CACHE AXIOM_SCRIPTING_TRUST_DEFAULT PROPERTY STRINGS "Restricted" "Trusted")
 option(AXIOM_ENABLE_WEBRTC
        "Enable the macOS WebRTC transport integration seam" OFF)
+option(AXIOM_ENABLE_PHYSICS
+       "Enable the JoltPhysics runtime simulation seam" ON)
 set(AXIOM_WEBRTC_FRAMEWORK_PATH "" CACHE PATH
     "Optional path to a locally built WebRTC.framework for macOS WebRTC integration")
 set(AXIOM_WEBRTC_LIBRARY_PATH "" CACHE FILEPATH
@@ -44,6 +46,28 @@ set(ASSIMP_WARNINGS_AS_ERRORS     OFF CACHE BOOL "" FORCE)
 set(ASSIMP_INSTALL                OFF CACHE BOOL "" FORCE)
 set(ASSIMP_INJECT_DEBUG_POSTFIX   OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(assimp)
+
+if(AXIOM_ENABLE_PHYSICS)
+  set(TARGET_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+  set(TARGET_HELLO_WORLD OFF CACHE BOOL "" FORCE)
+  set(TARGET_SAMPLES OFF CACHE BOOL "" FORCE)
+  set(TARGET_PERFORMANCE_TEST OFF CACHE BOOL "" FORCE)
+  set(TARGET_VIEWER OFF CACHE BOOL "" FORCE)
+  set(TARGET_TEST_FRAMEWORK OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(
+    JoltPhysics
+    GIT_REPOSITORY https://github.com/jrouwe/JoltPhysics.git
+    GIT_TAG v5.5.0
+    GIT_SHALLOW TRUE
+  )
+  FetchContent_MakeAvailable(JoltPhysics)
+  FetchContent_GetProperties(JoltPhysics
+    SOURCE_DIR AXIOM_JOLT_SOURCE_DIR
+    BINARY_DIR AXIOM_JOLT_BINARY_DIR)
+  if(NOT TARGET Jolt)
+    add_subdirectory("${AXIOM_JOLT_SOURCE_DIR}/Build" "${AXIOM_JOLT_BINARY_DIR}")
+  endif()
+endif()
 
 if(AXIOM_ENABLE_SCRIPTING)
   include(cmake/CoralNative.cmake)

@@ -20,10 +20,11 @@ public:
   std::vector<Axiom::PublishedEditorEvent> Events;
 };
 
-Axiom::CommandContext MakeContext(uint64_t FrameIndex = 1) {
+Axiom::CommandContext MakeContext(uint64_t FrameIndex = 1,
+                                  uint64_t UserId = 7) {
   return {
       .Session = Axiom::SessionId{1},
-      .User = Axiom::SessionUserId{7},
+      .User = Axiom::SessionUserId{UserId},
       .FrameIndex = FrameIndex,
       .DeltaTimeSeconds = 1.0f / 60.0f,
   };
@@ -96,6 +97,594 @@ std::filesystem::path WriteSingleMeshObj(const std::filesystem::path &ContentRoo
 }
 
 } // namespace
+
+TEST(SceneLifecycleTests, HostCanTransitionRuntimeStateThroughSimulationModes) {
+  Axiom::EditorSession Session = MakeWorldSession();
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(1, 1), {.Payload = Axiom::PlaySessionCommand{}});
+  Session.Tick();
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Playing);
+
+  Session.Submit(MakeContext(2, 1), {.Payload = Axiom::PauseSessionCommand{}});
+  Session.Tick();
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Paused);
+
+  Session.Submit(MakeContext(3, 1), {.Payload = Axiom::ResumeSessionCommand{}});
+  Session.Tick();
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Playing);
+
+  Session.Submit(MakeContext(4, 1), {.Payload = Axiom::StopSessionCommand{}});
+  Session.Tick();
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Edit);
+
+  const auto *RuntimeChanged =
+      FindEvent<Axiom::RuntimeStateChangedEvent>(Subscriber.Events);
+  ASSERT_NE(RuntimeChanged, nullptr);
+}
+
+TEST(SceneLifecycleTests, NonHostCannotControlRuntimeState) {
+  Axiom::EditorSession Session = MakeWorldSession();
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(), {.Payload = Axiom::PlaySessionCommand{}});
+  Session.Tick();
+
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Edit);
+  const auto *Rejected =
+      FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events);
+  ASSERT_NE(Rejected, nullptr);
+  EXPECT_NE(Rejected->Reason.find("host"), std::string::npos);
+}
+
+TEST(SceneLifecycleTests, FirstConnectedCollaboratorControlsRuntimeState) {
+  Axiom::EditorSession Session = MakeWorldSession();
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.SetPresence({
+      {
+          .User = Axiom::SessionUserId{1},
+          .DisplayName = "Headless Host",
+          .State = Axiom::EditorUserPresenceState::Connected,
+          .IsLocal = true,
+      },
+      {
+          .User = Axiom::SessionUserId{2},
+          .DisplayName = "User 1",
+          .State = Axiom::EditorUserPresenceState::Connected,
+          .IsLocal = false,
+      },
+      {
+          .User = Axiom::SessionUserId{3},
+          .DisplayName = "User 2",
+          .State = Axiom::EditorUserPresenceState::Connected,
+          .IsLocal = false,
+      },
+  });
+
+  EXPECT_EQ(Session.ResolveRuntimeControllerUser().Value, 2u);
+
+  Session.Submit(MakeContext(1, 2), {.Payload = Axiom::PlaySessionCommand{}});
+  Session.Tick();
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Playing);
+
+  Subscriber.Events.clear();
+  Session.Submit(MakeContext(2, 3), {.Payload = Axiom::PauseSessionCommand{}});
+  Session.Tick();
+
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Playing);
+  const auto *Rejected =
+      FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events);
+  ASSERT_NE(Rejected, nullptr);
+  EXPECT_NE(Rejected->Reason.find("simulation host"), std::string::npos);
+}
+
+TEST(SceneLifecycleTests, InvalidRuntimeTransitionsAreRejected) {
+  Axiom::EditorSession Session = MakeWorldSession();
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(1, 1), {.Payload = Axiom::PauseSessionCommand{}});
+  Session.Tick();
+
+  const auto *PauseRejected =
+      FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events);
+  ASSERT_NE(PauseRejected, nullptr);
+  EXPECT_NE(PauseRejected->Reason.find("only valid while playing"),
+            std::string::npos);
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Edit);
+
+  Subscriber.Events.clear();
+
+  Session.Submit(MakeContext(2, 1), {.Payload = Axiom::PlaySessionCommand{}});
+  Session.Tick();
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Playing);
+
+  Subscriber.Events.clear();
+
+  Session.Submit(MakeContext(3, 1), {.Payload = Axiom::PlaySessionCommand{}});
+  Session.Tick();
+
+  const auto *PlayRejected =
+      FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events);
+  ASSERT_NE(PlayRejected, nullptr);
+  EXPECT_NE(PlayRejected->Reason.find("only valid while in edit mode"),
+            std::string::npos);
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Playing);
+}
+
+TEST(SceneLifecycleTests, AuthoringMutationsAreRejectedWhileSimulationIsActive) {
+  Axiom::EditorSession Session = MakeWorldSession();
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.SetObjectDetails({
+      {
+          .ObjectId = "world",
+          .DisplayName = "World",
+          .Kind = Axiom::EditorSceneItemKind::Folder,
+          .Visible = true,
+          .SupportsTransform = false,
+          .TransformReadOnly = true,
+      },
+      {
+          .ObjectId = "crate-1",
+          .DisplayName = "Crate",
+          .Kind = Axiom::EditorSceneItemKind::Mesh,
+          .Visible = true,
+          .SupportsTransform = true,
+          .TransformReadOnly = false,
+          .Transform = Axiom::EditorTransformDetails{
+              .Location = glm::vec3(1.0f, 2.0f, 3.0f),
+              .RotationDegrees = glm::vec3(0.0f),
+              .Scale = glm::vec3(1.0f),
+          },
+      },
+  });
+  Session.SetSceneItems({{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {{
+          .Id = "crate-1",
+          .DisplayName = "Crate",
+          .Kind = Axiom::EditorSceneItemKind::Mesh,
+          .Visible = true,
+      }},
+  }});
+
+  Session.Submit(MakeContext(1, 1), {.Payload = Axiom::PlaySessionCommand{}});
+  Session.Tick();
+  ASSERT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Playing);
+
+  Subscriber.Events.clear();
+  Session.Submit(MakeContext(2, 1),
+                 {.Payload = Axiom::SetTransformCommand{
+                      .ObjectId = "crate-1",
+                      .Location = glm::vec3(9.0f, 8.0f, 7.0f),
+                      .RotationDegrees = glm::vec3(15.0f),
+                      .Scale = glm::vec3(2.0f),
+                  }});
+  Session.Tick();
+
+  const auto *TransformRejected =
+      FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events);
+  ASSERT_NE(TransformRejected, nullptr);
+  EXPECT_NE(TransformRejected->Reason.find("simulation is active"),
+            std::string::npos);
+  ASSERT_EQ(FindEvent<Axiom::ObjectTransformUpdatedEvent>(Subscriber.Events), nullptr);
+
+  const auto *DetailsAfterPlay = Session.FindObjectDetails("crate-1");
+  ASSERT_NE(DetailsAfterPlay, nullptr);
+  ASSERT_TRUE(DetailsAfterPlay->Transform.has_value());
+  EXPECT_EQ(DetailsAfterPlay->Transform->Location, glm::vec3(1.0f, 2.0f, 3.0f));
+
+  Subscriber.Events.clear();
+  Session.Submit(MakeContext(3, 1), {.Payload = Axiom::PauseSessionCommand{}});
+  Session.Tick();
+  ASSERT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Paused);
+
+  Subscriber.Events.clear();
+  Session.Submit(MakeContext(4, 1),
+                 {.Payload = Axiom::SetPhysicsPropertiesCommand{
+                      .ObjectId = "crate-1",
+                      .Physics = Axiom::EditorPhysicsProperties{
+                          .BodyType = Axiom::EditorPhysicsBodyType::Dynamic,
+                          .ColliderType = Axiom::EditorPhysicsColliderType::Sphere,
+                          .SphereRadius = 0.75f,
+                          .Mass = 3.0f,
+                          .Friction = 0.4f,
+                          .Restitution = 0.2f,
+                      },
+                  }});
+  Session.Tick();
+
+  const auto *PhysicsRejected =
+      FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events);
+  ASSERT_NE(PhysicsRejected, nullptr);
+  EXPECT_NE(PhysicsRejected->Reason.find("simulation is active"),
+            std::string::npos);
+  ASSERT_EQ(FindEvent<Axiom::PhysicsPropertiesChangedEvent>(Subscriber.Events), nullptr);
+
+  const auto *DetailsAfterPause = Session.FindObjectDetails("crate-1");
+  ASSERT_NE(DetailsAfterPause, nullptr);
+  EXPECT_FALSE(DetailsAfterPause->Physics.has_value());
+}
+
+TEST(SceneLifecycleTests, PhysicsStepsDynamicBodiesOnlyWhilePlaying) {
+#if !AXIOM_ENABLE_PHYSICS
+  GTEST_SKIP() << "Physics backend disabled for this build.";
+#else
+  Axiom::EditorSession Session = MakeWorldSession();
+  Session.SetObjectDetails({
+      {
+          .ObjectId = "world",
+          .DisplayName = "World",
+          .Kind = Axiom::EditorSceneItemKind::Folder,
+          .Visible = true,
+          .SupportsTransform = false,
+          .TransformReadOnly = true,
+      },
+      {
+          .ObjectId = "floor",
+          .DisplayName = "Floor",
+          .Kind = Axiom::EditorSceneItemKind::Mesh,
+          .Visible = true,
+          .SupportsTransform = true,
+          .TransformReadOnly = false,
+          .Transform = Axiom::EditorTransformDetails{
+              .Location = glm::vec3(0.0f, -1.0f, 0.0f),
+              .RotationDegrees = glm::vec3(0.0f),
+              .Scale = glm::vec3(1.0f),
+          },
+          .Physics = Axiom::EditorPhysicsProperties{
+              .BodyType = Axiom::EditorPhysicsBodyType::Static,
+              .ColliderType = Axiom::EditorPhysicsColliderType::Box,
+              .BoxHalfExtents = glm::vec3(8.0f, 0.5f, 8.0f),
+          },
+      },
+      {
+          .ObjectId = "ball",
+          .DisplayName = "Ball",
+          .Kind = Axiom::EditorSceneItemKind::Actor,
+          .Visible = true,
+          .SupportsTransform = true,
+          .TransformReadOnly = false,
+          .Transform = Axiom::EditorTransformDetails{
+              .Location = glm::vec3(0.0f, 5.0f, 0.0f),
+              .RotationDegrees = glm::vec3(0.0f),
+              .Scale = glm::vec3(1.0f),
+          },
+          .Physics = Axiom::EditorPhysicsProperties{
+              .BodyType = Axiom::EditorPhysicsBodyType::Dynamic,
+              .ColliderType = Axiom::EditorPhysicsColliderType::Sphere,
+              .SphereRadius = 0.5f,
+              .Mass = 1.0f,
+          },
+      },
+  });
+  Session.SetSceneItems({{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {{
+                       .Id = "floor",
+                       .DisplayName = "Floor",
+                       .Kind = Axiom::EditorSceneItemKind::Mesh,
+                       .Visible = true,
+                   },
+                   {
+                       .Id = "ball",
+                       .DisplayName = "Ball",
+                       .Kind = Axiom::EditorSceneItemKind::Actor,
+                       .Visible = true,
+                   }},
+  }});
+
+  Session.Submit(MakeContext(1, 1), {.Payload = Axiom::PlaySessionCommand{}});
+  Session.Tick(1.0f / 60.0f);
+  for (int Step = 0; Step < 60; ++Step) {
+    Session.Tick(1.0f / 60.0f);
+  }
+
+  const auto *Ball = Session.FindObjectDetails("ball");
+  ASSERT_NE(Ball, nullptr);
+  ASSERT_TRUE(Ball->WorldTransform.has_value() || Ball->Transform.has_value());
+  const Axiom::EditorTransformDetails &Transform =
+      Ball->WorldTransform.has_value() ? *Ball->WorldTransform : *Ball->Transform;
+  EXPECT_LT(Transform.Location.y, 5.0f);
+#endif
+}
+
+TEST(SceneLifecycleTests, PhysicsPauseFreezesDynamicBodies) {
+#if !AXIOM_ENABLE_PHYSICS
+  GTEST_SKIP() << "Physics backend disabled for this build.";
+#else
+  Axiom::EditorSession Session = MakeWorldSession();
+  Session.SetObjectDetails({
+      {
+          .ObjectId = "world",
+          .DisplayName = "World",
+          .Kind = Axiom::EditorSceneItemKind::Folder,
+          .Visible = true,
+          .SupportsTransform = false,
+          .TransformReadOnly = true,
+      },
+      {
+          .ObjectId = "ball",
+          .DisplayName = "Ball",
+          .Kind = Axiom::EditorSceneItemKind::Actor,
+          .Visible = true,
+          .SupportsTransform = true,
+          .TransformReadOnly = false,
+          .Transform = Axiom::EditorTransformDetails{
+              .Location = glm::vec3(0.0f, 3.0f, 0.0f),
+              .RotationDegrees = glm::vec3(0.0f),
+              .Scale = glm::vec3(1.0f),
+          },
+          .Physics = Axiom::EditorPhysicsProperties{
+              .BodyType = Axiom::EditorPhysicsBodyType::Dynamic,
+              .ColliderType = Axiom::EditorPhysicsColliderType::Sphere,
+              .SphereRadius = 0.5f,
+              .Mass = 1.0f,
+          },
+      },
+  });
+  Session.SetSceneItems({{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {{
+          .Id = "ball",
+          .DisplayName = "Ball",
+          .Kind = Axiom::EditorSceneItemKind::Actor,
+          .Visible = true,
+      }},
+  }});
+
+  Session.Submit(MakeContext(1, 1), {.Payload = Axiom::PlaySessionCommand{}});
+  for (int Step = 0; Step < 20; ++Step) {
+    Session.Tick(1.0f / 60.0f);
+  }
+  Session.Submit(MakeContext(2, 1), {.Payload = Axiom::PauseSessionCommand{}});
+  Session.Tick(1.0f / 60.0f);
+
+  const auto *BeforePause = Session.FindObjectDetails("ball");
+  ASSERT_NE(BeforePause, nullptr);
+  const float BeforeY =
+      (BeforePause->WorldTransform.has_value() ? BeforePause->WorldTransform->Location.y
+                                               : BeforePause->Transform->Location.y);
+
+  for (int Step = 0; Step < 30; ++Step) {
+    Session.Tick(1.0f / 60.0f);
+  }
+
+  const auto *AfterPause = Session.FindObjectDetails("ball");
+  ASSERT_NE(AfterPause, nullptr);
+  const float AfterY =
+      (AfterPause->WorldTransform.has_value() ? AfterPause->WorldTransform->Location.y
+                                              : AfterPause->Transform->Location.y);
+  EXPECT_NEAR(AfterY, BeforeY, 0.0001f);
+#endif
+}
+
+TEST(SceneLifecycleTests, PhysicsStopRestoresPrePlayTransformState) {
+#if !AXIOM_ENABLE_PHYSICS
+  GTEST_SKIP() << "Physics backend disabled for this build.";
+#else
+  Axiom::EditorSession Session = MakeWorldSession();
+  Session.SetObjectDetails({
+      {
+          .ObjectId = "world",
+          .DisplayName = "World",
+          .Kind = Axiom::EditorSceneItemKind::Folder,
+          .Visible = true,
+          .SupportsTransform = false,
+          .TransformReadOnly = true,
+      },
+      {
+          .ObjectId = "ball",
+          .DisplayName = "Ball",
+          .Kind = Axiom::EditorSceneItemKind::Actor,
+          .Visible = true,
+          .SupportsTransform = true,
+          .TransformReadOnly = false,
+          .Transform = Axiom::EditorTransformDetails{
+              .Location = glm::vec3(1.0f, 4.0f, 0.0f),
+              .RotationDegrees = glm::vec3(0.0f),
+              .Scale = glm::vec3(1.0f),
+          },
+          .Physics = Axiom::EditorPhysicsProperties{
+              .BodyType = Axiom::EditorPhysicsBodyType::Dynamic,
+              .ColliderType = Axiom::EditorPhysicsColliderType::Sphere,
+              .SphereRadius = 0.5f,
+              .Mass = 1.0f,
+          },
+      },
+  });
+  Session.SetSceneItems({{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {{
+          .Id = "ball",
+          .DisplayName = "Ball",
+          .Kind = Axiom::EditorSceneItemKind::Actor,
+          .Visible = true,
+      }},
+  }});
+
+  Session.Submit(MakeContext(1, 1), {.Payload = Axiom::PlaySessionCommand{}});
+  for (int Step = 0; Step < 20; ++Step) {
+    Session.Tick(1.0f / 60.0f);
+  }
+  Session.Submit(MakeContext(2, 1), {.Payload = Axiom::StopSessionCommand{}});
+  Session.Tick(1.0f / 60.0f);
+
+  const auto *Ball = Session.FindObjectDetails("ball");
+  ASSERT_NE(Ball, nullptr);
+  ASSERT_TRUE(Ball->Transform.has_value());
+  EXPECT_EQ(Ball->Transform->Location, glm::vec3(1.0f, 4.0f, 0.0f));
+#endif
+}
+
+TEST(SceneLifecycleTests, StopSessionRestoresPrePlayTransformState) {
+  Axiom::EditorSession Session = MakeWorldSession();
+  Session.SetObjectDetails({
+      {
+          .ObjectId = "world",
+          .DisplayName = "World",
+          .Kind = Axiom::EditorSceneItemKind::Folder,
+          .Visible = true,
+          .SupportsTransform = false,
+          .TransformReadOnly = true,
+      },
+      {
+          .ObjectId = "crate-1",
+          .DisplayName = "Crate",
+          .Kind = Axiom::EditorSceneItemKind::Mesh,
+          .Visible = true,
+          .SupportsTransform = true,
+          .TransformReadOnly = false,
+          .Transform = Axiom::EditorTransformDetails{
+              .Location = glm::vec3(1.0f, 2.0f, 3.0f),
+              .RotationDegrees = glm::vec3(0.0f, 0.0f, 0.0f),
+              .Scale = glm::vec3(1.0f),
+          },
+      },
+  });
+  Session.SetSceneItems({{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {{
+          .Id = "crate-1",
+          .DisplayName = "Crate",
+          .Kind = Axiom::EditorSceneItemKind::Mesh,
+          .Visible = true,
+          .Children = {},
+      }},
+  }});
+
+  Session.Submit(MakeContext(1, 1), {.Payload = Axiom::PlaySessionCommand{}});
+  Session.Tick();
+  Session.Submit(MakeContext(2, 1),
+                 {.Payload = Axiom::SetTransformCommand{
+                      .ObjectId = "crate-1",
+                      .Location = glm::vec3(9.0f, 8.0f, 7.0f),
+                      .RotationDegrees = glm::vec3(10.0f, 20.0f, 30.0f),
+                      .Scale = glm::vec3(2.0f),
+                  }});
+  Session.Tick();
+  Session.Submit(MakeContext(3, 1), {.Payload = Axiom::StopSessionCommand{}});
+  Session.Tick();
+
+  const auto *Details = Session.FindObjectDetails("crate-1");
+  ASSERT_NE(Details, nullptr);
+  ASSERT_TRUE(Details->Transform.has_value());
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Edit);
+  EXPECT_EQ(Details->Transform->Location, glm::vec3(1.0f, 2.0f, 3.0f));
+  EXPECT_EQ(Details->Transform->RotationDegrees, glm::vec3(0.0f, 0.0f, 0.0f));
+  EXPECT_EQ(Details->Transform->Scale, glm::vec3(1.0f));
+}
+
+TEST(SceneLifecycleTests, StopSessionRemovesObjectsCreatedDuringPlay) {
+  Axiom::EditorSession Session = MakeWorldSession();
+
+  Session.Submit(MakeContext(1, 1), {.Payload = Axiom::PlaySessionCommand{}});
+  Session.Tick();
+  Axiom::CommandContext ScriptCtx = MakeContext(2, 1);
+  ScriptCtx.IsScriptContext = true;
+  Session.Submit(ScriptCtx,
+                 {.Payload = Axiom::CreateObjectCommand{.TemplateId = "Mesh"}});
+  Session.Tick();
+
+  const auto *WorldBeforeStop = Session.FindSceneItem("world");
+  ASSERT_NE(WorldBeforeStop, nullptr);
+  ASSERT_EQ(WorldBeforeStop->Children.size(), 1u);
+  const std::string CreatedId = WorldBeforeStop->Children.front().Id;
+
+  Session.Submit(MakeContext(3, 1), {.Payload = Axiom::StopSessionCommand{}});
+  Session.Tick();
+
+  const auto *WorldAfterStop = Session.FindSceneItem("world");
+  ASSERT_NE(WorldAfterStop, nullptr);
+  EXPECT_TRUE(WorldAfterStop->Children.empty());
+  EXPECT_EQ(Session.FindSceneItem(CreatedId), nullptr);
+  EXPECT_EQ(Session.FindObjectDetails(CreatedId), nullptr);
+}
+
+TEST(SceneLifecycleTests, StopSessionRestoresPrePlayMaterialState) {
+  auto Mat = std::make_shared<Axiom::MaterialInstance>();
+  Mat->BaseColorFactor = glm::vec4(0.2f, 0.3f, 0.4f, 1.0f);
+  Mat->Metallic = 0.1f;
+  Mat->Roughness = 0.8f;
+
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  Session.SetSceneItems({{
+      .Id = "crate-1",
+      .DisplayName = "Crate",
+      .Kind = Axiom::EditorSceneItemKind::Mesh,
+      .Visible = true,
+      .Children = {},
+  }});
+  Session.SetObjectDetails({{
+      .ObjectId = "crate-1",
+      .DisplayName = "Crate",
+      .Kind = Axiom::EditorSceneItemKind::Mesh,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      .Transform = Axiom::EditorTransformDetails{},
+      .Material = Axiom::EditorMaterialProperties{
+          .BaseColorFactor = glm::vec4(0.2f, 0.3f, 0.4f, 1.0f),
+          .Metallic = 0.1f,
+          .Roughness = 0.8f,
+      },
+  }});
+  Session.SetSceneMeshInstances({{
+      .ObjectId = "crate-1",
+      .Mesh = {},
+      .Material = Mat,
+      .RenderPath = Axiom::MeshRenderPath::Graphics,
+      .Transform = glm::mat4(1.0f),
+  }});
+
+  Session.Submit(MakeContext(1, 1), {.Payload = Axiom::PlaySessionCommand{}});
+  Session.Tick();
+  Session.Submit(MakeContext(2, 1),
+                 {.Payload = Axiom::SetMaterialPropertiesCommand{
+                      .ObjectId = "crate-1",
+                      .BaseColorFactor = glm::vec4(0.9f, 0.1f, 0.2f, 1.0f),
+                      .Metallic = 0.95f,
+                      .Roughness = 0.05f,
+                  }});
+  Session.Tick();
+  Session.Submit(MakeContext(3, 1), {.Payload = Axiom::StopSessionCommand{}});
+  Session.Tick();
+
+  const auto *Details = Session.FindObjectDetails("crate-1");
+  ASSERT_NE(Details, nullptr);
+  ASSERT_TRUE(Details->Material.has_value());
+  EXPECT_FLOAT_EQ(Details->Material->BaseColorFactor.r, 0.2f);
+  EXPECT_FLOAT_EQ(Details->Material->Metallic, 0.1f);
+  EXPECT_FLOAT_EQ(Details->Material->Roughness, 0.8f);
+
+  const auto &Instances = Session.GetState().Scene.MeshInstances;
+  ASSERT_EQ(Instances.size(), 1u);
+  ASSERT_TRUE(Instances[0].Material != nullptr);
+  EXPECT_FLOAT_EQ(Instances[0].Material->BaseColorFactor.r, 0.2f);
+  EXPECT_FLOAT_EQ(Instances[0].Material->Metallic, 0.1f);
+  EXPECT_FLOAT_EQ(Instances[0].Material->Roughness, 0.8f);
+}
 
 // ---------------------------------------------------------------------------
 // Create
@@ -256,6 +845,12 @@ TEST(SceneLifecycleTests, CreateMeshObjectAddsMeshWithAssetAndTransform) {
   EXPECT_FLOAT_EQ(Details->Transform->Location.y, 2.0f);
   EXPECT_FLOAT_EQ(Details->Transform->Location.z, 3.0f);
   EXPECT_FLOAT_EQ(Details->WorldTransform->RotationDegrees.y, 45.0f);
+  ASSERT_TRUE(Details->Physics.has_value());
+  EXPECT_EQ(Details->Physics->BodyType, Axiom::EditorPhysicsBodyType::Static);
+  EXPECT_EQ(Details->Physics->ColliderType, Axiom::EditorPhysicsColliderType::Box);
+  EXPECT_FLOAT_EQ(Details->Physics->BoxHalfExtents.x, 1.5f);
+  EXPECT_FLOAT_EQ(Details->Physics->BoxHalfExtents.y, 1.5f);
+  EXPECT_FLOAT_EQ(Details->Physics->BoxHalfExtents.z, 0.01f);
 
   const auto &Instances = Session.GetState().Scene.MeshInstances;
   const auto It = std::find_if(Instances.begin(), Instances.end(),
@@ -327,6 +922,12 @@ TEST(SceneLifecycleTests, CreateMeshObjectExpandsMultiMeshAssetIntoGeneratedChil
   ASSERT_NE(ChildDetails, nullptr);
   EXPECT_TRUE(ChildDetails->IsGeneratedAssetChild);
   EXPECT_TRUE(ChildDetails->TransformReadOnly);
+  ASSERT_TRUE(RootDetails->Physics.has_value());
+  EXPECT_EQ(RootDetails->Physics->BodyType, Axiom::EditorPhysicsBodyType::Static);
+  EXPECT_EQ(RootDetails->Physics->ColliderType, Axiom::EditorPhysicsColliderType::Box);
+  EXPECT_GT(RootDetails->Physics->BoxHalfExtents.x, 0.0f);
+  EXPECT_GT(RootDetails->Physics->BoxHalfExtents.y, 0.0f);
+  EXPECT_GT(RootDetails->Physics->BoxHalfExtents.z, 0.0f);
 }
 
 TEST(SceneLifecycleTests, CreateWithUnknownTemplateIdIsRejected) {
@@ -1575,6 +2176,190 @@ TEST(SceneLifecycleTests, SceneFile_SaveLoadRoundTripsCookedMaterialState) {
   ASSERT_TRUE(DetailsIt->second.Material->TextureAssetPath.has_value());
   EXPECT_EQ(*DetailsIt->second.Material->TextureAssetPath,
             "Engine/tf2 coconut.jpg");
+}
+
+TEST(SceneLifecycleTests, SetPhysicsPropertiesUpdatesAuthoritativeDetails) {
+  Axiom::EditorSession Session = MakeWorldSession();
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.SetObjectDetails({
+      {
+          .ObjectId = "world",
+          .DisplayName = "World",
+          .Kind = Axiom::EditorSceneItemKind::Folder,
+          .Visible = true,
+          .SupportsTransform = false,
+          .TransformReadOnly = true,
+      },
+      {
+          .ObjectId = "ball",
+          .DisplayName = "Ball",
+          .Kind = Axiom::EditorSceneItemKind::Actor,
+          .Visible = true,
+          .SupportsTransform = true,
+          .TransformReadOnly = false,
+          .Transform = Axiom::EditorTransformDetails{},
+      },
+  });
+  Session.SetSceneItems({{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {{
+          .Id = "ball",
+          .DisplayName = "Ball",
+          .Kind = Axiom::EditorSceneItemKind::Actor,
+          .Visible = true,
+      }},
+  }});
+
+  Session.Submit(MakeContext(),
+                 {.Payload = Axiom::SetPhysicsPropertiesCommand{
+                      .ObjectId = "ball",
+                      .Physics = Axiom::EditorPhysicsProperties{
+                          .BodyType = Axiom::EditorPhysicsBodyType::Dynamic,
+                          .ColliderType = Axiom::EditorPhysicsColliderType::Sphere,
+                          .SphereRadius = 0.75f,
+                          .Mass = 2.5f,
+                          .Friction = 0.35f,
+                          .Restitution = 0.8f,
+                      },
+                  }});
+  Session.Tick();
+
+  ASSERT_EQ(FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events), nullptr);
+  const auto *Details = Session.FindObjectDetails("ball");
+  ASSERT_NE(Details, nullptr);
+  ASSERT_TRUE(Details->Physics.has_value());
+  EXPECT_EQ(Details->Physics->BodyType, Axiom::EditorPhysicsBodyType::Dynamic);
+  EXPECT_EQ(Details->Physics->ColliderType, Axiom::EditorPhysicsColliderType::Sphere);
+  EXPECT_FLOAT_EQ(Details->Physics->SphereRadius, 0.75f);
+  EXPECT_FLOAT_EQ(Details->Physics->Mass, 2.5f);
+  EXPECT_FLOAT_EQ(Details->Physics->Friction, 0.35f);
+  EXPECT_FLOAT_EQ(Details->Physics->Restitution, 0.8f);
+
+  const auto *Changed =
+      FindEvent<Axiom::PhysicsPropertiesChangedEvent>(Subscriber.Events);
+  ASSERT_NE(Changed, nullptr);
+  EXPECT_EQ(Changed->ObjectId, "ball");
+  EXPECT_EQ(Changed->Physics.BodyType, Axiom::EditorPhysicsBodyType::Dynamic);
+}
+
+TEST(SceneLifecycleTests, SceneFile_SaveLoadRoundTripsPhysicsState) {
+  EnsureLogInitialized();
+
+  const auto TempRoot =
+      std::filesystem::temp_directory_path() / "wraithengine-physics-scene-test";
+  std::error_code RemoveError;
+  std::filesystem::remove_all(TempRoot, RemoveError);
+  std::filesystem::create_directories(TempRoot / "Content");
+
+  Axiom::EditorSceneState Scene;
+  Scene.Items = {{
+      .Id = "ball",
+      .DisplayName = "Ball",
+      .Kind = Axiom::EditorSceneItemKind::Actor,
+      .Visible = true,
+      .Children = {},
+  }};
+  Scene.ObjectDetailsById["ball"] = Axiom::EditorObjectDetails{
+      .ObjectId = "ball",
+      .DisplayName = "Ball",
+      .Kind = Axiom::EditorSceneItemKind::Actor,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      .Transform = Axiom::EditorTransformDetails{
+          .Location = glm::vec3(1.0f, 2.0f, 3.0f),
+          .RotationDegrees = glm::vec3(0.0f),
+          .Scale = glm::vec3(1.0f),
+      },
+      .Physics = Axiom::EditorPhysicsProperties{
+          .BodyType = Axiom::EditorPhysicsBodyType::Dynamic,
+          .ColliderType = Axiom::EditorPhysicsColliderType::Sphere,
+          .BoxHalfExtents = glm::vec3(0.25f, 0.5f, 0.75f),
+          .SphereRadius = 0.6f,
+          .Mass = 4.0f,
+          .Friction = 0.45f,
+          .Restitution = 0.25f,
+      },
+  };
+
+  const auto ScenePath = TempRoot / "Content" / "scene.json";
+  ASSERT_TRUE(Axiom::Assets::SaveSceneToFile(ScenePath, Scene));
+
+  const auto Loaded = Axiom::Assets::LoadSceneFromFile(ScenePath);
+  ASSERT_TRUE(Loaded.has_value());
+  const auto DetailsIt = Loaded->ObjectDetailsById.find("ball");
+  ASSERT_NE(DetailsIt, Loaded->ObjectDetailsById.end());
+  ASSERT_TRUE(DetailsIt->second.Physics.has_value());
+  EXPECT_EQ(DetailsIt->second.Physics->BodyType,
+            Axiom::EditorPhysicsBodyType::Dynamic);
+  EXPECT_EQ(DetailsIt->second.Physics->ColliderType,
+            Axiom::EditorPhysicsColliderType::Sphere);
+  EXPECT_FLOAT_EQ(DetailsIt->second.Physics->BoxHalfExtents.y, 0.5f);
+  EXPECT_FLOAT_EQ(DetailsIt->second.Physics->SphereRadius, 0.6f);
+  EXPECT_FLOAT_EQ(DetailsIt->second.Physics->Mass, 4.0f);
+  EXPECT_FLOAT_EQ(DetailsIt->second.Physics->Friction, 0.45f);
+  EXPECT_FLOAT_EQ(DetailsIt->second.Physics->Restitution, 0.25f);
+}
+
+TEST(SceneLifecycleTests, SceneFile_LoadMigratesMissingMeshPhysicsToStaticBox) {
+  EnsureLogInitialized();
+
+  const auto TempRoot =
+      std::filesystem::temp_directory_path() / "wraithengine-mesh-physics-migration-test";
+  std::error_code RemoveError;
+  std::filesystem::remove_all(TempRoot, RemoveError);
+  std::filesystem::create_directories(TempRoot / "Content");
+  WriteSingleMeshObj(TempRoot / "Content");
+
+  Axiom::EditorSceneState Scene;
+  Scene.Items = {{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {{
+          .Id = "crate-1",
+          .DisplayName = "Crate",
+          .Kind = Axiom::EditorSceneItemKind::Mesh,
+          .Visible = true,
+          .Children = {},
+      }},
+  }};
+  Scene.ObjectDetailsById["crate-1"] = Axiom::EditorObjectDetails{
+      .ObjectId = "crate-1",
+      .DisplayName = "Crate",
+      .Kind = Axiom::EditorSceneItemKind::Mesh,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      .Transform = Axiom::EditorTransformDetails{
+          .Location = glm::vec3(0.0f),
+          .RotationDegrees = glm::vec3(0.0f),
+          .Scale = glm::vec3(2.0f, 3.0f, 4.0f),
+      },
+      .AssetRelativePath = "singlemesh.obj",
+  };
+
+  const auto ScenePath = TempRoot / "Content" / "scene.json";
+  ASSERT_TRUE(Axiom::Assets::SaveSceneToFile(ScenePath, Scene));
+
+  const auto Loaded = Axiom::Assets::LoadSceneFromFile(ScenePath);
+  ASSERT_TRUE(Loaded.has_value());
+  const auto DetailsIt = Loaded->ObjectDetailsById.find("crate-1");
+  ASSERT_NE(DetailsIt, Loaded->ObjectDetailsById.end());
+  ASSERT_TRUE(DetailsIt->second.Physics.has_value());
+  EXPECT_EQ(DetailsIt->second.Physics->BodyType,
+            Axiom::EditorPhysicsBodyType::Static);
+  EXPECT_EQ(DetailsIt->second.Physics->ColliderType,
+            Axiom::EditorPhysicsColliderType::Box);
+  EXPECT_FLOAT_EQ(DetailsIt->second.Physics->BoxHalfExtents.x, 2.0f);
+  EXPECT_FLOAT_EQ(DetailsIt->second.Physics->BoxHalfExtents.y, 3.0f);
+  EXPECT_FLOAT_EQ(DetailsIt->second.Physics->BoxHalfExtents.z, 0.01f);
 }
 
 TEST(SceneLifecycleTests, SceneFile_SaveLoadRegeneratesMultiMeshChildrenWithoutDuplicatingThem) {

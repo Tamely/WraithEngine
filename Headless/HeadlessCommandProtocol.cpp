@@ -176,6 +176,12 @@ std::string EventPayloadType(const EditorEventPayload &Payload) {
   if (std::holds_alternative<MaterialTextureChangedEvent>(Payload)) {
     return "material_texture_changed";
   }
+  if (std::holds_alternative<PhysicsPropertiesChangedEvent>(Payload)) {
+    return "physics_properties_changed";
+  }
+  if (std::holds_alternative<RuntimeStateChangedEvent>(Payload)) {
+    return "runtime_state_changed";
+  }
   return "object_transform_updated";
 }
 
@@ -207,6 +213,45 @@ std::string PresenceStateToString(EditorUserPresenceState State) {
   }
 
   return "connected";
+}
+
+std::string RuntimeStateToString(EditorRuntimeState State) {
+  switch (State) {
+  case EditorRuntimeState::Edit:
+    return "edit";
+  case EditorRuntimeState::Playing:
+    return "playing";
+  case EditorRuntimeState::Paused:
+    return "paused";
+  }
+
+  return "edit";
+}
+
+std::string PhysicsBodyTypeToString(EditorPhysicsBodyType Type) {
+  switch (Type) {
+  case EditorPhysicsBodyType::None:
+    return "none";
+  case EditorPhysicsBodyType::Static:
+    return "static";
+  case EditorPhysicsBodyType::Dynamic:
+    return "dynamic";
+  }
+
+  return "none";
+}
+
+std::string PhysicsColliderTypeToString(EditorPhysicsColliderType Type) {
+  switch (Type) {
+  case EditorPhysicsColliderType::None:
+    return "none";
+  case EditorPhysicsColliderType::Box:
+    return "box";
+  case EditorPhysicsColliderType::Sphere:
+    return "sphere";
+  }
+
+  return "none";
 }
 
 std::string LockStateToString(EditorObjectLockState State) {
@@ -300,6 +345,15 @@ void SerializeObjectDetails(std::ostringstream &Stream,
          << "\",\"displayName\":\"" << EscapeJson(Details.DisplayName)
          << "\",\"kind\":\"" << SceneItemKindToString(Details.Kind)
          << "\",\"visible\":" << (Details.Visible ? "true" : "false")
+         << ",\"isGeneratedAssetChild\":"
+         << (Details.IsGeneratedAssetChild ? "true" : "false");
+  if (Details.GeneratedFromAssetRootId.has_value()) {
+    Stream << ",\"generatedFromAssetRootId\":\""
+           << EscapeJson(*Details.GeneratedFromAssetRootId) << "\"";
+  } else {
+    Stream << ",\"generatedFromAssetRootId\":null";
+  }
+  Stream
          << ",\"capabilities\":{\"supportsTransform\":"
          << (Details.SupportsTransform ? "true" : "false")
          << ",\"transformReadOnly\":"
@@ -343,6 +397,22 @@ void SerializeObjectDetails(std::ostringstream &Stream,
     Stream << "}";
   } else {
     Stream << ",\"material\":null";
+  }
+  if (Details.Physics.has_value()) {
+    Stream << ",\"physics\":{\"bodyType\":\""
+           << PhysicsBodyTypeToString(Details.Physics->BodyType)
+           << "\",\"colliderType\":\""
+           << PhysicsColliderTypeToString(Details.Physics->ColliderType)
+           << "\",\"boxHalfExtents\":["
+           << Details.Physics->BoxHalfExtents.x << ","
+           << Details.Physics->BoxHalfExtents.y << ","
+           << Details.Physics->BoxHalfExtents.z
+           << "],\"sphereRadius\":" << Details.Physics->SphereRadius
+           << ",\"mass\":" << Details.Physics->Mass
+           << ",\"friction\":" << Details.Physics->Friction
+           << ",\"restitution\":" << Details.Physics->Restitution << "}";
+  } else {
+    Stream << ",\"physics\":null";
   }
   Stream << ",\"collaboration\":{\"selectedByUserIds\":[";
   bool FirstSelectionOwner = true;
@@ -441,6 +511,8 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
                                                     std::string &Error) {
   static const std::regex TypePattern(R"json("type"\s*:\s*"([^"]+)")json");
   static const std::regex ViewModePattern(R"json("viewMode"\s*:\s*"([^"]+)")json");
+  static const std::regex ShowCollidersPattern(
+      R"json("showColliders"\s*:\s*(true|false))json");
   static const std::regex BoolPattern(
       R"json("isLooking"\s*:\s*(true|false))json");
   static const std::regex CursorPattern(
@@ -497,8 +569,43 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
                            .EditorPayload = {},
                            .ViewMode = ParsedMode};
   }
+  if (*Type == "set_show_colliders") {
+    const auto ShowColliders = MatchString(JsonLine, ShowCollidersPattern);
+    if (!ShowColliders.has_value()) {
+      Error = "`set_show_colliders` requires `showColliders`.";
+      return std::nullopt;
+    }
+
+    return HeadlessCommand{.Type = HeadlessCommandType::SetShowColliders,
+                           .EditorPayload = {},
+                           .ShowColliders = *ShowColliders == "true"};
+  }
   if (*Type == "quit") {
     return HeadlessCommand{.Type = HeadlessCommandType::Quit, .EditorPayload = {}};
+  }
+  if (*Type == "play_session") {
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::PlaySession,
+        .EditorPayload = {.Payload = PlaySessionCommand{}},
+    };
+  }
+  if (*Type == "pause_session") {
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::PauseSession,
+        .EditorPayload = {.Payload = PauseSessionCommand{}},
+    };
+  }
+  if (*Type == "resume_session") {
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::ResumeSession,
+        .EditorPayload = {.Payload = ResumeSessionCommand{}},
+    };
+  }
+  if (*Type == "stop_session") {
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::StopSession,
+        .EditorPayload = {.Payload = StopSessionCommand{}},
+    };
   }
   if (*Type == "set_look_active") {
     const auto BoolValue = MatchString(JsonLine, BoolPattern);
@@ -917,6 +1024,8 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
     static const std::regex PropPattern(R"json("property"\s*:\s*"([^"]+)")json");
     static const std::regex StringValPattern(R"json("value"\s*:\s*"([^"]*)")json");
     static const std::regex BoolValPattern(R"json("value"\s*:\s*(true|false))json");
+    static const std::regex NumberValPattern(
+        R"json("value"\s*:\s*(-?[0-9Ee.+-]+))json");
     static const std::regex Vec3ValPattern(
         R"json("value"\s*:\s*\[\s*(-?[0-9Ee.+-]+)\s*,\s*(-?[0-9Ee.+-]+)\s*,\s*(-?[0-9Ee.+-]+)\s*\])json");
 
@@ -928,6 +1037,10 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
       Val = PropertyValue{*StrVal};
     } else if (const auto BoolStr = MatchString(JsonLine, BoolValPattern)) {
       Val = PropertyValue{*BoolStr == "true"};
+    } else if (const auto NumberStr = MatchString(JsonLine, NumberValPattern)) {
+      if (const auto Number = ParseDouble(*NumberStr)) {
+        Val = PropertyValue{static_cast<float>(*Number)};
+      }
     } else {
       std::match_results<std::string_view::const_iterator> M;
       if (std::regex_search(JsonLine.begin(), JsonLine.end(), M, Vec3ValPattern) &&
@@ -1004,6 +1117,7 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
 
   switch (Command->Type) {
   case HeadlessCommandType::SetViewMode:
+  case HeadlessCommandType::SetShowColliders:
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
   case HeadlessCommandType::SelectObject:
@@ -1031,6 +1145,10 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::SetLightProperties:
   case HeadlessCommandType::SetMaterialProperties:
   case HeadlessCommandType::SetMaterialTexture:
+  case HeadlessCommandType::PlaySession:
+  case HeadlessCommandType::PauseSession:
+  case HeadlessCommandType::ResumeSession:
+  case HeadlessCommandType::StopSession:
   case HeadlessCommandType::DropMesh:
   case HeadlessCommandType::DropTexture:
   case HeadlessCommandType::ReloadScripts:
@@ -1200,6 +1318,26 @@ std::string SerializeEvent(const PublishedEditorEvent &Event) {
                  std::get_if<MaterialTextureChangedEvent>(&Event.Event.Payload)) {
     Stream << ",\"objectId\":\"" << EscapeJson(TexEv->ObjectId)
            << "\",\"textureAssetPath\":\"" << EscapeJson(TexEv->TextureAssetPath) << "\"";
+  } else if (const auto *PhysicsProps =
+                 std::get_if<PhysicsPropertiesChangedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"objectId\":\"" << EscapeJson(PhysicsProps->ObjectId)
+           << "\",\"bodyType\":\""
+           << PhysicsBodyTypeToString(PhysicsProps->Physics.BodyType)
+           << "\",\"colliderType\":\""
+           << PhysicsColliderTypeToString(PhysicsProps->Physics.ColliderType)
+           << "\",\"boxHalfExtents\":["
+           << PhysicsProps->Physics.BoxHalfExtents.x << ","
+           << PhysicsProps->Physics.BoxHalfExtents.y << ","
+           << PhysicsProps->Physics.BoxHalfExtents.z
+           << "],\"sphereRadius\":" << PhysicsProps->Physics.SphereRadius
+           << ",\"mass\":" << PhysicsProps->Physics.Mass
+           << ",\"friction\":" << PhysicsProps->Physics.Friction
+           << ",\"restitution\":" << PhysicsProps->Physics.Restitution;
+  } else if (const auto *RuntimeState =
+                 std::get_if<RuntimeStateChangedEvent>(&Event.Event.Payload)) {
+    Stream << ",\"user\":" << RuntimeState->User.Value
+           << ",\"runtimeState\":\""
+           << RuntimeStateToString(RuntimeState->State) << "\"";
   }
   Stream << "}";
   return Stream.str();
@@ -1352,14 +1490,38 @@ std::string SerializeWebRtcIceCandidateList(
 
 std::string SerializeSessionSnapshot(const EditorSessionState &State,
                                      SessionUserId CurrentUser,
+                                     bool ShowColliders,
                                      bool TransportConnected,
                                      std::string_view TransportState,
                                      std::string_view WebRtcConnectionState) {
   const std::vector<EditorParticipant> Participants =
       BuildParticipants(State, CurrentUser);
+  const SessionUserId RuntimeControllerUser =
+      [&]() -> SessionUserId {
+    if (State.RuntimeControllerUser.has_value()) {
+      return *State.RuntimeControllerUser;
+    }
+
+    std::optional<SessionUserId> Candidate;
+    for (const auto &[User, Presence] : State.PresenceByUser) {
+      if (Presence.State == EditorUserPresenceState::Disconnected ||
+          User.Value == 1) {
+        continue;
+      }
+      if (!Candidate.has_value() || User.Value < Candidate->Value) {
+        Candidate = User;
+      }
+    }
+
+    return Candidate.value_or(SessionUserId{1});
+  }();
   std::ostringstream Stream;
   Stream << "{\"type\":\"session_snapshot\",\"sessionId\":" << State.Session.Value
          << ",\"currentUserId\":" << CurrentUser.Value
+         << ",\"runtimeControllerUserId\":" << RuntimeControllerUser.Value
+         << ",\"showColliders\":" << (ShowColliders ? "true" : "false")
+         << ",\"runtimeState\":\"" << RuntimeStateToString(State.RuntimeState)
+         << "\""
          << ",\"transport\":{\"connected\":"
          << (TransportConnected ? "true" : "false") << ",\"state\":\""
          << EscapeJson(TransportState) << "\",\"webrtcConnectionState\":\""
@@ -1415,13 +1577,13 @@ std::string SerializeSessionSnapshot(const EditorSessionState &State,
 
 std::string SerializeSessionConnectResponse(
     std::string_view ClientId, const EditorSessionState &State,
-    SessionUserId CurrentUser, bool TransportConnected,
+    SessionUserId CurrentUser, bool ShowColliders, bool TransportConnected,
     std::string_view TransportState,
     std::string_view WebRtcConnectionState) {
   std::ostringstream Stream;
   Stream << "{\"type\":\"session_connect\",\"clientId\":\""
          << EscapeJson(ClientId) << "\",\"snapshot\":"
-         << SerializeSessionSnapshot(State, CurrentUser, TransportConnected,
+         << SerializeSessionSnapshot(State, CurrentUser, ShowColliders, TransportConnected,
                                      TransportState, WebRtcConnectionState)
          << "}";
   return Stream.str();
@@ -1554,6 +1716,24 @@ std::string SerializeObjectSchema(const EditorObjectDetails &Details) {
             ? *Details.Material->TextureAssetPath
             : std::string_view{};
     AppendProp("baseColorTexture", "texture_ref", false, TexPath);
+  }
+
+  if (Details.SupportsTransform) {
+    const EditorPhysicsProperties Physics =
+        Details.Physics.value_or(EditorPhysicsProperties{});
+    AppendProp("physicsBodyType", "enum", Details.TransformReadOnly,
+               PhysicsBodyTypeToString(Physics.BodyType));
+    AppendProp("physicsColliderType", "enum", Details.TransformReadOnly,
+               PhysicsColliderTypeToString(Physics.ColliderType));
+    AppendProp("physicsBoxHalfExtents", "vec3", Details.TransformReadOnly);
+    AppendProp("physicsSphereRadius", "number", Details.TransformReadOnly,
+               std::to_string(Physics.SphereRadius));
+    AppendProp("physicsMass", "number", Details.TransformReadOnly,
+               std::to_string(Physics.Mass));
+    AppendProp("physicsFriction", "number", Details.TransformReadOnly,
+               std::to_string(Physics.Friction));
+    AppendProp("physicsRestitution", "number", Details.TransformReadOnly,
+               std::to_string(Physics.Restitution));
   }
 
   Stream << "]}";

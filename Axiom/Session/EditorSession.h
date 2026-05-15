@@ -19,6 +19,8 @@
 #include <vector>
 
 namespace Axiom {
+class PhysicsWorld;
+
 struct EditorSessionConfig {
   glm::vec3 InitialCameraPosition{0.0f, 0.8f, 3.5f};
   glm::vec3 InitialCameraTarget{0.0f, 0.3f, 0.0f};
@@ -79,6 +81,7 @@ struct EditorObjectDetails {
   std::optional<std::string> ScriptClass;               // C# script class name (Actor objects only)
   std::optional<EditorLightProperties> Light;           // Light objects only
   std::optional<EditorMaterialProperties> Material;     // Mesh objects only
+  std::optional<EditorPhysicsProperties> Physics;
   std::optional<std::string> GeneratedFromAssetRootId;
   std::string AssetRelativePath; // content-relative path when assigned directly to this object
 };
@@ -134,6 +137,8 @@ struct EditorSceneState {
 
 struct EditorSessionState {
   SessionId Session;
+  EditorRuntimeState RuntimeState{EditorRuntimeState::Edit};
+  std::optional<SessionUserId> RuntimeControllerUser;
   std::unordered_map<SessionUserId, EditorViewportState, SessionUserIdHash>
       Viewports;
   std::unordered_map<SessionUserId, EditorUserPresence, SessionUserIdHash>
@@ -147,10 +152,15 @@ class EditorSession final : public IEditorCommandSink {
 public:
   EditorSession(SessionId Session,
                 EditorSessionConfig Config = EditorSessionConfig{});
+  ~EditorSession();
+  EditorSession(const EditorSession &) = delete;
+  EditorSession &operator=(const EditorSession &) = delete;
+  EditorSession(EditorSession &&) noexcept;
+  EditorSession &operator=(EditorSession &&) noexcept;
 
   void Submit(const CommandContext &Context,
               const EditorCommand &Command) override;
-  void Tick();
+  void Tick(float DeltaTimeSeconds = 1.0f / 60.0f);
 
   void Subscribe(IEditorEventSubscriber *Subscriber);
   void Unsubscribe(IEditorEventSubscriber *Subscriber);
@@ -181,8 +191,10 @@ public:
   const EditorUserPresence *FindPresence(SessionUserId User) const;
   EditorParticipant BuildParticipant(SessionUserId User) const;
   std::vector<EditorParticipant> BuildParticipants(SessionUserId CurrentUser) const;
+  SessionUserId ResolveRuntimeControllerUser() const;
   const EditorObjectCollaborationState *FindCollaborationState(
       std::string_view ObjectId) const;
+  EditorRuntimeState GetRuntimeState() const { return m_State.RuntimeState; }
 
   void AcquireLock(const std::string &ObjectId, SessionUserId User);
   void ReleaseLock(const std::string &ObjectId, SessionUserId User);
@@ -276,13 +288,37 @@ private:
                      const SetMaterialPropertiesCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SetMaterialTextureCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const SetPhysicsPropertiesCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const PlaySessionCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const PauseSessionCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const ResumeSessionCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const StopSessionCommand &Command);
+  void ApplyWorldTransform(std::string_view ObjectId,
+                           const EditorTransformDetails &WorldTransform,
+                           SessionUserId User, bool PublishEvent);
+  void EnsurePhysicsWorldStarted();
+  void StopPhysicsWorld();
+  void StepRuntimePhysics(float DeltaTimeSeconds);
   void PublishEvent(const EditorEvent &Event);
 
 private:
+  struct RuntimeSceneSnapshot {
+    EditorSceneState Scene;
+    std::unordered_map<SessionUserId, std::string, SessionUserIdHash>
+        SelectedObjectIds;
+  };
+
   EditorSessionConfig m_Config;
   EditorSessionState m_State;
   EditorMessageBus m_MessageBus;
   std::unique_ptr<DataModel> m_SceneRoot;
   std::filesystem::path m_ContentDir;
+  std::optional<RuntimeSceneSnapshot> m_RuntimeSceneSnapshot;
+  std::unique_ptr<PhysicsWorld> m_PhysicsWorld;
 };
 } // namespace Axiom

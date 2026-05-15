@@ -50,11 +50,17 @@ export function Toolbar() {
     setGizmoMode,
     setGridSnapSettings,
     saveScene,
+    playSession,
+    pauseSession,
+    resumeSession,
+    stopSession,
     saveStatus,
     setSaveStatus,
     reloadScripts,
     reloadStatus,
     setReloadStatus,
+    runtimeState,
+    canControlRuntime,
   } = useRemoteViewport()
 
   useEffect(() => {
@@ -150,10 +156,28 @@ export function Toolbar() {
       <ToolbarDivider />
 
       <ToolbarGroup>
-        <ToolbarButton icon={Play} tooltip="Play" className="text-green-500 hover:text-green-400" />
-        <ToolbarButton icon={Pause} tooltip="Pause" />
-        <ToolbarButton icon={SkipForward} tooltip="Skip" />
-        <ToolbarButton icon={Square} tooltip="Stop" />
+        <ToolbarButton
+          icon={Play}
+          tooltip={runtimeState === "paused" ? "Resume" : "Play"}
+          className="text-green-500 hover:text-green-400"
+          active={runtimeState === "playing"}
+          disabled={!canControlRuntime || runtimeState === "playing"}
+          onClick={() => void (runtimeState === "paused" ? resumeSession() : playSession())}
+        />
+        <ToolbarButton
+          icon={Pause}
+          tooltip="Pause"
+          active={runtimeState === "paused"}
+          disabled={!canControlRuntime || runtimeState !== "playing"}
+          onClick={() => void pauseSession()}
+        />
+        <ToolbarButton icon={SkipForward} tooltip="Skip" disabled />
+        <ToolbarButton
+          icon={Square}
+          tooltip="Stop"
+          disabled={!canControlRuntime || runtimeState === "edit"}
+          onClick={() => void stopSession()}
+        />
       </ToolbarGroup>
 
       <ToolbarDivider />
@@ -272,19 +296,23 @@ function ToolbarButton({
   active,
   className,
   onClick,
+  disabled,
 }: {
   icon: React.ElementType
   tooltip: string
   active?: boolean
   className?: string
   onClick?: () => void
+  disabled?: boolean
 }) {
   return (
     <button
       title={tooltip}
       onClick={onClick}
-      className={`p-2 rounded hover:bg-neutral-800 transition-colors ${
-        active ? "bg-neutral-700 text-white" : "text-neutral-400"
+      disabled={disabled}
+      className={`p-2 rounded transition-colors ${
+        disabled ? "cursor-not-allowed opacity-40" : "hover:bg-neutral-800"
+      } ${active ? "bg-neutral-700 text-white" : "text-neutral-400"
       } ${className || ""}`}
     >
       <Icon className="w-4 h-4" />

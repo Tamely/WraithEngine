@@ -79,7 +79,7 @@ function DetailsContent({
   details: SessionObjectDetails
   schema: SessionObjectSchema | null
 }) {
-  const { participants, setProperty, updateTransform } = useRemoteViewport()
+  const { participants, runtimeState, setProperty, updateTransform } = useRemoteViewport()
   const [draftName, setDraftName] = useState(details.displayName)
   const [draft, setDraft] = useState<DraftTransform>(() => toDraft(details))
   const [isSaving, setIsSaving] = useState(false)
@@ -110,6 +110,8 @@ function DetailsContent({
     (schemaTransformReadOnly !== null
       ? !schemaTransformReadOnly
       : !details.capabilities.transformReadOnly)
+  const simulationActive = runtimeState !== "edit"
+  const canAuthor = !simulationActive
   const selectedByNames = details.collaboration.selectedByUserIds.map((userId) => {
     const collaborator = participants.find((entry) => entry.userId === userId)
     return collaborator?.displayName ?? fallbackUserLabel(userId)
@@ -166,7 +168,7 @@ function DetailsContent({
             <div className="min-w-0 flex-1">
               <input
                 className="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 outline-none focus:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={isSaving}
+                disabled={isSaving || simulationActive}
                 onChange={(event) => setDraftName(event.target.value)}
                 type="text"
                 value={draftName}
@@ -182,10 +184,14 @@ function DetailsContent({
           />
           <DetailRow label="Lock State" value={details.collaboration.lockState} />
           <DetailRow label="Lock Owner" value={lockOwnerName} />
+          <DetailRow
+            label="Authoring"
+            value={canAuthor ? "Enabled" : "Disabled during simulation"}
+          />
           <div className="flex justify-end gap-2 pt-1">
             <button
               className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={isSaving}
+              disabled={isSaving || simulationActive}
               onClick={() => void toggleVisibility()}
               type="button"
             >
@@ -193,7 +199,12 @@ function DetailsContent({
             </button>
             <button
               className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={isSaving || draftName.trim().length === 0 || draftName === details.displayName}
+              disabled={
+                isSaving ||
+                simulationActive ||
+                draftName.trim().length === 0 ||
+                draftName === details.displayName
+              }
               onClick={() => void applyIdentity()}
               type="button"
             >
@@ -207,7 +218,7 @@ function DetailsContent({
         <ScriptSection
           objectId={details.objectId}
           schema={schema}
-          isSaving={isSaving}
+          isSaving={isSaving || simulationActive}
           setIsSaving={setIsSaving}
         />
       )}
@@ -216,7 +227,7 @@ function DetailsContent({
         <LightSection
           objectId={details.objectId}
           light={details.light ?? null}
-          isSaving={isSaving}
+          isSaving={isSaving || simulationActive}
           setIsSaving={setIsSaving}
         />
       )}
@@ -225,7 +236,19 @@ function DetailsContent({
         <MaterialSection
           objectId={details.objectId}
           material={details.material ?? null}
-          isSaving={isSaving}
+          isSaving={isSaving || simulationActive}
+          setIsSaving={setIsSaving}
+        />
+      )}
+
+      {details.capabilities.supportsTransform && (
+        <PhysicsSection
+          objectId={details.objectId}
+          isGeneratedAssetChild={details.isGeneratedAssetChild}
+          generatedFromAssetRootId={details.generatedFromAssetRootId}
+          isReadOnly={details.capabilities.transformReadOnly}
+          physics={details.physics ?? null}
+          isSaving={isSaving || simulationActive}
           setIsSaving={setIsSaving}
         />
       )}
@@ -235,13 +258,13 @@ function DetailsContent({
         {details.capabilities.supportsTransform && details.transform ? (
           <div className="mt-3 space-y-3">
             <VectorEditor
-              disabled={!canEdit || isSaving}
+              disabled={!canEdit || isSaving || simulationActive}
               label="Location"
               value={draft.location}
               onChange={(value) => setDraft((current) => ({ ...current, location: value }))}
             />
             <VectorEditor
-              disabled={!canEdit || isSaving}
+              disabled={!canEdit || isSaving || simulationActive}
               label="Rotation"
               value={draft.rotationDegrees}
               onChange={(value) =>
@@ -249,17 +272,26 @@ function DetailsContent({
               }
             />
             <VectorEditor
-              disabled={!canEdit || isSaving}
+              disabled={!canEdit || isSaving || simulationActive}
               label="Scale"
               value={draft.scale}
               onChange={(value) => setDraft((current) => ({ ...current, scale: value }))}
             />
-            <DetailRow label="Editability" value={canEdit ? "Editable" : "Read-only"} />
+            <DetailRow
+              label="Editability"
+              value={
+                simulationActive
+                  ? "Runtime-owned"
+                  : canEdit
+                    ? "Editable"
+                    : "Read-only"
+              }
+            />
             {canEdit && (
               <div className="flex justify-end">
                 <button
                   className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={isSaving}
+                  disabled={isSaving || simulationActive}
                   onClick={() => void applyTransform()}
                   type="button"
                 >
@@ -674,6 +706,278 @@ function MaterialSection({
   )
 }
 
+function PhysicsSection({
+  objectId,
+  isGeneratedAssetChild,
+  generatedFromAssetRootId,
+  isReadOnly,
+  physics,
+  isSaving,
+  setIsSaving,
+}: {
+  objectId: string
+  isGeneratedAssetChild: boolean
+  generatedFromAssetRootId: string | null
+  isReadOnly: boolean
+  physics: {
+    bodyType: "none" | "static" | "dynamic"
+    colliderType: "none" | "box" | "sphere"
+    boxHalfExtents: [number, number, number]
+    sphereRadius: number
+    mass: number
+    friction: number
+    restitution: number
+  } | null
+  isSaving: boolean
+  setIsSaving: (value: boolean) => void
+}) {
+  const { setProperty } = useRemoteViewport()
+  const [bodyType, setBodyType] = useState<"none" | "static" | "dynamic">(
+    physics?.bodyType ?? "none"
+  )
+  const [colliderType, setColliderType] = useState<"none" | "box" | "sphere">(
+    physics?.colliderType ?? "none"
+  )
+  const [boxHalfExtents, setBoxHalfExtents] = useState<[string, string, string]>(
+    physics
+      ? [
+          String(physics.boxHalfExtents[0]),
+          String(physics.boxHalfExtents[1]),
+          String(physics.boxHalfExtents[2]),
+        ]
+      : ["0.5", "0.5", "0.5"]
+  )
+  const [sphereRadius, setSphereRadius] = useState(String(physics?.sphereRadius ?? 0.5))
+  const [mass, setMass] = useState(String(physics?.mass ?? 1))
+  const [friction, setFriction] = useState(String(physics?.friction ?? 0.2))
+  const [restitution, setRestitution] = useState(String(physics?.restitution ?? 0))
+
+  useEffect(() => {
+    setBodyType(physics?.bodyType ?? "none")
+    setColliderType(physics?.colliderType ?? "none")
+    setBoxHalfExtents(
+      physics
+        ? [
+            String(physics.boxHalfExtents[0]),
+            String(physics.boxHalfExtents[1]),
+            String(physics.boxHalfExtents[2]),
+          ]
+        : ["0.5", "0.5", "0.5"]
+    )
+    setSphereRadius(String(physics?.sphereRadius ?? 0.5))
+    setMass(String(physics?.mass ?? 1))
+    setFriction(String(physics?.friction ?? 0.2))
+    setRestitution(String(physics?.restitution ?? 0))
+  }, [
+    objectId,
+    physics?.bodyType,
+    physics?.colliderType,
+    physics?.boxHalfExtents[0],
+    physics?.boxHalfExtents[1],
+    physics?.boxHalfExtents[2],
+    physics?.sphereRadius,
+    physics?.mass,
+    physics?.friction,
+    physics?.restitution,
+  ])
+
+  async function applyPhysicsProperty(
+    property: string,
+    value: string | number | [number, number, number]
+  ) {
+    setIsSaving(true)
+    try {
+      await setProperty(objectId, property, value)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  async function applyBoxHalfExtents() {
+    const next = boxHalfExtents.map((value) => Number(value)) as [number, number, number]
+    if (next.some((value) => Number.isNaN(value) || value <= 0)) {
+      return
+    }
+    await applyPhysicsProperty("physicsBoxHalfExtents", next)
+  }
+
+  async function applySphereRadius() {
+    const next = Number(sphereRadius)
+    if (Number.isNaN(next) || next <= 0) {
+      return
+    }
+    await applyPhysicsProperty("physicsSphereRadius", next)
+  }
+
+  async function applyMass() {
+    const next = Number(mass)
+    if (Number.isNaN(next) || next <= 0) {
+      return
+    }
+    await applyPhysicsProperty("physicsMass", next)
+  }
+
+  async function applyFriction() {
+    const next = Number(friction)
+    if (Number.isNaN(next) || next < 0) {
+      return
+    }
+    await applyPhysicsProperty("physicsFriction", next)
+  }
+
+  async function applyRestitution() {
+    const next = Number(restitution)
+    if (Number.isNaN(next) || next < 0) {
+      return
+    }
+    await applyPhysicsProperty("physicsRestitution", next)
+  }
+
+  return (
+    <section className="rounded border border-neutral-800 bg-neutral-950/60 p-3">
+      <div className="mb-3 flex items-center gap-1.5">
+        <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">Physics</p>
+      </div>
+      {isGeneratedAssetChild && generatedFromAssetRootId ? (
+        <p className="mb-3 text-xs text-neutral-500">
+          This generated mesh child inherits collision authoring from
+          {" "}
+          <span className="text-neutral-300">{generatedFromAssetRootId}</span>.
+        </p>
+      ) : null}
+      <div className="space-y-3">
+        <LabeledSelect
+          disabled={isSaving || isReadOnly}
+          label="Body"
+          onChange={(value) => {
+            const next = value as "none" | "static" | "dynamic"
+            setBodyType(next)
+            void applyPhysicsProperty("physicsBodyType", next)
+          }}
+          options={[
+            { label: "None", value: "none" },
+            { label: "Static", value: "static" },
+            { label: "Dynamic", value: "dynamic" },
+          ]}
+          value={bodyType}
+        />
+        <LabeledSelect
+          disabled={isSaving || isReadOnly}
+          label="Collider"
+          onChange={(value) => {
+            const next = value as "none" | "box" | "sphere"
+            setColliderType(next)
+            void applyPhysicsProperty("physicsColliderType", next)
+          }}
+          options={[
+            { label: "None", value: "none" },
+            { label: "Box", value: "box" },
+            { label: "Sphere", value: "sphere" },
+          ]}
+          value={colliderType}
+        />
+        {colliderType === "box" ? (
+          <VectorEditor
+            disabled={isSaving || isReadOnly}
+            label="Half Extents"
+            value={boxHalfExtents}
+            onChange={setBoxHalfExtents}
+          />
+        ) : null}
+        {colliderType === "box" ? (
+          <div className="flex justify-end">
+            <button
+              className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isSaving || isReadOnly}
+              onClick={() => void applyBoxHalfExtents()}
+              type="button"
+            >
+              Apply Box
+            </button>
+          </div>
+        ) : null}
+        {colliderType === "sphere" ? (
+          <LabeledNumberInput
+            disabled={isSaving || isReadOnly}
+            label="Radius"
+            onChange={setSphereRadius}
+            value={sphereRadius}
+          />
+        ) : null}
+        {colliderType === "sphere" ? (
+          <div className="flex justify-end">
+            <button
+              className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isSaving || isReadOnly}
+              onClick={() => void applySphereRadius()}
+              type="button"
+            >
+              Apply Radius
+            </button>
+          </div>
+        ) : null}
+        {bodyType === "dynamic" ? (
+          <LabeledNumberInput
+            disabled={isSaving || isReadOnly}
+            label="Mass"
+            onChange={setMass}
+            value={mass}
+          />
+        ) : null}
+        {bodyType === "dynamic" ? (
+          <div className="flex justify-end">
+            <button
+              className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isSaving || isReadOnly}
+              onClick={() => void applyMass()}
+              type="button"
+            >
+              Apply Mass
+            </button>
+          </div>
+        ) : null}
+        <LabeledNumberInput
+          disabled={isSaving || isReadOnly}
+          label="Friction"
+          onChange={setFriction}
+          value={friction}
+        />
+        <div className="flex justify-end">
+          <button
+          className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isSaving || isReadOnly}
+            onClick={() => void applyFriction()}
+            type="button"
+          >
+            Apply Friction
+          </button>
+        </div>
+        <LabeledNumberInput
+          disabled={isSaving || isReadOnly}
+          label="Bounce"
+          onChange={setRestitution}
+          value={restitution}
+        />
+        <div className="flex justify-end">
+          <button
+          className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isSaving || isReadOnly}
+            onClick={() => void applyRestitution()}
+            type="button"
+          >
+            Apply Bounce
+          </button>
+        </div>
+        {isReadOnly ? (
+          <p className="text-xs text-neutral-500">
+            Physics values are read-only for this object.
+          </p>
+        ) : null}
+      </div>
+    </section>
+  )
+}
+
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center gap-3">
@@ -737,6 +1041,64 @@ function toDraft(details: SessionObjectDetails): DraftTransform {
     rotationDegrees: toStringVec3(details.transform?.rotationDegrees ?? [0, 0, 0]),
     scale: toStringVec3(details.transform?.scale ?? [1, 1, 1]),
   }
+}
+
+function LabeledSelect({
+  label,
+  value,
+  options,
+  onChange,
+  disabled,
+}: {
+  label: string
+  value: string
+  options: Array<{ label: string; value: string }>
+  onChange: (value: string) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="w-20 shrink-0 text-xs text-neutral-500">{label}</span>
+      <select
+        className="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 outline-none focus:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        value={value}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
+function LabeledNumberInput({
+  label,
+  value,
+  onChange,
+  disabled,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="w-20 shrink-0 text-xs text-neutral-500">{label}</span>
+      <input
+        className="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 outline-none focus:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        step={0.1}
+        type="number"
+        value={value}
+      />
+    </div>
+  )
 }
 
 function toStringVec3(value: [number, number, number]): [string, string, string] {

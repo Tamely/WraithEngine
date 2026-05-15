@@ -333,6 +333,68 @@ void VulkanSceneRenderer::RecordGraphicsPass(
   vkCmdEndRendering(Context.CommandBuffer);
 }
 
+void VulkanSceneRenderer::RecordTranslucentGraphicsPass(
+    const RenderContext &Context, const VkViewport &Viewport,
+    const VkRect2D &Scissor,
+    const std::vector<VisibleMeshSubmission> &GraphicsSubmissions,
+    const VkDescriptorBufferInfo &CameraBufferInfo, bool ForceWireframe) {
+  if (GraphicsSubmissions.empty()) {
+    return;
+  }
+
+  VkRenderingAttachmentInfo ColorAttachment =
+      VkInit::AttachmentInfo(Context.DrawImage.ImageView, VK_NULL_HANDLE,
+                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+  VkRenderingAttachmentInfo DepthAttachment{
+      .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+      .pNext = VK_NULL_HANDLE,
+      .imageView = Context.RasterDepthImage.ImageView,
+      .imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+      .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+      .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
+  VkRenderingInfo RenderingInfo =
+      VkInit::RenderingInfo(Context.DrawExtent, &ColorAttachment, &DepthAttachment);
+
+  vkCmdBeginRendering(Context.CommandBuffer, &RenderingInfo);
+  vkCmdBindPipeline(Context.CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    ForceWireframe ? Context.MeshWireframePipeline
+                                   : Context.MeshGraphicsAlphaBlendPipeline);
+  vkCmdSetViewport(Context.CommandBuffer, 0, 1, &Viewport);
+  vkCmdSetScissor(Context.CommandBuffer, 0, 1, &Scissor);
+
+  for (size_t SubmissionIndex = 0; SubmissionIndex < GraphicsSubmissions.size();
+       ++SubmissionIndex) {
+    const auto &VisibleSubmission = GraphicsSubmissions[SubmissionIndex];
+    VkDescriptorSet GraphicsDescriptorSet =
+        Context.Frame.GraphicsFrameDescriptorSets[SubmissionIndex];
+    UpdateGraphicsFrameDescriptors(
+        Context, GraphicsDescriptorSet,
+        Context.MaterialResources.ResolveMaterialTextureView(
+            VisibleSubmission.Submission->Material),
+        CameraBufferInfo);
+    vkCmdBindDescriptorSets(Context.CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            Context.MeshGraphicsPipelineLayout, 0, 1,
+                            &GraphicsDescriptorSet, 0, VK_NULL_HANDLE);
+    MeshGraphicsPushConstants PushConstants{};
+    PushConstants.Model = VisibleSubmission.Submission->Transform;
+    if (VisibleSubmission.Submission->Material) {
+      PushConstants.BaseColorFactor =
+          VisibleSubmission.Submission->Material->BaseColorFactor;
+      PushConstants.Metallic = VisibleSubmission.Submission->Material->Metallic;
+      PushConstants.Roughness =
+          VisibleSubmission.Submission->Material->Roughness;
+    }
+    vkCmdPushConstants(Context.CommandBuffer, Context.MeshGraphicsPipelineLayout,
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                       sizeof(MeshGraphicsPushConstants), &PushConstants);
+    BindMeshBuffers(Context.CommandBuffer, VisibleSubmission.Mesh);
+    vkCmdDrawIndexed(Context.CommandBuffer, VisibleSubmission.Mesh->IndexCount, 1,
+                     0, 0, 0);
+  }
+
+  vkCmdEndRendering(Context.CommandBuffer);
+}
+
 void VulkanSceneRenderer::RenderScenePasses(const RenderContext &Context) const {
   auto &Camera = *Context.Scene.ActiveCamera;
   CameraFrameUniform CameraData = BuildCameraData(Context);
@@ -359,10 +421,12 @@ void VulkanSceneRenderer::RenderScenePasses(const RenderContext &Context) const 
   Context.FrameStats.TriangleCount = 0;
 
   std::vector<CandidateSubmission> Candidates;
-  std::vector<VisibleMeshSubmission> GraphicsSubmissions;
+  std::vector<VisibleMeshSubmission> OpaqueGraphicsSubmissions;
+  std::vector<VisibleMeshSubmission> TranslucentGraphicsSubmissions;
   std::vector<VisibleMeshSubmission> ComputeSubmissions;
   Candidates.reserve(SubmissionCount);
-  GraphicsSubmissions.reserve(SubmissionCount);
+  OpaqueGraphicsSubmissions.reserve(SubmissionCount);
+  TranslucentGraphicsSubmissions.reserve(SubmissionCount);
   ComputeSubmissions.reserve(SubmissionCount);
 
   for (size_t Index = 0; Index < SubmissionCount; ++Index) {
@@ -419,12 +483,18 @@ void VulkanSceneRenderer::RenderScenePasses(const RenderContext &Context) const 
       continue;
     }
 
-    VisibleMeshSubmission VisibleSubmission{Candidate.Submission, Candidate.Mesh};
+    VisibleMeshSubmission VisibleSubmission{
+        .Submission = Candidate.Submission,
+        .Mesh = Candidate.Mesh,
+        .SortDepth = Candidate.SortDepth,
+    };
     if (!ForceWireframe &&
         Candidate.Submission->RenderPath == MeshRenderPath::Compute) {
       ComputeSubmissions.push_back(VisibleSubmission);
+    } else if (Candidate.Submission->Translucent) {
+      TranslucentGraphicsSubmissions.push_back(VisibleSubmission);
     } else {
-      GraphicsSubmissions.push_back(VisibleSubmission);
+      OpaqueGraphicsSubmissions.push_back(VisibleSubmission);
     }
 
     ++Context.FrameStats.MeshSubmissionCount;
@@ -435,7 +505,7 @@ void VulkanSceneRenderer::RenderScenePasses(const RenderContext &Context) const 
                       static_cast<float>(Context.DrawExtent.height), 0.0f, 1.0f};
   VkRect2D Scissor{{0, 0}, Context.DrawExtent};
 
-  RecordDepthPrepass(Context, Viewport, Scissor, GraphicsSubmissions,
+  RecordDepthPrepass(Context, Viewport, Scissor, OpaqueGraphicsSubmissions,
                      ComputeSubmissions);
 
   Context.BuildHzb(Context.CommandBuffer, Context.Frame);
@@ -443,8 +513,19 @@ void VulkanSceneRenderer::RenderScenePasses(const RenderContext &Context) const 
   Context.Frame.HzbViewportSize = glm::vec2(CameraData.ViewportSize);
 
   if (ComputeSubmissions.empty()) {
-    RecordGraphicsPass(Context, Viewport, Scissor, GraphicsSubmissions,
+    RecordGraphicsPass(Context, Viewport, Scissor, OpaqueGraphicsSubmissions,
                        CameraBufferInfo, ForceWireframe);
+    if (!TranslucentGraphicsSubmissions.empty()) {
+      std::sort(TranslucentGraphicsSubmissions.begin(),
+                TranslucentGraphicsSubmissions.end(),
+                [](const VisibleMeshSubmission &Left,
+                   const VisibleMeshSubmission &Right) {
+                  return Left.SortDepth > Right.SortDepth;
+                });
+      RecordTranslucentGraphicsPass(Context, Viewport, Scissor,
+                                    TranslucentGraphicsSubmissions,
+                                    CameraBufferInfo, ForceWireframe);
+    }
     return;
   }
 
@@ -532,7 +613,18 @@ void VulkanSceneRenderer::RenderScenePasses(const RenderContext &Context) const 
       .pImageMemoryBarriers = ToGraphicsBarriers.data()};
   vkCmdPipelineBarrier2(Context.CommandBuffer, &ToGraphicsDependencyInfo);
 
-  RecordGraphicsPass(Context, Viewport, Scissor, GraphicsSubmissions,
+  RecordGraphicsPass(Context, Viewport, Scissor, OpaqueGraphicsSubmissions,
                      CameraBufferInfo, ForceWireframe);
+  if (!TranslucentGraphicsSubmissions.empty()) {
+    std::sort(TranslucentGraphicsSubmissions.begin(),
+              TranslucentGraphicsSubmissions.end(),
+              [](const VisibleMeshSubmission &Left,
+                 const VisibleMeshSubmission &Right) {
+                return Left.SortDepth > Right.SortDepth;
+              });
+    RecordTranslucentGraphicsPass(Context, Viewport, Scissor,
+                                  TranslucentGraphicsSubmissions,
+                                  CameraBufferInfo, ForceWireframe);
+  }
 }
 } // namespace Axiom

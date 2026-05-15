@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <glm/vec3.hpp>
+
 namespace Axiom {
 struct CommandId {
   uint64_t Value{0};
@@ -43,4 +45,20 @@ struct AssetIdHash {
 };
 
 enum class EditorObjectLockState { Unlocked, Locked };
+
+enum class EditorRuntimeState { Edit, Playing, Paused };
+
+enum class EditorPhysicsBodyType { None, Static, Dynamic };
+
+enum class EditorPhysicsColliderType { None, Box, Sphere };
+
+struct EditorPhysicsProperties {
+  EditorPhysicsBodyType BodyType{EditorPhysicsBodyType::None};
+  EditorPhysicsColliderType ColliderType{EditorPhysicsColliderType::None};
+  glm::vec3 BoxHalfExtents{0.5f, 0.5f, 0.5f};
+  float SphereRadius{0.5f};
+  float Mass{1.0f};
+  float Friction{0.2f};
+  float Restitution{0.0f};
+};
 } // namespace Axiom

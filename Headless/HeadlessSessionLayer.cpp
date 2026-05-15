@@ -10,13 +10,19 @@
 #include <Renderer/Renderer.h>
 #include <Session/StartupScene.h>
 
+#include <glm/ext/matrix_float4x4.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/trigonometric.hpp>
 
+#include <algorithm>
 #include <array>
+#include <numbers>
 
 namespace Axiom {
 namespace {
+constexpr float ColliderOverlayScale = 1.01f;
+constexpr float ColliderCornerScale = 0.085f;
+
 MeshData BuildPresenceMarkerMeshData() {
   MeshData Mesh{};
   Mesh.Vertices = {
@@ -35,6 +41,104 @@ MeshData BuildPresenceMarkerMeshData() {
   };
   Mesh.BoundsMin = {-0.35f, -0.2f, -0.9f};
   Mesh.BoundsMax = {0.35f, 0.2f, 0.5f};
+  return Mesh;
+}
+
+MeshData BuildUnitBoxMeshData() {
+  MeshData Mesh{};
+  Mesh.Vertices = {
+      {.Position = {-1.0f, -1.0f, 1.0f, 1.0f}, .Normal = {0.0f, 0.0f, 1.0f, 0.0f}},
+      {.Position = {1.0f, -1.0f, 1.0f, 1.0f}, .Normal = {0.0f, 0.0f, 1.0f, 0.0f}},
+      {.Position = {1.0f, 1.0f, 1.0f, 1.0f}, .Normal = {0.0f, 0.0f, 1.0f, 0.0f}},
+      {.Position = {-1.0f, 1.0f, 1.0f, 1.0f}, .Normal = {0.0f, 0.0f, 1.0f, 0.0f}},
+      {.Position = {-1.0f, -1.0f, -1.0f, 1.0f}, .Normal = {0.0f, 0.0f, -1.0f, 0.0f}},
+      {.Position = {1.0f, -1.0f, -1.0f, 1.0f}, .Normal = {0.0f, 0.0f, -1.0f, 0.0f}},
+      {.Position = {1.0f, 1.0f, -1.0f, 1.0f}, .Normal = {0.0f, 0.0f, -1.0f, 0.0f}},
+      {.Position = {-1.0f, 1.0f, -1.0f, 1.0f}, .Normal = {0.0f, 0.0f, -1.0f, 0.0f}},
+      {.Position = {-1.0f, -1.0f, -1.0f, 1.0f}, .Normal = {-1.0f, 0.0f, 0.0f, 0.0f}},
+      {.Position = {-1.0f, -1.0f, 1.0f, 1.0f}, .Normal = {-1.0f, 0.0f, 0.0f, 0.0f}},
+      {.Position = {-1.0f, 1.0f, 1.0f, 1.0f}, .Normal = {-1.0f, 0.0f, 0.0f, 0.0f}},
+      {.Position = {-1.0f, 1.0f, -1.0f, 1.0f}, .Normal = {-1.0f, 0.0f, 0.0f, 0.0f}},
+      {.Position = {1.0f, -1.0f, -1.0f, 1.0f}, .Normal = {1.0f, 0.0f, 0.0f, 0.0f}},
+      {.Position = {1.0f, -1.0f, 1.0f, 1.0f}, .Normal = {1.0f, 0.0f, 0.0f, 0.0f}},
+      {.Position = {1.0f, 1.0f, 1.0f, 1.0f}, .Normal = {1.0f, 0.0f, 0.0f, 0.0f}},
+      {.Position = {1.0f, 1.0f, -1.0f, 1.0f}, .Normal = {1.0f, 0.0f, 0.0f, 0.0f}},
+      {.Position = {-1.0f, 1.0f, -1.0f, 1.0f}, .Normal = {0.0f, 1.0f, 0.0f, 0.0f}},
+      {.Position = {-1.0f, 1.0f, 1.0f, 1.0f}, .Normal = {0.0f, 1.0f, 0.0f, 0.0f}},
+      {.Position = {1.0f, 1.0f, 1.0f, 1.0f}, .Normal = {0.0f, 1.0f, 0.0f, 0.0f}},
+      {.Position = {1.0f, 1.0f, -1.0f, 1.0f}, .Normal = {0.0f, 1.0f, 0.0f, 0.0f}},
+      {.Position = {-1.0f, -1.0f, -1.0f, 1.0f}, .Normal = {0.0f, -1.0f, 0.0f, 0.0f}},
+      {.Position = {-1.0f, -1.0f, 1.0f, 1.0f}, .Normal = {0.0f, -1.0f, 0.0f, 0.0f}},
+      {.Position = {1.0f, -1.0f, 1.0f, 1.0f}, .Normal = {0.0f, -1.0f, 0.0f, 0.0f}},
+      {.Position = {1.0f, -1.0f, -1.0f, 1.0f}, .Normal = {0.0f, -1.0f, 0.0f, 0.0f}},
+  };
+  Mesh.Indices = {
+      0, 1, 2, 0, 2, 3,     4, 6, 5, 4, 7, 6,     8, 9, 10, 8, 10, 11,
+      12, 14, 13, 12, 15, 14, 16, 17, 18, 16, 18, 19, 20, 22, 21, 20, 23, 22,
+  };
+  Mesh.BoundsMin = {-1.0f, -1.0f, -1.0f};
+  Mesh.BoundsMax = {1.0f, 1.0f, 1.0f};
+  return Mesh;
+}
+
+MeshData BuildUnitSphereMeshData(uint32_t LongitudeSegments = 16,
+                                 uint32_t LatitudeSegments = 10) {
+  MeshData Mesh{};
+  Mesh.Vertices.reserve(static_cast<size_t>(LongitudeSegments + 1) *
+                        static_cast<size_t>(LatitudeSegments + 1));
+  for (uint32_t Lat = 0; Lat <= LatitudeSegments; ++Lat) {
+    const float V = static_cast<float>(Lat) /
+                    static_cast<float>(LatitudeSegments);
+    const float Theta = V * std::numbers::pi_v<float>;
+    const float SinTheta = std::sin(Theta);
+    const float CosTheta = std::cos(Theta);
+    for (uint32_t Lon = 0; Lon <= LongitudeSegments; ++Lon) {
+      const float U = static_cast<float>(Lon) /
+                      static_cast<float>(LongitudeSegments);
+      const float Phi = U * std::numbers::pi_v<float> * 2.0f;
+      const float SinPhi = std::sin(Phi);
+      const float CosPhi = std::cos(Phi);
+      const glm::vec3 Normal{SinTheta * CosPhi, CosTheta, SinTheta * SinPhi};
+      Mesh.Vertices.push_back({
+          .Position = glm::vec4(Normal, 1.0f),
+          .Normal = glm::vec4(glm::normalize(Normal), 0.0f),
+          .TexCoord = {U, V},
+      });
+    }
+  }
+
+  Mesh.Indices.reserve(static_cast<size_t>(LongitudeSegments) *
+                       static_cast<size_t>(LatitudeSegments) * 6u);
+  const uint32_t Stride = LongitudeSegments + 1;
+  for (uint32_t Lat = 0; Lat < LatitudeSegments; ++Lat) {
+    for (uint32_t Lon = 0; Lon < LongitudeSegments; ++Lon) {
+      const uint32_t A = Lat * Stride + Lon;
+      const uint32_t B = A + Stride;
+      const uint32_t C = A + 1;
+      const uint32_t D = B + 1;
+      Mesh.Indices.insert(Mesh.Indices.end(), {A, B, C, C, B, D});
+    }
+  }
+  Mesh.BoundsMin = {-1.0f, -1.0f, -1.0f};
+  Mesh.BoundsMax = {1.0f, 1.0f, 1.0f};
+  return Mesh;
+}
+
+MeshData BuildUnitCornerMarkerMeshData() {
+  MeshData Mesh{};
+  Mesh.Vertices = {
+      {.Position = {-1.0f, -1.0f, 1.0f, 1.0f}}, {.Position = {1.0f, -1.0f, 1.0f, 1.0f}},
+      {.Position = {1.0f, 1.0f, 1.0f, 1.0f}},   {.Position = {-1.0f, 1.0f, 1.0f, 1.0f}},
+      {.Position = {-1.0f, -1.0f, -1.0f, 1.0f}}, {.Position = {1.0f, -1.0f, -1.0f, 1.0f}},
+      {.Position = {1.0f, 1.0f, -1.0f, 1.0f}},   {.Position = {-1.0f, 1.0f, -1.0f, 1.0f}},
+  };
+  Mesh.Indices = {
+      0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6,
+      4, 0, 3, 4, 3, 7, 1, 5, 6, 1, 6, 2,
+      3, 2, 6, 3, 6, 7, 4, 5, 1, 4, 1, 0,
+  };
+  Mesh.BoundsMin = {-1.0f, -1.0f, -1.0f};
+  Mesh.BoundsMax = {1.0f, 1.0f, 1.0f};
   return Mesh;
 }
 
@@ -79,6 +183,34 @@ glm::mat4 BuildPresenceTransform(const EditorParticipant::CameraState &Camera) {
 
   return Transform * glm::scale(glm::mat4(1.0f), glm::vec3(0.35f));
 }
+
+glm::mat4 BuildTransformMatrix(const EditorTransformDetails &Transform) {
+  glm::mat4 Matrix = glm::translate(glm::mat4(1.0f), Transform.Location);
+  Matrix = glm::rotate(Matrix, glm::radians(Transform.RotationDegrees.y),
+                       glm::vec3(0.0f, 1.0f, 0.0f));
+  Matrix = glm::rotate(Matrix, glm::radians(Transform.RotationDegrees.x),
+                       glm::vec3(1.0f, 0.0f, 0.0f));
+  Matrix = glm::rotate(Matrix, glm::radians(Transform.RotationDegrees.z),
+                       glm::vec3(0.0f, 0.0f, 1.0f));
+  return glm::scale(Matrix, Transform.Scale);
+}
+
+const EditorTransformDetails *GetEffectiveTransform(const EditorObjectDetails &Details) {
+  if (Details.WorldTransform.has_value()) {
+    return &*Details.WorldTransform;
+  }
+  if (Details.Transform.has_value()) {
+    return &*Details.Transform;
+  }
+  return nullptr;
+}
+
+bool HasRenderableCollider(const EditorObjectDetails &Details) {
+  return Details.Visible && Details.Physics.has_value() &&
+         Details.Physics->BodyType != EditorPhysicsBodyType::None &&
+         Details.Physics->ColliderType != EditorPhysicsColliderType::None &&
+         GetEffectiveTransform(Details) != nullptr;
+}
 } // namespace
 
 HeadlessSessionLayer::HeadlessSessionLayer()
@@ -87,10 +219,12 @@ HeadlessSessionLayer::HeadlessSessionLayer()
 void HeadlessSessionLayer::OnAttach() {
   m_Session.EnsureViewportState(m_LocalUserId);
   m_PresenceMarkerMesh = Renderer::Get().CreateMesh(BuildPresenceMarkerMeshData());
+  m_ColliderBoxMesh = Renderer::Get().CreateMesh(BuildUnitBoxMeshData());
+  m_ColliderSphereMesh = Renderer::Get().CreateMesh(BuildUnitSphereMeshData());
 }
 
 void HeadlessSessionLayer::OnUpdate() {
-  m_Session.Tick();
+  m_Session.Tick(Application::Get().GetDeltaTime());
   if (m_ScriptHost != nullptr) {
     m_ScriptHost->Tick(Application::Get().GetDeltaTime());
   }
@@ -158,6 +292,11 @@ void HeadlessSessionLayer::OnRender() {
   for (const auto &Billboard : BuildLightBillboards()) {
     RenderCommand::SubmitLightBillboard(Billboard);
   }
+  if (RenderView.ShowColliders) {
+    for (const auto &Submission : BuildColliderOverlaySubmissions()) {
+      RenderCommand::Submit(Submission);
+    }
+  }
   for (const auto &Submission : BuildPresenceOverlaySubmissions(RenderUser)) {
     RenderCommand::Submit(Submission);
   }
@@ -224,6 +363,86 @@ std::vector<LightBillboardOverlay> HeadlessSessionLayer::BuildLightBillboards()
         .Color = glm::vec4(Details.Light->Color, 1.0f),
         .PixelSize = 48.0f,
     });
+  }
+  return Result;
+}
+
+std::vector<RenderMeshSubmission>
+HeadlessSessionLayer::BuildColliderOverlaySubmissions() const {
+  std::vector<RenderMeshSubmission> Result;
+  for (const auto &[Id, Details] : m_Session.GetState().Scene.ObjectDetailsById) {
+    (void)Id;
+    if (!HasRenderableCollider(Details)) {
+      continue;
+    }
+
+    const EditorTransformDetails &Transform = *GetEffectiveTransform(Details);
+    const EditorPhysicsProperties &Physics = *Details.Physics;
+    MeshRef ColliderMesh;
+    glm::mat4 ColliderTransform = BuildTransformMatrix(Transform);
+    if (Physics.ColliderType == EditorPhysicsColliderType::Box) {
+      if (m_ColliderBoxMesh == nullptr) {
+        continue;
+      }
+      ColliderMesh = m_ColliderBoxMesh;
+      ColliderTransform *= glm::scale(glm::mat4(1.0f),
+                                      Physics.BoxHalfExtents * ColliderOverlayScale);
+    } else if (Physics.ColliderType == EditorPhysicsColliderType::Sphere) {
+      if (m_ColliderSphereMesh == nullptr) {
+        continue;
+      }
+      ColliderMesh = m_ColliderSphereMesh;
+      ColliderTransform *= glm::scale(
+          glm::mat4(1.0f),
+          glm::vec3(Physics.SphereRadius * ColliderOverlayScale));
+    } else {
+      continue;
+    }
+
+    Result.push_back({
+        .Mesh = ColliderMesh,
+        .Material = GetOrCreateColliderMaterial(Physics.BodyType),
+        .Name = Details.ObjectId + "-collider",
+        .RenderPath = MeshRenderPath::Graphics,
+        .Transform = ColliderTransform,
+        .Translucent = true,
+    });
+
+    if (m_ColliderBoxMesh == nullptr) {
+      continue;
+    }
+
+    const glm::vec3 HalfExtents =
+        Physics.ColliderType == EditorPhysicsColliderType::Box
+            ? Physics.BoxHalfExtents * ColliderOverlayScale
+            : glm::vec3(Physics.SphereRadius * ColliderOverlayScale);
+    for (int X = -1; X <= 1; X += 2) {
+      for (int Y = -1; Y <= 1; Y += 2) {
+        for (int Z = -1; Z <= 1; Z += 2) {
+          const glm::vec3 LocalOffset =
+              glm::vec3(static_cast<float>(X), static_cast<float>(Y),
+                        static_cast<float>(Z)) *
+              HalfExtents;
+          glm::mat4 CornerTransform =
+              BuildTransformMatrix(Transform) *
+              glm::translate(glm::mat4(1.0f), LocalOffset) *
+              glm::scale(glm::mat4(1.0f), glm::vec3(std::max(
+                                                 0.03f,
+                                                 std::max(HalfExtents.x,
+                                                          std::max(HalfExtents.y,
+                                                                   HalfExtents.z)) *
+                                                     ColliderCornerScale)));
+          Result.push_back({
+              .Mesh = m_ColliderBoxMesh,
+              .Material = GetOrCreateColliderMaterial(Physics.BodyType),
+              .Name = Details.ObjectId + "-collider-corner",
+              .RenderPath = MeshRenderPath::Graphics,
+              .Transform = CornerTransform,
+              .Translucent = false,
+          });
+        }
+      }
+    }
   }
   return Result;
 }
@@ -307,6 +526,28 @@ HeadlessSessionLayer::GetOrCreatePresenceMaterial(SessionUserId User) const {
   auto Material = std::make_shared<MaterialInstance>();
   Material->BaseColorTexture = Texture;
   m_PresenceMaterials.emplace(User.Value, Material);
+  return Material;
+}
+
+MaterialInstanceRef HeadlessSessionLayer::GetOrCreateColliderMaterial(
+    EditorPhysicsBodyType BodyType) const {
+  const int Key = static_cast<int>(BodyType);
+  const auto Existing = m_ColliderMaterials.find(Key);
+  if (Existing != m_ColliderMaterials.end()) {
+    return Existing->second;
+  }
+
+  auto Material = std::make_shared<MaterialInstance>();
+  if (BodyType == EditorPhysicsBodyType::Dynamic) {
+    Material->BaseColorFactor = {1.0f, 0.55f, 0.2f, 0.22f};
+  } else if (BodyType == EditorPhysicsBodyType::Static) {
+    Material->BaseColorFactor = {0.2f, 0.9f, 1.0f, 0.18f};
+  } else {
+    Material->BaseColorFactor = {0.8f, 0.8f, 0.8f, 0.18f};
+  }
+  Material->Metallic = 0.0f;
+  Material->Roughness = 0.15f;
+  m_ColliderMaterials.emplace(Key, Material);
   return Material;
 }
 

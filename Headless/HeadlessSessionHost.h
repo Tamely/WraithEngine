@@ -30,6 +30,8 @@ public:
   void SetTransportVideoEncoder(std::unique_ptr<IVideoEncoder> Encoder);
   void SetRemoteViewMode(RendererViewMode ViewMode);
   void SetRemoteViewMode(SessionUserId User, RendererViewMode ViewMode);
+  void SetRemoteShowColliders(bool ShowColliders);
+  void SetRemoteShowColliders(SessionUserId User, bool ShowColliders);
   void EnsureRemoteRenderView(const std::string &ClientId, SessionUserId User);
   void RemoveRemoteRenderView(std::string_view ClientId);
   void FocusRemoteRenderView(std::string_view ClientId);

@@ -13,6 +13,26 @@
 
 namespace Axiom {
 
+bool ScriptHost::IsSimulationRunning() const {
+  return m_Session != nullptr &&
+         m_Session->GetRuntimeState() == EditorRuntimeState::Playing;
+}
+
+void ScriptHost::InstantiateAllEligibleScripts() {
+#if AXIOM_SCRIPTING_ENABLED
+  if (!m_UserAssemblyLoaded || m_Session == nullptr || !IsSimulationRunning()) {
+    return;
+  }
+
+  for (const auto &[Id, Details] : m_Session->GetState().Scene.ObjectDetailsById) {
+    if (Details.Kind == EditorSceneItemKind::Actor &&
+        Details.ScriptClass.has_value()) {
+      InstantiateScript(Id, *Details.ScriptClass);
+    }
+  }
+#endif
+}
+
 ScriptHost::~ScriptHost() {
   if (m_Initialized) {
     Shutdown();
@@ -232,17 +252,7 @@ void ScriptHost::LoadUserAssembly(const std::filesystem::path &AssemblyPath) {
   m_UserAssemblyLoaded = true;
   A_CORE_INFO("ScriptHost: user assembly loaded ({})", Assembly.GetName());
 
-  // Re-instantiate scripts for all existing Actors that already have a
-  // ScriptClass set (e.g. loaded from scene.json).
-  if (m_Session != nullptr) {
-    for (const auto &[Id, Details] :
-         m_Session->GetState().Scene.ObjectDetailsById) {
-      if (Details.Kind == EditorSceneItemKind::Actor &&
-          Details.ScriptClass.has_value()) {
-        InstantiateScript(Id, *Details.ScriptClass);
-      }
-    }
-  }
+  InstantiateAllEligibleScripts();
 #else
   (void)AssemblyPath;
 #endif
@@ -321,15 +331,22 @@ void ScriptHost::ReloadUserAssembly() {
   m_UserAssemblyLoaded = true;
   A_CORE_INFO("ScriptHost: user assembly reloaded ({})", Assembly.GetName());
 
-  // 6. Re-instantiate every script that existed before the reload
-  for (const auto &[ObjectId, ClassName] : ToReinstate) {
-    InstantiateScript(ObjectId, ClassName);
+  // 6. Re-instantiate every script that existed before the reload, but only
+  // while the session is actively simulating.
+  if (IsSimulationRunning()) {
+    for (const auto &[ObjectId, ClassName] : ToReinstate) {
+      InstantiateScript(ObjectId, ClassName);
+    }
   }
 #endif
 }
 
 void ScriptHost::Tick(float DeltaTimeSeconds) {
 #if AXIOM_SCRIPTING_ENABLED
+  if (!IsSimulationRunning()) {
+    return;
+  }
+
   for (auto &[ObjectId, Instance] : m_ScriptInstances) {
     try {
       Instance.InvokeMethod("OnTick", DeltaTimeSeconds);
@@ -352,7 +369,8 @@ void ScriptHost::OnEditorEvent(const PublishedEditorEvent &Event) {
           // A new object just appeared in the scene — if it's an Actor with a
           // ScriptClass already set (e.g. loaded from scene.json and immediately
           // re-created), instantiate the script.
-          if (m_UserAssemblyLoaded && m_Session != nullptr) {
+          if (m_UserAssemblyLoaded && m_Session != nullptr &&
+              IsSimulationRunning()) {
             const auto *Details =
                 m_Session->FindObjectDetails(Payload.ObjectId);
             if (Details != nullptr &&
@@ -365,12 +383,18 @@ void ScriptHost::OnEditorEvent(const PublishedEditorEvent &Event) {
           DestroyScript(Payload.ObjectId);
         } else if constexpr (std::is_same_v<T, ScriptClassChangedEvent>) {
           // AttachScript / DetachScript acknowledged
-          if (m_UserAssemblyLoaded) {
+          if (m_UserAssemblyLoaded && IsSimulationRunning()) {
             if (Payload.ScriptClass.has_value()) {
               InstantiateScript(Payload.ObjectId, *Payload.ScriptClass);
             } else {
               DestroyScript(Payload.ObjectId);
             }
+          }
+        } else if constexpr (std::is_same_v<T, RuntimeStateChangedEvent>) {
+          if (Payload.State == EditorRuntimeState::Playing) {
+            InstantiateAllEligibleScripts();
+          } else if (Payload.State == EditorRuntimeState::Edit) {
+            DestroyAllScripts();
           }
         }
       },

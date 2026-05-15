@@ -9,6 +9,7 @@ import {
 } from "lucide-react"
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -70,6 +71,8 @@ interface IceCandidateListResponse {
 interface SessionSnapshotResponse {
   sessionId: number
   currentUserId: number
+  runtimeControllerUserId: number
+  showColliders: boolean
   transport?: {
     connected: boolean
     state?: string
@@ -79,6 +82,7 @@ interface SessionSnapshotResponse {
   sceneTree: SessionSceneItem[]
   selections: SessionSelection[]
   selectedObjectDetails: SessionObjectDetails | null
+  runtimeState: "edit" | "playing" | "paused"
 }
 
 interface SessionConnectResponse {
@@ -91,6 +95,10 @@ type RemoteViewportCommand =
   | {
     type: "set_view_mode"
     viewMode: ViewMode
+  }
+  | {
+    type: "set_show_colliders"
+    showColliders: boolean
   }
   | {
     type: "set_look_active"
@@ -177,11 +185,15 @@ type RemoteViewportCommand =
   | { type: "list_assets" }
   | { type: "get_schema"; objectId: string }
   | { type: "save_scene" }
+  | { type: "play_session" }
+  | { type: "pause_session" }
+  | { type: "resume_session" }
+  | { type: "stop_session" }
   | {
     type: "set_property"
     objectId: string
     property: string
-    value: string | boolean | [number, number, number]
+    value: string | number | boolean | [number, number, number]
   }
   | { type: "reload_scripts" }
   | {
@@ -270,6 +282,7 @@ export function Viewport() {
     detailText,
     frameText,
     viewMode,
+    showColliders,
     gizmoMode,
     isLooking,
     participants,
@@ -278,6 +291,7 @@ export function Viewport() {
     setDetailText,
     setFrameText,
     setViewMode,
+    setShowColliders,
     setIsLooking,
     setServerOrigin,
     appendEventLog,
@@ -298,6 +312,7 @@ export function Viewport() {
     setSessionStatusText,
     setSessionDetailText,
     setGizmoMode: setGizmoModeCtx,
+    runtimeState,
   } = useRemoteViewport()
   const [serverOrigin] = useState(getServerOrigin)
 
@@ -550,6 +565,10 @@ export function Viewport() {
 
       setSessionSnapshot({
         currentUserId: snapshot.currentUserId,
+        runtimeControllerUserId:
+          snapshot.runtimeControllerUserId ?? snapshot.currentUserId,
+        runtimeState: snapshot.runtimeState ?? "edit",
+        showColliders: snapshot.showColliders ?? true,
         participants: snapshot.participants ?? [],
         sceneTree: snapshot.sceneTree ?? [],
         selections: snapshot.selections ?? [],
@@ -666,6 +685,24 @@ export function Viewport() {
         return
       }
 
+      if (message.payloadType === "runtime_state_changed") {
+        const runtimeState =
+          message.runtimeState === "playing" ||
+            message.runtimeState === "paused" ||
+            message.runtimeState === "edit"
+            ? message.runtimeState
+            : "edit"
+        const detail =
+          runtimeState === "playing"
+            ? "Simulation started."
+            : runtimeState === "paused"
+              ? "Simulation paused."
+              : "Simulation stopped."
+        setSessionUi("session-ready", "Session ready", detail)
+        void refreshSessionSnapshotSafely("event")
+        return
+      }
+
       if (message.payloadType === "viewport_camera_updated") {
         const userId =
           typeof message.user === "number" ? message.user : Number(message.user)
@@ -760,7 +797,16 @@ export function Viewport() {
               .filter((p): p is Record<string, unknown> => !!p && typeof p === "object")
               .map((p) => ({
                 name: typeof p.name === "string" ? p.name : "",
-                type: p.type === "bool" ? "bool" : p.type === "vec3" ? "vec3" : "string",
+                type:
+                  p.type === "bool"
+                    ? "bool"
+                    : p.type === "vec3"
+                      ? "vec3"
+                      : p.type === "number"
+                        ? "number"
+                        : p.type === "enum"
+                          ? "enum"
+                          : "string",
                 readOnly: p.readOnly === true,
                 value: typeof p.value === "string" ? p.value : undefined,
               })),
@@ -796,6 +842,11 @@ export function Viewport() {
       }
 
       if (message.payloadType === "material_texture_changed") {
+        void refreshSessionSnapshotSafely("event")
+        return
+      }
+
+      if (message.payloadType === "physics_properties_changed") {
         void refreshSessionSnapshotSafely("event")
         return
       }
@@ -1579,8 +1630,43 @@ export function Viewport() {
       saveScene: async () => {
         await sendCommand({ type: "save_scene" }, "reliable")
       },
+      playSession: async () => {
+        const accepted = await sendCommand({ type: "play_session" }, "reliable")
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
+      pauseSession: async () => {
+        const accepted = await sendCommand({ type: "pause_session" }, "reliable")
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
+      resumeSession: async () => {
+        const accepted = await sendCommand({ type: "resume_session" }, "reliable")
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
+      stopSession: async () => {
+        const accepted = await sendCommand({ type: "stop_session" }, "reliable")
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
       setProperty: async (objectId, property, value) => {
-        return sendCommand({ type: "set_property", objectId, property, value }, "reliable")
+        const accepted = await sendCommand(
+          { type: "set_property", objectId, property, value },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
       },
       reloadScripts: async () => {
         await sendCommand({ type: "reload_scripts" }, "reliable")
@@ -1624,6 +1710,15 @@ export function Viewport() {
           {
             type: "set_view_mode",
             viewMode: nextMode,
+          },
+          "reliable"
+        )
+      },
+      setShowColliders: async (nextValue) => {
+        await sendCommand(
+          {
+            type: "set_show_colliders",
+            showColliders: nextValue,
           },
           "reliable"
         )
@@ -1712,6 +1807,9 @@ export function Viewport() {
       }
 
       if (event.button === 0) {
+        if (runtimeState !== "edit") {
+          return
+        }
         const coords = toServerCoords(event)
         if (coords) {
           isDraggingGizmoRef.current = true
@@ -1756,6 +1854,10 @@ export function Viewport() {
         pendingLookDeltaRef.current.x += event.movementX
         pendingLookDeltaRef.current.y += event.movementY
         sendViewportInputFrame()
+        return
+      }
+
+      if (runtimeState !== "edit") {
         return
       }
 
@@ -1964,10 +2066,28 @@ export function Viewport() {
               </DropdownMenuRadioGroup>
             </DropdownMenuContent>
           </DropdownMenu>
-          <button className="flex items-center gap-1 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 rounded">
-            Show
-            <ChevronDown className="w-3 h-3" />
-          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="flex items-center gap-1 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 rounded"
+                type="button"
+              >
+                Show
+                <ChevronDown className="w-3 h-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              className="border-neutral-800 bg-neutral-950 text-neutral-200"
+            >
+              <DropdownMenuCheckboxItem
+                checked={showColliders}
+                onCheckedChange={(checked) => void setShowColliders(checked === true)}
+              >
+                Colliders
+              </DropdownMenuCheckboxItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         <div className="flex items-center gap-1">
           <ViewportButton

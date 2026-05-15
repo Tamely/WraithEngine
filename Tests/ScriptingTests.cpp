@@ -27,6 +27,15 @@ static constexpr const char *kEngineManagedDir   = AXIOM_MANAGED_DIR;
 static constexpr const char *kTestScriptsDir     = AXIOM_TEST_SCRIPTS_DIR;
 static constexpr const char *kRestrictedScriptsDir = AXIOM_RESTRICTED_SCRIPTS_DIR;
 
+Axiom::CommandContext HostContext(uint64_t FrameIndex = 1) {
+    return {
+        .Session = Axiom::SessionId{1},
+        .User = Axiom::SessionUserId{1},
+        .FrameIndex = FrameIndex,
+        .DeltaTimeSeconds = 1.0f / 60.0f,
+    };
+}
+
 // -----------------------------------------------------------------------
 // Fixture — one Coral runtime for the entire test binary
 // -----------------------------------------------------------------------
@@ -113,6 +122,10 @@ Axiom::EditorSession *ScriptingTest::s_Session  = nullptr;
 // -----------------------------------------------------------------------
 
 TEST_F(ScriptingTest, ScriptHostLifecycle) {
+    if (s_Session->GetRuntimeState() != Axiom::EditorRuntimeState::Edit) {
+        s_Session->Submit(HostContext(100), {.Payload = Axiom::StopSessionCommand{}});
+        s_Session->Tick();
+    }
     EXPECT_TRUE(s_Host->IsInitialized());
     EXPECT_TRUE(s_Host->IsEngineAssemblyLoaded());
 }
@@ -125,9 +138,16 @@ TEST_F(ScriptingTest, ScriptHostLifecycle) {
 // -----------------------------------------------------------------------
 
 TEST_F(ScriptingTest, InternalCallRoundTrip) {
+    if (s_Session->GetRuntimeState() != Axiom::EditorRuntimeState::Edit) {
+        s_Session->Submit(HostContext(101), {.Payload = Axiom::StopSessionCommand{}});
+        s_Session->Tick();
+    }
     s_Host->LoadUserAssembly(
         std::filesystem::path(kTestScriptsDir) / "WraithTestScripts.dll");
     ASSERT_TRUE(s_Host->IsUserAssemblyLoaded());
+
+    s_Session->Submit(HostContext(1), {.Payload = Axiom::PlaySessionCommand{}});
+    s_Session->Tick();
 
     // Drive OnTick — queues a SetTransformCommand on the session.
     s_Host->Tick(1.0f / 60.0f);
@@ -142,6 +162,8 @@ TEST_F(ScriptingTest, InternalCallRoundTrip) {
     EXPECT_FLOAT_EQ(Details->Transform->Location.x, 1.0f);
     EXPECT_FLOAT_EQ(Details->Transform->Location.y, 2.0f);
     EXPECT_FLOAT_EQ(Details->Transform->Location.z, 3.0f);
+    s_Session->Submit(HostContext(102), {.Payload = Axiom::StopSessionCommand{}});
+    s_Session->Tick();
 }
 
 // -----------------------------------------------------------------------
@@ -151,11 +173,18 @@ TEST_F(ScriptingTest, InternalCallRoundTrip) {
 // -----------------------------------------------------------------------
 
 TEST_F(ScriptingTest, ScriptLifecycle) {
+    if (s_Session->GetRuntimeState() != Axiom::EditorRuntimeState::Edit) {
+        s_Session->Submit(HostContext(103), {.Payload = Axiom::StopSessionCommand{}});
+        s_Session->Tick();
+    }
     // LoadUserAssembly destroys any live scripts first, then re-instantiates
     // TickScript for actor1 (which has ScriptClass set).
     s_Host->LoadUserAssembly(
         std::filesystem::path(kTestScriptsDir) / "WraithTestScripts.dll");
     ASSERT_TRUE(s_Host->IsUserAssemblyLoaded());
+
+    s_Session->Submit(HostContext(2), {.Payload = Axiom::PlaySessionCommand{}});
+    s_Session->Tick();
 
     s_Host->Tick(1.0f / 60.0f);
     s_Session->Tick();
@@ -165,6 +194,8 @@ TEST_F(ScriptingTest, ScriptLifecycle) {
     ASSERT_TRUE(Details->Transform.has_value());
     // OnTick sets Location.x to 1 — confirm the script ran.
     EXPECT_FLOAT_EQ(Details->Transform->Location.x, 1.0f);
+    s_Session->Submit(HostContext(104), {.Payload = Axiom::StopSessionCommand{}});
+    s_Session->Tick();
 }
 
 // -----------------------------------------------------------------------
@@ -174,11 +205,18 @@ TEST_F(ScriptingTest, ScriptLifecycle) {
 // -----------------------------------------------------------------------
 
 TEST_F(ScriptingTest, HotReload) {
+    if (s_Session->GetRuntimeState() != Axiom::EditorRuntimeState::Edit) {
+        s_Session->Submit(HostContext(105), {.Payload = Axiom::StopSessionCommand{}});
+        s_Session->Tick();
+    }
     const auto AssemblyPath =
         std::filesystem::path(kTestScriptsDir) / "WraithTestScripts.dll";
 
     s_Host->LoadUserAssembly(AssemblyPath);
     ASSERT_TRUE(s_Host->IsUserAssemblyLoaded());
+
+    s_Session->Submit(HostContext(3), {.Payload = Axiom::PlaySessionCommand{}});
+    s_Session->Tick();
 
     // Simulate a hot reload: unload ALC, reload assembly, re-instantiate.
     s_Host->ReloadUserAssembly();
@@ -192,6 +230,8 @@ TEST_F(ScriptingTest, HotReload) {
     ASSERT_NE(Details, nullptr);
     ASSERT_TRUE(Details->Transform.has_value());
     EXPECT_FLOAT_EQ(Details->Transform->Location.x, 1.0f);
+    s_Session->Submit(HostContext(106), {.Payload = Axiom::StopSessionCommand{}});
+    s_Session->Tick();
 }
 
 // -----------------------------------------------------------------------
@@ -201,6 +241,10 @@ TEST_F(ScriptingTest, HotReload) {
 // -----------------------------------------------------------------------
 
 TEST_F(ScriptingTest, RestrictedProfileBlocks) {
+    if (s_Session->GetRuntimeState() != Axiom::EditorRuntimeState::Edit) {
+        s_Session->Submit(HostContext(107), {.Payload = Axiom::StopSessionCommand{}});
+        s_Session->Tick();
+    }
     ASSERT_TRUE(s_Host->IsRestricted())
         << "Host must be in Restricted mode for this test to be meaningful";
 
@@ -211,6 +255,70 @@ TEST_F(ScriptingTest, RestrictedProfileBlocks) {
     // ValidateUserAssembly should have caught the System.Net.Http reference
     // and unloaded the ALC — no user assembly should be live.
     EXPECT_FALSE(s_Host->IsUserAssemblyLoaded());
+}
+
+TEST_F(ScriptingTest, EditModeDoesNotTickScripts) {
+    if (s_Session->GetRuntimeState() != Axiom::EditorRuntimeState::Edit) {
+        s_Session->Submit(HostContext(108), {.Payload = Axiom::StopSessionCommand{}});
+        s_Session->Tick();
+    }
+    s_Host->LoadUserAssembly(
+        std::filesystem::path(kTestScriptsDir) / "WraithTestScripts.dll");
+    ASSERT_TRUE(s_Host->IsUserAssemblyLoaded());
+
+    const auto *Before = s_Session->FindObjectDetails("actor1");
+    ASSERT_NE(Before, nullptr);
+    ASSERT_TRUE(Before->Transform.has_value());
+    EXPECT_FLOAT_EQ(Before->Transform->Location.x, 0.0f);
+
+    s_Host->Tick(1.0f / 60.0f);
+    s_Session->Tick();
+
+    const auto *After = s_Session->FindObjectDetails("actor1");
+    ASSERT_NE(After, nullptr);
+    ASSERT_TRUE(After->Transform.has_value());
+    EXPECT_FLOAT_EQ(After->Transform->Location.x, 0.0f);
+}
+
+TEST_F(ScriptingTest, PauseFreezesScriptTicks) {
+    if (s_Session->GetRuntimeState() != Axiom::EditorRuntimeState::Edit) {
+        s_Session->Submit(HostContext(109), {.Payload = Axiom::StopSessionCommand{}});
+        s_Session->Tick();
+    }
+    s_Host->LoadUserAssembly(
+        std::filesystem::path(kTestScriptsDir) / "WraithTestScripts.dll");
+    ASSERT_TRUE(s_Host->IsUserAssemblyLoaded());
+
+    s_Session->Submit(HostContext(4), {.Payload = Axiom::PlaySessionCommand{}});
+    s_Session->Tick();
+    s_Host->Tick(1.0f / 60.0f);
+    s_Session->Tick();
+
+    s_Session->Submit(HostContext(5), {.Payload = Axiom::PauseSessionCommand{}});
+    s_Session->Tick();
+
+    auto ManualCtx = HostContext(6);
+    ManualCtx.IsScriptContext = true;
+    s_Session->Submit(ManualCtx,
+        {.Payload = Axiom::SetTransformCommand{
+            .ObjectId = "actor1",
+            .Location = {0.0f, 0.0f, 0.0f},
+            .RotationDegrees = {0.0f, 0.0f, 0.0f},
+            .Scale = {1.0f, 1.0f, 1.0f},
+        }});
+    s_Session->Tick();
+
+    s_Host->Tick(1.0f / 60.0f);
+    s_Session->Tick();
+
+    const auto *Details = s_Session->FindObjectDetails("actor1");
+    ASSERT_NE(Details, nullptr);
+    ASSERT_TRUE(Details->Transform.has_value());
+    EXPECT_FLOAT_EQ(Details->Transform->Location.x, 0.0f);
+    EXPECT_FLOAT_EQ(Details->Transform->Location.y, 0.0f);
+    EXPECT_FLOAT_EQ(Details->Transform->Location.z, 0.0f);
+    s_Session->Submit(HostContext(110), {.Payload = Axiom::StopSessionCommand{}});
+    s_Session->Tick();
 }
 
 #endif // AXIOM_SCRIPTING_ENABLED

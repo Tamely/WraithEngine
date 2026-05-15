@@ -95,6 +95,15 @@ void HeadlessSessionHost::SetRemoteViewMode(SessionUserId User,
   m_RenderViews.SetViewMode(User, ViewMode);
 }
 
+void HeadlessSessionHost::SetRemoteShowColliders(bool ShowColliders) {
+  m_RenderViews.SetShowColliders(m_Layer->GetLocalUserId(), ShowColliders);
+}
+
+void HeadlessSessionHost::SetRemoteShowColliders(SessionUserId User,
+                                                 bool ShowColliders) {
+  m_RenderViews.SetShowColliders(User, ShowColliders);
+}
+
 void HeadlessSessionHost::EnsureRemoteRenderView(const std::string &ClientId,
                                                  SessionUserId User) {
   m_RenderViews.UpsertRemoteView(ClientId, User);
