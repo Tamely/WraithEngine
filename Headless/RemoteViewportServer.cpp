@@ -1299,6 +1299,10 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::AttachScript:
   case HeadlessCommandType::DetachScript:
+  case HeadlessCommandType::PlaySession:
+  case HeadlessCommandType::PauseSession:
+  case HeadlessCommandType::ResumeSession:
+  case HeadlessCommandType::StopSession:
   case HeadlessCommandType::SetMeshAsset:
   case HeadlessCommandType::SetLightProperties:
   case HeadlessCommandType::SetMaterialProperties:
@@ -2787,6 +2791,10 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::AttachScript:
   case HeadlessCommandType::DetachScript:
+  case HeadlessCommandType::PlaySession:
+  case HeadlessCommandType::PauseSession:
+  case HeadlessCommandType::ResumeSession:
+  case HeadlessCommandType::StopSession:
   case HeadlessCommandType::SetMeshAsset:
   case HeadlessCommandType::SetLightProperties:
   case HeadlessCommandType::SetMaterialProperties:
@@ -2869,6 +2877,10 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::SetTransform:
   case HeadlessCommandType::AttachScript:
   case HeadlessCommandType::DetachScript:
+  case HeadlessCommandType::PlaySession:
+  case HeadlessCommandType::PauseSession:
+  case HeadlessCommandType::ResumeSession:
+  case HeadlessCommandType::StopSession:
   case HeadlessCommandType::SetMeshAsset:
   case HeadlessCommandType::SetLightProperties:
   case HeadlessCommandType::SetMaterialProperties:
