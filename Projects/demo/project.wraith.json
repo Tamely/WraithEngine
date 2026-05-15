@@ -1,0 +1,8 @@
+{
+  "version": 2,
+  "projectId": "project-21c42ffaccefb43e",
+  "name": "Demo",
+  "slug": "demo",
+  "scriptAssemblyName": "Demo.Scripts",
+  "scriptRootNamespace": "Demo.Scripts"
+}

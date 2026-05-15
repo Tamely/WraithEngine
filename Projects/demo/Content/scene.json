@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "meshAsset": "",
+  "nodes": [
+    {"id":"world","parentId":null,"displayName":"World","kind":"Folder","visible":true},
+    {"id":"Mesh","parentId":"world","displayName":"Mesh","kind":"Mesh","visible":true},
+    {"id":"Mesh_2","parentId":"world","displayName":"Mesh 2","kind":"Mesh","visible":true},
+    {"id":"Light","parentId":"world","displayName":"Light","kind":"Light","visible":true}
+  ],
+  "objects": [
+    {"id":"Light","displayName":"Light","kind":"Light","visible":true,"isGeneratedAssetChild":false,"supportsTransform":true,"transformReadOnly":false,"location":[0,4,0],"rotationDegrees":[-0,0,0],"scale":[1,1,1],"lightColor":[1,1,1],"lightIntensity":1,"lightDirection":[0.35,0.7,0.2]},
+    {"id":"Mesh_2","displayName":"Mesh 2","kind":"Mesh","visible":true,"isGeneratedAssetChild":false,"supportsTransform":true,"transformReadOnly":false,"location":[0.710356,0,0.209167],"rotationDegrees":[-0,0,0],"scale":[10,1,10],"assetRelativePath":"basicmesh.glb","physicsBodyType":"static","physicsColliderType":"box","physicsBoxHalfExtents":[1.36719,1,1],"physicsSphereRadius":0.5,"physicsMass":1,"physicsFriction":0.2,"physicsRestitution":1},
+    {"id":"world","displayName":"World","kind":"Folder","visible":true,"isGeneratedAssetChild":false,"supportsTransform":false,"transformReadOnly":true},
+    {"id":"Mesh","displayName":"Mesh","kind":"Mesh","visible":true,"isGeneratedAssetChild":false,"supportsTransform":true,"transformReadOnly":false,"location":[0.83135,3,0],"rotationDegrees":[-0,0,0],"scale":[1,1,1],"assetRelativePath":"warrior_cats_minecraft_firestar.glb","physicsBodyType":"dynamic","physicsColliderType":"box","physicsBoxHalfExtents":[0.15625,0.75,1.35355],"physicsSphereRadius":0.5,"physicsMass":1,"physicsFriction":0.2,"physicsRestitution":0}
+  ],
+  "meshNameToObjectId": {
+
+  }
+}
