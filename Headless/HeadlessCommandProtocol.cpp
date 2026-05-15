@@ -511,6 +511,8 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
                                                     std::string &Error) {
   static const std::regex TypePattern(R"json("type"\s*:\s*"([^"]+)")json");
   static const std::regex ViewModePattern(R"json("viewMode"\s*:\s*"([^"]+)")json");
+  static const std::regex ShowCollidersPattern(
+      R"json("showColliders"\s*:\s*(true|false))json");
   static const std::regex BoolPattern(
       R"json("isLooking"\s*:\s*(true|false))json");
   static const std::regex CursorPattern(
@@ -566,6 +568,17 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
     return HeadlessCommand{.Type = HeadlessCommandType::SetViewMode,
                            .EditorPayload = {},
                            .ViewMode = ParsedMode};
+  }
+  if (*Type == "set_show_colliders") {
+    const auto ShowColliders = MatchString(JsonLine, ShowCollidersPattern);
+    if (!ShowColliders.has_value()) {
+      Error = "`set_show_colliders` requires `showColliders`.";
+      return std::nullopt;
+    }
+
+    return HeadlessCommand{.Type = HeadlessCommandType::SetShowColliders,
+                           .EditorPayload = {},
+                           .ShowColliders = *ShowColliders == "true"};
   }
   if (*Type == "quit") {
     return HeadlessCommand{.Type = HeadlessCommandType::Quit, .EditorPayload = {}};
@@ -1104,6 +1117,7 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
 
   switch (Command->Type) {
   case HeadlessCommandType::SetViewMode:
+  case HeadlessCommandType::SetShowColliders:
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
   case HeadlessCommandType::SelectObject:
@@ -1476,6 +1490,7 @@ std::string SerializeWebRtcIceCandidateList(
 
 std::string SerializeSessionSnapshot(const EditorSessionState &State,
                                      SessionUserId CurrentUser,
+                                     bool ShowColliders,
                                      bool TransportConnected,
                                      std::string_view TransportState,
                                      std::string_view WebRtcConnectionState) {
@@ -1504,6 +1519,7 @@ std::string SerializeSessionSnapshot(const EditorSessionState &State,
   Stream << "{\"type\":\"session_snapshot\",\"sessionId\":" << State.Session.Value
          << ",\"currentUserId\":" << CurrentUser.Value
          << ",\"runtimeControllerUserId\":" << RuntimeControllerUser.Value
+         << ",\"showColliders\":" << (ShowColliders ? "true" : "false")
          << ",\"runtimeState\":\"" << RuntimeStateToString(State.RuntimeState)
          << "\""
          << ",\"transport\":{\"connected\":"
@@ -1561,13 +1577,13 @@ std::string SerializeSessionSnapshot(const EditorSessionState &State,
 
 std::string SerializeSessionConnectResponse(
     std::string_view ClientId, const EditorSessionState &State,
-    SessionUserId CurrentUser, bool TransportConnected,
+    SessionUserId CurrentUser, bool ShowColliders, bool TransportConnected,
     std::string_view TransportState,
     std::string_view WebRtcConnectionState) {
   std::ostringstream Stream;
   Stream << "{\"type\":\"session_connect\",\"clientId\":\""
          << EscapeJson(ClientId) << "\",\"snapshot\":"
-         << SerializeSessionSnapshot(State, CurrentUser, TransportConnected,
+         << SerializeSessionSnapshot(State, CurrentUser, ShowColliders, TransportConnected,
                                      TransportState, WebRtcConnectionState)
          << "}";
   return Stream.str();

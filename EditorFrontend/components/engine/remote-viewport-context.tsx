@@ -151,6 +151,7 @@ interface RemoteViewportActions {
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
+  setShowColliders: (showColliders: boolean) => Promise<void>
   setGizmoMode: (mode: RemoteViewportGizmoMode) => Promise<void>
   setGridSnapSettings: (settings: RemoteViewportGridSnapSettings) => Promise<void>
   refreshSessionSnapshot: () => Promise<void>
@@ -209,6 +210,7 @@ interface RemoteViewportContextValue {
   runtimeState: RemoteRuntimeState
   canControlRuntime: boolean
   viewMode: RemoteViewportViewMode
+  showColliders: boolean
   gizmoMode: RemoteViewportGizmoMode
   gridSnapSettings: RemoteViewportGridSnapSettings
   isLooking: boolean
@@ -229,6 +231,7 @@ interface RemoteViewportContextValue {
   setSessionStatusText: (value: string) => void
   setSessionDetailText: (value: string) => void
   setViewMode: (value: RemoteViewportViewMode) => void
+  setShowCollidersState: (value: boolean) => void
   setIsLooking: (value: boolean) => void
   setServerOrigin: (value: string) => void
   appendEventLog: (value: string) => void
@@ -287,6 +290,7 @@ interface RemoteViewportContextValue {
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
+  setShowColliders: (showColliders: boolean) => Promise<void>
   setGizmoMode: (mode: RemoteViewportGizmoMode) => Promise<void>
   setGridSnapSettings: (settings: RemoteViewportGridSnapSettings) => Promise<void>
   refreshSessionSnapshot: () => Promise<void>
@@ -305,6 +309,7 @@ interface SessionSnapshot {
   currentUserId: number
   runtimeControllerUserId: number
   runtimeState: RemoteRuntimeState
+  showColliders: boolean
   participants: SessionParticipant[]
   sceneTree: SessionSceneItem[]
   selections: SessionSelection[]
@@ -346,6 +351,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     reconnect: async () => {},
     toggleLook: async () => {},
     setMode: async () => {},
+    setShowColliders: async () => {},
     setGizmoMode: async () => {},
     setGridSnapSettings: async () => {},
     refreshSessionSnapshot: async () => {},
@@ -384,6 +390,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
   )
   const [runtimeState, setRuntimeState] = useState<RemoteRuntimeState>("edit")
   const [viewMode, setViewMode] = useState<RemoteViewportViewMode>("lit")
+  const [showColliders, setShowCollidersState] = useState(true)
   const [gizmoMode, setGizmoModeState] = useState<RemoteViewportGizmoMode>("translate")
   const [gridSnapSettings, setGridSnapSettingsState] =
     useState<RemoteViewportGridSnapSettings>(defaultGridSnapSettings)
@@ -420,6 +427,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     setCurrentUserId(snapshot.currentUserId)
     setRuntimeControllerUserId(snapshot.runtimeControllerUserId)
     setRuntimeState(snapshot.runtimeState)
+    setShowCollidersState(snapshot.showColliders)
     setParticipants(snapshot.participants)
     setSceneTree(snapshot.sceneTree)
     setSelections(
@@ -437,6 +445,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     setCurrentUserId(null)
     setRuntimeControllerUserId(null)
     setRuntimeState("edit")
+    setShowCollidersState(true)
     setParticipants([])
     setSceneTree([])
     setSelections([])
@@ -497,6 +506,11 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
 
   const setMode = useCallback(async (mode: RemoteViewportViewMode) => {
     await actionsRef.current.setMode(mode)
+  }, [])
+
+  const setShowColliders = useCallback(async (nextValue: boolean) => {
+    setShowCollidersState(nextValue)
+    await actionsRef.current.setShowColliders(nextValue)
   }, [])
 
   const setGizmoModeAction = useCallback(async (mode: RemoteViewportGizmoMode) => {
@@ -643,6 +657,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       runtimeState,
       canControlRuntime,
       viewMode,
+      showColliders,
       gizmoMode,
       gridSnapSettings,
       isLooking,
@@ -688,6 +703,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       setSessionStatusText,
       setSessionDetailText,
       setViewMode,
+      setShowCollidersState,
       setIsLooking,
       setServerOrigin,
       appendEventLog,
@@ -701,6 +717,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       reconnect,
       toggleLook,
       setMode,
+      setShowColliders,
       setGizmoMode: setGizmoModeAction,
       setGridSnapSettings,
       refreshSessionSnapshot,
@@ -770,7 +787,9 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       dismissScriptErrorToast,
       serverOrigin,
       gizmoMode,
+      showColliders,
       setMode,
+      setShowColliders,
       setGizmoModeAction,
       setGridSnapSettings,
       setSessionDetailText,

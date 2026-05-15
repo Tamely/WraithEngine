@@ -61,5 +61,6 @@ struct RenderMeshSubmission {
   std::string Name;
   MeshRenderPath RenderPath{MeshRenderPath::Graphics};
   glm::mat4 Transform{1.0f};
+  bool Translucent{false};
 };
 } // namespace Axiom

@@ -411,10 +411,11 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
   };
 
   const std::string Json = Axiom::SerializeSessionSnapshot(
-      State, Axiom::SessionUserId{1}, true, "connected", "connected");
+      State, Axiom::SessionUserId{1}, true, true, "connected", "connected");
   EXPECT_NE(Json.find("\"type\":\"session_snapshot\""), std::string::npos);
   EXPECT_NE(Json.find("\"currentUserId\":1"), std::string::npos);
   EXPECT_NE(Json.find("\"runtimeControllerUserId\":1"), std::string::npos);
+  EXPECT_NE(Json.find("\"showColliders\":true"), std::string::npos);
   EXPECT_NE(Json.find("\"runtimeState\":\"edit\""), std::string::npos);
   EXPECT_NE(Json.find("\"participants\""), std::string::npos);
   EXPECT_NE(Json.find("\"displayName\":\"Local User\""), std::string::npos);
@@ -459,7 +460,7 @@ TEST(HeadlessProtocolTests, SerializesSessionConnectResponse) {
   };
 
   const std::string Json = Axiom::SerializeSessionConnectResponse(
-      "client-7", State, Axiom::SessionUserId{7}, true, "connected",
+      "client-7", State, Axiom::SessionUserId{7}, true, true, "connected",
       "new");
   EXPECT_NE(Json.find("\"type\":\"session_connect\""), std::string::npos);
   EXPECT_NE(Json.find("\"clientId\":\"client-7\""), std::string::npos);
@@ -743,7 +744,7 @@ TEST(HeadlessProtocolTests, SerializesObjectDetailsWithMaterial) {
   State.SelectedObjectIds[Axiom::SessionUserId{1}] = "crate-1";
 
   const std::string Json = Axiom::SerializeSessionSnapshot(
-      State, Axiom::SessionUserId{1}, true, "connected", "connected");
+      State, Axiom::SessionUserId{1}, true, true, "connected", "connected");
   EXPECT_NE(Json.find("\"material\":{"), std::string::npos);
   EXPECT_NE(Json.find("\"baseColorFactor\":[0.5,0.5,0.5,1]"), std::string::npos);
   EXPECT_NE(Json.find("\"metallic\":0"), std::string::npos);
@@ -763,6 +764,6 @@ TEST(HeadlessProtocolTests, SerializesObjectDetailsWithNullMaterialForLights) {
   State.SelectedObjectIds[Axiom::SessionUserId{1}] = "sun";
 
   const std::string Json = Axiom::SerializeSessionSnapshot(
-      State, Axiom::SessionUserId{1}, true, "connected", "connected");
+      State, Axiom::SessionUserId{1}, true, true, "connected", "connected");
   EXPECT_NE(Json.find("\"material\":null"), std::string::npos);
 }

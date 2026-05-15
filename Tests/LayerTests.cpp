@@ -1356,13 +1356,20 @@ TEST(HeadlessSessionLayerTests, BuildColliderOverlaySubmissionsUsesPhysicsData) 
   const std::vector<Axiom::RenderMeshSubmission> Submissions =
       Layer.BuildColliderOverlaySubmissions();
 
-  ASSERT_EQ(Submissions.size(), 2u);
+  ASSERT_EQ(Submissions.size(), 18u);
+  const size_t TranslucentCount = static_cast<size_t>(std::count_if(
+      Submissions.begin(), Submissions.end(),
+      [](const Axiom::RenderMeshSubmission &Submission) {
+        return Submission.Translucent;
+      }));
+  EXPECT_EQ(TranslucentCount, 2u);
   const auto StaticIt = std::find_if(
       Submissions.begin(), Submissions.end(),
       [](const Axiom::RenderMeshSubmission &Submission) {
         return Submission.Name == "static-box-collider";
       });
   ASSERT_NE(StaticIt, Submissions.end());
+  EXPECT_TRUE(StaticIt->Translucent);
   EXPECT_FLOAT_EQ(StaticIt->Transform[3].x, 1.0f);
   EXPECT_FLOAT_EQ(StaticIt->Transform[3].y, 2.0f);
   EXPECT_FLOAT_EQ(StaticIt->Transform[3].z, 3.0f);
@@ -1376,11 +1383,13 @@ TEST(HeadlessSessionLayerTests, BuildColliderOverlaySubmissionsUsesPhysicsData) 
         return Submission.Name == "dynamic-sphere-collider";
       });
   ASSERT_NE(DynamicIt, Submissions.end());
+  EXPECT_TRUE(DynamicIt->Translucent);
   EXPECT_FLOAT_EQ(DynamicIt->Transform[3].x, -3.0f);
   EXPECT_FLOAT_EQ(DynamicIt->Transform[3].y, 5.0f);
   EXPECT_FLOAT_EQ(DynamicIt->Transform[3].z, 8.0f);
   EXPECT_NE(DynamicIt->Material, nullptr);
   EXPECT_GT(DynamicIt->Material->BaseColorFactor.r, 0.9f);
+  EXPECT_LT(DynamicIt->Material->BaseColorFactor.a, 0.5f);
 }
 
 TEST(SvgTextureTests, LightbulbSvgRasterizesToValidTexture) {

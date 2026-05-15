@@ -129,6 +129,7 @@ private:
   VkPipeline m_MeshPipeline{VK_NULL_HANDLE};
   VkPipelineLayout m_MeshPipelineLayout{VK_NULL_HANDLE};
   VkPipeline m_MeshGraphicsPipeline{VK_NULL_HANDLE};
+  VkPipeline m_MeshGraphicsAlphaBlendPipeline{VK_NULL_HANDLE};
   VkPipelineLayout m_MeshGraphicsPipelineLayout{VK_NULL_HANDLE};
   VkPipeline m_MeshWireframePipeline{VK_NULL_HANDLE};
   VkPipeline m_MeshDepthPipeline{VK_NULL_HANDLE};

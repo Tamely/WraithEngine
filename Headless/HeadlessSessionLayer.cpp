@@ -14,12 +14,14 @@
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/trigonometric.hpp>
 
+#include <algorithm>
 #include <array>
 #include <numbers>
 
 namespace Axiom {
 namespace {
 constexpr float ColliderOverlayScale = 1.01f;
+constexpr float ColliderCornerScale = 0.085f;
 
 MeshData BuildPresenceMarkerMeshData() {
   MeshData Mesh{};
@@ -117,6 +119,24 @@ MeshData BuildUnitSphereMeshData(uint32_t LongitudeSegments = 16,
       Mesh.Indices.insert(Mesh.Indices.end(), {A, B, C, C, B, D});
     }
   }
+  Mesh.BoundsMin = {-1.0f, -1.0f, -1.0f};
+  Mesh.BoundsMax = {1.0f, 1.0f, 1.0f};
+  return Mesh;
+}
+
+MeshData BuildUnitCornerMarkerMeshData() {
+  MeshData Mesh{};
+  Mesh.Vertices = {
+      {.Position = {-1.0f, -1.0f, 1.0f, 1.0f}}, {.Position = {1.0f, -1.0f, 1.0f, 1.0f}},
+      {.Position = {1.0f, 1.0f, 1.0f, 1.0f}},   {.Position = {-1.0f, 1.0f, 1.0f, 1.0f}},
+      {.Position = {-1.0f, -1.0f, -1.0f, 1.0f}}, {.Position = {1.0f, -1.0f, -1.0f, 1.0f}},
+      {.Position = {1.0f, 1.0f, -1.0f, 1.0f}},   {.Position = {-1.0f, 1.0f, -1.0f, 1.0f}},
+  };
+  Mesh.Indices = {
+      0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6,
+      4, 0, 3, 4, 3, 7, 1, 5, 6, 1, 6, 2,
+      3, 2, 6, 3, 6, 7, 4, 5, 1, 4, 1, 0,
+  };
   Mesh.BoundsMin = {-1.0f, -1.0f, -1.0f};
   Mesh.BoundsMax = {1.0f, 1.0f, 1.0f};
   return Mesh;
@@ -272,8 +292,10 @@ void HeadlessSessionLayer::OnRender() {
   for (const auto &Billboard : BuildLightBillboards()) {
     RenderCommand::SubmitLightBillboard(Billboard);
   }
-  for (const auto &Submission : BuildColliderOverlaySubmissions()) {
-    RenderCommand::Submit(Submission);
+  if (RenderView.ShowColliders) {
+    for (const auto &Submission : BuildColliderOverlaySubmissions()) {
+      RenderCommand::Submit(Submission);
+    }
   }
   for (const auto &Submission : BuildPresenceOverlaySubmissions(RenderUser)) {
     RenderCommand::Submit(Submission);
@@ -383,7 +405,44 @@ HeadlessSessionLayer::BuildColliderOverlaySubmissions() const {
         .Name = Details.ObjectId + "-collider",
         .RenderPath = MeshRenderPath::Graphics,
         .Transform = ColliderTransform,
+        .Translucent = true,
     });
+
+    if (m_ColliderBoxMesh == nullptr) {
+      continue;
+    }
+
+    const glm::vec3 HalfExtents =
+        Physics.ColliderType == EditorPhysicsColliderType::Box
+            ? Physics.BoxHalfExtents * ColliderOverlayScale
+            : glm::vec3(Physics.SphereRadius * ColliderOverlayScale);
+    for (int X = -1; X <= 1; X += 2) {
+      for (int Y = -1; Y <= 1; Y += 2) {
+        for (int Z = -1; Z <= 1; Z += 2) {
+          const glm::vec3 LocalOffset =
+              glm::vec3(static_cast<float>(X), static_cast<float>(Y),
+                        static_cast<float>(Z)) *
+              HalfExtents;
+          glm::mat4 CornerTransform =
+              BuildTransformMatrix(Transform) *
+              glm::translate(glm::mat4(1.0f), LocalOffset) *
+              glm::scale(glm::mat4(1.0f), glm::vec3(std::max(
+                                                 0.03f,
+                                                 std::max(HalfExtents.x,
+                                                          std::max(HalfExtents.y,
+                                                                   HalfExtents.z)) *
+                                                     ColliderCornerScale)));
+          Result.push_back({
+              .Mesh = m_ColliderBoxMesh,
+              .Material = GetOrCreateColliderMaterial(Physics.BodyType),
+              .Name = Details.ObjectId + "-collider-corner",
+              .RenderPath = MeshRenderPath::Graphics,
+              .Transform = CornerTransform,
+              .Translucent = false,
+          });
+        }
+      }
+    }
   }
   return Result;
 }
@@ -480,11 +539,11 @@ MaterialInstanceRef HeadlessSessionLayer::GetOrCreateColliderMaterial(
 
   auto Material = std::make_shared<MaterialInstance>();
   if (BodyType == EditorPhysicsBodyType::Dynamic) {
-    Material->BaseColorFactor = {1.0f, 0.55f, 0.2f, 1.0f};
+    Material->BaseColorFactor = {1.0f, 0.55f, 0.2f, 0.22f};
   } else if (BodyType == EditorPhysicsBodyType::Static) {
-    Material->BaseColorFactor = {0.2f, 0.9f, 1.0f, 1.0f};
+    Material->BaseColorFactor = {0.2f, 0.9f, 1.0f, 0.18f};
   } else {
-    Material->BaseColorFactor = {0.8f, 0.8f, 0.8f, 1.0f};
+    Material->BaseColorFactor = {0.8f, 0.8f, 0.8f, 0.18f};
   }
   Material->Metallic = 0.0f;
   Material->Roughness = 0.15f;

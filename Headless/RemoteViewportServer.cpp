@@ -1286,6 +1286,9 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetViewMode:
     m_Host.SetRemoteViewMode(*User, Command->ViewMode);
     break;
+  case HeadlessCommandType::SetShowColliders:
+    m_Host.SetRemoteShowColliders(*User, Command->ShowColliders);
+    break;
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
   case HeadlessCommandType::UpdateViewportCamera:
@@ -1759,9 +1762,18 @@ bool RemoteViewportServer::HandleSessionConnectRequest(
   const WebRtcSessionStatus Status =
       Client.WebRtcSession != nullptr ? Client.WebRtcSession->GetStatus()
                                       : WebRtcSessionStatus{};
+  const bool ShowColliders =
+      [&]() -> bool {
+        if (const HeadlessRenderViewState *View =
+                m_Host.FindRemoteRenderView(Client.ClientId);
+            View != nullptr) {
+          return View->ShowColliders;
+        }
+        return true;
+      }();
   const std::string Payload = SerializeSessionConnectResponse(
       Client.ClientId, m_Host.GetHeadlessLayer().GetSession().GetState(),
-      Client.User, m_TransportConnected.load(),
+      Client.User, ShowColliders, m_TransportConnected.load(),
       m_TransportConnected.load() ? "connected" : "disconnected",
       Status.ConnectionState);
   const std::string Response = JsonResponse("200 OK", Payload);
@@ -1849,8 +1861,24 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
     const WebRtcSessionStatus Status =
         ClientId.has_value() ? GetClientWebRtcStatus(*ClientId)
                              : WebRtcSessionStatus{};
+    const bool ShowColliders =
+        [&]() -> bool {
+          if (ClientId.has_value()) {
+            if (const HeadlessRenderViewState *View =
+                    m_Host.FindRemoteRenderView(*ClientId);
+                View != nullptr) {
+              return View->ShowColliders;
+            }
+          }
+          if (const HeadlessRenderViewState *View = m_Host.FindRenderView(*User);
+              View != nullptr) {
+            return View->ShowColliders;
+          }
+          return true;
+        }();
     const std::string Body = SerializeSessionSnapshot(
         m_Host.GetHeadlessLayer().GetSession().GetState(), *User,
+        ShowColliders,
         m_TransportConnected.load(),
         m_TransportConnected.load() ? "connected" : "disconnected",
         Status.ConnectionState);
@@ -2772,6 +2800,9 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   switch (Command->Type) {
   case HeadlessCommandType::SetViewMode:
     m_Host.SetRemoteViewMode(Command->ViewMode);
+    return true;
+  case HeadlessCommandType::SetShowColliders:
+    m_Host.SetRemoteShowColliders(Command->ShowColliders);
     return true;
   case HeadlessCommandType::DropMesh:
     HandleMeshDropCommand(m_Host.GetHeadlessLayer().GetLocalUserId(), *Command);

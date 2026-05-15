@@ -9,6 +9,7 @@ import {
 } from "lucide-react"
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -71,6 +72,7 @@ interface SessionSnapshotResponse {
   sessionId: number
   currentUserId: number
   runtimeControllerUserId: number
+  showColliders: boolean
   transport?: {
     connected: boolean
     state?: string
@@ -93,6 +95,10 @@ type RemoteViewportCommand =
   | {
     type: "set_view_mode"
     viewMode: ViewMode
+  }
+  | {
+    type: "set_show_colliders"
+    showColliders: boolean
   }
   | {
     type: "set_look_active"
@@ -276,6 +282,7 @@ export function Viewport() {
     detailText,
     frameText,
     viewMode,
+    showColliders,
     gizmoMode,
     isLooking,
     participants,
@@ -284,6 +291,7 @@ export function Viewport() {
     setDetailText,
     setFrameText,
     setViewMode,
+    setShowColliders,
     setIsLooking,
     setServerOrigin,
     appendEventLog,
@@ -560,6 +568,7 @@ export function Viewport() {
         runtimeControllerUserId:
           snapshot.runtimeControllerUserId ?? snapshot.currentUserId,
         runtimeState: snapshot.runtimeState ?? "edit",
+        showColliders: snapshot.showColliders ?? true,
         participants: snapshot.participants ?? [],
         sceneTree: snapshot.sceneTree ?? [],
         selections: snapshot.selections ?? [],
@@ -1705,6 +1714,15 @@ export function Viewport() {
           "reliable"
         )
       },
+      setShowColliders: async (nextValue) => {
+        await sendCommand(
+          {
+            type: "set_show_colliders",
+            showColliders: nextValue,
+          },
+          "reliable"
+        )
+      },
       setGizmoMode: async (nextMode) => {
         gizmoModeRef.current = nextMode
         await sendCommand({ type: "set_gizmo_mode", mode: nextMode }, "reliable")
@@ -2048,10 +2066,28 @@ export function Viewport() {
               </DropdownMenuRadioGroup>
             </DropdownMenuContent>
           </DropdownMenu>
-          <button className="flex items-center gap-1 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 rounded">
-            Show
-            <ChevronDown className="w-3 h-3" />
-          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="flex items-center gap-1 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 rounded"
+                type="button"
+              >
+                Show
+                <ChevronDown className="w-3 h-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              className="border-neutral-800 bg-neutral-950 text-neutral-200"
+            >
+              <DropdownMenuCheckboxItem
+                checked={showColliders}
+                onCheckedChange={(checked) => void setShowColliders(checked === true)}
+              >
+                Colliders
+              </DropdownMenuCheckboxItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         <div className="flex items-center gap-1">
           <ViewportButton
