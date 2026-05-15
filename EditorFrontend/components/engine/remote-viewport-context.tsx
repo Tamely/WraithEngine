@@ -121,6 +121,8 @@ export interface SessionPhysicsDetails {
   boxHalfExtents: [number, number, number]
   sphereRadius: number
   mass: number
+  friction: number
+  restitution: number
 }
 
 export interface SessionObjectDetails {

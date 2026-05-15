@@ -1236,6 +1236,14 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
       FailureReason = "Sphere colliders require a positive radius.";
       return false;
     }
+    if (PhysicsCommand->Physics.Friction < 0.0f) {
+      FailureReason = "Physics friction must be zero or greater.";
+      return false;
+    }
+    if (PhysicsCommand->Physics.Restitution < 0.0f) {
+      FailureReason = "Physics restitution must be zero or greater.";
+      return false;
+    }
   }
 
   if (const auto *RenameCommand =

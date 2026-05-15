@@ -399,7 +399,9 @@ void SerializeObjectDetails(std::ostringstream &Stream,
            << Details.Physics->BoxHalfExtents.y << ","
            << Details.Physics->BoxHalfExtents.z
            << "],\"sphereRadius\":" << Details.Physics->SphereRadius
-           << ",\"mass\":" << Details.Physics->Mass << "}";
+           << ",\"mass\":" << Details.Physics->Mass
+           << ",\"friction\":" << Details.Physics->Friction
+           << ",\"restitution\":" << Details.Physics->Restitution << "}";
   } else {
     Stream << ",\"physics\":null";
   }
@@ -1305,7 +1307,9 @@ std::string SerializeEvent(const PublishedEditorEvent &Event) {
            << PhysicsProps->Physics.BoxHalfExtents.y << ","
            << PhysicsProps->Physics.BoxHalfExtents.z
            << "],\"sphereRadius\":" << PhysicsProps->Physics.SphereRadius
-           << ",\"mass\":" << PhysicsProps->Physics.Mass;
+           << ",\"mass\":" << PhysicsProps->Physics.Mass
+           << ",\"friction\":" << PhysicsProps->Physics.Friction
+           << ",\"restitution\":" << PhysicsProps->Physics.Restitution;
   } else if (const auto *RuntimeState =
                  std::get_if<RuntimeStateChangedEvent>(&Event.Event.Payload)) {
     Stream << ",\"user\":" << RuntimeState->User.Value
@@ -1681,6 +1685,10 @@ std::string SerializeObjectSchema(const EditorObjectDetails &Details) {
                std::to_string(Physics.SphereRadius));
     AppendProp("physicsMass", "number", Details.TransformReadOnly,
                std::to_string(Physics.Mass));
+    AppendProp("physicsFriction", "number", Details.TransformReadOnly,
+               std::to_string(Physics.Friction));
+    AppendProp("physicsRestitution", "number", Details.TransformReadOnly,
+               std::to_string(Physics.Restitution));
   }
 
   Stream << "]}";

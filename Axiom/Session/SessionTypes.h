@@ -58,5 +58,7 @@ struct EditorPhysicsProperties {
   glm::vec3 BoxHalfExtents{0.5f, 0.5f, 0.5f};
   float SphereRadius{0.5f};
   float Mass{1.0f};
+  float Friction{0.2f};
+  float Restitution{0.0f};
 };
 } // namespace Axiom

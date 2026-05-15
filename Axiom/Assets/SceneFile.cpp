@@ -431,7 +431,9 @@ bool SaveSceneToFile(const std::filesystem::path &Path,
           << ",\"physicsBoxHalfExtents\":"
           << SerializeVec3(Details.Physics->BoxHalfExtents)
           << ",\"physicsSphereRadius\":" << Details.Physics->SphereRadius
-          << ",\"physicsMass\":" << Details.Physics->Mass;
+          << ",\"physicsMass\":" << Details.Physics->Mass
+          << ",\"physicsFriction\":" << Details.Physics->Friction
+          << ",\"physicsRestitution\":" << Details.Physics->Restitution;
     }
     Out << "}";
   }
@@ -813,6 +815,22 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
             if (V) {
               if (!Data.Physics) Data.Physics = EditorPhysicsProperties{};
               Data.Physics->Mass = static_cast<float>(*V);
+            }
+            return true;
+          }
+          if (K == "physicsFriction") {
+            auto V = P.ParseNumber();
+            if (V) {
+              if (!Data.Physics) Data.Physics = EditorPhysicsProperties{};
+              Data.Physics->Friction = static_cast<float>(*V);
+            }
+            return true;
+          }
+          if (K == "physicsRestitution") {
+            auto V = P.ParseNumber();
+            if (V) {
+              if (!Data.Physics) Data.Physics = EditorPhysicsProperties{};
+              Data.Physics->Restitution = static_cast<float>(*V);
             }
             return true;
           }

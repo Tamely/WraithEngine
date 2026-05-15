@@ -276,6 +276,8 @@ void PhysicsWorld::Start(const EditorSceneState &Scene) {
     JPH::BodyCreationSettings Settings(
         Shape.GetPtr(), ToJoltRVec3(Transform.Location),
         ToJoltQuatDegrees(Transform.RotationDegrees), MotionType, Layer);
+    Settings.mFriction = Physics.Friction;
+    Settings.mRestitution = Physics.Restitution;
     if (Physics.BodyType == EditorPhysicsBodyType::Dynamic &&
         Physics.Mass > 0.0f) {
       Settings.mMassPropertiesOverride.mMass = Physics.Mass;

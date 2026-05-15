@@ -2961,7 +2961,8 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
       }
     } else if (Name == "physicsBodyType" || Name == "physicsColliderType" ||
                Name == "physicsBoxHalfExtents" || Name == "physicsSphereRadius" ||
-               Name == "physicsMass") {
+               Name == "physicsMass" || Name == "physicsFriction" ||
+               Name == "physicsRestitution") {
       const auto &DetailsById =
           m_Host.GetHeadlessLayer().GetSession().GetState().Scene.ObjectDetailsById;
       const auto It = DetailsById.find(ObjId);
@@ -3017,6 +3018,18 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
           return false;
         }
         Physics.Mass = *Number;
+      } else if (Name == "physicsFriction") {
+        const auto *Number = std::get_if<float>(&Val);
+        if (Number == nullptr) {
+          return false;
+        }
+        Physics.Friction = *Number;
+      } else if (Name == "physicsRestitution") {
+        const auto *Number = std::get_if<float>(&Val);
+        if (Number == nullptr) {
+          return false;
+        }
+        Physics.Restitution = *Number;
       }
 
       m_Host.SubmitRemoteCommand(

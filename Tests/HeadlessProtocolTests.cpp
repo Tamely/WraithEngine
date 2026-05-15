@@ -393,6 +393,8 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
                           .BoxHalfExtents = glm::vec3(0.5f, 0.75f, 1.0f),
                           .SphereRadius = 1.25f,
                           .Mass = 3.5f,
+                          .Friction = 0.6f,
+                          .Restitution = 0.4f,
                       },
                   },
               }},
@@ -433,6 +435,8 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
   EXPECT_NE(Json.find("\"colliderType\":\"sphere\""), std::string::npos);
   EXPECT_NE(Json.find("\"sphereRadius\":1.25"), std::string::npos);
   EXPECT_NE(Json.find("\"mass\":3.5"), std::string::npos);
+  EXPECT_NE(Json.find("\"friction\":0.6"), std::string::npos);
+  EXPECT_NE(Json.find("\"restitution\":0.4"), std::string::npos);
   EXPECT_NE(Json.find("\"selectedByUserIds\":[1]"), std::string::npos);
   EXPECT_NE(Json.find("\"lockState\":\"locked\""), std::string::npos);
   EXPECT_NE(Json.find("\"lockOwnerUserId\":1"), std::string::npos);

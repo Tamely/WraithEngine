@@ -696,6 +696,8 @@ function PhysicsSection({
     boxHalfExtents: [number, number, number]
     sphereRadius: number
     mass: number
+    friction: number
+    restitution: number
   } | null
   isSaving: boolean
   setIsSaving: (value: boolean) => void
@@ -718,6 +720,8 @@ function PhysicsSection({
   )
   const [sphereRadius, setSphereRadius] = useState(String(physics?.sphereRadius ?? 0.5))
   const [mass, setMass] = useState(String(physics?.mass ?? 1))
+  const [friction, setFriction] = useState(String(physics?.friction ?? 0.2))
+  const [restitution, setRestitution] = useState(String(physics?.restitution ?? 0))
 
   useEffect(() => {
     setBodyType(physics?.bodyType ?? "none")
@@ -733,6 +737,8 @@ function PhysicsSection({
     )
     setSphereRadius(String(physics?.sphereRadius ?? 0.5))
     setMass(String(physics?.mass ?? 1))
+    setFriction(String(physics?.friction ?? 0.2))
+    setRestitution(String(physics?.restitution ?? 0))
   }, [
     objectId,
     physics?.bodyType,
@@ -742,6 +748,8 @@ function PhysicsSection({
     physics?.boxHalfExtents[2],
     physics?.sphereRadius,
     physics?.mass,
+    physics?.friction,
+    physics?.restitution,
   ])
 
   async function applyPhysicsProperty(
@@ -778,6 +786,22 @@ function PhysicsSection({
       return
     }
     await applyPhysicsProperty("physicsMass", next)
+  }
+
+  async function applyFriction() {
+    const next = Number(friction)
+    if (Number.isNaN(next) || next < 0) {
+      return
+    }
+    await applyPhysicsProperty("physicsFriction", next)
+  }
+
+  async function applyRestitution() {
+    const next = Number(restitution)
+    if (Number.isNaN(next) || next < 0) {
+      return
+    }
+    await applyPhysicsProperty("physicsRestitution", next)
   }
 
   return (
@@ -876,6 +900,38 @@ function PhysicsSection({
             </button>
           </div>
         ) : null}
+        <LabeledNumberInput
+          disabled={isSaving}
+          label="Friction"
+          onChange={setFriction}
+          value={friction}
+        />
+        <div className="flex justify-end">
+          <button
+            className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isSaving}
+            onClick={() => void applyFriction()}
+            type="button"
+          >
+            Apply Friction
+          </button>
+        </div>
+        <LabeledNumberInput
+          disabled={isSaving}
+          label="Bounce"
+          onChange={setRestitution}
+          value={restitution}
+        />
+        <div className="flex justify-end">
+          <button
+            className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isSaving}
+            onClick={() => void applyRestitution()}
+            type="button"
+          >
+            Apply Bounce
+          </button>
+        </div>
       </div>
     </section>
   )

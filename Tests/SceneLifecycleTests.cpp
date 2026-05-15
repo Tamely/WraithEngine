@@ -2033,6 +2033,8 @@ TEST(SceneLifecycleTests, SetPhysicsPropertiesUpdatesAuthoritativeDetails) {
                           .ColliderType = Axiom::EditorPhysicsColliderType::Sphere,
                           .SphereRadius = 0.75f,
                           .Mass = 2.5f,
+                          .Friction = 0.35f,
+                          .Restitution = 0.8f,
                       },
                   }});
   Session.Tick();
@@ -2045,6 +2047,8 @@ TEST(SceneLifecycleTests, SetPhysicsPropertiesUpdatesAuthoritativeDetails) {
   EXPECT_EQ(Details->Physics->ColliderType, Axiom::EditorPhysicsColliderType::Sphere);
   EXPECT_FLOAT_EQ(Details->Physics->SphereRadius, 0.75f);
   EXPECT_FLOAT_EQ(Details->Physics->Mass, 2.5f);
+  EXPECT_FLOAT_EQ(Details->Physics->Friction, 0.35f);
+  EXPECT_FLOAT_EQ(Details->Physics->Restitution, 0.8f);
 
   const auto *Changed =
       FindEvent<Axiom::PhysicsPropertiesChangedEvent>(Subscriber.Events);
@@ -2088,6 +2092,8 @@ TEST(SceneLifecycleTests, SceneFile_SaveLoadRoundTripsPhysicsState) {
           .BoxHalfExtents = glm::vec3(0.25f, 0.5f, 0.75f),
           .SphereRadius = 0.6f,
           .Mass = 4.0f,
+          .Friction = 0.45f,
+          .Restitution = 0.25f,
       },
   };
 
@@ -2106,6 +2112,8 @@ TEST(SceneLifecycleTests, SceneFile_SaveLoadRoundTripsPhysicsState) {
   EXPECT_FLOAT_EQ(DetailsIt->second.Physics->BoxHalfExtents.y, 0.5f);
   EXPECT_FLOAT_EQ(DetailsIt->second.Physics->SphereRadius, 0.6f);
   EXPECT_FLOAT_EQ(DetailsIt->second.Physics->Mass, 4.0f);
+  EXPECT_FLOAT_EQ(DetailsIt->second.Physics->Friction, 0.45f);
+  EXPECT_FLOAT_EQ(DetailsIt->second.Physics->Restitution, 0.25f);
 }
 
 TEST(SceneLifecycleTests, SceneFile_SaveLoadRegeneratesMultiMeshChildrenWithoutDuplicatingThem) {
