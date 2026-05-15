@@ -297,7 +297,9 @@ TEST_F(ScriptingTest, PauseFreezesScriptTicks) {
     s_Session->Submit(HostContext(5), {.Payload = Axiom::PauseSessionCommand{}});
     s_Session->Tick();
 
-    s_Session->Submit(HostContext(6),
+    auto ManualCtx = HostContext(6);
+    ManualCtx.IsScriptContext = true;
+    s_Session->Submit(ManualCtx,
         {.Payload = Axiom::SetTransformCommand{
             .ObjectId = "actor1",
             .Location = {0.0f, 0.0f, 0.0f},

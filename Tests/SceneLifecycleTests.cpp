@@ -601,7 +601,9 @@ TEST(SceneLifecycleTests, StopSessionRemovesObjectsCreatedDuringPlay) {
 
   Session.Submit(MakeContext(1, 1), {.Payload = Axiom::PlaySessionCommand{}});
   Session.Tick();
-  Session.Submit(MakeContext(2, 1),
+  Axiom::CommandContext ScriptCtx = MakeContext(2, 1);
+  ScriptCtx.IsScriptContext = true;
+  Session.Submit(ScriptCtx,
                  {.Payload = Axiom::CreateObjectCommand{.TemplateId = "Mesh"}});
   Session.Tick();
 

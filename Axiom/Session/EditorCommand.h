@@ -17,6 +17,7 @@ struct CommandContext {
   SessionUserId User;
   uint64_t FrameIndex{0};
   float DeltaTimeSeconds{0.0f};
+  bool IsScriptContext{false};
 };
 
 struct UpdateViewportCameraCommand {

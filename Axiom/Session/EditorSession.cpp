@@ -1233,7 +1233,8 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
     return false;
   }
 
-  if (m_State.RuntimeState != EditorRuntimeState::Edit &&
+  if (!QueuedCommand.Context.IsScriptContext &&
+      m_State.RuntimeState != EditorRuntimeState::Edit &&
       IsAuthoringMutationCommand(QueuedCommand.Command.Payload)) {
     FailureReason =
         "Authoring edits are disabled while shared simulation is active.";

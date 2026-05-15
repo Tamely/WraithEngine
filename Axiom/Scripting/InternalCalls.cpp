@@ -64,7 +64,7 @@ void GameObject_SetTransform(Coral::String ObjectId,
   if (!s_Session || !InTransform)
     return;
   std::string id = ObjectId;
-  CommandContext Ctx{s_SessionId, s_UserId};
+  CommandContext Ctx{s_SessionId, s_UserId, 0, 0.0f, true};
   SetTransformCommand Cmd{.ObjectId = std::move(id),
                           .Location = InTransform->Location,
                           .RotationDegrees = InTransform->RotationDegrees,
