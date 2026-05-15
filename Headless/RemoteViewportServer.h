@@ -191,7 +191,7 @@ private:
   mutable std::mutex m_ClientMutex;
   std::vector<WebSocketClient> m_WebSocketClients;
   std::unordered_map<std::string, RemoteClientSession> m_RemoteClientsById;
-  uint64_t m_NextRemoteUserId{1};
+  uint64_t m_NextRemoteUserId{2};
   mutable std::mutex m_SendMutex;
   const std::filesystem::path m_ProjectsRoot;
   mutable std::mutex m_ProjectMutex;

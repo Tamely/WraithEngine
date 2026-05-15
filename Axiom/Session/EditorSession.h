@@ -138,6 +138,7 @@ struct EditorSceneState {
 struct EditorSessionState {
   SessionId Session;
   EditorRuntimeState RuntimeState{EditorRuntimeState::Edit};
+  std::optional<SessionUserId> RuntimeControllerUser;
   std::unordered_map<SessionUserId, EditorViewportState, SessionUserIdHash>
       Viewports;
   std::unordered_map<SessionUserId, EditorUserPresence, SessionUserIdHash>
@@ -190,6 +191,7 @@ public:
   const EditorUserPresence *FindPresence(SessionUserId User) const;
   EditorParticipant BuildParticipant(SessionUserId User) const;
   std::vector<EditorParticipant> BuildParticipants(SessionUserId CurrentUser) const;
+  SessionUserId ResolveRuntimeControllerUser() const;
   const EditorObjectCollaborationState *FindCollaborationState(
       std::string_view ObjectId) const;
   EditorRuntimeState GetRuntimeState() const { return m_State.RuntimeState; }

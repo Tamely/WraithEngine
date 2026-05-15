@@ -414,6 +414,7 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
       State, Axiom::SessionUserId{1}, true, "connected", "connected");
   EXPECT_NE(Json.find("\"type\":\"session_snapshot\""), std::string::npos);
   EXPECT_NE(Json.find("\"currentUserId\":1"), std::string::npos);
+  EXPECT_NE(Json.find("\"runtimeControllerUserId\":1"), std::string::npos);
   EXPECT_NE(Json.find("\"runtimeState\":\"edit\""), std::string::npos);
   EXPECT_NE(Json.find("\"participants\""), std::string::npos);
   EXPECT_NE(Json.find("\"displayName\":\"Local User\""), std::string::npos);

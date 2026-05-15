@@ -70,6 +70,7 @@ interface IceCandidateListResponse {
 interface SessionSnapshotResponse {
   sessionId: number
   currentUserId: number
+  runtimeControllerUserId: number
   transport?: {
     connected: boolean
     state?: string
@@ -556,6 +557,8 @@ export function Viewport() {
 
       setSessionSnapshot({
         currentUserId: snapshot.currentUserId,
+        runtimeControllerUserId:
+          snapshot.runtimeControllerUserId ?? snapshot.currentUserId,
         runtimeState: snapshot.runtimeState ?? "edit",
         participants: snapshot.participants ?? [],
         sceneTree: snapshot.sceneTree ?? [],

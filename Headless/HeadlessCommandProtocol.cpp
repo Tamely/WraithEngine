@@ -1472,9 +1472,29 @@ std::string SerializeSessionSnapshot(const EditorSessionState &State,
                                      std::string_view WebRtcConnectionState) {
   const std::vector<EditorParticipant> Participants =
       BuildParticipants(State, CurrentUser);
+  const SessionUserId RuntimeControllerUser =
+      [&]() -> SessionUserId {
+    if (State.RuntimeControllerUser.has_value()) {
+      return *State.RuntimeControllerUser;
+    }
+
+    std::optional<SessionUserId> Candidate;
+    for (const auto &[User, Presence] : State.PresenceByUser) {
+      if (Presence.State == EditorUserPresenceState::Disconnected ||
+          User.Value == 1) {
+        continue;
+      }
+      if (!Candidate.has_value() || User.Value < Candidate->Value) {
+        Candidate = User;
+      }
+    }
+
+    return Candidate.value_or(SessionUserId{1});
+  }();
   std::ostringstream Stream;
   Stream << "{\"type\":\"session_snapshot\",\"sessionId\":" << State.Session.Value
          << ",\"currentUserId\":" << CurrentUser.Value
+         << ",\"runtimeControllerUserId\":" << RuntimeControllerUser.Value
          << ",\"runtimeState\":\"" << RuntimeStateToString(State.RuntimeState)
          << "\""
          << ",\"transport\":{\"connected\":"

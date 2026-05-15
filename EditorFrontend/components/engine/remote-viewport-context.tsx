@@ -301,6 +301,7 @@ interface RemoteViewportContextValue {
 
 interface SessionSnapshot {
   currentUserId: number
+  runtimeControllerUserId: number
   runtimeState: RemoteRuntimeState
   participants: SessionParticipant[]
   sceneTree: SessionSceneItem[]
@@ -388,6 +389,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
   const [eventLog, setEventLog] = useState<string[]>([])
   const [serverOrigin, setServerOrigin] = useState("")
   const [currentUserId, setCurrentUserId] = useState<number | null>(null)
+  const [runtimeControllerUserId, setRuntimeControllerUserId] = useState<number | null>(null)
   const [participants, setParticipants] = useState<SessionParticipant[]>([])
   const [sceneTree, setSceneTree] = useState<SessionSceneItem[]>([])
   const [selections, setSelections] = useState<SessionSelection[]>([])
@@ -414,6 +416,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
 
   const setSessionSnapshot = useCallback((snapshot: SessionSnapshot) => {
     setCurrentUserId(snapshot.currentUserId)
+    setRuntimeControllerUserId(snapshot.runtimeControllerUserId)
     setRuntimeState(snapshot.runtimeState)
     setParticipants(snapshot.participants)
     setSceneTree(snapshot.sceneTree)
@@ -430,6 +433,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
 
   const clearSessionSnapshot = useCallback(() => {
     setCurrentUserId(null)
+    setRuntimeControllerUserId(null)
     setRuntimeState("edit")
     setParticipants([])
     setSceneTree([])
@@ -620,7 +624,10 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       ? selections.find((selection) => selection.userId === currentUserId)?.objectId ?? null
       : null
   const selectedObject = findSceneItem(sceneTree, selectedObjectId)
-  const canControlRuntime = currentUserId === 1
+  const canControlRuntime =
+    currentUserId !== null &&
+    runtimeControllerUserId !== null &&
+    currentUserId === runtimeControllerUserId
 
   const value = useMemo(
     () => ({
@@ -714,6 +721,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       connectionState,
       clearSessionSnapshot,
       currentUserId,
+      runtimeControllerUserId,
       detailText,
       eventLog,
       frameText,

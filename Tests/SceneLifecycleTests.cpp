@@ -139,6 +139,49 @@ TEST(SceneLifecycleTests, NonHostCannotControlRuntimeState) {
   EXPECT_NE(Rejected->Reason.find("host"), std::string::npos);
 }
 
+TEST(SceneLifecycleTests, FirstConnectedCollaboratorControlsRuntimeState) {
+  Axiom::EditorSession Session = MakeWorldSession();
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.SetPresence({
+      {
+          .User = Axiom::SessionUserId{1},
+          .DisplayName = "Headless Host",
+          .State = Axiom::EditorUserPresenceState::Connected,
+          .IsLocal = true,
+      },
+      {
+          .User = Axiom::SessionUserId{2},
+          .DisplayName = "User 1",
+          .State = Axiom::EditorUserPresenceState::Connected,
+          .IsLocal = false,
+      },
+      {
+          .User = Axiom::SessionUserId{3},
+          .DisplayName = "User 2",
+          .State = Axiom::EditorUserPresenceState::Connected,
+          .IsLocal = false,
+      },
+  });
+
+  EXPECT_EQ(Session.ResolveRuntimeControllerUser().Value, 2u);
+
+  Session.Submit(MakeContext(1, 2), {.Payload = Axiom::PlaySessionCommand{}});
+  Session.Tick();
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Playing);
+
+  Subscriber.Events.clear();
+  Session.Submit(MakeContext(2, 3), {.Payload = Axiom::PauseSessionCommand{}});
+  Session.Tick();
+
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Playing);
+  const auto *Rejected =
+      FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events);
+  ASSERT_NE(Rejected, nullptr);
+  EXPECT_NE(Rejected->Reason.find("simulation host"), std::string::npos);
+}
+
 TEST(SceneLifecycleTests, InvalidRuntimeTransitionsAreRejected) {
   Axiom::EditorSession Session = MakeWorldSession();
   RecordingSubscriber Subscriber;

@@ -485,6 +485,30 @@ std::vector<EditorParticipant> EditorSession::BuildParticipants(
   return Participants;
 }
 
+SessionUserId EditorSession::ResolveRuntimeControllerUser() const {
+  if (m_State.RuntimeControllerUser.has_value()) {
+    const SessionUserId User = *m_State.RuntimeControllerUser;
+    if (const EditorUserPresence *Presence = FindPresence(User);
+        Presence != nullptr &&
+        Presence->State != EditorUserPresenceState::Disconnected) {
+      return User;
+    }
+  }
+
+  std::optional<SessionUserId> Candidate;
+  for (const auto &[User, Presence] : m_State.PresenceByUser) {
+    if (Presence.State == EditorUserPresenceState::Disconnected ||
+        IsHostUser(User)) {
+      continue;
+    }
+    if (!Candidate.has_value() || User.Value < Candidate->Value) {
+      Candidate = User;
+    }
+  }
+
+  return Candidate.value_or(SessionUserId{1});
+}
+
 const EditorObjectCollaborationState *EditorSession::FindCollaborationState(
     std::string_view ObjectId) const {
   const auto It =
@@ -1139,8 +1163,9 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
        std::holds_alternative<PauseSessionCommand>(QueuedCommand.Command.Payload) ||
        std::holds_alternative<ResumeSessionCommand>(QueuedCommand.Command.Payload) ||
        std::holds_alternative<StopSessionCommand>(QueuedCommand.Command.Payload)) &&
-      !IsHostUser(QueuedCommand.Context.User)) {
-    FailureReason = "Only the host can control simulation state.";
+      QueuedCommand.Context.User.Value != ResolveRuntimeControllerUser().Value) {
+    FailureReason =
+        "Only the current simulation host can control simulation state.";
     return false;
   }
 
