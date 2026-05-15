@@ -78,6 +78,8 @@ public:
   Axiom::CursorMode ModeSet{Axiom::CursorMode::Normal};
 };
 
+class DummyMesh final : public Axiom::Mesh {};
+
 class RecordingEndpointSubscriber final
     : public Axiom::ISessionTransportSubscriber {
 public:
@@ -1287,6 +1289,98 @@ TEST(HeadlessSessionLayerTests, BuildLightBillboardsUsesVisibleLightsOnly) {
                            return Billboard.ObjectId == "light-hidden";
                          }),
             Billboards.end());
+}
+
+TEST(HeadlessSessionLayerTests, BuildColliderOverlaySubmissionsUsesPhysicsData) {
+  Axiom::HeadlessSessionLayer Layer;
+  Layer.SetColliderMeshesForTesting(std::make_shared<DummyMesh>(),
+                                    std::make_shared<DummyMesh>());
+  Layer.GetSession().SetObjectDetails({
+      {
+          .ObjectId = "static-box",
+          .DisplayName = "Static Box",
+          .Kind = Axiom::EditorSceneItemKind::Mesh,
+          .Visible = true,
+          .SupportsTransform = true,
+          .TransformReadOnly = false,
+          .Transform = Axiom::EditorTransformDetails{
+              .Location = {1.0f, 2.0f, 3.0f},
+              .RotationDegrees = {0.0f, 45.0f, 0.0f},
+              .Scale = {2.0f, 3.0f, 4.0f},
+          },
+          .Physics = Axiom::EditorPhysicsProperties{
+              .BodyType = Axiom::EditorPhysicsBodyType::Static,
+              .ColliderType = Axiom::EditorPhysicsColliderType::Box,
+              .BoxHalfExtents = {1.5f, 0.5f, 0.25f},
+          },
+      },
+      {
+          .ObjectId = "dynamic-sphere",
+          .DisplayName = "Dynamic Sphere",
+          .Kind = Axiom::EditorSceneItemKind::Mesh,
+          .Visible = true,
+          .SupportsTransform = true,
+          .TransformReadOnly = false,
+          .Transform = Axiom::EditorTransformDetails{
+              .Location = {-1.0f, 4.0f, 2.0f},
+              .Scale = {1.0f, 1.0f, 1.0f},
+          },
+          .WorldTransform = Axiom::EditorTransformDetails{
+              .Location = {-3.0f, 5.0f, 8.0f},
+              .RotationDegrees = {10.0f, 0.0f, 20.0f},
+              .Scale = {1.0f, 2.0f, 1.0f},
+          },
+          .Physics = Axiom::EditorPhysicsProperties{
+              .BodyType = Axiom::EditorPhysicsBodyType::Dynamic,
+              .ColliderType = Axiom::EditorPhysicsColliderType::Sphere,
+              .SphereRadius = 0.75f,
+          },
+      },
+      {
+          .ObjectId = "hidden-physics",
+          .DisplayName = "Hidden Physics",
+          .Kind = Axiom::EditorSceneItemKind::Mesh,
+          .Visible = false,
+          .SupportsTransform = true,
+          .TransformReadOnly = false,
+          .Transform = Axiom::EditorTransformDetails{
+              .Location = {9.0f, 9.0f, 9.0f},
+          },
+          .Physics = Axiom::EditorPhysicsProperties{
+              .BodyType = Axiom::EditorPhysicsBodyType::Static,
+              .ColliderType = Axiom::EditorPhysicsColliderType::Box,
+          },
+      },
+  });
+
+  const std::vector<Axiom::RenderMeshSubmission> Submissions =
+      Layer.BuildColliderOverlaySubmissions();
+
+  ASSERT_EQ(Submissions.size(), 2u);
+  const auto StaticIt = std::find_if(
+      Submissions.begin(), Submissions.end(),
+      [](const Axiom::RenderMeshSubmission &Submission) {
+        return Submission.Name == "static-box-collider";
+      });
+  ASSERT_NE(StaticIt, Submissions.end());
+  EXPECT_FLOAT_EQ(StaticIt->Transform[3].x, 1.0f);
+  EXPECT_FLOAT_EQ(StaticIt->Transform[3].y, 2.0f);
+  EXPECT_FLOAT_EQ(StaticIt->Transform[3].z, 3.0f);
+  EXPECT_NE(StaticIt->Material, nullptr);
+  EXPECT_GT(StaticIt->Material->BaseColorFactor.g, 0.8f);
+  EXPECT_GT(glm::length(glm::vec3(StaticIt->Transform[0])), 3.0f);
+
+  const auto DynamicIt = std::find_if(
+      Submissions.begin(), Submissions.end(),
+      [](const Axiom::RenderMeshSubmission &Submission) {
+        return Submission.Name == "dynamic-sphere-collider";
+      });
+  ASSERT_NE(DynamicIt, Submissions.end());
+  EXPECT_FLOAT_EQ(DynamicIt->Transform[3].x, -3.0f);
+  EXPECT_FLOAT_EQ(DynamicIt->Transform[3].y, 5.0f);
+  EXPECT_FLOAT_EQ(DynamicIt->Transform[3].z, 8.0f);
+  EXPECT_NE(DynamicIt->Material, nullptr);
+  EXPECT_GT(DynamicIt->Material->BaseColorFactor.r, 0.9f);
 }
 
 TEST(SvgTextureTests, LightbulbSvgRasterizesToValidTexture) {
