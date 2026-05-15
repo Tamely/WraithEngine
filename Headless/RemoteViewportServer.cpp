@@ -2895,6 +2895,9 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::SetViewMode:
     m_Host.SetRemoteViewMode(Client->User, Command->ViewMode);
     return true;
+  case HeadlessCommandType::SetShowColliders:
+    m_Host.SetRemoteShowColliders(Client->User, Command->ShowColliders);
+    return true;
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
   case HeadlessCommandType::UpdateViewportCamera:
@@ -2921,6 +2924,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::DropMesh:
     HandleMeshDropCommand(Client->User, *Command);
     return true;
+
   case HeadlessCommandType::ReloadScripts: {
     m_Host.ReloadUserScripts();
     if (Client->WebRtcSession != nullptr) {
