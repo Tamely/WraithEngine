@@ -130,6 +130,8 @@ export interface SessionObjectDetails {
   displayName: string
   kind: SessionSceneItemKind
   visible: boolean
+  isGeneratedAssetChild: boolean
+  generatedFromAssetRootId: string | null
   capabilities: {
     supportsTransform: boolean
     transformReadOnly: boolean

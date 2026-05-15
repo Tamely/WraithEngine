@@ -241,9 +241,12 @@ function DetailsContent({
         />
       )}
 
-      {details.capabilities.supportsTransform && !details.capabilities.transformReadOnly && (
+      {details.capabilities.supportsTransform && (
         <PhysicsSection
           objectId={details.objectId}
+          isGeneratedAssetChild={details.isGeneratedAssetChild}
+          generatedFromAssetRootId={details.generatedFromAssetRootId}
+          isReadOnly={details.capabilities.transformReadOnly}
           physics={details.physics ?? null}
           isSaving={isSaving || simulationActive}
           setIsSaving={setIsSaving}
@@ -705,11 +708,17 @@ function MaterialSection({
 
 function PhysicsSection({
   objectId,
+  isGeneratedAssetChild,
+  generatedFromAssetRootId,
+  isReadOnly,
   physics,
   isSaving,
   setIsSaving,
 }: {
   objectId: string
+  isGeneratedAssetChild: boolean
+  generatedFromAssetRootId: string | null
+  isReadOnly: boolean
   physics: {
     bodyType: "none" | "static" | "dynamic"
     colliderType: "none" | "box" | "sphere"
@@ -829,9 +838,16 @@ function PhysicsSection({
       <div className="mb-3 flex items-center gap-1.5">
         <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">Physics</p>
       </div>
+      {isGeneratedAssetChild && generatedFromAssetRootId ? (
+        <p className="mb-3 text-xs text-neutral-500">
+          This generated mesh child inherits collision authoring from
+          {" "}
+          <span className="text-neutral-300">{generatedFromAssetRootId}</span>.
+        </p>
+      ) : null}
       <div className="space-y-3">
         <LabeledSelect
-          disabled={isSaving}
+          disabled={isSaving || isReadOnly}
           label="Body"
           onChange={(value) => {
             const next = value as "none" | "static" | "dynamic"
@@ -846,7 +862,7 @@ function PhysicsSection({
           value={bodyType}
         />
         <LabeledSelect
-          disabled={isSaving}
+          disabled={isSaving || isReadOnly}
           label="Collider"
           onChange={(value) => {
             const next = value as "none" | "box" | "sphere"
@@ -862,7 +878,7 @@ function PhysicsSection({
         />
         {colliderType === "box" ? (
           <VectorEditor
-            disabled={isSaving}
+            disabled={isSaving || isReadOnly}
             label="Half Extents"
             value={boxHalfExtents}
             onChange={setBoxHalfExtents}
@@ -872,7 +888,7 @@ function PhysicsSection({
           <div className="flex justify-end">
             <button
               className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={isSaving}
+              disabled={isSaving || isReadOnly}
               onClick={() => void applyBoxHalfExtents()}
               type="button"
             >
@@ -882,7 +898,7 @@ function PhysicsSection({
         ) : null}
         {colliderType === "sphere" ? (
           <LabeledNumberInput
-            disabled={isSaving}
+            disabled={isSaving || isReadOnly}
             label="Radius"
             onChange={setSphereRadius}
             value={sphereRadius}
@@ -892,7 +908,7 @@ function PhysicsSection({
           <div className="flex justify-end">
             <button
               className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={isSaving}
+              disabled={isSaving || isReadOnly}
               onClick={() => void applySphereRadius()}
               type="button"
             >
@@ -902,7 +918,7 @@ function PhysicsSection({
         ) : null}
         {bodyType === "dynamic" ? (
           <LabeledNumberInput
-            disabled={isSaving}
+            disabled={isSaving || isReadOnly}
             label="Mass"
             onChange={setMass}
             value={mass}
@@ -912,7 +928,7 @@ function PhysicsSection({
           <div className="flex justify-end">
             <button
               className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={isSaving}
+              disabled={isSaving || isReadOnly}
               onClick={() => void applyMass()}
               type="button"
             >
@@ -921,15 +937,15 @@ function PhysicsSection({
           </div>
         ) : null}
         <LabeledNumberInput
-          disabled={isSaving}
+          disabled={isSaving || isReadOnly}
           label="Friction"
           onChange={setFriction}
           value={friction}
         />
         <div className="flex justify-end">
           <button
-            className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={isSaving}
+          className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isSaving || isReadOnly}
             onClick={() => void applyFriction()}
             type="button"
           >
@@ -937,21 +953,26 @@ function PhysicsSection({
           </button>
         </div>
         <LabeledNumberInput
-          disabled={isSaving}
+          disabled={isSaving || isReadOnly}
           label="Bounce"
           onChange={setRestitution}
           value={restitution}
         />
         <div className="flex justify-end">
           <button
-            className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={isSaving}
+          className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isSaving || isReadOnly}
             onClick={() => void applyRestitution()}
             type="button"
           >
             Apply Bounce
           </button>
         </div>
+        {isReadOnly ? (
+          <p className="text-xs text-neutral-500">
+            Physics values are read-only for this object.
+          </p>
+        ) : null}
       </div>
     </section>
   )

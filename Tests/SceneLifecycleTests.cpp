@@ -843,6 +843,12 @@ TEST(SceneLifecycleTests, CreateMeshObjectAddsMeshWithAssetAndTransform) {
   EXPECT_FLOAT_EQ(Details->Transform->Location.y, 2.0f);
   EXPECT_FLOAT_EQ(Details->Transform->Location.z, 3.0f);
   EXPECT_FLOAT_EQ(Details->WorldTransform->RotationDegrees.y, 45.0f);
+  ASSERT_TRUE(Details->Physics.has_value());
+  EXPECT_EQ(Details->Physics->BodyType, Axiom::EditorPhysicsBodyType::Static);
+  EXPECT_EQ(Details->Physics->ColliderType, Axiom::EditorPhysicsColliderType::Box);
+  EXPECT_FLOAT_EQ(Details->Physics->BoxHalfExtents.x, 1.5f);
+  EXPECT_FLOAT_EQ(Details->Physics->BoxHalfExtents.y, 1.5f);
+  EXPECT_FLOAT_EQ(Details->Physics->BoxHalfExtents.z, 0.01f);
 
   const auto &Instances = Session.GetState().Scene.MeshInstances;
   const auto It = std::find_if(Instances.begin(), Instances.end(),
@@ -914,6 +920,12 @@ TEST(SceneLifecycleTests, CreateMeshObjectExpandsMultiMeshAssetIntoGeneratedChil
   ASSERT_NE(ChildDetails, nullptr);
   EXPECT_TRUE(ChildDetails->IsGeneratedAssetChild);
   EXPECT_TRUE(ChildDetails->TransformReadOnly);
+  ASSERT_TRUE(RootDetails->Physics.has_value());
+  EXPECT_EQ(RootDetails->Physics->BodyType, Axiom::EditorPhysicsBodyType::Static);
+  EXPECT_EQ(RootDetails->Physics->ColliderType, Axiom::EditorPhysicsColliderType::Box);
+  EXPECT_GT(RootDetails->Physics->BoxHalfExtents.x, 0.0f);
+  EXPECT_GT(RootDetails->Physics->BoxHalfExtents.y, 0.0f);
+  EXPECT_GT(RootDetails->Physics->BoxHalfExtents.z, 0.0f);
 }
 
 TEST(SceneLifecycleTests, CreateWithUnknownTemplateIdIsRejected) {
@@ -2290,6 +2302,62 @@ TEST(SceneLifecycleTests, SceneFile_SaveLoadRoundTripsPhysicsState) {
   EXPECT_FLOAT_EQ(DetailsIt->second.Physics->Mass, 4.0f);
   EXPECT_FLOAT_EQ(DetailsIt->second.Physics->Friction, 0.45f);
   EXPECT_FLOAT_EQ(DetailsIt->second.Physics->Restitution, 0.25f);
+}
+
+TEST(SceneLifecycleTests, SceneFile_LoadMigratesMissingMeshPhysicsToStaticBox) {
+  EnsureLogInitialized();
+
+  const auto TempRoot =
+      std::filesystem::temp_directory_path() / "wraithengine-mesh-physics-migration-test";
+  std::error_code RemoveError;
+  std::filesystem::remove_all(TempRoot, RemoveError);
+  std::filesystem::create_directories(TempRoot / "Content");
+  WriteSingleMeshObj(TempRoot / "Content");
+
+  Axiom::EditorSceneState Scene;
+  Scene.Items = {{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {{
+          .Id = "crate-1",
+          .DisplayName = "Crate",
+          .Kind = Axiom::EditorSceneItemKind::Mesh,
+          .Visible = true,
+          .Children = {},
+      }},
+  }};
+  Scene.ObjectDetailsById["crate-1"] = Axiom::EditorObjectDetails{
+      .ObjectId = "crate-1",
+      .DisplayName = "Crate",
+      .Kind = Axiom::EditorSceneItemKind::Mesh,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      .Transform = Axiom::EditorTransformDetails{
+          .Location = glm::vec3(0.0f),
+          .RotationDegrees = glm::vec3(0.0f),
+          .Scale = glm::vec3(2.0f, 3.0f, 4.0f),
+      },
+      .AssetRelativePath = "singlemesh.obj",
+  };
+
+  const auto ScenePath = TempRoot / "Content" / "scene.json";
+  ASSERT_TRUE(Axiom::Assets::SaveSceneToFile(ScenePath, Scene));
+
+  const auto Loaded = Axiom::Assets::LoadSceneFromFile(ScenePath);
+  ASSERT_TRUE(Loaded.has_value());
+  const auto DetailsIt = Loaded->ObjectDetailsById.find("crate-1");
+  ASSERT_NE(DetailsIt, Loaded->ObjectDetailsById.end());
+  ASSERT_TRUE(DetailsIt->second.Physics.has_value());
+  EXPECT_EQ(DetailsIt->second.Physics->BodyType,
+            Axiom::EditorPhysicsBodyType::Static);
+  EXPECT_EQ(DetailsIt->second.Physics->ColliderType,
+            Axiom::EditorPhysicsColliderType::Box);
+  EXPECT_FLOAT_EQ(DetailsIt->second.Physics->BoxHalfExtents.x, 2.0f);
+  EXPECT_FLOAT_EQ(DetailsIt->second.Physics->BoxHalfExtents.y, 3.0f);
+  EXPECT_FLOAT_EQ(DetailsIt->second.Physics->BoxHalfExtents.z, 0.01f);
 }
 
 TEST(SceneLifecycleTests, SceneFile_SaveLoadRegeneratesMultiMeshChildrenWithoutDuplicatingThem) {

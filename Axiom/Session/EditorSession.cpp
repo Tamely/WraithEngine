@@ -13,6 +13,7 @@
 #include <glm/trigonometric.hpp>
 
 #include <algorithm>
+#include <array>
 #include <utility>
 
 namespace Axiom {
@@ -64,6 +65,64 @@ std::string PresenceStateName(EditorUserPresenceState State) {
 }
 
 bool IsHostUser(SessionUserId User) { return User.Value == 1; }
+
+glm::vec3 AbsVec3(const glm::vec3 &Value) {
+  return glm::vec3(std::abs(Value.x), std::abs(Value.y), std::abs(Value.z));
+}
+
+void ExpandBounds(const glm::vec3 &BoundsMin, const glm::vec3 &BoundsMax,
+                  const glm::mat4 &Transform, glm::vec3 &OutMin,
+                  glm::vec3 &OutMax, bool &HasBounds) {
+  const std::array<glm::vec3, 8> Corners = {
+      glm::vec3(BoundsMin.x, BoundsMin.y, BoundsMin.z),
+      glm::vec3(BoundsMax.x, BoundsMin.y, BoundsMin.z),
+      glm::vec3(BoundsMin.x, BoundsMax.y, BoundsMin.z),
+      glm::vec3(BoundsMax.x, BoundsMax.y, BoundsMin.z),
+      glm::vec3(BoundsMin.x, BoundsMin.y, BoundsMax.z),
+      glm::vec3(BoundsMax.x, BoundsMin.y, BoundsMax.z),
+      glm::vec3(BoundsMin.x, BoundsMax.y, BoundsMax.z),
+      glm::vec3(BoundsMax.x, BoundsMax.y, BoundsMax.z),
+  };
+
+  for (const glm::vec3 &Corner : Corners) {
+    const glm::vec3 WorldCorner = glm::vec3(Transform * glm::vec4(Corner, 1.0f));
+    if (!HasBounds) {
+      OutMin = WorldCorner;
+      OutMax = WorldCorner;
+      HasBounds = true;
+      continue;
+    }
+    OutMin = glm::min(OutMin, WorldCorner);
+    OutMax = glm::max(OutMax, WorldCorner);
+  }
+}
+
+std::optional<EditorPhysicsProperties>
+BuildDefaultStaticMeshPhysics(const MeshSceneData &SceneData,
+                              const EditorTransformDetails &RootTransform) {
+  glm::vec3 CombinedMin(0.0f);
+  glm::vec3 CombinedMax(0.0f);
+  bool HasBounds = false;
+
+  for (const auto &Instance : SceneData.Instances) {
+    ExpandBounds(Instance.Mesh.BoundsMin, Instance.Mesh.BoundsMax,
+                 Instance.Transform, CombinedMin, CombinedMax, HasBounds);
+  }
+
+  if (!HasBounds) {
+    return std::nullopt;
+  }
+
+  glm::vec3 HalfExtents = glm::max(glm::abs(CombinedMin), glm::abs(CombinedMax));
+  HalfExtents *= AbsVec3(RootTransform.Scale);
+  HalfExtents = glm::max(HalfExtents, glm::vec3(0.01f));
+
+  return EditorPhysicsProperties{
+      .BodyType = EditorPhysicsBodyType::Static,
+      .ColliderType = EditorPhysicsColliderType::Box,
+      .BoxHalfExtents = HalfExtents,
+  };
+}
 
 std::string DefaultPresentationColor(SessionUserId User) {
   static constexpr const char *Palette[] = {
@@ -852,6 +911,11 @@ void EditorSession::ExpandMeshAssetIntoScene(std::string_view RootObjectId,
   RootDetails.IsGeneratedAssetChild = false;
   RootDetails.GeneratedFromAssetRootId = std::nullopt;
   RootDetails.AssetRelativePath = std::string(AssetPath);
+  if (!RootDetails.Physics.has_value()) {
+    const EditorTransformDetails RootTransform =
+        RootDetails.Transform.value_or(EditorTransformDetails{});
+    RootDetails.Physics = BuildDefaultStaticMeshPhysics(SceneData, RootTransform);
+  }
 
   if (SceneData.Instances.size() == 1) {
     const auto &First = SceneData.Instances.front();

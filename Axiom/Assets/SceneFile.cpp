@@ -13,6 +13,7 @@
 #include <fstream>
 #include <functional>
 #include <sstream>
+#include <array>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -174,6 +175,64 @@ EditorTransformDetails DecomposeMatrix(const glm::mat4 &Matrix) {
   };
 }
 
+glm::vec3 AbsVec3(const glm::vec3 &Value) {
+  return glm::vec3(std::abs(Value.x), std::abs(Value.y), std::abs(Value.z));
+}
+
+void ExpandBounds(const glm::vec3 &BoundsMin, const glm::vec3 &BoundsMax,
+                  const glm::mat4 &Transform, glm::vec3 &OutMin,
+                  glm::vec3 &OutMax, bool &HasBounds) {
+  const std::array<glm::vec3, 8> Corners = {
+      glm::vec3(BoundsMin.x, BoundsMin.y, BoundsMin.z),
+      glm::vec3(BoundsMax.x, BoundsMin.y, BoundsMin.z),
+      glm::vec3(BoundsMin.x, BoundsMax.y, BoundsMin.z),
+      glm::vec3(BoundsMax.x, BoundsMax.y, BoundsMin.z),
+      glm::vec3(BoundsMin.x, BoundsMin.y, BoundsMax.z),
+      glm::vec3(BoundsMax.x, BoundsMin.y, BoundsMax.z),
+      glm::vec3(BoundsMin.x, BoundsMax.y, BoundsMax.z),
+      glm::vec3(BoundsMax.x, BoundsMax.y, BoundsMax.z),
+  };
+
+  for (const glm::vec3 &Corner : Corners) {
+    const glm::vec3 WorldCorner = glm::vec3(Transform * glm::vec4(Corner, 1.0f));
+    if (!HasBounds) {
+      OutMin = WorldCorner;
+      OutMax = WorldCorner;
+      HasBounds = true;
+      continue;
+    }
+    OutMin = glm::min(OutMin, WorldCorner);
+    OutMax = glm::max(OutMax, WorldCorner);
+  }
+}
+
+std::optional<EditorPhysicsProperties>
+BuildDefaultStaticMeshPhysics(const MeshSceneData &SceneData,
+                              const EditorTransformDetails &RootTransform) {
+  glm::vec3 CombinedMin(0.0f);
+  glm::vec3 CombinedMax(0.0f);
+  bool HasBounds = false;
+
+  for (const auto &Instance : SceneData.Instances) {
+    ExpandBounds(Instance.Mesh.BoundsMin, Instance.Mesh.BoundsMax,
+                 Instance.Transform, CombinedMin, CombinedMax, HasBounds);
+  }
+
+  if (!HasBounds) {
+    return std::nullopt;
+  }
+
+  glm::vec3 HalfExtents = glm::max(glm::abs(CombinedMin), glm::abs(CombinedMax));
+  HalfExtents *= AbsVec3(RootTransform.Scale);
+  HalfExtents = glm::max(HalfExtents, glm::vec3(0.01f));
+
+  return EditorPhysicsProperties{
+      .BodyType = EditorPhysicsBodyType::Static,
+      .ColliderType = EditorPhysicsColliderType::Box,
+      .BoxHalfExtents = HalfExtents,
+  };
+}
+
 void ExpandMeshAssetIntoScene(EditorSceneState &State, std::string_view RootObjectId,
                               const MeshSceneData &SceneData,
                               std::string_view AssetPath) {
@@ -186,6 +245,11 @@ void ExpandMeshAssetIntoScene(EditorSceneState &State, std::string_view RootObje
   RootDetails.IsGeneratedAssetChild = false;
   RootDetails.GeneratedFromAssetRootId = std::nullopt;
   RootDetails.AssetRelativePath = std::string(AssetPath);
+  if (!RootDetails.Physics.has_value()) {
+    const EditorTransformDetails RootTransform =
+        RootDetails.Transform.value_or(EditorTransformDetails{});
+    RootDetails.Physics = BuildDefaultStaticMeshPhysics(SceneData, RootTransform);
+  }
 
   auto *RootItem = FindSceneItemMutable(State.Items, RootObjectId);
   if (RootItem == nullptr) {
@@ -1015,6 +1079,16 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
             DetailsIt->second.Transform.has_value()) {
           const auto &T = *DetailsIt->second.Transform;
           Transform = BuildTransformMatrix(T);
+        }
+
+        if (DetailsIt != State.ObjectDetailsById.end() &&
+            !DetailsIt->second.Physics.has_value()) {
+          const auto RootTransform =
+              DetailsIt->second.Transform.value_or(EditorTransformDetails{});
+          MeshSceneData SingleMeshScene;
+          SingleMeshScene.Instances.push_back(Instance);
+          DetailsIt->second.Physics =
+              BuildDefaultStaticMeshPhysics(SingleMeshScene, RootTransform);
         }
 
         State.MeshInstances.push_back({

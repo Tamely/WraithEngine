@@ -345,6 +345,15 @@ void SerializeObjectDetails(std::ostringstream &Stream,
          << "\",\"displayName\":\"" << EscapeJson(Details.DisplayName)
          << "\",\"kind\":\"" << SceneItemKindToString(Details.Kind)
          << "\",\"visible\":" << (Details.Visible ? "true" : "false")
+         << ",\"isGeneratedAssetChild\":"
+         << (Details.IsGeneratedAssetChild ? "true" : "false");
+  if (Details.GeneratedFromAssetRootId.has_value()) {
+    Stream << ",\"generatedFromAssetRootId\":\""
+           << EscapeJson(*Details.GeneratedFromAssetRootId) << "\"";
+  } else {
+    Stream << ",\"generatedFromAssetRootId\":null";
+  }
+  Stream
          << ",\"capabilities\":{\"supportsTransform\":"
          << (Details.SupportsTransform ? "true" : "false")
          << ",\"transformReadOnly\":"
