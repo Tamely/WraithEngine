@@ -143,6 +143,24 @@ std::string CommandTypeName(const EditorCommandPayload &Payload) {
   return "set_transform";
 }
 
+bool IsAuthoringMutationCommand(const EditorCommandPayload &Payload) {
+  return std::holds_alternative<RenameObjectCommand>(Payload) ||
+         std::holds_alternative<SetObjectVisibilityCommand>(Payload) ||
+         std::holds_alternative<CreateObjectCommand>(Payload) ||
+         std::holds_alternative<CreateMeshObjectCommand>(Payload) ||
+         std::holds_alternative<DuplicateObjectCommand>(Payload) ||
+         std::holds_alternative<DeleteObjectCommand>(Payload) ||
+         std::holds_alternative<ReparentObjectCommand>(Payload) ||
+         std::holds_alternative<SetTransformCommand>(Payload) ||
+         std::holds_alternative<AttachScriptCommand>(Payload) ||
+         std::holds_alternative<DetachScriptCommand>(Payload) ||
+         std::holds_alternative<SetMeshAssetCommand>(Payload) ||
+         std::holds_alternative<SetLightPropertiesCommand>(Payload) ||
+         std::holds_alternative<SetMaterialPropertiesCommand>(Payload) ||
+         std::holds_alternative<SetMaterialTextureCommand>(Payload) ||
+         std::holds_alternative<SetPhysicsPropertiesCommand>(Payload);
+}
+
 EditorSceneItemKind KindForClassName(std::string_view ClassName) {
   if (ClassName == "SceneMeshObject") return EditorSceneItemKind::Mesh;
   if (ClassName == "SceneLight")      return EditorSceneItemKind::Light;
@@ -1123,6 +1141,13 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
        std::holds_alternative<StopSessionCommand>(QueuedCommand.Command.Payload)) &&
       !IsHostUser(QueuedCommand.Context.User)) {
     FailureReason = "Only the host can control simulation state.";
+    return false;
+  }
+
+  if (m_State.RuntimeState != EditorRuntimeState::Edit &&
+      IsAuthoringMutationCommand(QueuedCommand.Command.Payload)) {
+    FailureReason =
+        "Authoring edits are disabled while shared simulation is active.";
     return false;
   }
 

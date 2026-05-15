@@ -303,6 +303,7 @@ export function Viewport() {
     setSessionStatusText,
     setSessionDetailText,
     setGizmoMode: setGizmoModeCtx,
+    runtimeState,
   } = useRemoteViewport()
   const [serverOrigin] = useState(getServerOrigin)
 
@@ -1785,6 +1786,9 @@ export function Viewport() {
       }
 
       if (event.button === 0) {
+        if (runtimeState !== "edit") {
+          return
+        }
         const coords = toServerCoords(event)
         if (coords) {
           isDraggingGizmoRef.current = true
@@ -1829,6 +1833,10 @@ export function Viewport() {
         pendingLookDeltaRef.current.x += event.movementX
         pendingLookDeltaRef.current.y += event.movementY
         sendViewportInputFrame()
+        return
+      }
+
+      if (runtimeState !== "edit") {
         return
       }
 

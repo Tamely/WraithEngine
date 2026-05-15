@@ -3077,6 +3077,11 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     return true;
   }
   case HeadlessCommandType::GizmoHover: {
+    if (m_Host.GetHeadlessLayer().GetSession().GetRuntimeState() !=
+        EditorRuntimeState::Edit) {
+      m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
+      return true;
+    }
     if (Client->GizmoDrag.has_value()) {
       return true;
     }
@@ -3109,6 +3114,10 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     return true;
   }
   case HeadlessCommandType::GizmoDragStart: {
+    if (m_Host.GetHeadlessLayer().GetSession().GetRuntimeState() !=
+        EditorRuntimeState::Edit) {
+      return true;
+    }
     if (Client->GizmoDrag.has_value()) {
       return true;
     }
@@ -3183,6 +3192,17 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     return true;
   }
   case HeadlessCommandType::GizmoDragUpdate: {
+    if (m_Host.GetHeadlessLayer().GetSession().GetRuntimeState() !=
+        EditorRuntimeState::Edit) {
+      if (Client->GizmoDrag.has_value()) {
+        EditorSession &Session = m_Host.GetHeadlessLayer().GetSession();
+        const std::string DragObjectId = Client->GizmoDrag->ObjectId;
+        Client->GizmoDrag.reset();
+        Session.ReleaseLock(DragObjectId, Client->User);
+        m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
+      }
+      return true;
+    }
     if (!Client->GizmoDrag.has_value()) {
       return true;
     }

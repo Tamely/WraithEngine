@@ -139,6 +139,139 @@ TEST(SceneLifecycleTests, NonHostCannotControlRuntimeState) {
   EXPECT_NE(Rejected->Reason.find("host"), std::string::npos);
 }
 
+TEST(SceneLifecycleTests, InvalidRuntimeTransitionsAreRejected) {
+  Axiom::EditorSession Session = MakeWorldSession();
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(MakeContext(1, 1), {.Payload = Axiom::PauseSessionCommand{}});
+  Session.Tick();
+
+  const auto *PauseRejected =
+      FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events);
+  ASSERT_NE(PauseRejected, nullptr);
+  EXPECT_NE(PauseRejected->Reason.find("only valid while playing"),
+            std::string::npos);
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Edit);
+
+  Subscriber.Events.clear();
+
+  Session.Submit(MakeContext(2, 1), {.Payload = Axiom::PlaySessionCommand{}});
+  Session.Tick();
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Playing);
+
+  Subscriber.Events.clear();
+
+  Session.Submit(MakeContext(3, 1), {.Payload = Axiom::PlaySessionCommand{}});
+  Session.Tick();
+
+  const auto *PlayRejected =
+      FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events);
+  ASSERT_NE(PlayRejected, nullptr);
+  EXPECT_NE(PlayRejected->Reason.find("only valid while in edit mode"),
+            std::string::npos);
+  EXPECT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Playing);
+}
+
+TEST(SceneLifecycleTests, AuthoringMutationsAreRejectedWhileSimulationIsActive) {
+  Axiom::EditorSession Session = MakeWorldSession();
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.SetObjectDetails({
+      {
+          .ObjectId = "world",
+          .DisplayName = "World",
+          .Kind = Axiom::EditorSceneItemKind::Folder,
+          .Visible = true,
+          .SupportsTransform = false,
+          .TransformReadOnly = true,
+      },
+      {
+          .ObjectId = "crate-1",
+          .DisplayName = "Crate",
+          .Kind = Axiom::EditorSceneItemKind::Mesh,
+          .Visible = true,
+          .SupportsTransform = true,
+          .TransformReadOnly = false,
+          .Transform = Axiom::EditorTransformDetails{
+              .Location = glm::vec3(1.0f, 2.0f, 3.0f),
+              .RotationDegrees = glm::vec3(0.0f),
+              .Scale = glm::vec3(1.0f),
+          },
+      },
+  });
+  Session.SetSceneItems({{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {{
+          .Id = "crate-1",
+          .DisplayName = "Crate",
+          .Kind = Axiom::EditorSceneItemKind::Mesh,
+          .Visible = true,
+      }},
+  }});
+
+  Session.Submit(MakeContext(1, 1), {.Payload = Axiom::PlaySessionCommand{}});
+  Session.Tick();
+  ASSERT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Playing);
+
+  Subscriber.Events.clear();
+  Session.Submit(MakeContext(2, 1),
+                 {.Payload = Axiom::SetTransformCommand{
+                      .ObjectId = "crate-1",
+                      .Location = glm::vec3(9.0f, 8.0f, 7.0f),
+                      .RotationDegrees = glm::vec3(15.0f),
+                      .Scale = glm::vec3(2.0f),
+                  }});
+  Session.Tick();
+
+  const auto *TransformRejected =
+      FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events);
+  ASSERT_NE(TransformRejected, nullptr);
+  EXPECT_NE(TransformRejected->Reason.find("simulation is active"),
+            std::string::npos);
+  ASSERT_EQ(FindEvent<Axiom::ObjectTransformUpdatedEvent>(Subscriber.Events), nullptr);
+
+  const auto *DetailsAfterPlay = Session.FindObjectDetails("crate-1");
+  ASSERT_NE(DetailsAfterPlay, nullptr);
+  ASSERT_TRUE(DetailsAfterPlay->Transform.has_value());
+  EXPECT_EQ(DetailsAfterPlay->Transform->Location, glm::vec3(1.0f, 2.0f, 3.0f));
+
+  Subscriber.Events.clear();
+  Session.Submit(MakeContext(3, 1), {.Payload = Axiom::PauseSessionCommand{}});
+  Session.Tick();
+  ASSERT_EQ(Session.GetRuntimeState(), Axiom::EditorRuntimeState::Paused);
+
+  Subscriber.Events.clear();
+  Session.Submit(MakeContext(4, 1),
+                 {.Payload = Axiom::SetPhysicsPropertiesCommand{
+                      .ObjectId = "crate-1",
+                      .Physics = Axiom::EditorPhysicsProperties{
+                          .BodyType = Axiom::EditorPhysicsBodyType::Dynamic,
+                          .ColliderType = Axiom::EditorPhysicsColliderType::Sphere,
+                          .SphereRadius = 0.75f,
+                          .Mass = 3.0f,
+                          .Friction = 0.4f,
+                          .Restitution = 0.2f,
+                      },
+                  }});
+  Session.Tick();
+
+  const auto *PhysicsRejected =
+      FindEvent<Axiom::CommandRejectedEvent>(Subscriber.Events);
+  ASSERT_NE(PhysicsRejected, nullptr);
+  EXPECT_NE(PhysicsRejected->Reason.find("simulation is active"),
+            std::string::npos);
+  ASSERT_EQ(FindEvent<Axiom::PhysicsPropertiesChangedEvent>(Subscriber.Events), nullptr);
+
+  const auto *DetailsAfterPause = Session.FindObjectDetails("crate-1");
+  ASSERT_NE(DetailsAfterPause, nullptr);
+  EXPECT_FALSE(DetailsAfterPause->Physics.has_value());
+}
+
 TEST(SceneLifecycleTests, PhysicsStepsDynamicBodiesOnlyWhilePlaying) {
 #if !AXIOM_ENABLE_PHYSICS
   GTEST_SKIP() << "Physics backend disabled for this build.";

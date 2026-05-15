@@ -79,7 +79,7 @@ function DetailsContent({
   details: SessionObjectDetails
   schema: SessionObjectSchema | null
 }) {
-  const { participants, setProperty, updateTransform } = useRemoteViewport()
+  const { participants, runtimeState, setProperty, updateTransform } = useRemoteViewport()
   const [draftName, setDraftName] = useState(details.displayName)
   const [draft, setDraft] = useState<DraftTransform>(() => toDraft(details))
   const [isSaving, setIsSaving] = useState(false)
@@ -110,6 +110,8 @@ function DetailsContent({
     (schemaTransformReadOnly !== null
       ? !schemaTransformReadOnly
       : !details.capabilities.transformReadOnly)
+  const simulationActive = runtimeState !== "edit"
+  const canAuthor = !simulationActive
   const selectedByNames = details.collaboration.selectedByUserIds.map((userId) => {
     const collaborator = participants.find((entry) => entry.userId === userId)
     return collaborator?.displayName ?? fallbackUserLabel(userId)
@@ -166,7 +168,7 @@ function DetailsContent({
             <div className="min-w-0 flex-1">
               <input
                 className="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 outline-none focus:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={isSaving}
+                disabled={isSaving || simulationActive}
                 onChange={(event) => setDraftName(event.target.value)}
                 type="text"
                 value={draftName}
@@ -182,10 +184,14 @@ function DetailsContent({
           />
           <DetailRow label="Lock State" value={details.collaboration.lockState} />
           <DetailRow label="Lock Owner" value={lockOwnerName} />
+          <DetailRow
+            label="Authoring"
+            value={canAuthor ? "Enabled" : "Disabled during simulation"}
+          />
           <div className="flex justify-end gap-2 pt-1">
             <button
               className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={isSaving}
+              disabled={isSaving || simulationActive}
               onClick={() => void toggleVisibility()}
               type="button"
             >
@@ -193,7 +199,12 @@ function DetailsContent({
             </button>
             <button
               className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={isSaving || draftName.trim().length === 0 || draftName === details.displayName}
+              disabled={
+                isSaving ||
+                simulationActive ||
+                draftName.trim().length === 0 ||
+                draftName === details.displayName
+              }
               onClick={() => void applyIdentity()}
               type="button"
             >
@@ -207,7 +218,7 @@ function DetailsContent({
         <ScriptSection
           objectId={details.objectId}
           schema={schema}
-          isSaving={isSaving}
+          isSaving={isSaving || simulationActive}
           setIsSaving={setIsSaving}
         />
       )}
@@ -216,7 +227,7 @@ function DetailsContent({
         <LightSection
           objectId={details.objectId}
           light={details.light ?? null}
-          isSaving={isSaving}
+          isSaving={isSaving || simulationActive}
           setIsSaving={setIsSaving}
         />
       )}
@@ -225,7 +236,7 @@ function DetailsContent({
         <MaterialSection
           objectId={details.objectId}
           material={details.material ?? null}
-          isSaving={isSaving}
+          isSaving={isSaving || simulationActive}
           setIsSaving={setIsSaving}
         />
       )}
@@ -234,7 +245,7 @@ function DetailsContent({
         <PhysicsSection
           objectId={details.objectId}
           physics={details.physics ?? null}
-          isSaving={isSaving}
+          isSaving={isSaving || simulationActive}
           setIsSaving={setIsSaving}
         />
       )}
@@ -244,13 +255,13 @@ function DetailsContent({
         {details.capabilities.supportsTransform && details.transform ? (
           <div className="mt-3 space-y-3">
             <VectorEditor
-              disabled={!canEdit || isSaving}
+              disabled={!canEdit || isSaving || simulationActive}
               label="Location"
               value={draft.location}
               onChange={(value) => setDraft((current) => ({ ...current, location: value }))}
             />
             <VectorEditor
-              disabled={!canEdit || isSaving}
+              disabled={!canEdit || isSaving || simulationActive}
               label="Rotation"
               value={draft.rotationDegrees}
               onChange={(value) =>
@@ -258,17 +269,26 @@ function DetailsContent({
               }
             />
             <VectorEditor
-              disabled={!canEdit || isSaving}
+              disabled={!canEdit || isSaving || simulationActive}
               label="Scale"
               value={draft.scale}
               onChange={(value) => setDraft((current) => ({ ...current, scale: value }))}
             />
-            <DetailRow label="Editability" value={canEdit ? "Editable" : "Read-only"} />
+            <DetailRow
+              label="Editability"
+              value={
+                simulationActive
+                  ? "Runtime-owned"
+                  : canEdit
+                    ? "Editable"
+                    : "Read-only"
+              }
+            />
             {canEdit && (
               <div className="flex justify-end">
                 <button
                   className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={isSaving}
+                  disabled={isSaving || simulationActive}
                   onClick={() => void applyTransform()}
                   type="button"
                 >
