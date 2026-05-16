@@ -1069,6 +1069,8 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
         R"json("skyboxColorTop"\s*:\s*\[\s*(-?[0-9Ee.+-]+)\s*,\s*(-?[0-9Ee.+-]+)\s*,\s*(-?[0-9Ee.+-]+)\s*\])json");
     static const std::regex BottomPattern(
         R"json("skyboxColorBottom"\s*:\s*\[\s*(-?[0-9Ee.+-]+)\s*,\s*(-?[0-9Ee.+-]+)\s*,\s*(-?[0-9Ee.+-]+)\s*\])json");
+    static const std::regex HDRPattern(
+        R"json("skyboxHDRPath"\s*:\s*"([^"]*)")json");
 
     HeadlessCommand Cmd;
     Cmd.Type = HeadlessCommandType::SetWorldSettings;
@@ -1093,10 +1095,16 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
         Cmd.SkyboxColorBottom.b = static_cast<float>(*B);
     }
 
+    if (std::regex_search(JsonLine.begin(), JsonLine.end(), Match, HDRPattern) &&
+        Match.size() == 2) {
+      Cmd.SkyboxHDRPath.assign(Match[1].first, Match[1].second);
+    }
+
     Cmd.EditorPayload = {.Payload = SetWorldSettingsCommand{
                              .Settings = EditorWorldSettings{
                                  .SkyboxColorTop = Cmd.SkyboxColorTop,
-                                 .SkyboxColorBottom = Cmd.SkyboxColorBottom}}};
+                                 .SkyboxColorBottom = Cmd.SkyboxColorBottom,
+                                 .SkyboxHDRPath = Cmd.SkyboxHDRPath}}};
     return Cmd;
   }
   if (*Type == "set_gizmo_mode") {
@@ -1589,13 +1597,15 @@ std::string SerializeSessionSnapshot(const EditorSessionState &State,
     }
     SerializeSceneItem(Stream, State.Scene.Items[Index]);
   }
-  Stream << "],\"worldSettings\":{\"skyboxColorTop\":[" 
+  Stream << "],\"worldSettings\":{\"skyboxColorTop\":["
          << State.Scene.WorldSettings.SkyboxColorTop.r << ","
          << State.Scene.WorldSettings.SkyboxColorTop.g << ","
          << State.Scene.WorldSettings.SkyboxColorTop.b << "],\"skyboxColorBottom\":["
          << State.Scene.WorldSettings.SkyboxColorBottom.r << ","
          << State.Scene.WorldSettings.SkyboxColorBottom.g << ","
-         << State.Scene.WorldSettings.SkyboxColorBottom.b << "]}"
+         << State.Scene.WorldSettings.SkyboxColorBottom.b
+         << "],\"skyboxHDRPath\":\""
+         << EscapeJson(State.Scene.WorldSettings.SkyboxHDRPath) << "\"}"
          << ",\"selectedObjectDetails\":";
   if (const EditorObjectDetails *Details =
           [&]() -> const EditorObjectDetails * {

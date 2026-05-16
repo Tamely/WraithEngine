@@ -44,6 +44,19 @@ void CookTextureAssetBestEffort(const std::filesystem::path &ContentDir,
   }
 }
 
+void CookHDRTextureAssetBestEffort(const std::filesystem::path &ContentDir,
+                                   std::string_view RelativeAssetPath) {
+  if (ContentDir.empty() || RelativeAssetPath.empty()) {
+    return;
+  }
+
+  const auto Cooked = Assets::CookHDRTextureAsset(ContentDir, RelativeAssetPath);
+  if (!Cooked.has_value()) {
+    A_CORE_WARN("EditorSession: failed to cook HDR texture asset '{}'",
+                std::string(RelativeAssetPath));
+  }
+}
+
 std::string DefaultUserDisplayName(SessionUserId User) {
   if (User.Value == 1) {
     return "Host";
@@ -2249,7 +2262,33 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
 void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                   const SetWorldSettingsCommand &Command) {
   (void)QueuedCommand;
+  const std::string PreviousHDRPath = m_State.Scene.WorldSettings.SkyboxHDRPath;
+  HDRTextureSourceDataRef PreviousHDRData = m_State.Scene.WorldSettings.SkyboxHDRData;
+
   m_State.Scene.WorldSettings = Command.Settings;
+
+  if (Command.Settings.SkyboxHDRPath.empty()) {
+    m_State.Scene.WorldSettings.SkyboxHDRData = nullptr;
+  } else if (Command.Settings.SkyboxHDRPath == PreviousHDRPath &&
+             PreviousHDRData) {
+    // Path unchanged and we already have the data loaded — reuse it.
+    m_State.Scene.WorldSettings.SkyboxHDRData = std::move(PreviousHDRData);
+  } else if (m_ContentDir.empty()) {
+    A_CORE_WARN("SetWorldSettings: content directory not configured; cannot "
+                "load HDR '{}'",
+                Command.Settings.SkyboxHDRPath);
+    m_State.Scene.WorldSettings.SkyboxHDRData = nullptr;
+  } else {
+    CookHDRTextureAssetBestEffort(m_ContentDir,
+                                  Command.Settings.SkyboxHDRPath);
+    const auto FullPath = m_ContentDir / Command.Settings.SkyboxHDRPath;
+    auto Loaded = Assets::LoadHDRTextureFromFile(FullPath);
+    if (!Loaded) {
+      A_CORE_WARN("SetWorldSettings: failed to load HDR '{}'",
+                  Command.Settings.SkyboxHDRPath);
+    }
+    m_State.Scene.WorldSettings.SkyboxHDRData = std::move(Loaded);
+  }
 }
 
 void EditorSession::SetContentDir(std::filesystem::path ContentDir) {

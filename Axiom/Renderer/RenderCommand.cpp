@@ -46,5 +46,11 @@ void RenderCommand::SetSkyboxColors(const glm::vec3 &Top, const glm::vec3 &Botto
   }
 }
 
+void RenderCommand::SetSkyboxHDR(HDRTextureSourceDataRef Texture) {
+  if (s_ActiveScene) {
+    s_ActiveScene->SkyboxHDRTexture = std::move(Texture);
+  }
+}
+
 void RenderCommand::EndScene() { s_ActiveScene = nullptr; }
 } // namespace Axiom
