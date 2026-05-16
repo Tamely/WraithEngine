@@ -190,6 +190,11 @@ interface RemoteViewportActions {
     roughness: number
   ) => Promise<boolean>
   setMaterialTexture: (objectId: string, textureAssetPath: string) => Promise<boolean>
+  setWorldSettings: (
+    skyboxColorTop: [number, number, number],
+    skyboxColorBottom: [number, number, number],
+    skyboxHDRPath: string,
+  ) => Promise<boolean>
 }
 
 export interface SessionObjectTransformUpdate {
@@ -303,12 +308,18 @@ interface RemoteViewportContextValue {
   duplicateObject: (objectId: string) => Promise<boolean>
   deleteObject: (objectId: string) => Promise<boolean>
   reparentObject: (objectId: string, newParentId: string) => Promise<boolean>
-  setWorldSettings: (skyboxColorTop: [number, number, number], skyboxColorBottom: [number, number, number]) => Promise<boolean>
+  worldSettings: SessionWorldSettings
+  setWorldSettings: (
+    skyboxColorTop: [number, number, number],
+    skyboxColorBottom: [number, number, number],
+    skyboxHDRPath: string,
+  ) => Promise<boolean>
 }
 
 export interface SessionWorldSettings {
   skyboxColorTop: [number, number, number]
   skyboxColorBottom: [number, number, number]
+  skyboxHDRPath: string
 }
 
 interface SessionSnapshot {
@@ -412,6 +423,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
   const [worldSettings, setWorldSettingsState] = useState<SessionWorldSettings>({
     skyboxColorTop: [0.08, 0.09, 0.14],
     skyboxColorBottom: [0.14, 0.24, 0.38],
+    skyboxHDRPath: "",
   })
   const [selections, setSelections] = useState<SessionSelection[]>([])
   const [selectedObjectDetails, setSelectedObjectDetails] =
@@ -464,6 +476,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     setWorldSettingsState({
       skyboxColorTop: [0.08, 0.09, 0.14],
       skyboxColorBottom: [0.14, 0.24, 0.38],
+      skyboxHDRPath: "",
     })
     setSelections([])
     setSelectedObjectDetails(null)
@@ -708,7 +721,11 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       setMaterialProperties,
       setMaterialTexture,
       worldSettings,
-      setWorldSettings: async (top: [number, number, number], bottom: [number, number, number]) => await actionsRef.current.setWorldSettings(top, bottom),
+      setWorldSettings: async (
+        top: [number, number, number],
+        bottom: [number, number, number],
+        hdrPath: string,
+      ) => await actionsRef.current.setWorldSettings(top, bottom, hdrPath),
       reloadStatus,
       setReloadStatus,
       scriptErrorToasts,

@@ -86,6 +86,7 @@ interface SessionSnapshotResponse {
   worldSettings?: {
     skyboxColorTop: [number, number, number]
     skyboxColorBottom: [number, number, number]
+    skyboxHDRPath?: string
   }
 }
 
@@ -234,6 +235,12 @@ type RemoteViewportCommand =
     mouseX: number
     mouseY: number
     textureAssetPath: string
+  }
+  | {
+    type: "set_world_settings"
+    skyboxColorTop: [number, number, number]
+    skyboxColorBottom: [number, number, number]
+    skyboxHDRPath: string
   }
 
 function formatLogEntry(value: unknown) {
@@ -577,9 +584,12 @@ export function Viewport() {
         sceneTree: snapshot.sceneTree ?? [],
         selections: snapshot.selections ?? [],
         selectedObjectDetails: snapshot.selectedObjectDetails ?? null,
-        worldSettings: snapshot.worldSettings ?? {
-          skyboxColorTop: [0.08, 0.09, 0.14],
-          skyboxColorBottom: [0.14, 0.24, 0.38],
+        worldSettings: {
+          skyboxColorTop:
+            snapshot.worldSettings?.skyboxColorTop ?? [0.08, 0.09, 0.14],
+          skyboxColorBottom:
+            snapshot.worldSettings?.skyboxColorBottom ?? [0.14, 0.24, 0.38],
+          skyboxHDRPath: snapshot.worldSettings?.skyboxHDRPath ?? "",
         },
       })
       sessionReadyRef.current = true
@@ -1629,12 +1639,13 @@ export function Viewport() {
         }
         return accepted
       },
-      setWorldSettings: async (skyboxColorTop, skyboxColorBottom) => {
+      setWorldSettings: async (skyboxColorTop, skyboxColorBottom, skyboxHDRPath) => {
         const accepted = await sendCommand(
           {
             type: "set_world_settings",
             skyboxColorTop,
             skyboxColorBottom,
+            skyboxHDRPath,
           },
           "reliable"
         )
