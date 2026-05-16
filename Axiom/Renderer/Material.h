@@ -22,6 +22,20 @@ struct TextureSourceData {
 
 using TextureSourceDataRef = std::shared_ptr<TextureSourceData>;
 
+struct HDRTextureSourceData {
+  uint32_t Width{0};
+  uint32_t Height{0};
+  std::vector<float> Pixels; // RGBA floats, 4 per pixel
+
+  [[nodiscard]] bool IsValid() const {
+    return Width > 0 && Height > 0 &&
+           Pixels.size() == static_cast<size_t>(Width) *
+                                static_cast<size_t>(Height) * 4;
+  }
+};
+
+using HDRTextureSourceDataRef = std::shared_ptr<HDRTextureSourceData>;
+
 struct MaterialInstance {
   TextureSourceDataRef BaseColorTexture;
   glm::vec4 BaseColorFactor{1.0f};

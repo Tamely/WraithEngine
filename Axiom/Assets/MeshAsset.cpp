@@ -579,4 +579,52 @@ TextureSourceDataRef LoadTextureFromMemory(const unsigned char *Bytes,
   return DecodeTextureFromMemory(
       reinterpret_cast<const stbi_uc *>(Bytes), Length, DebugName);
 }
+
+HDRTextureSourceDataRef
+LoadHDRTextureFromSourceFile(const std::filesystem::path &Path) {
+  int Width = 0;
+  int Height = 0;
+  int Channels = 0;
+  float *DecodedPixels =
+      stbi_loadf(Path.string().c_str(), &Width, &Height, &Channels, STBI_rgb_alpha);
+  if (DecodedPixels == nullptr) {
+    A_CORE_WARN("Failed to load HDR texture file {0}: {1}", Path.string(),
+                stbi_failure_reason());
+    return nullptr;
+  }
+
+  auto Texture = std::make_shared<HDRTextureSourceData>();
+  Texture->Width = static_cast<uint32_t>(Width);
+  Texture->Height = static_cast<uint32_t>(Height);
+  const size_t FloatCount =
+      static_cast<size_t>(Width) * static_cast<size_t>(Height) * 4;
+  Texture->Pixels.assign(DecodedPixels, DecodedPixels + FloatCount);
+  stbi_image_free(DecodedPixels);
+  return Texture;
+}
+
+HDRTextureSourceDataRef LoadHDRTextureFromFile(const std::filesystem::path &Path) {
+  const std::string Ext = ToLowerCopy(Path.extension().string());
+  if (Ext == ".wtex") {
+    const auto Cooked = LoadCookedHDRTextureAsset(Path);
+    if (!Cooked.has_value()) {
+      return nullptr;
+    }
+    return std::make_shared<HDRTextureSourceData>(*Cooked);
+  }
+
+  if (auto Cooked = LoadCookedHDRTextureAssetIfAvailable(Path);
+      Cooked != nullptr) {
+    return Cooked;
+  }
+
+  if (IsCookedOnlyContentPath(Path)) {
+    A_CORE_WARN(
+        "Cooked runtime: missing cooked HDR texture asset for '{}' and source fallback is disabled",
+        Path.string());
+    return nullptr;
+  }
+
+  return LoadHDRTextureFromSourceFile(Path);
+}
 } // namespace Axiom::Assets

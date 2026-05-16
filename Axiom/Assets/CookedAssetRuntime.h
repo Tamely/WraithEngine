@@ -20,6 +20,9 @@ LoadCookedMeshAssetIfAvailable(const std::filesystem::path &Path);
 TextureSourceDataRef
 LoadCookedTextureAssetIfAvailable(const std::filesystem::path &Path);
 
+HDRTextureSourceDataRef
+LoadCookedHDRTextureAssetIfAvailable(const std::filesystem::path &Path);
+
 std::optional<CookedMaterialData>
 LoadCookedMaterialAssetIfAvailable(const std::filesystem::path &Path);
 
