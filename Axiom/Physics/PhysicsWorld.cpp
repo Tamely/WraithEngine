@@ -159,6 +159,7 @@ struct PhysicsWorld::Impl {
     std::string ObjectId;
     EditorPhysicsBodyType BodyType{EditorPhysicsBodyType::None};
     JPH::BodyID BodyId;
+    glm::vec3 Scale{1.0f};
   };
 
   BroadPhaseLayerInterfaceImpl BroadPhaseLayers;
@@ -181,12 +182,14 @@ struct PhysicsWorld::Impl {
     System->SetGravity(JPH::Vec3(0.0f, -9.81f, 0.0f));
   }
 
-  JPH::ShapeRefC BuildShape(const EditorPhysicsProperties &Physics) {
+  JPH::ShapeRefC BuildShape(const EditorPhysicsProperties &Physics, const glm::vec3 &Scale) {
     switch (Physics.ColliderType) {
     case EditorPhysicsColliderType::Box:
-      return new JPH::BoxShape(ToJoltVec3(Physics.BoxHalfExtents));
+      return new JPH::BoxShape(ToJoltVec3(Physics.BoxHalfExtents * Scale));
     case EditorPhysicsColliderType::Sphere:
-      return new JPH::SphereShape(Physics.SphereRadius);
+      return new JPH::SphereShape(Physics.SphereRadius *
+                                  std::max({std::abs(Scale.x), std::abs(Scale.y),
+                                            std::abs(Scale.z)}));
     default:
       return nullptr;
     }
@@ -258,7 +261,11 @@ void PhysicsWorld::Start(const EditorSceneState &Scene) {
       continue;
     }
 
-    JPH::ShapeRefC Shape = m_Impl->BuildShape(Physics);
+    const EditorTransformDetails &Transform = Details.WorldTransform.has_value()
+                                                  ? *Details.WorldTransform
+                                                  : *Details.Transform;
+
+    JPH::ShapeRefC Shape = m_Impl->BuildShape(Physics, Transform.Scale);
     if (Shape == nullptr) {
       continue;
     }
@@ -270,9 +277,7 @@ void PhysicsWorld::Start(const EditorSceneState &Scene) {
     const JPH::ObjectLayer Layer =
         Physics.BodyType == EditorPhysicsBodyType::Dynamic ? kDynamicObjectLayer
                                                            : kStaticObjectLayer;
-    const EditorTransformDetails &Transform = Details.WorldTransform.has_value()
-                                                  ? *Details.WorldTransform
-                                                  : *Details.Transform;
+
     JPH::BodyCreationSettings Settings(
         Shape.GetPtr(), ToJoltRVec3(Transform.Location),
         ToJoltQuatDegrees(Transform.RotationDegrees), MotionType, Layer);
@@ -295,8 +300,10 @@ void PhysicsWorld::Start(const EditorSceneState &Scene) {
     }
 
     const size_t Index = m_Impl->Bodies.size();
-    m_Impl->Bodies.push_back(
-        {.ObjectId = ObjectId, .BodyType = Physics.BodyType, .BodyId = BodyId});
+    m_Impl->Bodies.push_back({.ObjectId = ObjectId,
+                              .BodyType = Physics.BodyType,
+                              .BodyId = BodyId,
+                              .Scale = Transform.Scale});
     m_Impl->BodyIndexByObjectId.emplace(ObjectId, Index);
   }
 
@@ -338,7 +345,7 @@ std::vector<PhysicsTransformUpdate> PhysicsWorld::Step(float DeltaTimeSeconds) {
                     BodyInterface.GetCenterOfMassPosition(Body.BodyId)),
                 .RotationDegrees = ToGlmEulerDegrees(
                     BodyInterface.GetRotation(Body.BodyId)),
-                .Scale = glm::vec3(1.0f),
+                .Scale = Body.Scale,
             },
     });
   }
