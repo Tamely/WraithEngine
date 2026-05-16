@@ -1175,7 +1175,28 @@ void VulkanRendererBackend::SyncHDRSkyboxTexture() {
     return;
   }
 
-  DestroyHDRSkyboxTexture();
+  // Defer destruction of the previous image onto the current frame's deletion
+  // queue. That queue flushes when this frame slot is reused, after its
+  // RenderFence is signaled — guaranteeing every command buffer that bound the
+  // old image/descriptor has finished executing on the GPU.
+  if (m_HDRSkyboxImage.Image != VK_NULL_HANDLE) {
+    AllocatedImage OldImage = m_HDRSkyboxImage;
+    GetCurrentFrame().DeletionQueue.PushFunction(
+        [Device = m_Device.Device, Allocator = m_Device.Allocator,
+         OldImage]() mutable {
+          if (OldImage.ImageView != VK_NULL_HANDLE) {
+            vkDestroyImageView(Device, OldImage.ImageView, VK_NULL_HANDLE);
+          }
+          if (OldImage.Image != VK_NULL_HANDLE) {
+            vmaDestroyImage(Allocator, OldImage.Image, OldImage.Allocation);
+          }
+        });
+    m_HDRSkyboxImage = {};
+    // The descriptor set is pool-allocated; drop the handle. The pool itself
+    // is destroyed at shutdown.
+    m_HDRSkyboxDescriptorSet = VK_NULL_HANDLE;
+  }
+
   if (Wanted) {
     UploadHDRSkyboxTexture(*Wanted);
   }
