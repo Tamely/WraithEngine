@@ -64,6 +64,9 @@ private:
   void InitHzbResources();
   void CollectFrameStats(MeshFrameResources &Frame);
   void DrawBackground(VkCommandBuffer CommandBuffer);
+  void SyncHDRSkyboxTexture();
+  void UploadHDRSkyboxTexture(const HDRTextureSourceData &Texture);
+  void DestroyHDRSkyboxTexture();
   void DrawMeshes(VkCommandBuffer CommandBuffer, RenderScene &Scene);
   void BuildHzb(VkCommandBuffer CommandBuffer, MeshFrameResources &Frame);
   void RecordOffscreenCapture(VkCommandBuffer CommandBuffer,
@@ -122,6 +125,13 @@ private:
 
   VkPipeline m_GradientPipeline{VK_NULL_HANDLE};
   VkPipelineLayout m_GradientPipelineLayout{VK_NULL_HANDLE};
+  VkPipeline m_HDRSkyboxPipeline{VK_NULL_HANDLE};
+  VkPipelineLayout m_HDRSkyboxPipelineLayout{VK_NULL_HANDLE};
+  VkDescriptorSetLayout m_HDRSkyboxDescriptorLayout{VK_NULL_HANDLE};
+  VkDescriptorSet m_HDRSkyboxDescriptorSet{VK_NULL_HANDLE};
+  VkSampler m_HDRSkyboxSampler{VK_NULL_HANDLE};
+  AllocatedImage m_HDRSkyboxImage{};
+  HDRTextureSourceDataRef m_LoadedHDRSkyboxData{nullptr};
   VkPipeline m_HzbReducePipeline{VK_NULL_HANDLE};
   VkPipelineLayout m_HzbReducePipelineLayout{VK_NULL_HANDLE};
   VkPipeline m_MeshProjectPipeline{VK_NULL_HANDLE};

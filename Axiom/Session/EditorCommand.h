@@ -128,6 +128,10 @@ struct ResumeSessionCommand {};
 
 struct StopSessionCommand {};
 
+struct SetWorldSettingsCommand {
+  EditorWorldSettings Settings;
+};
+
 using EditorCommandPayload =
     std::variant<UpdateViewportCameraCommand, SetViewportCameraPoseCommand,
                  SetLookActiveCommand, SelectObjectCommand,
@@ -142,7 +146,7 @@ using EditorCommandPayload =
                  SetMaterialTextureCommand, SetPhysicsPropertiesCommand,
                  PlaySessionCommand,
                  PauseSessionCommand, ResumeSessionCommand,
-                 StopSessionCommand>;
+                 StopSessionCommand, SetWorldSettingsCommand>;
 
 struct EditorCommand {
   EditorCommandPayload Payload;

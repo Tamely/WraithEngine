@@ -83,6 +83,11 @@ interface SessionSnapshotResponse {
   selections: SessionSelection[]
   selectedObjectDetails: SessionObjectDetails | null
   runtimeState: "edit" | "playing" | "paused"
+  worldSettings?: {
+    skyboxColorTop: [number, number, number]
+    skyboxColorBottom: [number, number, number]
+    skyboxHDRPath?: string
+  }
 }
 
 interface SessionConnectResponse {
@@ -230,6 +235,12 @@ type RemoteViewportCommand =
     mouseX: number
     mouseY: number
     textureAssetPath: string
+  }
+  | {
+    type: "set_world_settings"
+    skyboxColorTop: [number, number, number]
+    skyboxColorBottom: [number, number, number]
+    skyboxHDRPath: string
   }
 
 function formatLogEntry(value: unknown) {
@@ -573,6 +584,13 @@ export function Viewport() {
         sceneTree: snapshot.sceneTree ?? [],
         selections: snapshot.selections ?? [],
         selectedObjectDetails: snapshot.selectedObjectDetails ?? null,
+        worldSettings: {
+          skyboxColorTop:
+            snapshot.worldSettings?.skyboxColorTop ?? [0.08, 0.09, 0.14],
+          skyboxColorBottom:
+            snapshot.worldSettings?.skyboxColorBottom ?? [0.14, 0.24, 0.38],
+          skyboxHDRPath: snapshot.worldSettings?.skyboxHDRPath ?? "",
+        },
       })
       sessionReadyRef.current = true
       setSessionUi(
@@ -1613,6 +1631,21 @@ export function Viewport() {
           {
             type: "delete_object",
             objectId,
+          },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
+      setWorldSettings: async (skyboxColorTop, skyboxColorBottom, skyboxHDRPath) => {
+        const accepted = await sendCommand(
+          {
+            type: "set_world_settings",
+            skyboxColorTop,
+            skyboxColorBottom,
+            skyboxHDRPath,
           },
           "reliable"
         )

@@ -1,8 +1,11 @@
 #pragma once
 
+#include "Renderer/Material.h"
+
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 #include <glm/vec3.hpp>
 
@@ -60,5 +63,16 @@ struct EditorPhysicsProperties {
   float Mass{1.0f};
   float Friction{0.2f};
   float Restitution{0.0f};
+};
+
+struct EditorWorldSettings {
+  glm::vec3 SkyboxColorTop{0.08f, 0.09f, 0.14f};
+  glm::vec3 SkyboxColorBottom{0.14f, 0.24f, 0.38f};
+  // Content-relative path to an equirectangular HDR (.hdr / cooked .wtex).
+  // Empty means use the gradient colors above.
+  std::string SkyboxHDRPath;
+  // Loaded HDR pixel data; populated by EditorSession when SkyboxHDRPath
+  // changes. Not serialized.
+  HDRTextureSourceDataRef SkyboxHDRData;
 };
 } // namespace Axiom

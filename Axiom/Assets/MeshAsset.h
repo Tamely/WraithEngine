@@ -14,4 +14,7 @@ TextureSourceDataRef LoadTextureFromFile(const std::filesystem::path &Path);
 TextureSourceDataRef LoadTextureFromSourceFile(const std::filesystem::path &Path);
 TextureSourceDataRef LoadTextureFromMemory(const unsigned char *Bytes, int Length,
                                            const std::string &DebugName);
+
+HDRTextureSourceDataRef LoadHDRTextureFromFile(const std::filesystem::path &Path);
+HDRTextureSourceDataRef LoadHDRTextureFromSourceFile(const std::filesystem::path &Path);
 } // namespace Axiom::Assets

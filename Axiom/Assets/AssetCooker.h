@@ -28,6 +28,19 @@ CookTextureAsset(const std::filesystem::path &ContentRoot,
                  const std::filesystem::path &RelativeTexturePath,
                  const TextureSourceData &Texture);
 
+// Decodes a source HDR texture (e.g. .hdr) from the content directory, writes
+// a cooked v2 `.wtex` with float pixels, and updates the cook manifest.
+std::optional<AssetCookManifestEntry>
+CookHDRTextureAsset(const std::filesystem::path &ContentRoot,
+                    const std::filesystem::path &RelativeAssetPath);
+
+// Writes generated cooked HDR texture state under Content/Cooked and updates the
+// cook manifest for the provided logical texture path.
+std::optional<AssetCookManifestEntry>
+CookHDRTextureAsset(const std::filesystem::path &ContentRoot,
+                    const std::filesystem::path &RelativeTexturePath,
+                    const HDRTextureSourceData &Texture);
+
 // Writes generated cooked material state under Content/Cooked and updates the
 // cook manifest for the provided logical material path.
 std::optional<AssetCookManifestEntry>

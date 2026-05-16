@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Renderer/Material.h"
 #include "Renderer/Mesh.h"
 
 #include <glm/mat4x4.hpp>
@@ -45,5 +46,8 @@ public:
   std::optional<GizmoOverlayData> GizmoOverlay;
   std::optional<DirectionalLight> Sun;
   std::vector<LightBillboardOverlay> LightBillboards;
+  glm::vec3 SkyboxColorTop{0.08f, 0.09f, 0.14f};
+  glm::vec3 SkyboxColorBottom{0.14f, 0.24f, 0.38f};
+  HDRTextureSourceDataRef SkyboxHDRTexture{nullptr};
 };
 } // namespace Axiom

@@ -266,6 +266,79 @@ CookTextureAsset(const std::filesystem::path &ContentRoot,
 }
 
 std::optional<AssetCookManifestEntry>
+CookHDRTextureAsset(const std::filesystem::path &ContentRoot,
+                    const std::filesystem::path &RelativeAssetPath) {
+  const std::filesystem::path SourcePath = ContentRoot / RelativeAssetPath;
+  const auto SourceHash = HashFileContents(SourcePath);
+  if (!SourceHash.has_value()) {
+    A_CORE_WARN("AssetCooker: failed to hash source HDR texture '{}'",
+                SourcePath.string());
+    return std::nullopt;
+  }
+
+  const auto Texture = LoadHDRTextureFromSourceFile(SourcePath);
+  if (!Texture || !Texture->IsValid()) {
+    A_CORE_WARN("AssetCooker: failed to decode source HDR texture '{}'",
+                SourcePath.string());
+    return std::nullopt;
+  }
+
+  return CookHDRTextureAsset(ContentRoot, RelativeAssetPath, *Texture);
+}
+
+std::optional<AssetCookManifestEntry>
+CookHDRTextureAsset(const std::filesystem::path &ContentRoot,
+                    const std::filesystem::path &RelativeTexturePath,
+                    const HDRTextureSourceData &Texture) {
+  const AssetId Asset = AssetIdFromRelativePath(RelativeTexturePath);
+  if (!Texture.IsValid()) {
+    A_CORE_WARN("AssetCooker: invalid generated HDR texture '{}'",
+                RelativeTexturePath.string());
+    return std::nullopt;
+  }
+
+  const std::filesystem::path CookedRelativePath =
+      BuildCookedTextureRelativePath(RelativeTexturePath);
+  const std::filesystem::path CookedAbsolutePath = ContentRoot / CookedRelativePath;
+  std::error_code Ec;
+  std::filesystem::create_directories(CookedAbsolutePath.parent_path(), Ec);
+  if (Ec) {
+    A_CORE_WARN("AssetCooker: failed to create cooked HDR texture directory '{}': {}",
+                CookedAbsolutePath.parent_path().string(), Ec.message());
+    return std::nullopt;
+  }
+
+  if (!SaveCookedHDRTextureAsset(CookedAbsolutePath, Texture, Asset)) {
+    return std::nullopt;
+  }
+
+  const std::filesystem::path ManifestPath =
+      ContentRoot / "Cooked" / "AssetCookManifest.json";
+  AssetCookManifest Manifest =
+      LoadAssetCookManifest(ManifestPath).value_or(AssetCookManifest{});
+
+  const uint64_t SourceHash = HashString(
+      std::to_string(Texture.Width) + "|" + std::to_string(Texture.Height) +
+      "|hdr|" + std::to_string(Texture.Pixels.size()));
+
+  AssetCookManifestEntry Entry{
+      .Id = Asset,
+      .Kind = AssetKind::Texture,
+      .RelativePath = RelativeTexturePath.generic_string(),
+      .CookedPath = CookedRelativePath.generic_string(),
+      .FormatVersion = kCookedTextureFormatVersion,
+      .SourceHash = SourceHash,
+  };
+  UpsertManifestEntry(Manifest, Entry);
+
+  if (!SaveAssetCookManifest(ManifestPath, Manifest)) {
+    return std::nullopt;
+  }
+
+  return Entry;
+}
+
+std::optional<AssetCookManifestEntry>
 CookMaterialAsset(const std::filesystem::path &ContentRoot,
                   const std::filesystem::path &RelativeMaterialPath,
                   const CookedMaterialData &Material) {

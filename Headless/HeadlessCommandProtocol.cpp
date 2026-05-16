@@ -1064,6 +1064,49 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
   if (*Type == "heartbeat") {
     return HeadlessCommand{.Type = HeadlessCommandType::Heartbeat};
   }
+  if (*Type == "set_world_settings") {
+    static const std::regex TopPattern(
+        R"json("skyboxColorTop"\s*:\s*\[\s*(-?[0-9Ee.+-]+)\s*,\s*(-?[0-9Ee.+-]+)\s*,\s*(-?[0-9Ee.+-]+)\s*\])json");
+    static const std::regex BottomPattern(
+        R"json("skyboxColorBottom"\s*:\s*\[\s*(-?[0-9Ee.+-]+)\s*,\s*(-?[0-9Ee.+-]+)\s*,\s*(-?[0-9Ee.+-]+)\s*\])json");
+    static const std::regex HDRPattern(
+        R"json("skyboxHDRPath"\s*:\s*"([^"]*)")json");
+
+    HeadlessCommand Cmd;
+    Cmd.Type = HeadlessCommandType::SetWorldSettings;
+
+    std::match_results<std::string_view::const_iterator> Match;
+    if (std::regex_search(JsonLine.begin(), JsonLine.end(), Match, TopPattern) &&
+        Match.size() == 4) {
+      if (const auto R = ParseDouble(std::string_view(Match[1].first, Match[1].second)))
+        Cmd.SkyboxColorTop.r = static_cast<float>(*R);
+      if (const auto G = ParseDouble(std::string_view(Match[2].first, Match[2].second)))
+        Cmd.SkyboxColorTop.g = static_cast<float>(*G);
+      if (const auto B = ParseDouble(std::string_view(Match[3].first, Match[3].second)))
+        Cmd.SkyboxColorTop.b = static_cast<float>(*B);
+    }
+    if (std::regex_search(JsonLine.begin(), JsonLine.end(), Match, BottomPattern) &&
+        Match.size() == 4) {
+      if (const auto R = ParseDouble(std::string_view(Match[1].first, Match[1].second)))
+        Cmd.SkyboxColorBottom.r = static_cast<float>(*R);
+      if (const auto G = ParseDouble(std::string_view(Match[2].first, Match[2].second)))
+        Cmd.SkyboxColorBottom.g = static_cast<float>(*G);
+      if (const auto B = ParseDouble(std::string_view(Match[3].first, Match[3].second)))
+        Cmd.SkyboxColorBottom.b = static_cast<float>(*B);
+    }
+
+    if (std::regex_search(JsonLine.begin(), JsonLine.end(), Match, HDRPattern) &&
+        Match.size() == 2) {
+      Cmd.SkyboxHDRPath.assign(Match[1].first, Match[1].second);
+    }
+
+    Cmd.EditorPayload = {.Payload = SetWorldSettingsCommand{
+                             .Settings = EditorWorldSettings{
+                                 .SkyboxColorTop = Cmd.SkyboxColorTop,
+                                 .SkyboxColorBottom = Cmd.SkyboxColorBottom,
+                                 .SkyboxHDRPath = Cmd.SkyboxHDRPath}}};
+    return Cmd;
+  }
   if (*Type == "set_gizmo_mode") {
     static const std::regex ModePattern(R"json("mode"\s*:\s*"([^"]+)")json");
     const auto ModeStr = MatchString(JsonLine, ModePattern);
@@ -1151,6 +1194,7 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::StopSession:
   case HeadlessCommandType::DropMesh:
   case HeadlessCommandType::DropTexture:
+  case HeadlessCommandType::SetWorldSettings:
   case HeadlessCommandType::ReloadScripts:
   case HeadlessCommandType::Heartbeat:
   case HeadlessCommandType::Quit:
@@ -1553,7 +1597,16 @@ std::string SerializeSessionSnapshot(const EditorSessionState &State,
     }
     SerializeSceneItem(Stream, State.Scene.Items[Index]);
   }
-  Stream << "],\"selectedObjectDetails\":";
+  Stream << "],\"worldSettings\":{\"skyboxColorTop\":["
+         << State.Scene.WorldSettings.SkyboxColorTop.r << ","
+         << State.Scene.WorldSettings.SkyboxColorTop.g << ","
+         << State.Scene.WorldSettings.SkyboxColorTop.b << "],\"skyboxColorBottom\":["
+         << State.Scene.WorldSettings.SkyboxColorBottom.r << ","
+         << State.Scene.WorldSettings.SkyboxColorBottom.g << ","
+         << State.Scene.WorldSettings.SkyboxColorBottom.b
+         << "],\"skyboxHDRPath\":\""
+         << EscapeJson(State.Scene.WorldSettings.SkyboxHDRPath) << "\"}"
+         << ",\"selectedObjectDetails\":";
   if (const EditorObjectDetails *Details =
           [&]() -> const EditorObjectDetails * {
             const auto SelectionIt = State.SelectedObjectIds.find(CurrentUser);

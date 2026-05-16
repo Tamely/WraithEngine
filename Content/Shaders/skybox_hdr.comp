@@ -1,0 +1,40 @@
+#version 460
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(rgba16f, set = 0, binding = 0) uniform image2D image;
+layout(set = 1, binding = 0) uniform sampler2D hdrTexture;
+
+layout(push_constant) uniform constants {
+  mat4 inverseViewProj;
+} PC;
+
+const float PI = 3.14159265359;
+
+void main() {
+  ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+  ivec2 size = imageSize(image);
+  if (coord.x >= size.x || coord.y >= size.y) {
+    return;
+  }
+
+  // Pixel center to NDC (Vulkan: Y-down in image space; viewport flip is
+  // handled by the camera projection, so we keep the raw mapping here.)
+  vec2 uv = (vec2(coord) + 0.5) / vec2(size);
+  vec2 ndc = uv * 2.0 - 1.0;
+
+  // Unproject two depths to derive the world-space ray direction.
+  vec4 near = PC.inverseViewProj * vec4(ndc, 0.0, 1.0);
+  near /= near.w;
+  vec4 far  = PC.inverseViewProj * vec4(ndc, 1.0, 1.0);
+  far  /= far.w;
+  vec3 dir = normalize(far.xyz - near.xyz);
+
+  // Equirectangular sample.
+  float phi   = atan(dir.z, dir.x);
+  float theta = asin(clamp(dir.y, -1.0, 1.0));
+  vec2 hdruv  = vec2(phi / (2.0 * PI) + 0.5, 0.5 - theta / PI);
+
+  vec4 color = texture(hdrTexture, hdruv);
+  imageStore(image, coord, vec4(color.rgb, 1.0));
+}

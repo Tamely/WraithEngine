@@ -190,6 +190,11 @@ interface RemoteViewportActions {
     roughness: number
   ) => Promise<boolean>
   setMaterialTexture: (objectId: string, textureAssetPath: string) => Promise<boolean>
+  setWorldSettings: (
+    skyboxColorTop: [number, number, number],
+    skyboxColorBottom: [number, number, number],
+    skyboxHDRPath: string,
+  ) => Promise<boolean>
 }
 
 export interface SessionObjectTransformUpdate {
@@ -303,6 +308,18 @@ interface RemoteViewportContextValue {
   duplicateObject: (objectId: string) => Promise<boolean>
   deleteObject: (objectId: string) => Promise<boolean>
   reparentObject: (objectId: string, newParentId: string) => Promise<boolean>
+  worldSettings: SessionWorldSettings
+  setWorldSettings: (
+    skyboxColorTop: [number, number, number],
+    skyboxColorBottom: [number, number, number],
+    skyboxHDRPath: string,
+  ) => Promise<boolean>
+}
+
+export interface SessionWorldSettings {
+  skyboxColorTop: [number, number, number]
+  skyboxColorBottom: [number, number, number]
+  skyboxHDRPath: string
 }
 
 interface SessionSnapshot {
@@ -312,6 +329,7 @@ interface SessionSnapshot {
   showColliders: boolean
   participants: SessionParticipant[]
   sceneTree: SessionSceneItem[]
+  worldSettings: SessionWorldSettings
   selections: SessionSelection[]
   selectedObjectDetails: SessionObjectDetails | null
 }
@@ -377,6 +395,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     setLightProperties: async () => false,
     setMaterialProperties: async () => false,
     setMaterialTexture: async () => false,
+    setWorldSettings: async () => false,
   })
   const [connectionState, setConnectionState] =
     useState<RemoteViewportConnectionState>("idle")
@@ -401,6 +420,11 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
   const [runtimeControllerUserId, setRuntimeControllerUserId] = useState<number | null>(null)
   const [participants, setParticipants] = useState<SessionParticipant[]>([])
   const [sceneTree, setSceneTree] = useState<SessionSceneItem[]>([])
+  const [worldSettings, setWorldSettingsState] = useState<SessionWorldSettings>({
+    skyboxColorTop: [0.08, 0.09, 0.14],
+    skyboxColorBottom: [0.14, 0.24, 0.38],
+    skyboxHDRPath: "",
+  })
   const [selections, setSelections] = useState<SessionSelection[]>([])
   const [selectedObjectDetails, setSelectedObjectDetails] =
     useState<SessionObjectDetails | null>(null)
@@ -430,6 +454,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     setShowCollidersState(snapshot.showColliders)
     setParticipants(snapshot.participants)
     setSceneTree(snapshot.sceneTree)
+    setWorldSettingsState(snapshot.worldSettings)
     setSelections(
       snapshot.participants
         .filter((participant) => participant.selectionObjectId !== null)
@@ -448,6 +473,11 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     setShowCollidersState(true)
     setParticipants([])
     setSceneTree([])
+    setWorldSettingsState({
+      skyboxColorTop: [0.08, 0.09, 0.14],
+      skyboxColorBottom: [0.14, 0.24, 0.38],
+      skyboxHDRPath: "",
+    })
     setSelections([])
     setSelectedObjectDetails(null)
     setLockedObjects({})
@@ -690,6 +720,12 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       setLightProperties,
       setMaterialProperties,
       setMaterialTexture,
+      worldSettings,
+      setWorldSettings: async (
+        top: [number, number, number],
+        bottom: [number, number, number],
+        hdrPath: string,
+      ) => await actionsRef.current.setWorldSettings(top, bottom, hdrPath),
       reloadStatus,
       setReloadStatus,
       scriptErrorToasts,
@@ -781,6 +817,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       setLightProperties,
       setMaterialProperties,
       setMaterialTexture,
+      worldSettings,
       reloadStatus,
       scriptErrorToasts,
       addScriptErrorToast,

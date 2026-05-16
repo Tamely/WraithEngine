@@ -103,6 +103,38 @@ LoadCookedTextureAssetIfAvailable(const std::filesystem::path &Path) {
   return std::make_shared<TextureSourceData>(*CookedTexture);
 }
 
+HDRTextureSourceDataRef
+LoadCookedHDRTextureAssetIfAvailable(const std::filesystem::path &Path) {
+  const auto ContentRoot = FindContentRootForPath(Path);
+  if (!ContentRoot.has_value()) {
+    return nullptr;
+  }
+
+  std::error_code Ec;
+  const auto RelativePath = std::filesystem::relative(Path, *ContentRoot, Ec);
+  if (Ec) {
+    return nullptr;
+  }
+
+  const CookedAssetSource CookedSource(*ContentRoot);
+  if (!CookedSource.HasManifest()) {
+    return nullptr;
+  }
+
+  const auto CookedPath =
+      CookedSource.Resolve(AssetIdFromRelativePath(RelativePath));
+  if (!CookedPath.has_value()) {
+    return nullptr;
+  }
+
+  const auto CookedTexture = LoadCookedHDRTextureAsset(*CookedPath);
+  if (!CookedTexture.has_value()) {
+    return nullptr;
+  }
+
+  return std::make_shared<HDRTextureSourceData>(*CookedTexture);
+}
+
 std::optional<CookedMaterialData>
 LoadCookedMaterialAssetIfAvailable(const std::filesystem::path &Path) {
   const auto ContentRoot = FindContentRootForPath(Path);
