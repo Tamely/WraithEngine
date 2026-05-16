@@ -102,22 +102,11 @@ export function WorldDetailsPanel() {
               <span className="text-[11px] uppercase tracking-wide text-neutral-500">
                 HDR Sky
               </span>
-              <input
-                type="text"
-                placeholder="Textures/studio.hdr"
-                className="h-7 w-full rounded-sm border border-neutral-800 bg-neutral-900 px-2 text-xs text-neutral-200 placeholder:text-neutral-600 focus:border-neutral-600 focus:outline-none"
+              <HdrPathInput
                 value={hdrPath}
-                onChange={(e) => setHdrPath(e.target.value)}
-                onBlur={(e) => commitHdrPath(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    commitHdrPath((e.target as HTMLInputElement).value)
-                    ;(e.target as HTMLInputElement).blur()
-                  } else if (e.key === "Escape") {
-                    setHdrPath(remoteHdrPath)
-                    ;(e.target as HTMLInputElement).blur()
-                  }
-                }}
+                onLocalChange={setHdrPath}
+                onCommit={commitHdrPath}
+                onRevert={() => setHdrPath(remoteHdrPath)}
               />
             </div>
             <p className="pl-[88px] pr-1 text-[10px] leading-snug text-neutral-500">
@@ -128,6 +117,95 @@ export function WorldDetailsPanel() {
         </div>
       </div>
     </div>
+  )
+}
+
+function isHdrAssetDrag(e: React.DragEvent): boolean {
+  const types = e.dataTransfer.types
+  if (!types.includes("axiom/asset-path")) {
+    // Browser may have hidden the data during dragover; fall back to the
+    // window-global the content browser sets alongside dataTransfer.
+    const fallback = (window as unknown as { __axiomDragAsset?: { kind: string; path: string } })
+      .__axiomDragAsset
+    return !!fallback && fallback.kind === "texture" && /\.hdr$/i.test(fallback.path)
+  }
+  // dataTransfer.getData is unavailable during dragover for security; we can
+  // only inspect during drop. Allow any texture-kind drag during dragover and
+  // re-validate on drop.
+  const kind = types.includes("axiom/asset-kind")
+    ? (window as unknown as { __axiomDragAsset?: { kind: string; path: string } })
+        .__axiomDragAsset?.kind
+    : undefined
+  return kind === undefined || kind === "texture"
+}
+
+function HdrPathInput({
+  value,
+  onLocalChange,
+  onCommit,
+  onRevert,
+}: {
+  value: string
+  onLocalChange: (next: string) => void
+  onCommit: (next: string) => void
+  onRevert: () => void
+}) {
+  const [dragHover, setDragHover] = useState(false)
+
+  return (
+    <input
+      type="text"
+      placeholder="Drop a .hdr here or type Textures/studio.hdr"
+      className={`h-7 w-full rounded-sm border bg-neutral-900 px-2 text-xs text-neutral-200 placeholder:text-neutral-600 focus:outline-none ${
+        dragHover
+          ? "border-blue-500 ring-1 ring-blue-500/40"
+          : "border-neutral-800 focus:border-neutral-600"
+      }`}
+      value={value}
+      onChange={(e) => onLocalChange(e.target.value)}
+      onBlur={(e) => onCommit(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          onCommit((e.target as HTMLInputElement).value)
+          ;(e.target as HTMLInputElement).blur()
+        } else if (e.key === "Escape") {
+          onRevert()
+          ;(e.target as HTMLInputElement).blur()
+        }
+      }}
+      onDragEnter={(e) => {
+        if (isHdrAssetDrag(e)) {
+          e.preventDefault()
+          setDragHover(true)
+        }
+      }}
+      onDragOver={(e) => {
+        if (isHdrAssetDrag(e)) {
+          e.preventDefault()
+          e.dataTransfer.dropEffect = "copy"
+        }
+      }}
+      onDragLeave={() => setDragHover(false)}
+      onDrop={(e) => {
+        setDragHover(false)
+        const path =
+          e.dataTransfer.getData("axiom/asset-path") ||
+          (window as unknown as { __axiomDragAsset?: { kind: string; path: string } })
+            .__axiomDragAsset?.path ||
+          ""
+        const kind =
+          e.dataTransfer.getData("axiom/asset-kind") ||
+          (window as unknown as { __axiomDragAsset?: { kind: string; path: string } })
+            .__axiomDragAsset?.kind ||
+          ""
+        if (!path) return
+        if (kind && kind !== "texture") return
+        if (!/\.hdr$/i.test(path)) return
+        e.preventDefault()
+        onLocalChange(path)
+        onCommit(path)
+      }}
+    />
   )
 }
 
