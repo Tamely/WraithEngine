@@ -2,9 +2,10 @@
 
 import { useRemoteViewport } from "@/components/engine/remote-viewport-context"
 import { HexColorPicker } from "react-colorful"
-import { useEffect, useState } from "react"
-import { Globe } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import { Globe, Image as ImageIcon, Palette } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { AssetPickerButton, type AssetPickerItem } from "@/components/panels/asset-picker"
 
 function vec3ToHex(vec: [number, number, number]): string {
   const toHex = (n: number) => {
@@ -22,11 +23,10 @@ function hexToVec3(hex: string): [number, number, number] {
 }
 
 export function WorldDetailsPanel() {
-  const { worldSettings, setWorldSettings } = useRemoteViewport()
+  const { worldSettings, setWorldSettings, assets, listAssets } = useRemoteViewport()
 
-  // Derive primitive remote values once so effect deps compare by value, not
-  // by the worldSettings object reference (which is a new object on every
-  // session-snapshot refresh).
+  // Derive primitive remote values so effect deps compare by value, not by the
+  // worldSettings object reference (a fresh object on every snapshot refresh).
   const remoteTopHex = vec3ToHex(worldSettings.skyboxColorTop)
   const remoteBottomHex = vec3ToHex(worldSettings.skyboxColorBottom)
   const remoteHdrPath = worldSettings.skyboxHDRPath
@@ -35,9 +35,6 @@ export function WorldDetailsPanel() {
   const [bottomColorHex, setBottomColorHex] = useState(remoteBottomHex)
   const [hdrPath, setHdrPath] = useState(remoteHdrPath)
 
-  // Only adopt the remote value when the underlying string actually changes;
-  // typing into the input no longer gets clobbered by unrelated snapshot
-  // refreshes.
   useEffect(() => {
     setTopColorHex(remoteTopHex)
   }, [remoteTopHex])
@@ -47,6 +44,23 @@ export function WorldDetailsPanel() {
   useEffect(() => {
     setHdrPath(remoteHdrPath)
   }, [remoteHdrPath])
+
+  const hdrItems = useMemo<AssetPickerItem[]>(
+    () =>
+      assets
+        .filter((asset) => asset.kind === "texture" && /\.hdr$/i.test(asset.path))
+        .map((asset) => {
+          const lastSlash = asset.path.lastIndexOf("/")
+          const fileName = lastSlash === -1 ? asset.path : asset.path.slice(lastSlash + 1)
+          return {
+            key: asset.path,
+            label: fileName,
+            sublabel: asset.path,
+            selectValue: asset.path,
+          }
+        }),
+    [assets],
+  )
 
   const handleTopColorChange = (next: string) => {
     setTopColorHex(next)
@@ -59,6 +73,7 @@ export function WorldDetailsPanel() {
   }
 
   const commitHdrPath = (next: string) => {
+    setHdrPath(next)
     if (next === remoteHdrPath) return
     setWorldSettings(hexToVec3(topColorHex), hexToVec3(bottomColorHex), next)
   }
@@ -75,44 +90,54 @@ export function WorldDetailsPanel() {
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        <div className="flex flex-col gap-4 p-3">
-          <section className="flex flex-col gap-2">
-            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
-              Environment
-            </h3>
-
-            <div
-              className={`flex flex-col gap-2 ${hdrActive ? "pointer-events-none opacity-40" : ""}`}
-            >
+        <div className="space-y-4 p-3">
+          <section className="rounded border border-neutral-800 bg-neutral-950/60 p-3">
+            <div className="mb-3 flex items-center gap-1.5">
+              <Palette className="h-3.5 w-3.5 text-neutral-400" />
+              <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">
+                Sky Gradient
+              </p>
+            </div>
+            <div className={`space-y-2 ${hdrActive ? "pointer-events-none opacity-40" : ""}`}>
               <ColorRow
-                label="Sky Top"
+                label="Top"
                 value={topColorHex}
                 onChange={handleTopColorChange}
                 popoverTitle="Skybox Top Color"
               />
               <ColorRow
-                label="Sky Bottom"
+                label="Bottom"
                 value={bottomColorHex}
                 onChange={handleBottomColorChange}
                 popoverTitle="Skybox Bottom Color"
               />
             </div>
+          </section>
 
-            <div className="mt-2 grid grid-cols-[80px_1fr] items-center gap-2">
-              <span className="text-[11px] uppercase tracking-wide text-neutral-500">
+          <section className="rounded border border-neutral-800 bg-neutral-950/60 p-3">
+            <div className="mb-3 flex items-center gap-1.5">
+              <ImageIcon className="h-3.5 w-3.5 text-neutral-400" />
+              <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">
                 HDR Sky
-              </span>
-              <HdrPathInput
-                value={hdrPath}
-                onLocalChange={setHdrPath}
-                onCommit={commitHdrPath}
-                onRevert={() => setHdrPath(remoteHdrPath)}
-              />
+              </p>
             </div>
-            <p className="pl-[88px] pr-1 text-[10px] leading-snug text-neutral-500">
-              Content-relative path to an equirectangular .hdr (or cooked .wtex). Leave empty
-              to use the gradient colors.
-            </p>
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                <span className="w-20 shrink-0 text-xs text-neutral-500">File</span>
+                <HdrPathInput
+                  value={hdrPath}
+                  onLocalChange={setHdrPath}
+                  onCommit={commitHdrPath}
+                  onRevert={() => setHdrPath(remoteHdrPath)}
+                  pickerItems={hdrItems}
+                  onPickerOpen={() => void listAssets()}
+                />
+              </div>
+              <p className="text-[10px] leading-snug text-neutral-500">
+                Drop a .hdr from the content browser or pick one with the folder icon.
+                Leave empty to use the gradient above.
+              </p>
+            </div>
           </section>
         </div>
       </div>
@@ -123,15 +148,10 @@ export function WorldDetailsPanel() {
 function isHdrAssetDrag(e: React.DragEvent): boolean {
   const types = e.dataTransfer.types
   if (!types.includes("axiom/asset-path")) {
-    // Browser may have hidden the data during dragover; fall back to the
-    // window-global the content browser sets alongside dataTransfer.
     const fallback = (window as unknown as { __axiomDragAsset?: { kind: string; path: string } })
       .__axiomDragAsset
     return !!fallback && fallback.kind === "texture" && /\.hdr$/i.test(fallback.path)
   }
-  // dataTransfer.getData is unavailable during dragover for security; we can
-  // only inspect during drop. Allow any texture-kind drag during dragover and
-  // re-validate on drop.
   const kind = types.includes("axiom/asset-kind")
     ? (window as unknown as { __axiomDragAsset?: { kind: string; path: string } })
         .__axiomDragAsset?.kind
@@ -144,35 +164,23 @@ function HdrPathInput({
   onLocalChange,
   onCommit,
   onRevert,
+  pickerItems,
+  onPickerOpen,
 }: {
   value: string
   onLocalChange: (next: string) => void
   onCommit: (next: string) => void
   onRevert: () => void
+  pickerItems: AssetPickerItem[]
+  onPickerOpen?: () => void
 }) {
   const [dragHover, setDragHover] = useState(false)
 
   return (
-    <input
-      type="text"
-      placeholder="Drop a .hdr here or type Textures/studio.hdr"
-      className={`h-7 w-full rounded-sm border bg-neutral-900 px-2 text-xs text-neutral-200 placeholder:text-neutral-600 focus:outline-none ${
-        dragHover
-          ? "border-blue-500 ring-1 ring-blue-500/40"
-          : "border-neutral-800 focus:border-neutral-600"
+    <div
+      className={`flex w-full min-w-0 items-center rounded border bg-neutral-900 pr-1 transition-colors focus-within:border-neutral-600 ${
+        dragHover ? "border-blue-500 ring-1 ring-blue-500/40" : "border-neutral-800"
       }`}
-      value={value}
-      onChange={(e) => onLocalChange(e.target.value)}
-      onBlur={(e) => onCommit(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          onCommit((e.target as HTMLInputElement).value)
-          ;(e.target as HTMLInputElement).blur()
-        } else if (e.key === "Escape") {
-          onRevert()
-          ;(e.target as HTMLInputElement).blur()
-        }
-      }}
       onDragEnter={(e) => {
         if (isHdrAssetDrag(e)) {
           e.preventDefault()
@@ -202,10 +210,35 @@ function HdrPathInput({
         if (kind && kind !== "texture") return
         if (!/\.hdr$/i.test(path)) return
         e.preventDefault()
-        onLocalChange(path)
         onCommit(path)
       }}
-    />
+    >
+      <input
+        type="text"
+        placeholder="Textures/studio.hdr"
+        className="min-w-0 flex-1 bg-transparent px-2 py-1 text-xs text-neutral-300 placeholder:text-neutral-600 outline-none"
+        value={value}
+        onChange={(e) => onLocalChange(e.target.value)}
+        onBlur={(e) => onCommit(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            onCommit((e.target as HTMLInputElement).value)
+            ;(e.target as HTMLInputElement).blur()
+          } else if (e.key === "Escape") {
+            onRevert()
+            ;(e.target as HTMLInputElement).blur()
+          }
+        }}
+      />
+      <AssetPickerButton
+        items={pickerItems}
+        onSelect={onCommit}
+        onOpen={onPickerOpen}
+        triggerLabel="Browse project HDRs"
+        searchPlaceholder="Search HDR files..."
+        emptyMessage="No .hdr files found in project"
+      />
+    </div>
   )
 }
 
@@ -221,29 +254,35 @@ function ColorRow({
   popoverTitle: string
 }) {
   return (
-    <div className="grid grid-cols-[80px_1fr] items-center gap-2">
-      <span className="text-[11px] uppercase tracking-wide text-neutral-500">{label}</span>
+    <div className="flex items-center gap-3">
+      <span className="w-20 shrink-0 text-xs text-neutral-500">{label}</span>
       <Popover>
         <PopoverTrigger asChild>
           <button
             type="button"
-            className="flex h-7 w-full items-center rounded-sm border border-neutral-800 bg-neutral-900 px-1.5 transition-colors hover:border-neutral-700"
+            className="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1 outline-none transition-colors hover:border-neutral-700 focus:border-neutral-600"
           >
             <div
-              className="h-full w-full rounded-[2px] border border-neutral-800"
+              className="h-3.5 w-full rounded-sm border border-neutral-800"
               style={{ backgroundColor: value }}
             />
           </button>
         </PopoverTrigger>
-        <PopoverContent className="w-auto border-neutral-800 bg-neutral-950 p-3" side="left">
+        <PopoverContent
+          align="end"
+          side="left"
+          className="dark w-auto border-neutral-800 bg-neutral-950 p-3 text-neutral-200"
+        >
           <div className="flex flex-col gap-3">
-            <div className="text-xs font-medium text-neutral-300">{popoverTitle}</div>
+            <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">
+              {popoverTitle}
+            </p>
             <HexColorPicker color={value} onChange={onChange} />
-            <div className="flex items-center gap-2">
-              <span className="w-10 font-mono text-[10px] text-neutral-500">HEX</span>
+            <div className="flex items-center gap-3">
+              <span className="w-10 shrink-0 text-xs text-neutral-500">HEX</span>
               <input
                 type="text"
-                className="h-7 w-full rounded-sm border border-neutral-800 bg-neutral-900 px-2 font-mono text-xs text-neutral-200 focus:border-neutral-600 focus:outline-none"
+                className="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1 font-mono text-xs text-neutral-300 outline-none focus:border-neutral-600"
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
               />

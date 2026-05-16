@@ -10,6 +10,7 @@ import {
 } from "./remote-viewport-context"
 import { useProjectSession } from "./project-session-context"
 import { useDock } from "./dock/dock-context"
+import { AssetPickerButton, type AssetPickerItem } from "@/components/panels/asset-picker"
 
 function fallbackUserLabel(userId: number) {
   return userId === 1 ? "Host" : `User ${userId - 1}`
@@ -375,6 +376,17 @@ function ScriptSection({
     [availableClasses, currentValue]
   )
 
+  const scriptPickerItems = useMemo<AssetPickerItem[]>(
+    () =>
+      availableClasses.map((entry) => ({
+        key: entry.className,
+        label: entry.className,
+        sublabel: entry.path,
+        selectValue: entry.className,
+      })),
+    [availableClasses]
+  )
+
   async function applyScriptClass() {
     setIsSaving(true)
     try {
@@ -410,15 +422,33 @@ function ScriptSection({
         <div className="flex items-center gap-3">
           <span className="w-20 shrink-0 text-xs text-neutral-500">Class</span>
           <div className="min-w-0 flex-1">
-            <input
-              list={`script-classes-${objectId}`}
-              className="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 outline-none focus:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-50 placeholder:text-neutral-600"
-              disabled={isSaving}
-              onChange={(event) => setDraftClass(event.target.value)}
-              placeholder="e.g. MyGame.RotatorScript"
-              type="text"
-              value={draftClass}
-            />
+            <div
+              className={`flex w-full min-w-0 items-center rounded border border-neutral-800 bg-neutral-900 px-1 transition-colors focus-within:border-neutral-600 ${
+                isSaving ? "cursor-not-allowed opacity-50" : ""
+              }`}
+            >
+              <input
+                list={`script-classes-${objectId}`}
+                className="min-w-0 flex-1 bg-transparent px-1 py-1 text-xs text-neutral-300 outline-none placeholder:text-neutral-600 disabled:cursor-not-allowed"
+                disabled={isSaving}
+                onChange={(event) => setDraftClass(event.target.value)}
+                placeholder="e.g. MyGame.RotatorScript"
+                type="text"
+                value={draftClass}
+              />
+              <AssetPickerButton
+                items={scriptPickerItems}
+                onSelect={(value) => setDraftClass(value)}
+                onOpen={() => void loadScriptClasses()}
+                triggerLabel="Browse project script classes"
+                searchPlaceholder="Search script classes..."
+                emptyMessage={
+                  classesLoading
+                    ? "Loading classes..."
+                    : "No attachable script classes found"
+                }
+              />
+            </div>
             <datalist id={`script-classes-${objectId}`}>
               {availableClasses.map((entry) => (
                 <option key={entry.className} value={entry.className} />
