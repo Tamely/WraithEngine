@@ -42,6 +42,7 @@ AxiomRemoteViewportServer  (C++)
 - Session-wide Play / Pause / Stop with authoritative edit-snapshot restore
 - Runtime-only Jolt physics stepping with pause / resume support
 - Default static box collision for imported mesh assets, with load-time migration for older meshes that had no authored physics yet
+- Configurable sky background — a two-color vertical gradient (compute-shader blended) or an equirectangular HDR (`.hdr`) sampled from a world-space ray; HDR data is preserved end-to-end as float pixels through a v2 cooked `.wtex` so future image-based lighting can reuse the same asset
 
 **Browser editor**
 - Dockable panels: outliner, details/property inspector, content browser, toolbar
@@ -54,6 +55,7 @@ AxiomRemoteViewportServer  (C++)
 - Script class attachment and hot-reload button
 - Inspector-driven physics authoring: body type, collider type, extents/radius, mass, friction, bounce
 - Read-only physics visibility for generated mesh children, with inheritance hints pointing back to the authored root mesh object
+- World Details panel for editing the skybox: color pickers for the gradient mode, plus an HDR file slot that accepts drag-drop from the content browser, a searchable folder-icon picker listing every `.hdr` in the project, or a typed content-relative path
 
 ## Prerequisites
 
