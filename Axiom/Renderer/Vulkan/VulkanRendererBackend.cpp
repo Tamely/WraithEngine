@@ -1,6 +1,7 @@
 #include "Renderer/Vulkan/VulkanRendererBackend.h"
 
 #include "Assets/SvgTexture.h"
+#include "Renderer/Camera.h"
 #include "Renderer/RenderScene.h"
 #include "Renderer/Vulkan/VulkanBuffer.h"
 #include "Renderer/Vulkan/VulkanDescriptors.h"
@@ -8,6 +9,9 @@
 #include "Renderer/Vulkan/VulkanInitializers.h"
 #include "Renderer/Vulkan/VulkanMesh.h"
 #include "Renderer/Vulkan/VulkanPipeline.h"
+
+#include <glm/gtc/type_ptr.hpp>
+#include <glm/matrix.hpp>
 
 #include <volk.h>
 #include <vulkan/vulkan_core.h>
@@ -565,6 +569,91 @@ void VulkanRendererBackend::InitBackgroundPipelines() {
                             VK_NULL_HANDLE);
     vkDestroyPipeline(m_Device.Device, m_GradientPipeline, VK_NULL_HANDLE);
   });
+
+  // --- HDR skybox pipeline -------------------------------------------------
+  {
+    DescriptorLayoutBuilder Builder;
+    Builder.AddBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    m_HDRSkyboxDescriptorLayout =
+        Builder.Build(m_Device.Device, VK_SHADER_STAGE_COMPUTE_BIT);
+  }
+
+  VkSamplerCreateInfo HDRSamplerInfo{
+      .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+      .pNext = VK_NULL_HANDLE,
+      .magFilter = VK_FILTER_LINEAR,
+      .minFilter = VK_FILTER_LINEAR,
+      .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+      .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+      .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+      .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+      .mipLodBias = 0.0f,
+      .anisotropyEnable = VK_FALSE,
+      .compareEnable = VK_FALSE,
+      .minLod = 0.0f,
+      .maxLod = 0.0f,
+      .borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK,
+      .unnormalizedCoordinates = VK_FALSE};
+  VK_CHECK(vkCreateSampler(m_Device.Device, &HDRSamplerInfo, VK_NULL_HANDLE,
+                           &m_HDRSkyboxSampler));
+
+  const std::array<VkDescriptorSetLayout, 2> HDRSetLayouts = {
+      m_DrawImageDescriptorLayout, m_HDRSkyboxDescriptorLayout};
+
+  VkPipelineLayoutCreateInfo HDRLayout = VkInit::PipelineLayoutCreateInfo();
+  HDRLayout.pSetLayouts = HDRSetLayouts.data();
+  HDRLayout.setLayoutCount = static_cast<uint32_t>(HDRSetLayouts.size());
+
+  VkPushConstantRange HDRPushConstant{};
+  HDRPushConstant.offset = 0;
+  HDRPushConstant.size = sizeof(glm::mat4);
+  HDRPushConstant.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+  HDRLayout.pPushConstantRanges = &HDRPushConstant;
+  HDRLayout.pushConstantRangeCount = 1;
+
+  VK_CHECK(vkCreatePipelineLayout(m_Device.Device, &HDRLayout, VK_NULL_HANDLE,
+                                  &m_HDRSkyboxPipelineLayout));
+
+  VkShaderModule HDRShader;
+  const std::string HDRShaderPath =
+      std::string(AXIOM_CONTENT_DIR) + "/Shaders/skybox_hdr.comp.spv";
+  if (!VkUtil::LoadShaderModule(HDRShaderPath.c_str(), m_Device.Device,
+                                &HDRShader)) {
+    A_ERROR("Error when loading the HDR skybox compute shader: {0}",
+            HDRShaderPath);
+    Axiom::Log::Flush();
+    abort();
+  }
+
+  VkPipelineShaderStageCreateInfo HDRStage =
+      VkInit::PipelineShaderStageCreateInfo(VK_SHADER_STAGE_COMPUTE_BIT,
+                                            HDRShader);
+
+  VkComputePipelineCreateInfo HDRPipelineInfo = {
+      .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+      .pNext = VK_NULL_HANDLE,
+      .stage = HDRStage,
+      .layout = m_HDRSkyboxPipelineLayout};
+
+  VK_CHECK(vkCreateComputePipelines(m_Device.Device, VK_NULL_HANDLE, 1,
+                                    &HDRPipelineInfo, VK_NULL_HANDLE,
+                                    &m_HDRSkyboxPipeline));
+
+  vkDestroyShaderModule(m_Device.Device, HDRShader, VK_NULL_HANDLE);
+
+  m_MainDeletionQueue.PushFunction([this]() {
+    DestroyHDRSkyboxTexture();
+    if (m_HDRSkyboxSampler != VK_NULL_HANDLE) {
+      vkDestroySampler(m_Device.Device, m_HDRSkyboxSampler, VK_NULL_HANDLE);
+      m_HDRSkyboxSampler = VK_NULL_HANDLE;
+    }
+    vkDestroyPipeline(m_Device.Device, m_HDRSkyboxPipeline, VK_NULL_HANDLE);
+    vkDestroyPipelineLayout(m_Device.Device, m_HDRSkyboxPipelineLayout,
+                            VK_NULL_HANDLE);
+    vkDestroyDescriptorSetLayout(m_Device.Device, m_HDRSkyboxDescriptorLayout,
+                                 VK_NULL_HANDLE);
+  });
 }
 
 void VulkanRendererBackend::InitMeshPipelines() {
@@ -1024,6 +1113,37 @@ void VulkanRendererBackend::CollectFrameStats(MeshFrameResources &Frame) {
 }
 
 void VulkanRendererBackend::DrawBackground(VkCommandBuffer CommandBuffer) {
+  SyncHDRSkyboxTexture();
+
+  const bool UseHDR = m_LoadedHDRSkyboxData != nullptr &&
+                      m_HDRSkyboxDescriptorSet != VK_NULL_HANDLE &&
+                      m_ActiveScene != nullptr &&
+                      m_ActiveScene->ActiveCamera != nullptr;
+
+  if (UseHDR) {
+    vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      m_HDRSkyboxPipeline);
+    const std::array<VkDescriptorSet, 2> Sets = {m_DrawImageDescriptorSet,
+                                                 m_HDRSkyboxDescriptorSet};
+    vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            m_HDRSkyboxPipelineLayout, 0,
+                            static_cast<uint32_t>(Sets.size()), Sets.data(), 0,
+                            VK_NULL_HANDLE);
+
+    const glm::mat4 InverseViewProj = glm::inverse(
+        m_ActiveScene->ActiveCamera->GetViewProjectionMatrix());
+
+    vkCmdPushConstants(CommandBuffer, m_HDRSkyboxPipelineLayout,
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(glm::mat4),
+                       glm::value_ptr(InverseViewProj));
+
+    vkCmdDispatch(CommandBuffer,
+                  static_cast<uint32_t>(std::ceil(m_DrawExtent.width / 16.0f)),
+                  static_cast<uint32_t>(std::ceil(m_DrawExtent.height / 16.0f)),
+                  1);
+    return;
+  }
+
   vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                     m_GradientPipeline);
   vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -1046,6 +1166,111 @@ void VulkanRendererBackend::DrawBackground(VkCommandBuffer CommandBuffer) {
   vkCmdDispatch(CommandBuffer,
                 static_cast<uint32_t>(std::ceil(m_DrawExtent.width / 16.0f)),
                 static_cast<uint32_t>(std::ceil(m_DrawExtent.height / 16.0f)), 1);
+}
+
+void VulkanRendererBackend::SyncHDRSkyboxTexture() {
+  const HDRTextureSourceDataRef Wanted =
+      m_ActiveScene ? m_ActiveScene->SkyboxHDRTexture : nullptr;
+  if (Wanted == m_LoadedHDRSkyboxData) {
+    return;
+  }
+
+  DestroyHDRSkyboxTexture();
+  if (Wanted) {
+    UploadHDRSkyboxTexture(*Wanted);
+  }
+  m_LoadedHDRSkyboxData = Wanted;
+}
+
+void VulkanRendererBackend::UploadHDRSkyboxTexture(
+    const HDRTextureSourceData &Texture) {
+  if (!Texture.IsValid()) {
+    A_CORE_WARN("HDR skybox: refusing to upload invalid texture ({}x{})",
+                Texture.Width, Texture.Height);
+    return;
+  }
+
+  m_HDRSkyboxImage.ImageFormat = VK_FORMAT_R32G32B32A32_SFLOAT;
+  m_HDRSkyboxImage.ImageExtent = {Texture.Width, Texture.Height, 1};
+
+  VkImageCreateInfo ImageInfo = VkInit::ImageCreateInfo(
+      m_HDRSkyboxImage.ImageFormat,
+      VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+      m_HDRSkyboxImage.ImageExtent);
+
+  VmaAllocationCreateInfo AllocationInfo{};
+  AllocationInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+  AllocationInfo.requiredFlags =
+      VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+  VK_CHECK(vmaCreateImage(m_Device.Allocator, &ImageInfo, &AllocationInfo,
+                          &m_HDRSkyboxImage.Image, &m_HDRSkyboxImage.Allocation,
+                          VK_NULL_HANDLE));
+
+  VkImageViewCreateInfo ViewInfo = VkInit::ImageViewCreateInfo(
+      m_HDRSkyboxImage.ImageFormat, m_HDRSkyboxImage.Image,
+      VK_IMAGE_ASPECT_COLOR_BIT);
+  VK_CHECK(vkCreateImageView(m_Device.Device, &ViewInfo, VK_NULL_HANDLE,
+                             &m_HDRSkyboxImage.ImageView));
+
+  const VkDeviceSize ByteCount =
+      static_cast<VkDeviceSize>(Texture.Pixels.size()) * sizeof(float);
+  auto StagingBuffer = VkBufferUtil::CreateBuffer(
+      m_Device.Allocator, ByteCount, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+      VMA_MEMORY_USAGE_CPU_ONLY,
+      VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+          VMA_ALLOCATION_CREATE_MAPPED_BIT);
+  std::memcpy(StagingBuffer.Info.pMappedData, Texture.Pixels.data(), ByteCount);
+
+  ImmediateSubmit([&](VkCommandBuffer CommandBuffer) {
+    VkUtil::TransitionImage(CommandBuffer, m_HDRSkyboxImage.Image,
+                            VK_IMAGE_LAYOUT_UNDEFINED,
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    VkBufferImageCopy Region{};
+    Region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    Region.imageSubresource.layerCount = 1;
+    Region.imageExtent = m_HDRSkyboxImage.ImageExtent;
+    vkCmdCopyBufferToImage(CommandBuffer, StagingBuffer.Buffer,
+                           m_HDRSkyboxImage.Image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
+
+    VkUtil::TransitionImage(CommandBuffer, m_HDRSkyboxImage.Image,
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  });
+
+  VkBufferUtil::DestroyBuffer(m_Device.Allocator, StagingBuffer);
+
+  m_HDRSkyboxDescriptorSet = m_GlobalDescriptorAllocator.Allocate(
+      m_Device.Device, m_HDRSkyboxDescriptorLayout);
+
+  VkDescriptorImageInfo SamplerImage{};
+  SamplerImage.sampler = m_HDRSkyboxSampler;
+  SamplerImage.imageView = m_HDRSkyboxImage.ImageView;
+  SamplerImage.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+  VkWriteDescriptorSet Write = VkInit::WriteDescriptorSet(
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, m_HDRSkyboxDescriptorSet,
+      &SamplerImage, 0);
+  vkUpdateDescriptorSets(m_Device.Device, 1, &Write, 0, VK_NULL_HANDLE);
+}
+
+void VulkanRendererBackend::DestroyHDRSkyboxTexture() {
+  if (m_HDRSkyboxImage.ImageView != VK_NULL_HANDLE) {
+    vkDestroyImageView(m_Device.Device, m_HDRSkyboxImage.ImageView,
+                       VK_NULL_HANDLE);
+    m_HDRSkyboxImage.ImageView = VK_NULL_HANDLE;
+  }
+  if (m_HDRSkyboxImage.Image != VK_NULL_HANDLE) {
+    vmaDestroyImage(m_Device.Allocator, m_HDRSkyboxImage.Image,
+                    m_HDRSkyboxImage.Allocation);
+    m_HDRSkyboxImage.Image = VK_NULL_HANDLE;
+    m_HDRSkyboxImage.Allocation = VK_NULL_HANDLE;
+  }
+  // The descriptor set lives in the pool; we drop the handle and rely on the
+  // pool being destroyed at shutdown.
+  m_HDRSkyboxDescriptorSet = VK_NULL_HANDLE;
 }
 
 void VulkanRendererBackend::BuildHzb(VkCommandBuffer CommandBuffer,
