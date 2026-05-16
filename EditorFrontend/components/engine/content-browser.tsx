@@ -316,7 +316,7 @@ export function ContentBrowser() {
           <input
             type="file"
             multiple
-            accept=".glb,.gltf,.fbx,.obj,.png,.jpg,.jpeg"
+            accept=".glb,.gltf,.fbx,.obj,.png,.jpg,.jpeg,.hdr"
             className="sr-only"
             onChange={(e) => {
               if (e.target.files && e.target.files.length > 0) {

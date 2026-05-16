@@ -2247,7 +2247,7 @@ bool RemoteViewportServer::HandleAssetUploadRequest(
       return E;
     }();
     static constexpr std::string_view kAllowed[] = {
-        ".glb", ".gltf", ".fbx", ".obj", ".png", ".jpg", ".jpeg"};
+        ".glb", ".gltf", ".fbx", ".obj", ".png", ".jpg", ".jpeg", ".hdr"};
     bool Allowed = false;
     for (const auto &A : kAllowed) {
       if (Ext == A) { Allowed = true; break; }

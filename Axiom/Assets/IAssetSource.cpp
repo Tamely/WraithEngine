@@ -11,7 +11,7 @@ AssetKind KindFromExtension(const std::filesystem::path &Path) {
   auto ext = Path.extension().string();
   if (ext == ".glb" || ext == ".gltf" || ext == ".fbx" || ext == ".obj")
     return AssetKind::Mesh;
-  if (ext == ".png" || ext == ".jpg" || ext == ".jpeg")
+  if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".hdr")
     return AssetKind::Texture;
   if (ext == ".wmesh")
     return AssetKind::Mesh;
@@ -22,9 +22,9 @@ AssetKind KindFromExtension(const std::filesystem::path &Path) {
   return AssetKind::Unknown;
 }
 
-constexpr std::string_view kContentExtensions[] = {".glb", ".gltf", ".fbx",
-                                                    ".obj", ".png", ".jpg",
-                                                    ".jpeg"};
+constexpr std::string_view kContentExtensions[] = {".glb",  ".gltf", ".fbx",
+                                                    ".obj",  ".png",  ".jpg",
+                                                    ".jpeg", ".hdr"};
 
 bool IsContentFile(const std::filesystem::path &Path) {
   auto ext = Path.extension().string();
