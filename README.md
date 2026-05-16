@@ -6,6 +6,8 @@
 
 ---
 
+![Wraith Engine Demo](Docs/Demo.gif)
+
 ## Overview
 
 Wraith Engine is a C++/Vulkan game engine runtime paired with a browser-based editor shell. The engine runs headless on a server, streams rendered viewports to browser clients via WebRTC with H.264, and processes editing commands through an authoritative command/event model. One shared runtime supports both local native editing and remotely hosted collaborative sessions.
