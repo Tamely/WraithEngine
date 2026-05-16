@@ -1310,6 +1310,7 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetLightProperties:
   case HeadlessCommandType::SetMaterialProperties:
   case HeadlessCommandType::SetMaterialTexture:
+  case HeadlessCommandType::SetWorldSettings:
     m_Host.SubmitRemoteCommand(*User, Command->EditorPayload);
     break;
   case HeadlessCommandType::DropMesh:
@@ -2919,6 +2920,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::SetLightProperties:
   case HeadlessCommandType::SetMaterialProperties:
   case HeadlessCommandType::SetMaterialTexture:
+  case HeadlessCommandType::SetWorldSettings:
     m_Host.SubmitRemoteCommand(Client->User, Command->EditorPayload);
     return true;
   case HeadlessCommandType::DropMesh:

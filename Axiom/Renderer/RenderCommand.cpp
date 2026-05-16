@@ -39,5 +39,12 @@ void RenderCommand::SetSun(const DirectionalLight &Light) {
   }
 }
 
+void RenderCommand::SetSkyboxColors(const glm::vec3 &Top, const glm::vec3 &Bottom) {
+  if (s_ActiveScene) {
+    s_ActiveScene->SkyboxColorTop = Top;
+    s_ActiveScene->SkyboxColorBottom = Bottom;
+  }
+}
+
 void RenderCommand::EndScene() { s_ActiveScene = nullptr; }
 } // namespace Axiom

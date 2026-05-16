@@ -199,6 +199,9 @@ std::string CommandTypeName(const EditorCommandPayload &Payload) {
   if (std::holds_alternative<StopSessionCommand>(Payload)) {
     return "stop_session";
   }
+  if (std::holds_alternative<SetWorldSettingsCommand>(Payload)) {
+    return "set_world_settings";
+  }
   return "set_transform";
 }
 
@@ -217,7 +220,8 @@ bool IsAuthoringMutationCommand(const EditorCommandPayload &Payload) {
          std::holds_alternative<SetLightPropertiesCommand>(Payload) ||
          std::holds_alternative<SetMaterialPropertiesCommand>(Payload) ||
          std::holds_alternative<SetMaterialTextureCommand>(Payload) ||
-         std::holds_alternative<SetPhysicsPropertiesCommand>(Payload);
+         std::holds_alternative<SetPhysicsPropertiesCommand>(Payload) ||
+         std::holds_alternative<SetWorldSettingsCommand>(Payload);
 }
 
 EditorSceneItemKind KindForClassName(std::string_view ClassName) {
@@ -1617,6 +1621,8 @@ bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
     }
   }
 
+  // SetWorldSettingsCommand requires no specific validation since colors are just vec3
+
   return true;
 }
 
@@ -2238,6 +2244,12 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                     .User = QueuedCommand.Context.User,
                     .State = m_State.RuntimeState,
                 }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const SetWorldSettingsCommand &Command) {
+  (void)QueuedCommand;
+  m_State.Scene.WorldSettings = Command.Settings;
 }
 
 void EditorSession::SetContentDir(std::filesystem::path ContentDir) {

@@ -83,6 +83,10 @@ interface SessionSnapshotResponse {
   selections: SessionSelection[]
   selectedObjectDetails: SessionObjectDetails | null
   runtimeState: "edit" | "playing" | "paused"
+  worldSettings?: {
+    skyboxColorTop: [number, number, number]
+    skyboxColorBottom: [number, number, number]
+  }
 }
 
 interface SessionConnectResponse {
@@ -573,6 +577,10 @@ export function Viewport() {
         sceneTree: snapshot.sceneTree ?? [],
         selections: snapshot.selections ?? [],
         selectedObjectDetails: snapshot.selectedObjectDetails ?? null,
+        worldSettings: snapshot.worldSettings ?? {
+          skyboxColorTop: [0.08, 0.09, 0.14],
+          skyboxColorBottom: [0.14, 0.24, 0.38],
+        },
       })
       sessionReadyRef.current = true
       setSessionUi(
@@ -1613,6 +1621,20 @@ export function Viewport() {
           {
             type: "delete_object",
             objectId,
+          },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
+      setWorldSettings: async (skyboxColorTop, skyboxColorBottom) => {
+        const accepted = await sendCommand(
+          {
+            type: "set_world_settings",
+            skyboxColorTop,
+            skyboxColorBottom,
           },
           "reliable"
         )

@@ -1031,8 +1031,13 @@ void VulkanRendererBackend::DrawBackground(VkCommandBuffer CommandBuffer) {
                           &m_DrawImageDescriptorSet, 0, VK_NULL_HANDLE);
 
   ComputePushConstants PC;
-  PC.data1 = glm::vec4(0.08f, 0.09f, 0.14f, 1.0f);
-  PC.data2 = glm::vec4(0.14f, 0.24f, 0.38f, 1.0f);
+  if (m_ActiveScene) {
+    PC.data1 = glm::vec4(m_ActiveScene->SkyboxColorTop, 1.0f);
+    PC.data2 = glm::vec4(m_ActiveScene->SkyboxColorBottom, 1.0f);
+  } else {
+    PC.data1 = glm::vec4(0.08f, 0.09f, 0.14f, 1.0f);
+    PC.data2 = glm::vec4(0.14f, 0.24f, 0.38f, 1.0f);
+  }
 
   vkCmdPushConstants(CommandBuffer, m_GradientPipelineLayout,
                      VK_SHADER_STAGE_COMPUTE_BIT, 0,

@@ -9,6 +9,7 @@ export type PanelId =
   | "content-browser"
   | "remote-viewport"
   | "script-editor"
+  | "world-details"
 
 export type DockZone = "left" | "right" | "top" | "bottom" | "center" | "tab"
 
@@ -252,7 +253,7 @@ const initialLayout: DockState = {
                         id: "details-cell",
                         type: "cell",
                         weight: 1,
-                        tabGroup: { id: "tg-details", panels: ["details"], activePanel: "details" },
+                        tabGroup: { id: "tg-details", panels: ["details", "world-details"], activePanel: "details" },
                     },
                 ],
             } as DockColumn,

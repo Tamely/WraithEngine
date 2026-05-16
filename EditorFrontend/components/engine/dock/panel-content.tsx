@@ -7,6 +7,7 @@ import { Details } from "../details"
 import { ContentBrowser } from "../content-browser"
 import { RemoteViewportPanel } from "../remote-viewport-panel"
 import { ScriptEditor } from "../script-editor"
+import { WorldDetailsPanel } from "../../panels/world-details-panel"
 
 interface PanelContentProps {
     panelId: PanelId
@@ -26,6 +27,8 @@ export function PanelContent({ panelId }: PanelContentProps) {
             return <RemoteViewportPanel />
         case "script-editor":
             return <ScriptEditor />
+        case "world-details":
+            return <WorldDetailsPanel />
         default:
             return null
     }

@@ -13,6 +13,7 @@ public:
   static void SubmitLightBillboard(const LightBillboardOverlay &Billboard);
   static void SetGizmoOverlay(const GizmoOverlayData &Gizmo);
   static void SetSun(const DirectionalLight &Light);
+  static void SetSkyboxColors(const glm::vec3 &Top, const glm::vec3 &Bottom);
   static void EndScene();
 
 private:

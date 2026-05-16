@@ -60,6 +60,7 @@ enum class HeadlessCommandType {
   StopSession,
   DropMesh,
   DropTexture,
+  SetWorldSettings,
   Heartbeat,
   RenderFrame,
   Quit,
@@ -89,6 +90,8 @@ struct HeadlessCommand {
   float Roughness{0.5f};        // used by SetMaterialProperties
   std::string MeshAssetPath;    // used by DropMesh
   std::string TextureAssetPath; // used by SetMaterialTexture
+  glm::vec3 SkyboxColorTop{0.08f, 0.09f, 0.14f};    // used by SetWorldSettings
+  glm::vec3 SkyboxColorBottom{0.14f, 0.24f, 0.38f}; // used by SetWorldSettings
 };
 
 struct HeadlessAppOptions {

@@ -286,6 +286,9 @@ void HeadlessSessionLayer::OnRender() {
     }
   }
 
+  RenderCommand::SetSkyboxColors(m_Session.GetState().Scene.WorldSettings.SkyboxColorTop,
+                                 m_Session.GetState().Scene.WorldSettings.SkyboxColorBottom);
+
   for (const auto &Submission : m_RendererAdapter->BuildRenderSubmissions(m_Session)) {
     RenderCommand::Submit(Submission);
   }

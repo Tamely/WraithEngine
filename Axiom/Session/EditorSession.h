@@ -133,6 +133,7 @@ struct EditorSceneState {
   std::unordered_map<std::string, EditorObjectDetails> ObjectDetailsById;
   std::unordered_map<std::string, EditorObjectCollaborationState>
       CollaborationByObjectId;
+  EditorWorldSettings WorldSettings;
 };
 
 struct EditorSessionState {
@@ -298,6 +299,8 @@ private:
                      const ResumeSessionCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const StopSessionCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const SetWorldSettingsCommand &Command);
   void ApplyWorldTransform(std::string_view ObjectId,
                            const EditorTransformDetails &WorldTransform,
                            SessionUserId User, bool PublishEvent);

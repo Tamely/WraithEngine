@@ -61,4 +61,9 @@ struct EditorPhysicsProperties {
   float Friction{0.2f};
   float Restitution{0.0f};
 };
+
+struct EditorWorldSettings {
+  glm::vec3 SkyboxColorTop{0.08f, 0.09f, 0.14f};
+  glm::vec3 SkyboxColorBottom{0.14f, 0.24f, 0.38f};
+};
 } // namespace Axiom

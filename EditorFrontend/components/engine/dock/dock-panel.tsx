@@ -19,6 +19,7 @@ const PANEL_LABELS: Record<PanelId, string> = {
     "content-browser": "Content Browser",
     "remote-viewport": "Remote Viewport",
     "script-editor": "Script Editor",
+    "world-details": "World Details",
 }
 
 export function DockPanel({ tabGroup, className = "", style }: DockPanelProps) {
