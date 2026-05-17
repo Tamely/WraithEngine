@@ -152,6 +152,9 @@ std::string CommandTypeName(const EditorCommandPayload &Payload) {
   if (std::holds_alternative<SetViewportCameraPoseCommand>(Payload)) {
     return "set_viewport_camera_pose";
   }
+  if (std::holds_alternative<SetCameraProjectionCommand>(Payload)) {
+    return "set_camera_projection";
+  }
   if (std::holds_alternative<SetLookActiveCommand>(Payload)) {
     return "set_look_active";
   }
@@ -215,6 +218,9 @@ std::string CommandTypeName(const EditorCommandPayload &Payload) {
   if (std::holds_alternative<SetWorldSettingsCommand>(Payload)) {
     return "set_world_settings";
   }
+  if (std::holds_alternative<PlaceActorCommand>(Payload)) {
+    return "place_actor";
+  }
   return "set_transform";
 }
 
@@ -234,7 +240,8 @@ bool IsAuthoringMutationCommand(const EditorCommandPayload &Payload) {
          std::holds_alternative<SetMaterialPropertiesCommand>(Payload) ||
          std::holds_alternative<SetMaterialTextureCommand>(Payload) ||
          std::holds_alternative<SetPhysicsPropertiesCommand>(Payload) ||
-         std::holds_alternative<SetWorldSettingsCommand>(Payload);
+         std::holds_alternative<SetWorldSettingsCommand>(Payload) ||
+         std::holds_alternative<PlaceActorCommand>(Payload);
 }
 
 EditorSceneItemKind KindForClassName(std::string_view ClassName) {
@@ -1692,6 +1699,23 @@ void EditorSession::HandleCommand(
 }
 
 void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const SetCameraProjectionCommand &Command) {
+  EditorViewportState &Viewport = EnsureViewport(QueuedCommand.Context.User);
+  Viewport.ProjectionType = Command.ProjectionType;
+  if (Command.ProjectionType == CameraProjectionType::Orthographic) {
+    Viewport.Camera.SetOrthographic(Viewport.OrthoHeight,
+                                    m_Config.CameraAspectRatio,
+                                    m_Config.CameraNearPlane,
+                                    m_Config.CameraFarPlane);
+  } else {
+    Viewport.Camera.SetPerspective(m_Config.CameraVerticalFovDegrees,
+                                   m_Config.CameraAspectRatio,
+                                   m_Config.CameraNearPlane,
+                                   m_Config.CameraFarPlane);
+  }
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                   const SetLookActiveCommand &Command) {
   EditorViewportState &Viewport = EnsureViewport(QueuedCommand.Context.User);
   const bool StateChanged = Viewport.IsLooking != Command.IsLooking;
@@ -2011,8 +2035,22 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
     return;
   }
 
-  CookMeshAssetBestEffort(m_ContentDir, Command.AssetPath);
-  const std::filesystem::path FullPath = m_ContentDir / Command.AssetPath;
+  // Resolve "Engine/" prefix to the engine content directory.
+  const std::filesystem::path AssetRelative{Command.AssetPath};
+  const bool IsEngineAsset =
+      !AssetRelative.empty() && *AssetRelative.begin() == "Engine";
+  std::filesystem::path EffectiveContentDir = m_ContentDir;
+  std::filesystem::path EffectiveRelative = AssetRelative;
+  if (IsEngineAsset && !m_EngineContentDir.empty()) {
+    EffectiveContentDir = m_EngineContentDir;
+    auto It = AssetRelative.begin();
+    ++It; // skip "Engine"
+    EffectiveRelative.clear();
+    for (; It != AssetRelative.end(); ++It) EffectiveRelative /= *It;
+  }
+
+  CookMeshAssetBestEffort(EffectiveContentDir, EffectiveRelative.string());
+  const std::filesystem::path FullPath = EffectiveContentDir / EffectiveRelative;
   const auto SceneData = Assets::LoadBasicMeshAsset(FullPath);
   if (!SceneData.has_value() || SceneData->Instances.empty()) {
     A_CORE_WARN("SetMeshAsset: failed to load '{}' for object '{}'",
@@ -2291,8 +2329,94 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
   }
 }
 
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const PlaceActorCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
+  Instance *WorldFolder = EnsureWorldFolder();
+  if (!WorldFolder) return;
+
+  // Create the Actor parent
+  const std::string ActorId = BuildUniqueObjectId("Actor");
+  const std::string ActorDisplayName = BuildUniqueDisplayName("Actor");
+  const EditorTransformDetails ActorTransform{.Location = Command.Location};
+  m_State.Scene.ObjectDetailsById.emplace(
+      ActorId,
+      EditorObjectDetails{
+          .ObjectId = ActorId,
+          .DisplayName = ActorDisplayName,
+          .Kind = EditorSceneItemKind::Actor,
+          .Visible = true,
+          .SupportsTransform = true,
+          .TransformReadOnly = false,
+          .Transform = ActorTransform,
+          .WorldTransform = ActorTransform,
+      });
+  Instance *ActorNode = CreateInstanceForTemplate("Actor", ActorId);
+  if (ActorNode) ActorNode->SetParent(WorldFolder);
+
+  // Create the child object (if a template was specified)
+  std::string ChildId;
+  std::string ChildDisplayName;
+  if (!Command.ChildTemplateId.empty()) {
+    const EditorSceneItemKind ChildKind = KindForTemplateId(Command.ChildTemplateId);
+    ChildId = BuildUniqueObjectId(Command.ChildTemplateId);
+    ChildDisplayName = BuildUniqueDisplayName(Command.ChildTemplateId);
+    const bool ChildTransformable = SupportsTransformForKind(ChildKind);
+    m_State.Scene.ObjectDetailsById.emplace(
+        ChildId,
+        EditorObjectDetails{
+            .ObjectId = ChildId,
+            .DisplayName = ChildDisplayName,
+            .Kind = ChildKind,
+            .Visible = true,
+            .SupportsTransform = ChildTransformable,
+            .TransformReadOnly = false,
+            .Transform = ChildTransformable
+                             ? std::optional{EditorTransformDetails{}}
+                             : std::nullopt,
+            .WorldTransform = ChildTransformable
+                                  ? std::optional{EditorTransformDetails{}}
+                                  : std::nullopt,
+        });
+    if (Instance *ChildNode =
+            CreateInstanceForTemplate(Command.ChildTemplateId, ChildId)) {
+      ChildNode->SetParent(ActorNode ? ActorNode : WorldFolder);
+    }
+  }
+
+  SyncItemsFromTree();
+  PublishEvent({.Payload = ObjectCreatedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .ObjectId = ActorId,
+                    .DisplayName = ActorDisplayName,
+                }});
+  if (!ChildId.empty()) {
+    PublishEvent({.Payload = ObjectCreatedEvent{
+                      .User = QueuedCommand.Context.User,
+                      .ObjectId = ChildId,
+                      .DisplayName = ChildDisplayName,
+                  }});
+    if (!Command.ChildMeshAssetPath.empty()) {
+      HandleCommand(QueuedCommand, SetMeshAssetCommand{
+                                       .ObjectId = ChildId,
+                                       .AssetPath = Command.ChildMeshAssetPath,
+                                   });
+    }
+  }
+
+  // Apply world-space location to the actor
+  HandleCommand(QueuedCommand, SetTransformCommand{
+                                   .ObjectId = ActorId,
+                                   .Location = Command.Location,
+                               });
+}
+
 void EditorSession::SetContentDir(std::filesystem::path ContentDir) {
   m_ContentDir = std::move(ContentDir);
+}
+
+void EditorSession::SetEngineContentDir(std::filesystem::path EngineContentDir) {
+  m_EngineContentDir = std::move(EngineContentDir);
 }
 
 void EditorSession::PublishScriptError(const std::string &ObjectId,

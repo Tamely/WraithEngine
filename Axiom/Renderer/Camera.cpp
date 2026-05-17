@@ -27,6 +27,16 @@ void Camera::SetPerspective(float VerticalFovDegrees, float AspectRatio,
   m_Projection = glm::perspective(glm::radians(VerticalFovDegrees), AspectRatio,
                                   NearPlane, FarPlane);
   m_Projection[1][1] *= -1.0f;
+  m_ProjectionType = CameraProjectionType::Perspective;
+}
+
+void Camera::SetOrthographic(float OrthoHeight, float AspectRatio,
+                              float NearPlane, float FarPlane) {
+  const float HalfH = OrthoHeight * 0.5f;
+  const float HalfW = HalfH * AspectRatio;
+  m_Projection = glm::ortho(-HalfW, HalfW, -HalfH, HalfH, NearPlane, FarPlane);
+  m_Projection[1][1] *= -1.0f; // Vulkan Y-flip
+  m_ProjectionType = CameraProjectionType::Orthographic;
 }
 
 void Camera::SetPosition(const glm::vec3 &Position) {

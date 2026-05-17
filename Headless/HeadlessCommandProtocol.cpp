@@ -529,6 +529,8 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
       R"json("mouseX"\s*:\s*([-+0-9.eE]+))json");
   static const std::regex MouseYPattern(
       R"json("mouseY"\s*:\s*([-+0-9.eE]+))json");
+  static const std::regex ProjectionTypePattern(
+      R"json("projectionType"\s*:\s*"([^"]+)")json");
 
   const auto Type = MatchString(JsonLine, TypePattern);
   if (!Type.has_value()) {
@@ -568,6 +570,28 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
     return HeadlessCommand{.Type = HeadlessCommandType::SetViewMode,
                            .EditorPayload = {},
                            .ViewMode = ParsedMode};
+  }
+  if (*Type == "set_camera_projection") {
+    const auto ProjType = MatchString(JsonLine, ProjectionTypePattern);
+    if (!ProjType.has_value()) {
+      Error = "`set_camera_projection` requires `projectionType`.";
+      return std::nullopt;
+    }
+
+    CameraProjectionType Parsed{};
+    if (*ProjType == "perspective") {
+      Parsed = CameraProjectionType::Perspective;
+    } else if (*ProjType == "orthographic") {
+      Parsed = CameraProjectionType::Orthographic;
+    } else {
+      Error = "Unsupported projectionType: " + *ProjType;
+      return std::nullopt;
+    }
+
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::SetCameraProjection,
+        .EditorPayload = {SetCameraProjectionCommand{.ProjectionType = Parsed}},
+        .ProjectionType = Parsed};
   }
   if (*Type == "set_show_colliders") {
     const auto ShowColliders = MatchString(JsonLine, ShowCollidersPattern);
@@ -892,6 +916,30 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
     Cmd.MousePosition = {MouseX, MouseY};
     return Cmd;
   }
+  if (*Type == "place_actor") {
+    static const std::regex TemplateIdPattern(
+        R"json("templateId"\s*:\s*"((?:\\.|[^"])*)")json");
+    static const std::regex MeshAssetPathPattern(
+        R"json("meshAssetPath"\s*:\s*"((?:\\.|[^"])*)")json");
+    const auto TemplateId = MatchString(JsonLine, TemplateIdPattern);
+    const auto MeshAssetPath = MatchString(JsonLine, MeshAssetPathPattern);
+    const auto MX = MatchString(JsonLine, MouseXPattern);
+    const auto MY = MatchString(JsonLine, MouseYPattern);
+    float MouseX = -1.0f;
+    float MouseY = -1.0f;
+    if (MX.has_value()) {
+      if (const auto V = ParseDouble(*MX)) MouseX = static_cast<float>(*V);
+    }
+    if (MY.has_value()) {
+      if (const auto V = ParseDouble(*MY)) MouseY = static_cast<float>(*V);
+    }
+    HeadlessCommand Cmd;
+    Cmd.Type = HeadlessCommandType::PlaceActor;
+    Cmd.PlaceActorTemplateId = TemplateId.has_value() ? UnescapeJsonString(*TemplateId) : "";
+    Cmd.PlaceActorMeshAssetPath = MeshAssetPath.has_value() ? UnescapeJsonString(*MeshAssetPath) : "";
+    Cmd.MousePosition = {MouseX, MouseY};
+    return Cmd;
+  }
   if (*Type == "list_assets") {
     return HeadlessCommand{.Type = HeadlessCommandType::ListAssets};
   }
@@ -1194,7 +1242,9 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::StopSession:
   case HeadlessCommandType::DropMesh:
   case HeadlessCommandType::DropTexture:
+  case HeadlessCommandType::PlaceActor:
   case HeadlessCommandType::SetWorldSettings:
+  case HeadlessCommandType::SetCameraProjection:
   case HeadlessCommandType::ReloadScripts:
   case HeadlessCommandType::Heartbeat:
   case HeadlessCommandType::Quit:

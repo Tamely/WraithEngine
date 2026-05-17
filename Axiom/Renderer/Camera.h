@@ -4,6 +4,8 @@
 #include <glm/vec3.hpp>
 
 namespace Axiom {
+enum class CameraProjectionType { Perspective, Orthographic };
+
 class Camera {
 public:
   Camera() = default;
@@ -12,6 +14,8 @@ public:
               const glm::vec3 &Up = glm::vec3(0.0f, 1.0f, 0.0f));
   void SetPerspective(float VerticalFovDegrees, float AspectRatio,
                       float NearPlane, float FarPlane);
+  void SetOrthographic(float OrthoHeight, float AspectRatio,
+                       float NearPlane, float FarPlane);
   void SetPosition(const glm::vec3 &Position);
   void SetRotation(float YawDegrees, float PitchDegrees);
   void MoveLocal(const glm::vec3 &LocalOffset);
@@ -26,6 +30,10 @@ public:
   const glm::mat4 &GetViewMatrix() const { return m_View; }
   const glm::mat4 &GetProjectionMatrix() const { return m_Projection; }
   glm::mat4 GetViewProjectionMatrix() const { return m_Projection * m_View; }
+  CameraProjectionType GetProjectionType() const { return m_ProjectionType; }
+  bool IsOrthographic() const {
+    return m_ProjectionType == CameraProjectionType::Orthographic;
+  }
 
 private:
   void UpdateOrientationVectors();
@@ -39,5 +47,6 @@ private:
   float m_PitchDegrees{0.0f};
   glm::mat4 m_View{1.0f};
   glm::mat4 m_Projection{1.0f};
+  CameraProjectionType m_ProjectionType{CameraProjectionType::Perspective};
 };
 } // namespace Axiom

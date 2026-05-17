@@ -33,6 +33,7 @@ export type RemoteSessionState =
 export type RemoteRuntimeState = "edit" | "playing" | "paused"
 
 export type RemoteViewportViewMode = "lit" | "unlit" | "wireframe"
+export type RemoteViewportProjectionType = "perspective" | "orthographic"
 export type RemoteViewportGizmoMode = "translate" | "scale" | "rotate"
 export type SessionSceneItemKind = "folder" | "mesh" | "light" | "camera" | "actor"
 
@@ -151,6 +152,7 @@ interface RemoteViewportActions {
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
+  setProjectionType: (type: RemoteViewportProjectionType) => Promise<void>
   setShowColliders: (showColliders: boolean) => Promise<void>
   setGizmoMode: (mode: RemoteViewportGizmoMode) => Promise<void>
   setGridSnapSettings: (settings: RemoteViewportGridSnapSettings) => Promise<void>
@@ -161,6 +163,7 @@ interface RemoteViewportActions {
   goToParticipantCamera: (userId: number) => Promise<boolean>
   updateTransform: (details: SessionObjectTransformUpdate) => Promise<boolean>
   createObject: (templateId: string) => Promise<boolean>
+  placeActor: (templateId: string, mouseX: number, mouseY: number, meshAssetPath?: string) => Promise<boolean>
   duplicateObject: (objectId: string) => Promise<boolean>
   deleteObject: (objectId: string) => Promise<boolean>
   reparentObject: (objectId: string, newParentId: string) => Promise<boolean>
@@ -215,6 +218,7 @@ interface RemoteViewportContextValue {
   runtimeState: RemoteRuntimeState
   canControlRuntime: boolean
   viewMode: RemoteViewportViewMode
+  projectionType: RemoteViewportProjectionType
   showColliders: boolean
   gizmoMode: RemoteViewportGizmoMode
   gridSnapSettings: RemoteViewportGridSnapSettings
@@ -295,6 +299,7 @@ interface RemoteViewportContextValue {
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
+  setProjectionType: (type: RemoteViewportProjectionType) => Promise<void>
   setShowColliders: (showColliders: boolean) => Promise<void>
   setGizmoMode: (mode: RemoteViewportGizmoMode) => Promise<void>
   setGridSnapSettings: (settings: RemoteViewportGridSnapSettings) => Promise<void>
@@ -305,6 +310,7 @@ interface RemoteViewportContextValue {
   goToParticipantCamera: (userId: number) => Promise<boolean>
   updateTransform: (details: SessionObjectTransformUpdate) => Promise<boolean>
   createObject: (templateId: string) => Promise<boolean>
+  placeActor: (templateId: string, mouseX: number, mouseY: number, meshAssetPath?: string) => Promise<boolean>
   duplicateObject: (objectId: string) => Promise<boolean>
   deleteObject: (objectId: string) => Promise<boolean>
   reparentObject: (objectId: string, newParentId: string) => Promise<boolean>
@@ -369,6 +375,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     reconnect: async () => {},
     toggleLook: async () => {},
     setMode: async () => {},
+    setProjectionType: async () => {},
     setShowColliders: async () => {},
     setGizmoMode: async () => {},
     setGridSnapSettings: async () => {},
@@ -379,6 +386,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     goToParticipantCamera: async () => false,
     updateTransform: async () => false,
     createObject: async () => false,
+    placeActor: async () => false,
     duplicateObject: async () => false,
     deleteObject: async () => false,
     reparentObject: async () => false,
@@ -409,6 +417,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
   )
   const [runtimeState, setRuntimeState] = useState<RemoteRuntimeState>("edit")
   const [viewMode, setViewMode] = useState<RemoteViewportViewMode>("lit")
+  const [projectionType, setProjectionTypeState] = useState<RemoteViewportProjectionType>("perspective")
   const [showColliders, setShowCollidersState] = useState(true)
   const [gizmoMode, setGizmoModeState] = useState<RemoteViewportGizmoMode>("translate")
   const [gridSnapSettings, setGridSnapSettingsState] =
@@ -538,6 +547,11 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     await actionsRef.current.setMode(mode)
   }, [])
 
+  const setProjectionType = useCallback(async (type: RemoteViewportProjectionType) => {
+    setProjectionTypeState(type)
+    await actionsRef.current.setProjectionType(type)
+  }, [])
+
   const setShowColliders = useCallback(async (nextValue: boolean) => {
     setShowCollidersState(nextValue)
     await actionsRef.current.setShowColliders(nextValue)
@@ -579,6 +593,10 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
 
   const createObject = useCallback(async (templateId: string) => {
     return actionsRef.current.createObject(templateId)
+  }, [])
+
+  const placeActor = useCallback(async (templateId: string, mouseX: number, mouseY: number, meshAssetPath?: string) => {
+    return actionsRef.current.placeActor(templateId, mouseX, mouseY, meshAssetPath)
   }, [])
 
   const duplicateObject = useCallback(async (objectId: string) => {
@@ -687,6 +705,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       runtimeState,
       canControlRuntime,
       viewMode,
+      projectionType,
       showColliders,
       gizmoMode,
       gridSnapSettings,
@@ -753,6 +772,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       reconnect,
       toggleLook,
       setMode,
+      setProjectionType,
       setShowColliders,
       setGizmoMode: setGizmoModeAction,
       setGridSnapSettings,
@@ -763,6 +783,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       goToParticipantCamera,
       updateTransform,
       createObject,
+      placeActor,
       duplicateObject,
       deleteObject,
       reparentObject,
@@ -826,6 +847,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       gizmoMode,
       showColliders,
       setMode,
+      setProjectionType,
       setShowColliders,
       setGizmoModeAction,
       setGridSnapSettings,
@@ -837,10 +859,12 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       toggleLook,
       updateTransform,
       createObject,
+      placeActor,
       duplicateObject,
       deleteObject,
       reparentObject,
       viewMode,
+      projectionType,
     ]
   )
 

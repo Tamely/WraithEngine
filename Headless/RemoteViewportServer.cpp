@@ -1291,6 +1291,7 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
     break;
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
+  case HeadlessCommandType::SetCameraProjection:
   case HeadlessCommandType::UpdateViewportCamera:
   case HeadlessCommandType::SelectObject:
   case HeadlessCommandType::RenameObject:
@@ -1320,6 +1321,9 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
     HandleTextureDropCommand(*User, *Command);
     break;
   }
+  case HeadlessCommandType::PlaceActor:
+    HandlePlaceActorCommand(*User, *Command);
+    break;
   case HeadlessCommandType::GizmoHover:
   case HeadlessCommandType::GizmoDragStart:
   case HeadlessCommandType::GizmoDragUpdate:
@@ -2661,6 +2665,32 @@ void RemoteViewportServer::HandleMeshDropCommand(SessionUserId User,
                                    }});
 }
 
+void RemoteViewportServer::HandlePlaceActorCommand(SessionUserId User,
+                                                    const HeadlessCommand &Command) {
+  const EditorSession &Session = m_Host.GetHeadlessLayer().GetSession();
+  const EditorViewportState *Viewport = Session.FindViewport(User);
+  if (Viewport == nullptr) {
+    return;
+  }
+
+  glm::vec2 MousePos = Command.MousePosition;
+  if (MousePos.x < 0.0f || MousePos.y < 0.0f) {
+    MousePos = {static_cast<float>(m_Options.Width) * 0.5f,
+                static_cast<float>(m_Options.Height) * 0.5f};
+  }
+
+  const glm::vec3 SpawnLocation = ResolveViewportDropPosition(
+      Viewport->Camera, m_Options.Width, m_Options.Height, MousePos,
+      Session.GetState().Scene.MeshInstances);
+
+  m_Host.SubmitRemoteCommand(
+      User, EditorCommand{PlaceActorCommand{
+                .ChildTemplateId = Command.PlaceActorTemplateId,
+                .ChildMeshAssetPath = Command.PlaceActorMeshAssetPath,
+                .Location = SpawnLocation,
+            }});
+}
+
 bool RemoteViewportServer::HandleWebSocketUpgrade(uintptr_t ClientSocketValue,
                                                   std::string_view HeaderBlock,
                                                   std::string_view Path) {
@@ -2811,8 +2841,12 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   case HeadlessCommandType::DropTexture:
     HandleTextureDropCommand(m_Host.GetHeadlessLayer().GetLocalUserId(), *Command);
     return true;
+  case HeadlessCommandType::PlaceActor:
+    HandlePlaceActorCommand(m_Host.GetHeadlessLayer().GetLocalUserId(), *Command);
+    return true;
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
+  case HeadlessCommandType::SetCameraProjection:
   case HeadlessCommandType::SelectObject:
   case HeadlessCommandType::RenameObject:
   case HeadlessCommandType::SetObjectVisibility:
@@ -2901,6 +2935,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     return true;
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
+  case HeadlessCommandType::SetCameraProjection:
   case HeadlessCommandType::UpdateViewportCamera:
   case HeadlessCommandType::SelectObject:
   case HeadlessCommandType::RenameObject:
@@ -2925,6 +2960,9 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     return true;
   case HeadlessCommandType::DropMesh:
     HandleMeshDropCommand(Client->User, *Command);
+    return true;
+  case HeadlessCommandType::PlaceActor:
+    HandlePlaceActorCommand(Client->User, *Command);
     return true;
 
   case HeadlessCommandType::ReloadScripts: {

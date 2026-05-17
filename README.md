@@ -42,9 +42,11 @@ AxiomRemoteViewportServer  (C++)
 - Session-wide Play / Pause / Stop with authoritative edit-snapshot restore
 - Runtime-only Jolt physics stepping with pause / resume support
 - Default static box collision for imported mesh assets, with load-time migration for older meshes that had no authored physics yet
+- Configurable sky background — a two-color vertical gradient (compute-shader blended) or an equirectangular HDR (`.hdr`) sampled from a world-space ray; HDR data is preserved end-to-end as float pixels through a v2 cooked `.wtex` so future image-based lighting can reuse the same asset
 
 **Browser editor**
-- Dockable panels: outliner, details/property inspector, content browser, toolbar
+- Dockable panels: outliner, details/property inspector, content browser, toolbar, Place Actors, script editor, remote viewport
+- Window menu to show/hide any panel; panels can be tabbed or floated
 - Scene outliner with drag-drop reparenting, inline rename, right-click context menus
 - Object lifecycle: create, duplicate, delete
 - Per-client gizmo mode (Q / E / R shortcuts)
@@ -54,6 +56,9 @@ AxiomRemoteViewportServer  (C++)
 - Script class attachment and hot-reload button
 - Inspector-driven physics authoring: body type, collider type, extents/radius, mass, friction, bounce
 - Read-only physics visibility for generated mesh children, with inheritance hints pointing back to the authored root mesh object
+- World Details panel for editing the skybox: color pickers for the gradient mode, plus an HDR file slot that accepts drag-drop from the content browser, a searchable folder-icon picker listing every `.hdr` in the project, or a typed content-relative path
+- Perspective / Orthographic viewport projection toggle; HDR skybox automatically falls back to gradient in orthographic mode
+- Place Actors panel: searchable, category-filtered panel with click-to-place and drag-to-viewport placement; shapes (Cube, Sphere, Cylinder, Cone, Plane) place a Mesh child inside an Actor wrapper; lights, cameras, and generic actors each place their appropriate type
 
 ## Prerequisites
 
@@ -235,6 +240,9 @@ Open `http://localhost:3000` in your browser.
 | `Scripting/WraithEngine.Managed/` | C# engine API assembly (`Script`, `GameObject`, `Transform`) |
 | `EditorFrontend/` | React / Next.js browser editor shell |
 | `Content/` | Shaders, demo assets (`.glb`), and the persistent `scene.json` |
+| `Content/Engine/` | Engine-bundled assets (billboards, primitive shapes); paths prefixed with `Engine/` resolve here |
+| `Content/Engine/Primitives/` | Procedurally generated primitive meshes: Cube, Sphere, Cylinder, Cone, Plane |
+| `Tools/` | Dev utilities — `gen_primitives.py` regenerates the primitive GLB assets |
 | `Tests/` | Google Test suite |
 | `Tests/TestScripts/` | C# test assemblies for scripting tests |
 | `Docs/` | Architecture and design documents |

@@ -461,6 +461,7 @@ bool HeadlessSessionLayer::LoadStartupSceneIntoSession(
 #define AXIOM_CONTENT_DIR "Content"
 #endif
   m_Session.SetContentDir(ContentDir);
+  m_Session.SetEngineContentDir(std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine");
   return LoadStartupScene(m_Session);
 }
 

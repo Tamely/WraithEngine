@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Renderer/Camera.h"
 #include "Session/SessionTypes.h"
 
 #include <glm/vec2.hpp>
@@ -128,12 +129,23 @@ struct ResumeSessionCommand {};
 
 struct StopSessionCommand {};
 
+struct SetCameraProjectionCommand {
+  CameraProjectionType ProjectionType{CameraProjectionType::Perspective};
+};
+
 struct SetWorldSettingsCommand {
   EditorWorldSettings Settings;
 };
 
+struct PlaceActorCommand {
+  std::string ChildTemplateId; // empty = bare Actor, no child
+  std::string ChildMeshAssetPath; // if set, assigns this asset to the child mesh after creation
+  glm::vec3 Location{0.0f};
+};
+
 using EditorCommandPayload =
     std::variant<UpdateViewportCameraCommand, SetViewportCameraPoseCommand,
+                 SetCameraProjectionCommand,
                  SetLookActiveCommand, SelectObjectCommand,
                  RenameObjectCommand, SetObjectVisibilityCommand,
                  CreateObjectCommand, CreateMeshObjectCommand,
@@ -146,7 +158,8 @@ using EditorCommandPayload =
                  SetMaterialTextureCommand, SetPhysicsPropertiesCommand,
                  PlaySessionCommand,
                  PauseSessionCommand, ResumeSessionCommand,
-                 StopSessionCommand, SetWorldSettingsCommand>;
+                 StopSessionCommand, SetWorldSettingsCommand,
+                 PlaceActorCommand>;
 
 struct EditorCommand {
   EditorCommandPayload Payload;

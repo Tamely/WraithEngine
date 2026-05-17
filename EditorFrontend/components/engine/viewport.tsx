@@ -22,6 +22,7 @@ import {
   type SessionObjectDetails,
   type RemoteViewportConnectionState,
   type RemoteViewportViewMode,
+  type RemoteViewportProjectionType,
   type RemoteViewportGizmoMode,
   type SessionParticipant,
   type SessionSceneItem,
@@ -36,6 +37,7 @@ const SESSION_POLL_INTERVAL_MS = 1500
 const CLIENT_ID_CLAIM_TIMEOUT_MS = 100
 type ConnectionState = RemoteViewportConnectionState
 type ViewMode = RemoteViewportViewMode
+type ProjectionType = RemoteViewportProjectionType
 type GizmoMode = RemoteViewportGizmoMode
 type ChannelPreference = "reliable" | "unreliable"
 
@@ -100,6 +102,10 @@ type RemoteViewportCommand =
   | {
     type: "set_view_mode"
     viewMode: ViewMode
+  }
+  | {
+    type: "set_camera_projection"
+    projectionType: ProjectionType
   }
   | {
     type: "set_show_colliders"
@@ -225,6 +231,13 @@ type RemoteViewportCommand =
     textureAssetPath: string
   }
   | {
+    type: "place_actor"
+    templateId: string
+    meshAssetPath?: string
+    mouseX: number
+    mouseY: number
+  }
+  | {
     type: "drop_mesh"
     mouseX: number
     mouseY: number
@@ -280,6 +293,7 @@ export function Viewport() {
   const pendingLookDeltaRef = useRef({ x: 0, y: 0 })
   const isLookingRef = useRef(false)
   const viewModeRef = useRef<ViewMode>("lit")
+  const projectionTypeRef = useRef<ProjectionType>("perspective")
   const gizmoModeRef = useRef<GizmoMode>("translate")
   const setGizmoModeCtxRef = useRef<(mode: GizmoMode) => Promise<void>>(async () => { })
   const notifyServerOnDestroyRef = useRef(true)
@@ -293,6 +307,7 @@ export function Viewport() {
     detailText,
     frameText,
     viewMode,
+    projectionType,
     showColliders,
     gizmoMode,
     isLooking,
@@ -323,6 +338,7 @@ export function Viewport() {
     setSessionStatusText,
     setSessionDetailText,
     setGizmoMode: setGizmoModeCtx,
+    setProjectionType: setProjectionTypeCtx,
     runtimeState,
   } = useRemoteViewport()
   const [serverOrigin] = useState(getServerOrigin)
@@ -335,6 +351,10 @@ export function Viewport() {
   useEffect(() => {
     viewModeRef.current = viewMode
   }, [viewMode])
+
+  useEffect(() => {
+    projectionTypeRef.current = projectionType
+  }, [projectionType])
 
   useEffect(() => {
     isLookingRef.current = isLooking
@@ -1613,6 +1633,22 @@ export function Viewport() {
         }
         return accepted
       },
+      placeActor: async (templateId, mouseX, mouseY, meshAssetPath) => {
+        const accepted = await sendCommand(
+          {
+            type: "place_actor",
+            templateId,
+            meshAssetPath,
+            mouseX,
+            mouseY,
+          },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
       duplicateObject: async (objectId) => {
         const accepted = await sendCommand(
           {
@@ -1743,6 +1779,19 @@ export function Viewport() {
           {
             type: "set_view_mode",
             viewMode: nextMode,
+          },
+          "reliable"
+        )
+      },
+      setProjectionType: async (nextType) => {
+        if (projectionTypeRef.current === nextType) {
+          return
+        }
+        projectionTypeRef.current = nextType
+        await sendCommand(
+          {
+            type: "set_camera_projection",
+            projectionType: nextType,
           },
           "reliable"
         )
@@ -1964,6 +2013,10 @@ export function Viewport() {
     const handleDocDragOver = (event: DragEvent) => {
       lastDragX = event.clientX
       lastDragY = event.clientY
+      if (event.dataTransfer?.types.includes("application/x-place-actor")) {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = "copy"
+      }
     }
 
       ; (window as any).__axiomViewportDropHandler = (clientX: number, clientY: number, kind: string, path: string) => {
@@ -1990,9 +2043,44 @@ export function Viewport() {
         void sendCommand({ type: "drop_texture", mouseX, mouseY, textureAssetPath: path }, "reliable")
       }
 
+    const handleDocDrop = (event: DragEvent) => {
+      const payload = event.dataTransfer?.getData("application/x-place-actor")
+      if (!payload) return
+      event.preventDefault()
+      let templateId = payload
+      let meshAssetPath: string | undefined
+      try {
+        const parsed = JSON.parse(payload) as { templateId: string; meshAssetPath?: string }
+        templateId = parsed.templateId
+        meshAssetPath = parsed.meshAssetPath
+      } catch {
+        // plain templateId string (legacy)
+      }
+      const x = event.clientX
+      const y = event.clientY
+      const s = viewportShellRef.current
+      const v = videoRef.current
+      if (!s || !v || !v.videoWidth || !v.videoHeight) {
+        void sendCommand({ type: "place_actor", templateId, meshAssetPath, mouseX: -1, mouseY: -1 }, "reliable")
+        return
+      }
+      const rect = s.getBoundingClientRect()
+      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return
+      const scale = Math.min(rect.width / v.videoWidth, rect.height / v.videoHeight)
+      const contentW = v.videoWidth * scale
+      const contentH = v.videoHeight * scale
+      const cssX = x - rect.left - (rect.width - contentW) / 2
+      const cssY = y - rect.top - (rect.height - contentH) / 2
+      if (cssX < 0 || cssY < 0 || cssX > contentW || cssY > contentH) return
+      const mouseX = (cssX / contentW) * v.videoWidth
+      const mouseY = (cssY / contentH) * v.videoHeight
+      void sendCommand({ type: "place_actor", templateId, meshAssetPath, mouseX, mouseY }, "reliable")
+    }
+
     video?.addEventListener("loadedmetadata", handleLoadedMetadata)
     video?.addEventListener("resize", handleResize)
     document.addEventListener("dragover", handleDocDragOver)
+    document.addEventListener("drop", handleDocDrop)
     document.addEventListener("mousedown", handleMouseDown)
     document.addEventListener("mouseup", handleMouseUp)
     document.addEventListener("contextmenu", handleContextMenu)
@@ -2009,6 +2097,7 @@ export function Viewport() {
       video?.removeEventListener("loadedmetadata", handleLoadedMetadata)
       video?.removeEventListener("resize", handleResize)
       document.removeEventListener("dragover", handleDocDragOver)
+      document.removeEventListener("drop", handleDocDrop)
         ; (window as any).__axiomViewportDropHandler = null
       document.removeEventListener("mousedown", handleMouseDown)
       document.removeEventListener("mouseup", handleMouseUp)
@@ -2071,10 +2160,29 @@ export function Viewport() {
     <div className="h-full flex flex-col bg-neutral-900">
       <div className="flex items-center justify-between h-8 bg-neutral-950 border-b border-neutral-800 px-2">
         <div className="flex items-center gap-2">
-          <button className="flex items-center gap-1 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 rounded">
-            Perspective
-            <ChevronDown className="w-3 h-3" />
-          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="flex items-center gap-1 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 rounded"
+                type="button"
+              >
+                {projectionType === "perspective" ? "Perspective" : "Orthographic"}
+                <ChevronDown className="w-3 h-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              className="border-neutral-800 bg-neutral-950 text-neutral-200"
+            >
+              <DropdownMenuRadioGroup
+                value={projectionType}
+                onValueChange={(value) => void setProjectionTypeCtx(value as ProjectionType)}
+              >
+                <DropdownMenuRadioItem value="perspective">Perspective</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="orthographic">Orthographic</DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button

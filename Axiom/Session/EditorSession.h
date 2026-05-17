@@ -34,6 +34,8 @@ struct EditorSessionConfig {
 
 struct EditorViewportState {
   Camera Camera;
+  CameraProjectionType ProjectionType{CameraProjectionType::Perspective};
+  float OrthoHeight{20.0f};
   bool IsLooking{false};
   glm::dvec2 LastCursorPosition{0.0, 0.0};
   bool HasLastCursorPosition{false};
@@ -170,6 +172,10 @@ public:
   void SetContentDir(std::filesystem::path ContentDir);
   const std::filesystem::path &GetContentDir() const { return m_ContentDir; }
 
+  // Optional fallback for engine-bundled assets (paths prefixed with "Engine/").
+  void SetEngineContentDir(std::filesystem::path EngineContentDir);
+  const std::filesystem::path &GetEngineContentDir() const { return m_EngineContentDir; }
+
   void EnsureViewportState(SessionUserId User);
   void SetPresenceState(SessionUserId User, EditorUserPresenceState State);
   void SetSceneState(EditorSceneState SceneState);
@@ -258,6 +264,8 @@ private:
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SetViewportCameraPoseCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const SetCameraProjectionCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SetLookActiveCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SelectObjectCommand &Command);
@@ -301,6 +309,8 @@ private:
                      const StopSessionCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SetWorldSettingsCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const PlaceActorCommand &Command);
   void ApplyWorldTransform(std::string_view ObjectId,
                            const EditorTransformDetails &WorldTransform,
                            SessionUserId User, bool PublishEvent);
@@ -321,6 +331,7 @@ private:
   EditorMessageBus m_MessageBus;
   std::unique_ptr<DataModel> m_SceneRoot;
   std::filesystem::path m_ContentDir;
+  std::filesystem::path m_EngineContentDir;
   std::optional<RuntimeSceneSnapshot> m_RuntimeSceneSnapshot;
   std::unique_ptr<PhysicsWorld> m_PhysicsWorld;
 };
