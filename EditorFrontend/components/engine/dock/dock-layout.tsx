@@ -133,6 +133,7 @@ const PANEL_LABELS: Record<PanelId, string> = {
     "remote-viewport": "Remote Viewport",
     "script-editor": "Script Editor",
     "world-details": "World Details",
+    "place-actors": "Place Actors",
 }
 
 function DragCursorOverlay() {

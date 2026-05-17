@@ -1,6 +1,6 @@
 "use client"
 
-import React, { createContext, useContext, useCallback, useState, useRef } from "react"
+import React, { createContext, useContext, useCallback, useState, useRef, useMemo } from "react"
 
 export type PanelId =
   | "viewport"
@@ -10,6 +10,7 @@ export type PanelId =
   | "remote-viewport"
   | "script-editor"
   | "world-details"
+  | "place-actors"
 
 export type DockZone = "left" | "right" | "top" | "bottom" | "center" | "tab"
 
@@ -65,6 +66,7 @@ interface DragState {
 
 interface DockContextValue {
     layout: DockState
+    openPanelIds: Set<PanelId>
     dragState: DragState
     setDragState: React.Dispatch<React.SetStateAction<DragState>>
     dropPanel: (panelId: PanelId, targetTabGroupId: string, zone: DockZone) => void
@@ -74,6 +76,8 @@ interface DockContextValue {
     updateWeight: (nodeId: string, weight: number) => void
     floatingDragRef: React.MutableRefObject<{ panelId: PanelId; offsetX: number; offsetY: number } | null>
     setFloatingPosition: (panelId: PanelId, x: number, y: number) => void
+    openPanel: (panelId: PanelId) => void
+    closePanel: (panelId: PanelId) => void
 }
 
 const DockContext = createContext<DockContextValue | null>(null)
@@ -204,6 +208,14 @@ function setActiveTabInTree(node: DockNode, tabGroupId: string, panelId: PanelId
     } as DockRow | DockColumn
 }
 
+function collectPanelIds(node: DockNode, ids: Set<PanelId>): void {
+    if (node.type === "cell") {
+        for (const p of node.tabGroup.panels) ids.add(p)
+        return
+    }
+    for (const child of node.children) collectPanelIds(child, ids)
+}
+
 // ─── initial layout ────────────────────────────────────────────────────────────
 
 const initialLayout: DockState = {
@@ -247,7 +259,7 @@ const initialLayout: DockState = {
                         id: "outliner-cell",
                         type: "cell",
                         weight: 1,
-                        tabGroup: { id: "tg-outliner", panels: ["outliner"], activePanel: "outliner" },
+                        tabGroup: { id: "tg-outliner", panels: ["outliner", "place-actors"], activePanel: "outliner" },
                     },
                     {
                         id: "details-cell",
@@ -323,10 +335,44 @@ export function DockProvider({ children }: { children: React.ReactNode }) {
         }))
     }, [])
 
+    const openPanel = useCallback((panelId: PanelId) => {
+        setLayout((prev) => {
+            const ids = new Set<PanelId>()
+            collectPanelIds(prev.root, ids)
+            for (const f of prev.floatingPanels) ids.add(f.panelId)
+            if (ids.has(panelId)) return prev
+            return {
+                ...prev,
+                floatingPanels: [
+                    ...prev.floatingPanels,
+                    { panelId, x: 200, y: 80, width: 320, height: 480 },
+                ],
+            }
+        })
+    }, [])
+
+    const closePanel = useCallback((panelId: PanelId) => {
+        setLayout((prev) => {
+            const { node: afterRemove } = removePanel(prev.root, panelId)
+            return {
+                root: afterRemove ?? prev.root,
+                floatingPanels: prev.floatingPanels.filter((f) => f.panelId !== panelId),
+            }
+        })
+    }, [])
+
+    const openPanelIds = useMemo(() => {
+        const ids = new Set<PanelId>()
+        collectPanelIds(layout.root, ids)
+        for (const f of layout.floatingPanels) ids.add(f.panelId)
+        return ids
+    }, [layout])
+
     return (
         <DockContext.Provider
             value={{
                 layout,
+                openPanelIds,
                 dragState,
                 setDragState,
                 dropPanel,
@@ -336,6 +382,8 @@ export function DockProvider({ children }: { children: React.ReactNode }) {
                 updateWeight,
                 floatingDragRef,
                 setFloatingPosition,
+                openPanel,
+                closePanel,
             }}
         >
             {children}
