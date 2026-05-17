@@ -305,6 +305,8 @@ private:
                      const StopSessionCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SetWorldSettingsCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const PlaceActorCommand &Command);
   void ApplyWorldTransform(std::string_view ObjectId,
                            const EditorTransformDetails &WorldTransform,
                            SessionUserId User, bool PublishEvent);

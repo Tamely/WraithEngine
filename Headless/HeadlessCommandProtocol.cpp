@@ -916,6 +916,26 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
     Cmd.MousePosition = {MouseX, MouseY};
     return Cmd;
   }
+  if (*Type == "place_actor") {
+    static const std::regex TemplateIdPattern(
+        R"json("templateId"\s*:\s*"((?:\\.|[^"])*)")json");
+    const auto TemplateId = MatchString(JsonLine, TemplateIdPattern);
+    const auto MX = MatchString(JsonLine, MouseXPattern);
+    const auto MY = MatchString(JsonLine, MouseYPattern);
+    float MouseX = -1.0f;
+    float MouseY = -1.0f;
+    if (MX.has_value()) {
+      if (const auto V = ParseDouble(*MX)) MouseX = static_cast<float>(*V);
+    }
+    if (MY.has_value()) {
+      if (const auto V = ParseDouble(*MY)) MouseY = static_cast<float>(*V);
+    }
+    HeadlessCommand Cmd;
+    Cmd.Type = HeadlessCommandType::PlaceActor;
+    Cmd.PlaceActorTemplateId = TemplateId.has_value() ? UnescapeJsonString(*TemplateId) : "";
+    Cmd.MousePosition = {MouseX, MouseY};
+    return Cmd;
+  }
   if (*Type == "list_assets") {
     return HeadlessCommand{.Type = HeadlessCommandType::ListAssets};
   }
@@ -1218,6 +1238,7 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::StopSession:
   case HeadlessCommandType::DropMesh:
   case HeadlessCommandType::DropTexture:
+  case HeadlessCommandType::PlaceActor:
   case HeadlessCommandType::SetWorldSettings:
   case HeadlessCommandType::SetCameraProjection:
   case HeadlessCommandType::ReloadScripts:

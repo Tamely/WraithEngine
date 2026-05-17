@@ -82,7 +82,7 @@ const CATEGORIES: Category[] = [
 ]
 
 export function PlaceActorsPanel() {
-  const { createObject } = useRemoteViewport()
+  const { placeActor } = useRemoteViewport()
   const [search, setSearch] = useState("")
   const [activeCategory, setActiveCategory] = useState<CategoryId>("all")
   const [placingId, setPlacingId] = useState<string | null>(null)
@@ -102,10 +102,15 @@ export function PlaceActorsPanel() {
     if (placingId) return
     setPlacingId(item.id)
     try {
-      await createObject(item.templateId)
+      await placeActor(item.templateId, -1, -1)
     } finally {
       setPlacingId(null)
     }
+  }
+
+  function handleDragStart(event: React.DragEvent, item: PlaceableItem) {
+    event.dataTransfer.setData("application/x-place-actor", item.templateId)
+    event.dataTransfer.effectAllowed = "copy"
   }
 
   return (
@@ -166,6 +171,8 @@ export function PlaceActorsPanel() {
               return (
                 <button
                   key={item.id}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, item)}
                   onClick={() => void handlePlace(item)}
                   disabled={!!placingId}
                   className="group flex w-full items-center gap-3 rounded px-2 py-2 text-left transition-colors hover:bg-neutral-800 disabled:pointer-events-none"

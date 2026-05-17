@@ -163,6 +163,7 @@ interface RemoteViewportActions {
   goToParticipantCamera: (userId: number) => Promise<boolean>
   updateTransform: (details: SessionObjectTransformUpdate) => Promise<boolean>
   createObject: (templateId: string) => Promise<boolean>
+  placeActor: (templateId: string, mouseX: number, mouseY: number) => Promise<boolean>
   duplicateObject: (objectId: string) => Promise<boolean>
   deleteObject: (objectId: string) => Promise<boolean>
   reparentObject: (objectId: string, newParentId: string) => Promise<boolean>
@@ -309,6 +310,7 @@ interface RemoteViewportContextValue {
   goToParticipantCamera: (userId: number) => Promise<boolean>
   updateTransform: (details: SessionObjectTransformUpdate) => Promise<boolean>
   createObject: (templateId: string) => Promise<boolean>
+  placeActor: (templateId: string, mouseX: number, mouseY: number) => Promise<boolean>
   duplicateObject: (objectId: string) => Promise<boolean>
   deleteObject: (objectId: string) => Promise<boolean>
   reparentObject: (objectId: string, newParentId: string) => Promise<boolean>
@@ -384,6 +386,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     goToParticipantCamera: async () => false,
     updateTransform: async () => false,
     createObject: async () => false,
+    placeActor: async () => false,
     duplicateObject: async () => false,
     deleteObject: async () => false,
     reparentObject: async () => false,
@@ -592,6 +595,10 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     return actionsRef.current.createObject(templateId)
   }, [])
 
+  const placeActor = useCallback(async (templateId: string, mouseX: number, mouseY: number) => {
+    return actionsRef.current.placeActor(templateId, mouseX, mouseY)
+  }, [])
+
   const duplicateObject = useCallback(async (objectId: string) => {
     return actionsRef.current.duplicateObject(objectId)
   }, [])
@@ -776,6 +783,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       goToParticipantCamera,
       updateTransform,
       createObject,
+      placeActor,
       duplicateObject,
       deleteObject,
       reparentObject,
@@ -851,6 +859,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       toggleLook,
       updateTransform,
       createObject,
+      placeActor,
       duplicateObject,
       deleteObject,
       reparentObject,

@@ -151,6 +151,8 @@ private:
                                 const HeadlessCommand &Command);
   void HandleMeshDropCommand(SessionUserId User,
                              const HeadlessCommand &Command);
+  void HandlePlaceActorCommand(SessionUserId User,
+                                const HeadlessCommand &Command);
   void HandleClientEncodedVideoPacket(std::string_view ClientId,
                                       const EncodedVideoPacket &Packet);
   std::optional<SessionUserId> ResolveClientUser(

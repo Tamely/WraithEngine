@@ -137,6 +137,11 @@ struct SetWorldSettingsCommand {
   EditorWorldSettings Settings;
 };
 
+struct PlaceActorCommand {
+  std::string ChildTemplateId; // empty = bare Actor, no child
+  glm::vec3 Location{0.0f};
+};
+
 using EditorCommandPayload =
     std::variant<UpdateViewportCameraCommand, SetViewportCameraPoseCommand,
                  SetCameraProjectionCommand,
@@ -152,7 +157,8 @@ using EditorCommandPayload =
                  SetMaterialTextureCommand, SetPhysicsPropertiesCommand,
                  PlaySessionCommand,
                  PauseSessionCommand, ResumeSessionCommand,
-                 StopSessionCommand, SetWorldSettingsCommand>;
+                 StopSessionCommand, SetWorldSettingsCommand,
+                 PlaceActorCommand>;
 
 struct EditorCommand {
   EditorCommandPayload Payload;

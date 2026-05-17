@@ -218,6 +218,9 @@ std::string CommandTypeName(const EditorCommandPayload &Payload) {
   if (std::holds_alternative<SetWorldSettingsCommand>(Payload)) {
     return "set_world_settings";
   }
+  if (std::holds_alternative<PlaceActorCommand>(Payload)) {
+    return "place_actor";
+  }
   return "set_transform";
 }
 
@@ -237,7 +240,8 @@ bool IsAuthoringMutationCommand(const EditorCommandPayload &Payload) {
          std::holds_alternative<SetMaterialPropertiesCommand>(Payload) ||
          std::holds_alternative<SetMaterialTextureCommand>(Payload) ||
          std::holds_alternative<SetPhysicsPropertiesCommand>(Payload) ||
-         std::holds_alternative<SetWorldSettingsCommand>(Payload);
+         std::holds_alternative<SetWorldSettingsCommand>(Payload) ||
+         std::holds_alternative<PlaceActorCommand>(Payload);
 }
 
 EditorSceneItemKind KindForClassName(std::string_view ClassName) {
@@ -2309,6 +2313,82 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
     }
     m_State.Scene.WorldSettings.SkyboxHDRData = std::move(Loaded);
   }
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const PlaceActorCommand &Command) {
+  EnsurePresence(QueuedCommand.Context.User);
+  Instance *WorldFolder = EnsureWorldFolder();
+  if (!WorldFolder) return;
+
+  // Create the Actor parent
+  const std::string ActorId = BuildUniqueObjectId("Actor");
+  const std::string ActorDisplayName = BuildUniqueDisplayName("Actor");
+  const EditorTransformDetails ActorTransform{.Location = Command.Location};
+  m_State.Scene.ObjectDetailsById.emplace(
+      ActorId,
+      EditorObjectDetails{
+          .ObjectId = ActorId,
+          .DisplayName = ActorDisplayName,
+          .Kind = EditorSceneItemKind::Actor,
+          .Visible = true,
+          .SupportsTransform = true,
+          .TransformReadOnly = false,
+          .Transform = ActorTransform,
+          .WorldTransform = ActorTransform,
+      });
+  Instance *ActorNode = CreateInstanceForTemplate("Actor", ActorId);
+  if (ActorNode) ActorNode->SetParent(WorldFolder);
+
+  // Create the child object (if a template was specified)
+  std::string ChildId;
+  std::string ChildDisplayName;
+  if (!Command.ChildTemplateId.empty()) {
+    const EditorSceneItemKind ChildKind = KindForTemplateId(Command.ChildTemplateId);
+    ChildId = BuildUniqueObjectId(Command.ChildTemplateId);
+    ChildDisplayName = BuildUniqueDisplayName(Command.ChildTemplateId);
+    const bool ChildTransformable = SupportsTransformForKind(ChildKind);
+    m_State.Scene.ObjectDetailsById.emplace(
+        ChildId,
+        EditorObjectDetails{
+            .ObjectId = ChildId,
+            .DisplayName = ChildDisplayName,
+            .Kind = ChildKind,
+            .Visible = true,
+            .SupportsTransform = ChildTransformable,
+            .TransformReadOnly = false,
+            .Transform = ChildTransformable
+                             ? std::optional{EditorTransformDetails{}}
+                             : std::nullopt,
+            .WorldTransform = ChildTransformable
+                                  ? std::optional{EditorTransformDetails{}}
+                                  : std::nullopt,
+        });
+    if (Instance *ChildNode =
+            CreateInstanceForTemplate(Command.ChildTemplateId, ChildId)) {
+      ChildNode->SetParent(ActorNode ? ActorNode : WorldFolder);
+    }
+  }
+
+  SyncItemsFromTree();
+  PublishEvent({.Payload = ObjectCreatedEvent{
+                    .User = QueuedCommand.Context.User,
+                    .ObjectId = ActorId,
+                    .DisplayName = ActorDisplayName,
+                }});
+  if (!ChildId.empty()) {
+    PublishEvent({.Payload = ObjectCreatedEvent{
+                      .User = QueuedCommand.Context.User,
+                      .ObjectId = ChildId,
+                      .DisplayName = ChildDisplayName,
+                  }});
+  }
+
+  // Apply world-space location to the actor
+  HandleCommand(QueuedCommand, SetTransformCommand{
+                                   .ObjectId = ActorId,
+                                   .Location = Command.Location,
+                               });
 }
 
 void EditorSession::SetContentDir(std::filesystem::path ContentDir) {

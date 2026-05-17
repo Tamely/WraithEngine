@@ -231,6 +231,12 @@ type RemoteViewportCommand =
     textureAssetPath: string
   }
   | {
+    type: "place_actor"
+    templateId: string
+    mouseX: number
+    mouseY: number
+  }
+  | {
     type: "drop_mesh"
     mouseX: number
     mouseY: number
@@ -1626,6 +1632,21 @@ export function Viewport() {
         }
         return accepted
       },
+      placeActor: async (templateId, mouseX, mouseY) => {
+        const accepted = await sendCommand(
+          {
+            type: "place_actor",
+            templateId,
+            mouseX,
+            mouseY,
+          },
+          "reliable"
+        )
+        if (accepted) {
+          await refreshSessionSnapshotSafely("command")
+        }
+        return accepted
+      },
       duplicateObject: async (objectId) => {
         const accepted = await sendCommand(
           {
@@ -1990,6 +2011,10 @@ export function Viewport() {
     const handleDocDragOver = (event: DragEvent) => {
       lastDragX = event.clientX
       lastDragY = event.clientY
+      if (event.dataTransfer?.types.includes("application/x-place-actor")) {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = "copy"
+      }
     }
 
       ; (window as any).__axiomViewportDropHandler = (clientX: number, clientY: number, kind: string, path: string) => {
@@ -2016,9 +2041,35 @@ export function Viewport() {
         void sendCommand({ type: "drop_texture", mouseX, mouseY, textureAssetPath: path }, "reliable")
       }
 
+    const handleDocDrop = (event: DragEvent) => {
+      const templateId = event.dataTransfer?.getData("application/x-place-actor")
+      if (!templateId) return
+      event.preventDefault()
+      const x = event.clientX
+      const y = event.clientY
+      const s = viewportShellRef.current
+      const v = videoRef.current
+      if (!s || !v || !v.videoWidth || !v.videoHeight) {
+        void sendCommand({ type: "place_actor", templateId, mouseX: -1, mouseY: -1 }, "reliable")
+        return
+      }
+      const rect = s.getBoundingClientRect()
+      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return
+      const scale = Math.min(rect.width / v.videoWidth, rect.height / v.videoHeight)
+      const contentW = v.videoWidth * scale
+      const contentH = v.videoHeight * scale
+      const cssX = x - rect.left - (rect.width - contentW) / 2
+      const cssY = y - rect.top - (rect.height - contentH) / 2
+      if (cssX < 0 || cssY < 0 || cssX > contentW || cssY > contentH) return
+      const mouseX = (cssX / contentW) * v.videoWidth
+      const mouseY = (cssY / contentH) * v.videoHeight
+      void sendCommand({ type: "place_actor", templateId, mouseX, mouseY }, "reliable")
+    }
+
     video?.addEventListener("loadedmetadata", handleLoadedMetadata)
     video?.addEventListener("resize", handleResize)
     document.addEventListener("dragover", handleDocDragOver)
+    document.addEventListener("drop", handleDocDrop)
     document.addEventListener("mousedown", handleMouseDown)
     document.addEventListener("mouseup", handleMouseUp)
     document.addEventListener("contextmenu", handleContextMenu)
@@ -2035,6 +2086,7 @@ export function Viewport() {
       video?.removeEventListener("loadedmetadata", handleLoadedMetadata)
       video?.removeEventListener("resize", handleResize)
       document.removeEventListener("dragover", handleDocDragOver)
+      document.removeEventListener("drop", handleDocDrop)
         ; (window as any).__axiomViewportDropHandler = null
       document.removeEventListener("mousedown", handleMouseDown)
       document.removeEventListener("mouseup", handleMouseUp)
