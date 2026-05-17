@@ -139,6 +139,7 @@ struct SetWorldSettingsCommand {
 
 struct PlaceActorCommand {
   std::string ChildTemplateId; // empty = bare Actor, no child
+  std::string ChildMeshAssetPath; // if set, assigns this asset to the child mesh after creation
   glm::vec3 Location{0.0f};
 };
 

@@ -2035,8 +2035,22 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
     return;
   }
 
-  CookMeshAssetBestEffort(m_ContentDir, Command.AssetPath);
-  const std::filesystem::path FullPath = m_ContentDir / Command.AssetPath;
+  // Resolve "Engine/" prefix to the engine content directory.
+  const std::filesystem::path AssetRelative{Command.AssetPath};
+  const bool IsEngineAsset =
+      !AssetRelative.empty() && *AssetRelative.begin() == "Engine";
+  std::filesystem::path EffectiveContentDir = m_ContentDir;
+  std::filesystem::path EffectiveRelative = AssetRelative;
+  if (IsEngineAsset && !m_EngineContentDir.empty()) {
+    EffectiveContentDir = m_EngineContentDir;
+    auto It = AssetRelative.begin();
+    ++It; // skip "Engine"
+    EffectiveRelative.clear();
+    for (; It != AssetRelative.end(); ++It) EffectiveRelative /= *It;
+  }
+
+  CookMeshAssetBestEffort(EffectiveContentDir, EffectiveRelative.string());
+  const std::filesystem::path FullPath = EffectiveContentDir / EffectiveRelative;
   const auto SceneData = Assets::LoadBasicMeshAsset(FullPath);
   if (!SceneData.has_value() || SceneData->Instances.empty()) {
     A_CORE_WARN("SetMeshAsset: failed to load '{}' for object '{}'",
@@ -2382,6 +2396,12 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                       .ObjectId = ChildId,
                       .DisplayName = ChildDisplayName,
                   }});
+    if (!Command.ChildMeshAssetPath.empty()) {
+      HandleCommand(QueuedCommand, SetMeshAssetCommand{
+                                       .ObjectId = ChildId,
+                                       .AssetPath = Command.ChildMeshAssetPath,
+                                   });
+    }
   }
 
   // Apply world-space location to the actor
@@ -2393,6 +2413,10 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
 
 void EditorSession::SetContentDir(std::filesystem::path ContentDir) {
   m_ContentDir = std::move(ContentDir);
+}
+
+void EditorSession::SetEngineContentDir(std::filesystem::path EngineContentDir) {
+  m_EngineContentDir = std::move(EngineContentDir);
 }
 
 void EditorSession::PublishScriptError(const std::string &ObjectId,

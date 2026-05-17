@@ -91,7 +91,8 @@ struct HeadlessCommand {
   float Metallic{0.0f};         // used by SetMaterialProperties
   float Roughness{0.5f};        // used by SetMaterialProperties
   std::string MeshAssetPath;    // used by DropMesh
-  std::string PlaceActorTemplateId; // used by PlaceActor
+  std::string PlaceActorTemplateId;    // used by PlaceActor
+  std::string PlaceActorMeshAssetPath; // used by PlaceActor (shapes)
   std::string TextureAssetPath; // used by SetMaterialTexture
   glm::vec3 SkyboxColorTop{0.08f, 0.09f, 0.14f};    // used by SetWorldSettings
   glm::vec3 SkyboxColorBottom{0.14f, 0.24f, 0.38f}; // used by SetWorldSettings

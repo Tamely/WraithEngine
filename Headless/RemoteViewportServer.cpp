@@ -2686,6 +2686,7 @@ void RemoteViewportServer::HandlePlaceActorCommand(SessionUserId User,
   m_Host.SubmitRemoteCommand(
       User, EditorCommand{PlaceActorCommand{
                 .ChildTemplateId = Command.PlaceActorTemplateId,
+                .ChildMeshAssetPath = Command.PlaceActorMeshAssetPath,
                 .Location = SpawnLocation,
             }});
 }

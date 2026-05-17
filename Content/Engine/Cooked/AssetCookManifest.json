@@ -1,0 +1,14 @@
+{
+  "entries": [
+    {"assetId":17869987657431928246,"kind":"material","relativePath":"Generated/MeshMaterials/Cube__0","cookedPath":"Cooked/Generated/MeshMaterials/Cube__0.wmat","formatVersion":1,"sourceHash":5263286426569856486},
+    {"assetId":17473500555079411416,"kind":"mesh","relativePath":"Primitives/Cube.glb","cookedPath":"Cooked/Primitives/Cube.wmesh","formatVersion":2,"sourceHash":14886726218825273740},
+    {"assetId":9525971645921137078,"kind":"material","relativePath":"Generated/MeshMaterials/Sphere__0","cookedPath":"Cooked/Generated/MeshMaterials/Sphere__0.wmat","formatVersion":1,"sourceHash":5263286426569856486},
+    {"assetId":2642413918879317334,"kind":"mesh","relativePath":"Primitives/Sphere.glb","cookedPath":"Cooked/Primitives/Sphere.wmesh","formatVersion":2,"sourceHash":6741214548514332},
+    {"assetId":13522777309111790592,"kind":"material","relativePath":"Generated/MeshMaterials/Cylinder__0","cookedPath":"Cooked/Generated/MeshMaterials/Cylinder__0.wmat","formatVersion":1,"sourceHash":5263286426569856486},
+    {"assetId":6692227360735420864,"kind":"mesh","relativePath":"Primitives/Cylinder.glb","cookedPath":"Cooked/Primitives/Cylinder.wmesh","formatVersion":2,"sourceHash":15044282560946633958},
+    {"assetId":17271692768927002155,"kind":"material","relativePath":"Generated/MeshMaterials/Cone__0","cookedPath":"Cooked/Generated/MeshMaterials/Cone__0.wmat","formatVersion":1,"sourceHash":5263286426569856486},
+    {"assetId":8791640745736304361,"kind":"mesh","relativePath":"Primitives/Cone.glb","cookedPath":"Cooked/Primitives/Cone.wmesh","formatVersion":2,"sourceHash":18189565898652062489},
+    {"assetId":11105005092375462530,"kind":"material","relativePath":"Generated/MeshMaterials/Plane__0","cookedPath":"Cooked/Generated/MeshMaterials/Plane__0.wmat","formatVersion":1,"sourceHash":5263286426569856486},
+    {"assetId":13441880797815026060,"kind":"mesh","relativePath":"Primitives/Plane.glb","cookedPath":"Cooked/Primitives/Plane.wmesh","formatVersion":2,"sourceHash":14317949110025125343}
+  ]
+}

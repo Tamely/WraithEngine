@@ -233,6 +233,7 @@ type RemoteViewportCommand =
   | {
     type: "place_actor"
     templateId: string
+    meshAssetPath?: string
     mouseX: number
     mouseY: number
   }
@@ -1632,11 +1633,12 @@ export function Viewport() {
         }
         return accepted
       },
-      placeActor: async (templateId, mouseX, mouseY) => {
+      placeActor: async (templateId, mouseX, mouseY, meshAssetPath) => {
         const accepted = await sendCommand(
           {
             type: "place_actor",
             templateId,
+            meshAssetPath,
             mouseX,
             mouseY,
           },
@@ -2042,15 +2044,24 @@ export function Viewport() {
       }
 
     const handleDocDrop = (event: DragEvent) => {
-      const templateId = event.dataTransfer?.getData("application/x-place-actor")
-      if (!templateId) return
+      const payload = event.dataTransfer?.getData("application/x-place-actor")
+      if (!payload) return
       event.preventDefault()
+      let templateId = payload
+      let meshAssetPath: string | undefined
+      try {
+        const parsed = JSON.parse(payload) as { templateId: string; meshAssetPath?: string }
+        templateId = parsed.templateId
+        meshAssetPath = parsed.meshAssetPath
+      } catch {
+        // plain templateId string (legacy)
+      }
       const x = event.clientX
       const y = event.clientY
       const s = viewportShellRef.current
       const v = videoRef.current
       if (!s || !v || !v.videoWidth || !v.videoHeight) {
-        void sendCommand({ type: "place_actor", templateId, mouseX: -1, mouseY: -1 }, "reliable")
+        void sendCommand({ type: "place_actor", templateId, meshAssetPath, mouseX: -1, mouseY: -1 }, "reliable")
         return
       }
       const rect = s.getBoundingClientRect()
@@ -2063,7 +2074,7 @@ export function Viewport() {
       if (cssX < 0 || cssY < 0 || cssX > contentW || cssY > contentH) return
       const mouseX = (cssX / contentW) * v.videoWidth
       const mouseY = (cssY / contentH) * v.videoHeight
-      void sendCommand({ type: "place_actor", templateId, mouseX, mouseY }, "reliable")
+      void sendCommand({ type: "place_actor", templateId, meshAssetPath, mouseX, mouseY }, "reliable")
     }
 
     video?.addEventListener("loadedmetadata", handleLoadedMetadata)

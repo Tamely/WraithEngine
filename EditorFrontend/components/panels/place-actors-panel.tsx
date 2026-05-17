@@ -9,29 +9,73 @@ import {
   Folder,
   Search,
   Layers,
+  Circle,
+  Cylinder,
+  Triangle,
+  Square,
 } from "lucide-react"
 import { useRemoteViewport } from "@/components/engine/remote-viewport-context"
 
-type CategoryId = "all" | "geometry" | "lights" | "cameras" | "actors" | "utility"
+type CategoryId = "all" | "shapes" | "lights" | "cameras" | "actors" | "utility"
 
 interface PlaceableItem {
   id: string
   label: string
   description: string
   templateId: string
+  meshAssetPath?: string
   categoryId: CategoryId
   Icon: React.ComponentType<{ className?: string }>
 }
 
 const ITEMS: PlaceableItem[] = [
+  // Shapes (child Mesh with asset)
   {
-    id: "mesh",
-    label: "Mesh",
-    description: "Empty mesh object",
+    id: "shape-cube",
+    label: "Cube",
+    description: "Unit cube primitive",
     templateId: "Mesh",
-    categoryId: "geometry",
+    meshAssetPath: "Engine/Primitives/Cube.glb",
+    categoryId: "shapes",
     Icon: Box,
   },
+  {
+    id: "shape-sphere",
+    label: "Sphere",
+    description: "UV sphere primitive",
+    templateId: "Mesh",
+    meshAssetPath: "Engine/Primitives/Sphere.glb",
+    categoryId: "shapes",
+    Icon: Circle,
+  },
+  {
+    id: "shape-cylinder",
+    label: "Cylinder",
+    description: "Cylinder with caps",
+    templateId: "Mesh",
+    meshAssetPath: "Engine/Primitives/Cylinder.glb",
+    categoryId: "shapes",
+    Icon: Cylinder,
+  },
+  {
+    id: "shape-cone",
+    label: "Cone",
+    description: "Cone with base cap",
+    templateId: "Mesh",
+    meshAssetPath: "Engine/Primitives/Cone.glb",
+    categoryId: "shapes",
+    Icon: Triangle,
+  },
+  {
+    id: "shape-plane",
+    label: "Plane",
+    description: "Flat ground plane",
+    templateId: "Mesh",
+    meshAssetPath: "Engine/Primitives/Plane.glb",
+    categoryId: "shapes",
+    Icon: Square,
+  },
+  // Lights
   {
     id: "light",
     label: "Light",
@@ -40,6 +84,7 @@ const ITEMS: PlaceableItem[] = [
     categoryId: "lights",
     Icon: Lightbulb,
   },
+  // Cameras
   {
     id: "camera",
     label: "Camera",
@@ -48,6 +93,7 @@ const ITEMS: PlaceableItem[] = [
     categoryId: "cameras",
     Icon: Camera,
   },
+  // Actors
   {
     id: "actor",
     label: "Actor",
@@ -56,6 +102,7 @@ const ITEMS: PlaceableItem[] = [
     categoryId: "actors",
     Icon: User,
   },
+  // Utility
   {
     id: "folder",
     label: "Folder",
@@ -73,12 +120,12 @@ interface Category {
 }
 
 const CATEGORIES: Category[] = [
-  { id: "all", label: "All", Icon: Layers },
-  { id: "geometry", label: "Geometry", Icon: Box },
-  { id: "lights", label: "Lights", Icon: Lightbulb },
-  { id: "cameras", label: "Cameras", Icon: Camera },
-  { id: "actors", label: "Actors", Icon: User },
-  { id: "utility", label: "Utility", Icon: Folder },
+  { id: "all",     label: "All",     Icon: Layers   },
+  { id: "shapes",  label: "Shapes",  Icon: Box      },
+  { id: "lights",  label: "Lights",  Icon: Lightbulb },
+  { id: "cameras", label: "Cameras", Icon: Camera   },
+  { id: "actors",  label: "Actors",  Icon: User     },
+  { id: "utility", label: "Utility", Icon: Folder   },
 ]
 
 export function PlaceActorsPanel() {
@@ -102,14 +149,15 @@ export function PlaceActorsPanel() {
     if (placingId) return
     setPlacingId(item.id)
     try {
-      await placeActor(item.templateId, -1, -1)
+      await placeActor(item.templateId, -1, -1, item.meshAssetPath)
     } finally {
       setPlacingId(null)
     }
   }
 
   function handleDragStart(event: React.DragEvent, item: PlaceableItem) {
-    event.dataTransfer.setData("application/x-place-actor", item.templateId)
+    const payload = JSON.stringify({ templateId: item.templateId, meshAssetPath: item.meshAssetPath })
+    event.dataTransfer.setData("application/x-place-actor", payload)
     event.dataTransfer.effectAllowed = "copy"
   }
 

@@ -172,6 +172,10 @@ public:
   void SetContentDir(std::filesystem::path ContentDir);
   const std::filesystem::path &GetContentDir() const { return m_ContentDir; }
 
+  // Optional fallback for engine-bundled assets (paths prefixed with "Engine/").
+  void SetEngineContentDir(std::filesystem::path EngineContentDir);
+  const std::filesystem::path &GetEngineContentDir() const { return m_EngineContentDir; }
+
   void EnsureViewportState(SessionUserId User);
   void SetPresenceState(SessionUserId User, EditorUserPresenceState State);
   void SetSceneState(EditorSceneState SceneState);
@@ -327,6 +331,7 @@ private:
   EditorMessageBus m_MessageBus;
   std::unique_ptr<DataModel> m_SceneRoot;
   std::filesystem::path m_ContentDir;
+  std::filesystem::path m_EngineContentDir;
   std::optional<RuntimeSceneSnapshot> m_RuntimeSceneSnapshot;
   std::unique_ptr<PhysicsWorld> m_PhysicsWorld;
 };

@@ -919,7 +919,10 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
   if (*Type == "place_actor") {
     static const std::regex TemplateIdPattern(
         R"json("templateId"\s*:\s*"((?:\\.|[^"])*)")json");
+    static const std::regex MeshAssetPathPattern(
+        R"json("meshAssetPath"\s*:\s*"((?:\\.|[^"])*)")json");
     const auto TemplateId = MatchString(JsonLine, TemplateIdPattern);
+    const auto MeshAssetPath = MatchString(JsonLine, MeshAssetPathPattern);
     const auto MX = MatchString(JsonLine, MouseXPattern);
     const auto MY = MatchString(JsonLine, MouseYPattern);
     float MouseX = -1.0f;
@@ -933,6 +936,7 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
     HeadlessCommand Cmd;
     Cmd.Type = HeadlessCommandType::PlaceActor;
     Cmd.PlaceActorTemplateId = TemplateId.has_value() ? UnescapeJsonString(*TemplateId) : "";
+    Cmd.PlaceActorMeshAssetPath = MeshAssetPath.has_value() ? UnescapeJsonString(*MeshAssetPath) : "";
     Cmd.MousePosition = {MouseX, MouseY};
     return Cmd;
   }
