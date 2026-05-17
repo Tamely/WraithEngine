@@ -139,8 +139,44 @@ Supported command types:
 
 - `load_startup_scene`
 - `set_view_mode`
+- `set_camera_projection`
 - `set_look_active`
 - `update_viewport_camera`
+- `set_viewport_camera_pose`
+- `select_object`
+- `rename_object`
+- `set_object_visibility`
+- `create_object`
+- `duplicate_object`
+- `delete_object`
+- `reparent_object`
+- `set_transform`
+- `attach_script`
+- `detach_script`
+- `reload_scripts`
+- `set_mesh_asset`
+- `set_light_properties`
+- `set_material_properties`
+- `set_material_texture`
+- `set_property`
+- `drop_mesh`
+- `drop_texture`
+- `place_actor`
+- `play_session`
+- `pause_session`
+- `resume_session`
+- `stop_session`
+- `set_world_settings`
+- `list_assets`
+- `get_schema`
+- `save_scene`
+- `set_gizmo_mode`
+- `set_grid_snap`
+- `gizmo_hover`
+- `gizmo_drag_start`
+- `gizmo_drag_update`
+- `gizmo_drag_end`
+- `heartbeat`
 - `render_frame`
 - `quit`
 
@@ -311,6 +347,29 @@ Object locking, selection/lock visibility, presence indicators, and heartbeat-dr
   - elapsed ≥ 10 s and Connected → `SetPresenceState(Away)`, broadcast
   - elapsed ≥ 30 s and Away → `SetPresenceState(Disconnected)`, `ReleaseAllLocksForUser`, broadcast
 - the two-threshold design handles hard tab closes: JavaScript cleanup never fires, so the heartbeat simply stops, the client goes Away at 10 s and Disconnected at 30 s, and all locks are released at the Disconnected transition
+
+## Orthographic Projection
+
+- `set_camera_projection` command switches the per-client viewport between `"perspective"` and `"orthographic"` modes
+- orthographic projection uses `glm::ortho` with a Vulkan Y-flip, initialized to a 20-unit height
+- the HDR skybox compute shader is disabled in orthographic mode (the shader's perspective ray reconstruction produces a solid smear for parallel rays); the gradient fallback is used instead
+- billboard raycasting and screen-space size are corrected for orthographic cameras in `MeshPicking.h`
+- the browser "Perspective" button in the viewport toolbar is now a live dropdown that sends `set_camera_projection` and reflects the current state
+
+## Place Actors
+
+- `place_actor` command creates an Actor parent node at the resolved world-space position, then optionally creates a child object of the given `templateId`
+- if `meshAssetPath` is provided, the child Mesh object has that asset assigned atomically via `SetMeshAssetCommand` during the same handler
+- mouse coordinates are optional: omitting them (or passing negative values) places the actor at the viewport center
+- asset paths prefixed with `Engine/` resolve to the engine content directory (`AXIOM_CONTENT_DIR/Engine/`), allowing built-in primitive meshes to be referenced independently of the active project
+- five engine-bundled primitive meshes live in `Content/Engine/Primitives/`: `Cube.glb`, `Sphere.glb`, `Cylinder.glb`, `Cone.glb`, `Plane.glb`; regenerate them with `python3 Tools/gen_primitives.py`
+- the Place Actors browser panel supports click-to-place and drag-to-viewport placement; drag payloads are JSON-encoded `{templateId, meshAssetPath}` on the `application/x-place-actor` MIME type
+
+Example:
+
+```json
+{"type":"place_actor","templateId":"Mesh","meshAssetPath":"Engine/Primitives/Cube.glb","mouseX":800,"mouseY":450}
+```
 
 ## Next Priority
 
