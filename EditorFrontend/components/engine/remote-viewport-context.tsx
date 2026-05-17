@@ -33,6 +33,7 @@ export type RemoteSessionState =
 export type RemoteRuntimeState = "edit" | "playing" | "paused"
 
 export type RemoteViewportViewMode = "lit" | "unlit" | "wireframe"
+export type RemoteViewportProjectionType = "perspective" | "orthographic"
 export type RemoteViewportGizmoMode = "translate" | "scale" | "rotate"
 export type SessionSceneItemKind = "folder" | "mesh" | "light" | "camera" | "actor"
 
@@ -151,6 +152,7 @@ interface RemoteViewportActions {
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
+  setProjectionType: (type: RemoteViewportProjectionType) => Promise<void>
   setShowColliders: (showColliders: boolean) => Promise<void>
   setGizmoMode: (mode: RemoteViewportGizmoMode) => Promise<void>
   setGridSnapSettings: (settings: RemoteViewportGridSnapSettings) => Promise<void>
@@ -215,6 +217,7 @@ interface RemoteViewportContextValue {
   runtimeState: RemoteRuntimeState
   canControlRuntime: boolean
   viewMode: RemoteViewportViewMode
+  projectionType: RemoteViewportProjectionType
   showColliders: boolean
   gizmoMode: RemoteViewportGizmoMode
   gridSnapSettings: RemoteViewportGridSnapSettings
@@ -295,6 +298,7 @@ interface RemoteViewportContextValue {
   reconnect: () => Promise<void>
   toggleLook: () => Promise<void>
   setMode: (mode: RemoteViewportViewMode) => Promise<void>
+  setProjectionType: (type: RemoteViewportProjectionType) => Promise<void>
   setShowColliders: (showColliders: boolean) => Promise<void>
   setGizmoMode: (mode: RemoteViewportGizmoMode) => Promise<void>
   setGridSnapSettings: (settings: RemoteViewportGridSnapSettings) => Promise<void>
@@ -369,6 +373,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
     reconnect: async () => {},
     toggleLook: async () => {},
     setMode: async () => {},
+    setProjectionType: async () => {},
     setShowColliders: async () => {},
     setGizmoMode: async () => {},
     setGridSnapSettings: async () => {},
@@ -409,6 +414,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
   )
   const [runtimeState, setRuntimeState] = useState<RemoteRuntimeState>("edit")
   const [viewMode, setViewMode] = useState<RemoteViewportViewMode>("lit")
+  const [projectionType, setProjectionTypeState] = useState<RemoteViewportProjectionType>("perspective")
   const [showColliders, setShowCollidersState] = useState(true)
   const [gizmoMode, setGizmoModeState] = useState<RemoteViewportGizmoMode>("translate")
   const [gridSnapSettings, setGridSnapSettingsState] =
@@ -536,6 +542,11 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
 
   const setMode = useCallback(async (mode: RemoteViewportViewMode) => {
     await actionsRef.current.setMode(mode)
+  }, [])
+
+  const setProjectionType = useCallback(async (type: RemoteViewportProjectionType) => {
+    setProjectionTypeState(type)
+    await actionsRef.current.setProjectionType(type)
   }, [])
 
   const setShowColliders = useCallback(async (nextValue: boolean) => {
@@ -687,6 +698,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       runtimeState,
       canControlRuntime,
       viewMode,
+      projectionType,
       showColliders,
       gizmoMode,
       gridSnapSettings,
@@ -753,6 +765,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       reconnect,
       toggleLook,
       setMode,
+      setProjectionType,
       setShowColliders,
       setGizmoMode: setGizmoModeAction,
       setGridSnapSettings,
@@ -826,6 +839,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       gizmoMode,
       showColliders,
       setMode,
+      setProjectionType,
       setShowColliders,
       setGizmoModeAction,
       setGridSnapSettings,
@@ -841,6 +855,7 @@ export function RemoteViewportProvider({ children }: { children: ReactNode }) {
       deleteObject,
       reparentObject,
       viewMode,
+      projectionType,
     ]
   )
 

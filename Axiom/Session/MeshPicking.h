@@ -37,7 +37,6 @@ BuildViewportRay(const Camera &Cam, uint32_t VpWidth, uint32_t VpHeight,
     return std::nullopt;
   }
 
-  const glm::vec3 RayOrigin = Cam.GetPosition();
   const float NdcX = (MousePixel.x / static_cast<float>(VpWidth)) * 2.0f - 1.0f;
   const float NdcY = (MousePixel.y / static_cast<float>(VpHeight)) * 2.0f - 1.0f;
   const glm::vec4 WorldH =
@@ -47,6 +46,17 @@ BuildViewportRay(const Camera &Cam, uint32_t VpWidth, uint32_t VpHeight,
   }
 
   const glm::vec3 WorldPt = glm::vec3(WorldH) / WorldH.w;
+
+  if (Cam.IsOrthographic()) {
+    const glm::vec3 RayDir = glm::normalize(Cam.GetForward());
+    if (!std::isfinite(RayDir.x) || !std::isfinite(RayDir.y) ||
+        !std::isfinite(RayDir.z)) {
+      return std::nullopt;
+    }
+    return ViewportRay{.Origin = WorldPt, .Direction = RayDir};
+  }
+
+  const glm::vec3 RayOrigin = Cam.GetPosition();
   const glm::vec3 RayDir = glm::normalize(WorldPt - RayOrigin);
   if (!std::isfinite(RayDir.x) || !std::isfinite(RayDir.y) ||
       !std::isfinite(RayDir.z)) {
@@ -146,6 +156,13 @@ inline float ComputeBillboardHalfSizeWorld(const Camera &Cam,
   const float ProjectionY = glm::abs(Cam.GetProjectionMatrix()[1][1]);
   if (ProjectionY < 0.0001f || VpHeight == 0) {
     return 0.1f;
+  }
+
+  if (Cam.IsOrthographic()) {
+    // For ortho: |Projection[1][1]| = 1/HalfH, so world units per pixel = 2/(ProjectionY * VpHeight)
+    const float WorldUnitsPerPixel =
+        2.0f / (ProjectionY * static_cast<float>(VpHeight));
+    return std::max(0.01f, PixelSize * 0.5f * WorldUnitsPerPixel);
   }
 
   const float TanHalfFov = 1.0f / ProjectionY;

@@ -22,6 +22,7 @@ import {
   type SessionObjectDetails,
   type RemoteViewportConnectionState,
   type RemoteViewportViewMode,
+  type RemoteViewportProjectionType,
   type RemoteViewportGizmoMode,
   type SessionParticipant,
   type SessionSceneItem,
@@ -36,6 +37,7 @@ const SESSION_POLL_INTERVAL_MS = 1500
 const CLIENT_ID_CLAIM_TIMEOUT_MS = 100
 type ConnectionState = RemoteViewportConnectionState
 type ViewMode = RemoteViewportViewMode
+type ProjectionType = RemoteViewportProjectionType
 type GizmoMode = RemoteViewportGizmoMode
 type ChannelPreference = "reliable" | "unreliable"
 
@@ -100,6 +102,10 @@ type RemoteViewportCommand =
   | {
     type: "set_view_mode"
     viewMode: ViewMode
+  }
+  | {
+    type: "set_camera_projection"
+    projectionType: ProjectionType
   }
   | {
     type: "set_show_colliders"
@@ -280,6 +286,7 @@ export function Viewport() {
   const pendingLookDeltaRef = useRef({ x: 0, y: 0 })
   const isLookingRef = useRef(false)
   const viewModeRef = useRef<ViewMode>("lit")
+  const projectionTypeRef = useRef<ProjectionType>("perspective")
   const gizmoModeRef = useRef<GizmoMode>("translate")
   const setGizmoModeCtxRef = useRef<(mode: GizmoMode) => Promise<void>>(async () => { })
   const notifyServerOnDestroyRef = useRef(true)
@@ -293,6 +300,7 @@ export function Viewport() {
     detailText,
     frameText,
     viewMode,
+    projectionType,
     showColliders,
     gizmoMode,
     isLooking,
@@ -323,6 +331,7 @@ export function Viewport() {
     setSessionStatusText,
     setSessionDetailText,
     setGizmoMode: setGizmoModeCtx,
+    setProjectionType: setProjectionTypeCtx,
     runtimeState,
   } = useRemoteViewport()
   const [serverOrigin] = useState(getServerOrigin)
@@ -335,6 +344,10 @@ export function Viewport() {
   useEffect(() => {
     viewModeRef.current = viewMode
   }, [viewMode])
+
+  useEffect(() => {
+    projectionTypeRef.current = projectionType
+  }, [projectionType])
 
   useEffect(() => {
     isLookingRef.current = isLooking
@@ -1747,6 +1760,19 @@ export function Viewport() {
           "reliable"
         )
       },
+      setProjectionType: async (nextType) => {
+        if (projectionTypeRef.current === nextType) {
+          return
+        }
+        projectionTypeRef.current = nextType
+        await sendCommand(
+          {
+            type: "set_camera_projection",
+            projectionType: nextType,
+          },
+          "reliable"
+        )
+      },
       setShowColliders: async (nextValue) => {
         await sendCommand(
           {
@@ -2071,10 +2097,29 @@ export function Viewport() {
     <div className="h-full flex flex-col bg-neutral-900">
       <div className="flex items-center justify-between h-8 bg-neutral-950 border-b border-neutral-800 px-2">
         <div className="flex items-center gap-2">
-          <button className="flex items-center gap-1 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 rounded">
-            Perspective
-            <ChevronDown className="w-3 h-3" />
-          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="flex items-center gap-1 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 rounded"
+                type="button"
+              >
+                {projectionType === "perspective" ? "Perspective" : "Orthographic"}
+                <ChevronDown className="w-3 h-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              className="border-neutral-800 bg-neutral-950 text-neutral-200"
+            >
+              <DropdownMenuRadioGroup
+                value={projectionType}
+                onValueChange={(value) => void setProjectionTypeCtx(value as ProjectionType)}
+              >
+                <DropdownMenuRadioItem value="perspective">Perspective</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="orthographic">Orthographic</DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button

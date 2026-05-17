@@ -1291,6 +1291,7 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
     break;
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
+  case HeadlessCommandType::SetCameraProjection:
   case HeadlessCommandType::UpdateViewportCamera:
   case HeadlessCommandType::SelectObject:
   case HeadlessCommandType::RenameObject:
@@ -2813,6 +2814,7 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
     return true;
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
+  case HeadlessCommandType::SetCameraProjection:
   case HeadlessCommandType::SelectObject:
   case HeadlessCommandType::RenameObject:
   case HeadlessCommandType::SetObjectVisibility:
@@ -2901,6 +2903,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     return true;
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
+  case HeadlessCommandType::SetCameraProjection:
   case HeadlessCommandType::UpdateViewportCamera:
   case HeadlessCommandType::SelectObject:
   case HeadlessCommandType::RenameObject:

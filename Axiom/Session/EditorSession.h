@@ -34,6 +34,8 @@ struct EditorSessionConfig {
 
 struct EditorViewportState {
   Camera Camera;
+  CameraProjectionType ProjectionType{CameraProjectionType::Perspective};
+  float OrthoHeight{20.0f};
   bool IsLooking{false};
   glm::dvec2 LastCursorPosition{0.0, 0.0};
   bool HasLastCursorPosition{false};
@@ -257,6 +259,8 @@ private:
                      const UpdateViewportCameraCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SetViewportCameraPoseCommand &Command);
+  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                     const SetCameraProjectionCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,
                      const SetLookActiveCommand &Command);
   void HandleCommand(const QueuedEditorCommand &QueuedCommand,

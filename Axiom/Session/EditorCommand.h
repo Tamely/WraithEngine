@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Renderer/Camera.h"
 #include "Session/SessionTypes.h"
 
 #include <glm/vec2.hpp>
@@ -128,12 +129,17 @@ struct ResumeSessionCommand {};
 
 struct StopSessionCommand {};
 
+struct SetCameraProjectionCommand {
+  CameraProjectionType ProjectionType{CameraProjectionType::Perspective};
+};
+
 struct SetWorldSettingsCommand {
   EditorWorldSettings Settings;
 };
 
 using EditorCommandPayload =
     std::variant<UpdateViewportCameraCommand, SetViewportCameraPoseCommand,
+                 SetCameraProjectionCommand,
                  SetLookActiveCommand, SelectObjectCommand,
                  RenameObjectCommand, SetObjectVisibilityCommand,
                  CreateObjectCommand, CreateMeshObjectCommand,

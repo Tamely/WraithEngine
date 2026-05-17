@@ -152,6 +152,9 @@ std::string CommandTypeName(const EditorCommandPayload &Payload) {
   if (std::holds_alternative<SetViewportCameraPoseCommand>(Payload)) {
     return "set_viewport_camera_pose";
   }
+  if (std::holds_alternative<SetCameraProjectionCommand>(Payload)) {
+    return "set_camera_projection";
+  }
   if (std::holds_alternative<SetLookActiveCommand>(Payload)) {
     return "set_look_active";
   }
@@ -1689,6 +1692,23 @@ void EditorSession::HandleCommand(
                     .YawDegrees = Viewport.Camera.GetYawDegrees(),
                     .PitchDegrees = Viewport.Camera.GetPitchDegrees(),
                 }});
+}
+
+void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
+                                  const SetCameraProjectionCommand &Command) {
+  EditorViewportState &Viewport = EnsureViewport(QueuedCommand.Context.User);
+  Viewport.ProjectionType = Command.ProjectionType;
+  if (Command.ProjectionType == CameraProjectionType::Orthographic) {
+    Viewport.Camera.SetOrthographic(Viewport.OrthoHeight,
+                                    m_Config.CameraAspectRatio,
+                                    m_Config.CameraNearPlane,
+                                    m_Config.CameraFarPlane);
+  } else {
+    Viewport.Camera.SetPerspective(m_Config.CameraVerticalFovDegrees,
+                                   m_Config.CameraAspectRatio,
+                                   m_Config.CameraNearPlane,
+                                   m_Config.CameraFarPlane);
+  }
 }
 
 void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,

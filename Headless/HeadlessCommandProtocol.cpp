@@ -529,6 +529,8 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
       R"json("mouseX"\s*:\s*([-+0-9.eE]+))json");
   static const std::regex MouseYPattern(
       R"json("mouseY"\s*:\s*([-+0-9.eE]+))json");
+  static const std::regex ProjectionTypePattern(
+      R"json("projectionType"\s*:\s*"([^"]+)")json");
 
   const auto Type = MatchString(JsonLine, TypePattern);
   if (!Type.has_value()) {
@@ -568,6 +570,28 @@ std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
     return HeadlessCommand{.Type = HeadlessCommandType::SetViewMode,
                            .EditorPayload = {},
                            .ViewMode = ParsedMode};
+  }
+  if (*Type == "set_camera_projection") {
+    const auto ProjType = MatchString(JsonLine, ProjectionTypePattern);
+    if (!ProjType.has_value()) {
+      Error = "`set_camera_projection` requires `projectionType`.";
+      return std::nullopt;
+    }
+
+    CameraProjectionType Parsed{};
+    if (*ProjType == "perspective") {
+      Parsed = CameraProjectionType::Perspective;
+    } else if (*ProjType == "orthographic") {
+      Parsed = CameraProjectionType::Orthographic;
+    } else {
+      Error = "Unsupported projectionType: " + *ProjType;
+      return std::nullopt;
+    }
+
+    return HeadlessCommand{
+        .Type = HeadlessCommandType::SetCameraProjection,
+        .EditorPayload = {SetCameraProjectionCommand{.ProjectionType = Parsed}},
+        .ProjectionType = Parsed};
   }
   if (*Type == "set_show_colliders") {
     const auto ShowColliders = MatchString(JsonLine, ShowCollidersPattern);
@@ -1195,6 +1219,7 @@ ParseRemoteViewportCommand(std::string_view JsonLine, std::string &Error) {
   case HeadlessCommandType::DropMesh:
   case HeadlessCommandType::DropTexture:
   case HeadlessCommandType::SetWorldSettings:
+  case HeadlessCommandType::SetCameraProjection:
   case HeadlessCommandType::ReloadScripts:
   case HeadlessCommandType::Heartbeat:
   case HeadlessCommandType::Quit:

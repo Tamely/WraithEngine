@@ -1118,7 +1118,8 @@ void VulkanRendererBackend::DrawBackground(VkCommandBuffer CommandBuffer) {
   const bool UseHDR = m_LoadedHDRSkyboxData != nullptr &&
                       m_HDRSkyboxDescriptorSet != VK_NULL_HANDLE &&
                       m_ActiveScene != nullptr &&
-                      m_ActiveScene->ActiveCamera != nullptr;
+                      m_ActiveScene->ActiveCamera != nullptr &&
+                      !m_ActiveScene->ActiveCamera->IsOrthographic();
 
   if (UseHDR) {
     vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,

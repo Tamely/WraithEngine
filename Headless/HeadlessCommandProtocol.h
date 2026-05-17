@@ -61,6 +61,7 @@ enum class HeadlessCommandType {
   DropMesh,
   DropTexture,
   SetWorldSettings,
+  SetCameraProjection,
   Heartbeat,
   RenderFrame,
   Quit,
@@ -93,6 +94,7 @@ struct HeadlessCommand {
   glm::vec3 SkyboxColorTop{0.08f, 0.09f, 0.14f};    // used by SetWorldSettings
   glm::vec3 SkyboxColorBottom{0.14f, 0.24f, 0.38f}; // used by SetWorldSettings
   std::string SkyboxHDRPath;                        // used by SetWorldSettings
+  CameraProjectionType ProjectionType{CameraProjectionType::Perspective}; // used by SetCameraProjection
 };
 
 struct HeadlessAppOptions {
