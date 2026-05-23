@@ -519,8 +519,8 @@ std::string SerializeProjectJson(const Project::ProjectDescriptor &Project) {
          << EscapeJsonString(Project.Output.PackagedContentDir.string())
          << "\",\"packagedCookedDir\":\""
          << EscapeJsonString(Project.Output.PackagedCookedDir.string())
-         << "\",\"packagedSceneFilePath\":\""
-         << EscapeJsonString(Project.Output.PackagedSceneFilePath.string())
+         << "\",\"packagedSceneAssetPath\":\""
+         << EscapeJsonString(Project.Output.PackagedSceneAssetPath.string())
          << "\",\"packageManifestPath\":\""
          << EscapeJsonString(Project.Output.PackageManifestPath.string())
          << "\",\"engineContentDir\":\""
@@ -590,10 +590,13 @@ std::string SerializeProjectPackageResult(
          << ",\"cookedSourceAssetCount\":" << Result.Cook.CookedSourceAssetCount
          << ",\"manifestEntryCount\":" << Result.Cook.ManifestEntryCount
          << ",\"packagedFileCount\":" << Result.PackagedFileCount
-         << ",\"includedSceneFile\":"
-         << (Result.IncludedSceneFile ? "true" : "false")
+         << ",\"includedSceneAsset\":"
+         << (Result.IncludedSceneAsset ? "true" : "false")
          << ",\"includedEngineContent\":"
          << (Result.IncludedEngineContent ? "true" : "false")
+         << ",\"sceneAssetPath\":\""
+         << EscapeJsonString(Result.SceneAssetPath.string())
+         << "\""
          << ",\"packageDir\":\""
          << EscapeJsonString(Result.Cook.Output.PackageDir.string())
          << "\",\"packageManifestPath\":\""

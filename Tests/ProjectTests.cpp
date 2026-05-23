@@ -284,10 +284,14 @@ TEST_F(ProjectSystemTests, PackageProjectContentStagesCookedProjectOutput) {
   EXPECT_TRUE(std::filesystem::exists(Created->Output.CookManifestPath));
   EXPECT_TRUE(std::filesystem::exists(Created->Output.PackagedCookedDir));
   EXPECT_TRUE(std::filesystem::exists(Created->Output.PackagedCookManifestPath));
-  EXPECT_TRUE(std::filesystem::exists(Created->Output.PackagedSceneFilePath));
+  EXPECT_TRUE(std::filesystem::exists(Created->Output.PackagedSceneAssetPath));
   EXPECT_TRUE(std::filesystem::exists(Created->Output.PackagedEngineContentDir));
   EXPECT_TRUE(std::filesystem::exists(Created->Output.PackageManifestPath));
   EXPECT_GT(PackageResult->PackagedFileCount, 0u);
+  EXPECT_TRUE(PackageResult->IncludedSceneAsset);
+  EXPECT_EQ(PackageResult->SceneAssetPath, Created->Output.PackagedSceneAssetPath);
+  EXPECT_FALSE(std::filesystem::exists(Created->Output.PackageDir / "Content" /
+                                       "scene.json"));
 
   std::ifstream PackageManifestFile(Created->Output.PackageManifestPath);
   ASSERT_TRUE(PackageManifestFile.is_open());
@@ -295,10 +299,13 @@ TEST_F(ProjectSystemTests, PackageProjectContentStagesCookedProjectOutput) {
       (std::istreambuf_iterator<char>(PackageManifestFile)),
       std::istreambuf_iterator<char>());
   EXPECT_NE(PackageManifestText.find(
-                "\"contentMode\": \"transitional-scene-plus-cooked-assets\""),
+                "\"contentMode\": \"cooked-only-v1\""),
             std::string::npos);
   EXPECT_NE(PackageManifestText.find(
                 "\"assetCookManifest\": \"Content/Cooked/AssetCookManifest.json\""),
+            std::string::npos);
+  EXPECT_NE(PackageManifestText.find(
+                "\"sceneAsset\": \"Content/Cooked/scene.wscene\""),
             std::string::npos);
 }
 
@@ -376,8 +383,8 @@ TEST_F(ProjectSystemTests, PackagedProjectLoadsSceneFromCookedAssetsWithoutSourc
   EXPECT_FALSE(std::filesystem::exists(Created->Output.PackageDir / "Content" /
                                        "crate.jpg"));
 
-  const auto Loaded = Axiom::Assets::LoadSceneFromFile(
-      Created->Output.PackagedSceneFilePath);
+  const auto Loaded = Axiom::Assets::LoadCookedSceneFromFile(
+      Created->Output.PackagedSceneAssetPath);
   ASSERT_TRUE(Loaded.has_value());
   ASSERT_EQ(Loaded->MeshInstances.size(), 1u);
   EXPECT_EQ(Loaded->MeshInstances[0].ObjectId, "crate-1");
@@ -388,6 +395,8 @@ TEST_F(ProjectSystemTests, PackagedProjectLoadsSceneFromCookedAssetsWithoutSourc
   ASSERT_TRUE(DetailsIt->second.Material.has_value());
   ASSERT_TRUE(DetailsIt->second.Material->TextureAssetPath.has_value());
   EXPECT_EQ(*DetailsIt->second.Material->TextureAssetPath, "crate.jpg");
+  EXPECT_FALSE(std::filesystem::exists(Created->Output.PackageDir / "Content" /
+                                       "scene.json"));
 }
 
 TEST_F(ProjectSystemTests, PackagedContentRequiresSceneFileAndWillNotFallback) {

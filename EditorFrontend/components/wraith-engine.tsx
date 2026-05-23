@@ -68,8 +68,9 @@ interface ProjectPackageResponse {
   cookedSourceAssetCount: number
   manifestEntryCount: number
   packagedFileCount: number
-  includedSceneFile: boolean
+  includedSceneAsset: boolean
   includedEngineContent: boolean
+  sceneAssetPath: string
   packageDir: string
   packageManifestPath: string
 }
@@ -310,7 +311,7 @@ export function WraithEngine() {
         kind: "package",
         status: "success",
         title: "Package Complete",
-        message: `Packaged ${payload.project.name} to ${payload.packageDir}. ${payload.packagedFileCount} files staged with cooked assets${payload.includedSceneFile ? " and scene state" : ""}.`,
+        message: `Packaged ${payload.project.name} to ${payload.packageDir}. ${payload.packagedFileCount} files staged with cooked assets${payload.includedSceneAsset ? ` and ${payload.sceneAssetPath}` : ""}.`,
       })
       setActiveProject(payload.project)
       await refreshProjects()

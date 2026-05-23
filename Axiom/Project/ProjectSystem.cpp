@@ -2,6 +2,7 @@
 
 #include "Assets/AssetCookManifest.h"
 #include "Assets/AssetCooker.h"
+#include "Assets/SceneFile.h"
 #include "Core/Log.h"
 
 #include <algorithm>
@@ -572,8 +573,8 @@ bool SavePackageManifestFile(const ProjectDescriptor &Project,
          << "\",\n"
          << "  \"name\": \"" << EscapeJsonString(Project.Manifest.Name) << "\",\n"
          << "  \"slug\": \"" << EscapeJsonString(Project.Manifest.Slug) << "\",\n"
-         << "  \"contentMode\": \"transitional-scene-plus-cooked-assets\",\n"
-         << "  \"sceneFile\": \"Content/scene.json\",\n"
+         << "  \"contentMode\": \"cooked-only-v1\",\n"
+         << "  \"sceneAsset\": \"Content/Cooked/scene.wscene\",\n"
          << "  \"cookedDir\": \"Content/Cooked\",\n"
          << "  \"assetCookManifest\": \"Content/Cooked/AssetCookManifest.json\",\n"
          << "  \"engineContentDir\": \"Content/Engine\",\n"
@@ -639,7 +640,8 @@ ProjectOutputLayout ResolveProjectOutputLayout(const ProjectRoot &Root) {
       .PackagedCookManifestPath =
           Root.RootPath / "Package" / "Content" / "Cooked" /
           "AssetCookManifest.json",
-      .PackagedSceneFilePath = Root.RootPath / "Package" / "Content" / "scene.json",
+      .PackagedSceneAssetPath =
+          Root.RootPath / "Package" / "Content" / "Cooked" / "scene.wscene",
       .PackagedEngineContentDir =
           Root.RootPath / "Package" / "Content" / "Engine",
       .PackageManifestPath = Root.RootPath / "Package" / "package.wraith.json",
@@ -1066,16 +1068,26 @@ PackageProjectContent(const ProjectDescriptor &Project,
     return std::nullopt;
   }
 
-  if (std::filesystem::exists(Project.Root.SceneFilePath)) {
-    std::filesystem::copy_file(
-        Project.Root.SceneFilePath, Project.Output.PackagedSceneFilePath,
-        std::filesystem::copy_options::overwrite_existing, Error);
-    if (Error) {
-      if (FailureReason != nullptr) {
-        *FailureReason = "Failed to copy the project scene into the package.";
-      }
-      return std::nullopt;
+  if (!std::filesystem::exists(Project.Root.SceneFilePath)) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Failed to package the project scene because scene.json is missing.";
     }
+    return std::nullopt;
+  }
+
+  const auto LoadedScene = Assets::LoadSceneFromFile(Project.Root.SceneFilePath);
+  if (!LoadedScene.has_value()) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Failed to load the project scene before packaging.";
+    }
+    return std::nullopt;
+  }
+  if (!Assets::SaveCookedSceneToFile(Project.Output.PackagedSceneAssetPath,
+                                     *LoadedScene)) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Failed to write the cooked packaged scene asset.";
+    }
+    return std::nullopt;
   }
 
   const auto EngineContentDir =
@@ -1090,9 +1102,11 @@ PackageProjectContent(const ProjectDescriptor &Project,
   ProjectPackageResult Result{
       .Cook = *CookResult,
       .PackagedFileCount = CountPackagedFiles(Project.Output.PackageDir),
-      .IncludedSceneFile = std::filesystem::exists(Project.Output.PackagedSceneFilePath),
+      .IncludedSceneAsset =
+          std::filesystem::exists(Project.Output.PackagedSceneAssetPath),
       .IncludedEngineContent =
           std::filesystem::exists(Project.Output.PackagedEngineContentDir),
+      .SceneAssetPath = Project.Output.PackagedSceneAssetPath,
   };
   if (!SavePackageManifestFile(Project, Result)) {
     if (FailureReason != nullptr) {

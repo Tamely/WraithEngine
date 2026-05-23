@@ -10,6 +10,8 @@
 #include <glm/trigonometric.hpp>
 
 #include <charconv>
+#include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <functional>
 #include <sstream>
@@ -28,6 +30,9 @@ namespace Axiom::Assets {
 // ---------------------------------------------------------------------------
 
 namespace {
+
+constexpr char kCookedSceneMagic[] = {'W', 'S', 'C', 'N'};
+constexpr std::uint32_t kCookedSceneVersion = 1;
 
 std::string EscStr(std::string_view S) {
   std::string Out;
@@ -382,8 +387,8 @@ void ExpandMeshAssetIntoScene(EditorSceneState &State, std::string_view RootObje
 // Save
 // ---------------------------------------------------------------------------
 
-bool SaveSceneToFile(const std::filesystem::path &Path,
-                     const EditorSceneState &Scene) {
+std::string SerializeSceneToJsonString(const std::filesystem::path &Path,
+                                       const EditorSceneState &Scene) {
   const std::filesystem::path ContentRoot = ResolveContentRootForScenePath(Path);
   std::unordered_map<std::string, std::string> AssetPathByObjectId;
   for (const auto &[ObjectId, Details] : Scene.ObjectDetailsById) {
@@ -519,15 +524,46 @@ bool SaveSceneToFile(const std::filesystem::path &Path,
     FirstMesh = false;
     Out << "    " << EscStr(It->second.DisplayName) << ": " << EscStr(Instance.ObjectId);
   }
-  Out << "\n  }\n";
+  Out << "\n  },\n";
+  Out << "  \"worldSettings\": {\n"
+      << "    \"skyboxColorTop\": "
+      << SerializeVec3(Scene.WorldSettings.SkyboxColorTop) << ",\n"
+      << "    \"skyboxColorBottom\": "
+      << SerializeVec3(Scene.WorldSettings.SkyboxColorBottom) << ",\n"
+      << "    \"skyboxHDRPath\": "
+      << EscStr(Scene.WorldSettings.SkyboxHDRPath) << "\n"
+      << "  }\n";
   Out << "}\n";
+  return Out.str();
+}
 
+bool SaveSceneToFile(const std::filesystem::path &Path,
+                     const EditorSceneState &Scene) {
   std::ofstream File(Path);
   if (!File.is_open()) {
     A_CORE_ERROR("SceneFile: could not open {0} for writing", Path.string());
     return false;
   }
-  File << Out.str();
+  File << SerializeSceneToJsonString(Path, Scene);
+  return File.good();
+}
+
+bool SaveCookedSceneToFile(const std::filesystem::path &Path,
+                           const EditorSceneState &Scene) {
+  const std::string Payload = SerializeSceneToJsonString(Path, Scene);
+  std::ofstream File(Path, std::ios::binary);
+  if (!File.is_open()) {
+    A_CORE_ERROR("SceneFile: could not open cooked scene {0} for writing",
+                 Path.string());
+    return false;
+  }
+
+  const std::uint64_t PayloadSize = static_cast<std::uint64_t>(Payload.size());
+  File.write(kCookedSceneMagic, sizeof(kCookedSceneMagic));
+  File.write(reinterpret_cast<const char *>(&kCookedSceneVersion),
+             sizeof(kCookedSceneVersion));
+  File.write(reinterpret_cast<const char *>(&PayloadSize), sizeof(PayloadSize));
+  File.write(Payload.data(), static_cast<std::streamsize>(Payload.size()));
   return File.good();
 }
 
@@ -699,14 +735,10 @@ EditorSceneItemKind KindFromStr(std::string_view S) {
 // ---------------------------------------------------------------------------
 
 std::optional<EditorSceneState>
-LoadSceneFromFile(const std::filesystem::path &Path) {
+DeserializeSceneFromJsonString(const std::filesystem::path &Path,
+                               std::string_view Text) {
   const std::filesystem::path ContentRoot = ResolveContentRootForScenePath(Path);
   const bool CookedOnlyContent = IsCookedOnlyContentPath(ContentRoot);
-
-  std::ifstream File(Path);
-  if (!File.is_open()) return std::nullopt;
-  const std::string Text((std::istreambuf_iterator<char>(File)),
-                          std::istreambuf_iterator<char>());
 
   Parser P{Text};
 
@@ -737,6 +769,7 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
   std::vector<FlatNode> Nodes;
   std::unordered_map<std::string, ObjectData> Objects;
   std::unordered_map<std::string, std::string> MeshNameToObjectId;
+  EditorWorldSettings WorldSettings;
 
   bool Ok = P.ParseObject([&](const std::string &Key) -> bool {
     if (Key == "version") { P.ParseNumber(); return true; }
@@ -912,6 +945,27 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
       });
       return true;
     }
+    if (Key == "worldSettings") {
+      P.ParseObject([&](const std::string &K) -> bool {
+        if (K == "skyboxColorTop") {
+          auto V = P.ParseVec3();
+          if (V) WorldSettings.SkyboxColorTop = *V;
+          return true;
+        }
+        if (K == "skyboxColorBottom") {
+          auto V = P.ParseVec3();
+          if (V) WorldSettings.SkyboxColorBottom = *V;
+          return true;
+        }
+        if (K == "skyboxHDRPath") {
+          auto V = P.ParseString();
+          if (V) WorldSettings.SkyboxHDRPath = *V;
+          return true;
+        }
+        return false;
+      });
+      return true;
+    }
     return false;
   });
 
@@ -958,6 +1012,7 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
   // --- Stage 3: rebuild ObjectDetailsById ---
   EditorSceneState State;
   State.Items = std::move(RootItems);
+  State.WorldSettings = WorldSettings;
   for (auto &[Id, Data] : Objects) {
     EditorObjectDetails Details;
     Details.ObjectId        = Id;
@@ -1103,6 +1158,55 @@ LoadSceneFromFile(const std::filesystem::path &Path) {
   }
 
   return State;
+}
+
+std::optional<EditorSceneState>
+LoadSceneFromFile(const std::filesystem::path &Path) {
+  std::ifstream File(Path);
+  if (!File.is_open()) return std::nullopt;
+  const std::string Text((std::istreambuf_iterator<char>(File)),
+                         std::istreambuf_iterator<char>());
+  return DeserializeSceneFromJsonString(Path, Text);
+}
+
+std::optional<EditorSceneState>
+LoadCookedSceneFromFile(const std::filesystem::path &Path) {
+  std::ifstream File(Path, std::ios::binary);
+  if (!File.is_open()) {
+    return std::nullopt;
+  }
+
+  char Magic[sizeof(kCookedSceneMagic)];
+  File.read(Magic, sizeof(Magic));
+  if (!File.good() || std::memcmp(Magic, kCookedSceneMagic, sizeof(Magic)) != 0) {
+    A_CORE_ERROR("SceneFile: invalid cooked scene header in {0}", Path.string());
+    return std::nullopt;
+  }
+
+  std::uint32_t Version = 0;
+  std::uint64_t PayloadSize = 0;
+  File.read(reinterpret_cast<char *>(&Version), sizeof(Version));
+  File.read(reinterpret_cast<char *>(&PayloadSize), sizeof(PayloadSize));
+  if (!File.good()) {
+    A_CORE_ERROR("SceneFile: failed to read cooked scene header from {0}",
+                 Path.string());
+    return std::nullopt;
+  }
+  if (Version != kCookedSceneVersion) {
+    A_CORE_ERROR("SceneFile: unsupported cooked scene version {} in {}",
+                 Version, Path.string());
+    return std::nullopt;
+  }
+
+  std::string Payload(PayloadSize, '\0');
+  File.read(Payload.data(), static_cast<std::streamsize>(PayloadSize));
+  if (!File.good()) {
+    A_CORE_ERROR("SceneFile: failed to read cooked scene payload from {0}",
+                 Path.string());
+    return std::nullopt;
+  }
+
+  return DeserializeSceneFromJsonString(Path, Payload);
 }
 
 } // namespace Axiom::Assets
