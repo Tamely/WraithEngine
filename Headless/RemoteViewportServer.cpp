@@ -521,6 +521,8 @@ std::string SerializeProjectJson(const Project::ProjectDescriptor &Project) {
          << EscapeJsonString(Project.Output.PackagedCookedDir.string())
          << "\",\"packagedSceneAssetPath\":\""
          << EscapeJsonString(Project.Output.PackagedSceneAssetPath.string())
+         << "\",\"stagedRuntimeBinaryPath\":\""
+         << EscapeJsonString(Project.Output.StagedRuntimeBinaryPath.string())
          << "\",\"packageManifestPath\":\""
          << EscapeJsonString(Project.Output.PackageManifestPath.string())
          << "\",\"engineContentDir\":\""
@@ -594,8 +596,12 @@ std::string SerializeProjectPackageResult(
          << (Result.IncludedSceneAsset ? "true" : "false")
          << ",\"includedEngineContent\":"
          << (Result.IncludedEngineContent ? "true" : "false")
+         << ",\"includedRuntimeBinary\":"
+         << (Result.IncludedRuntimeBinary ? "true" : "false")
          << ",\"sceneAssetPath\":\""
          << EscapeJsonString(Result.SceneAssetPath.string())
+         << "\",\"runtimeBinaryPath\":\""
+         << EscapeJsonString(Result.RuntimeBinaryPath.string())
          << "\""
          << ",\"packageDir\":\""
          << EscapeJsonString(Result.Cook.Output.PackageDir.string())

@@ -20,7 +20,11 @@ struct ApplicationArgs {
   int ArgumentCount;
 };
 
-enum class RuntimeMode { LocalWindowedEditor, HeadlessEditorSession };
+enum class RuntimeMode {
+  LocalWindowedEditor,
+  LocalPackagedGame,
+  HeadlessEditorSession
+};
 
 struct ApplicationConfig {
   std::string Title{"Axiom Engine"};

@@ -9,6 +9,7 @@
 #include <array>
 #include <cctype>
 #include <charconv>
+#include <cstdlib>
 #include <iomanip>
 #include <fstream>
 #include <sstream>
@@ -24,6 +25,10 @@
 
 #ifndef AXIOM_CONTENT_DIR
 #define AXIOM_CONTENT_DIR "Content"
+#endif
+
+#ifndef AXIOM_PACKAGED_RUNTIME_BINARY_PATH
+#define AXIOM_PACKAGED_RUNTIME_BINARY_PATH ""
 #endif
 
 namespace Axiom::Project {
@@ -645,6 +650,9 @@ ProjectOutputLayout ResolveProjectOutputLayout(const ProjectRoot &Root) {
       .PackagedEngineContentDir =
           Root.RootPath / "Package" / "Content" / "Engine",
       .PackageManifestPath = Root.RootPath / "Package" / "package.wraith.json",
+      .StagedRuntimeBinaryPath =
+          Root.RootPath / "Package" /
+          std::filesystem::path(AXIOM_PACKAGED_RUNTIME_BINARY_PATH).filename(),
   };
 }
 
@@ -1099,6 +1107,36 @@ PackageProjectContent(const ProjectDescriptor &Project,
     return std::nullopt;
   }
 
+  const std::filesystem::path RuntimeBinaryPath =
+      std::filesystem::path(AXIOM_PACKAGED_RUNTIME_BINARY_PATH);
+  if (RuntimeBinaryPath.empty() || !std::filesystem::exists(RuntimeBinaryPath)) {
+    if (FailureReason != nullptr) {
+      *FailureReason =
+          "Failed to stage AxiomPackagedRuntime because the built runtime binary was not found.";
+    }
+    return std::nullopt;
+  }
+
+  Error.clear();
+  std::filesystem::copy_file(
+      RuntimeBinaryPath, Project.Output.StagedRuntimeBinaryPath,
+      std::filesystem::copy_options::overwrite_existing, Error);
+  if (Error) {
+    if (FailureReason != nullptr) {
+      *FailureReason =
+          "Failed to copy AxiomPackagedRuntime into the package output.";
+    }
+    return std::nullopt;
+  }
+#ifndef _WIN32
+  std::filesystem::permissions(
+      Project.Output.StagedRuntimeBinaryPath,
+      std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec |
+          std::filesystem::perms::others_exec,
+      std::filesystem::perm_options::add, Error);
+  Error.clear();
+#endif
+
   ProjectPackageResult Result{
       .Cook = *CookResult,
       .PackagedFileCount = CountPackagedFiles(Project.Output.PackageDir),
@@ -1106,7 +1144,10 @@ PackageProjectContent(const ProjectDescriptor &Project,
           std::filesystem::exists(Project.Output.PackagedSceneAssetPath),
       .IncludedEngineContent =
           std::filesystem::exists(Project.Output.PackagedEngineContentDir),
+      .IncludedRuntimeBinary =
+          std::filesystem::exists(Project.Output.StagedRuntimeBinaryPath),
       .SceneAssetPath = Project.Output.PackagedSceneAssetPath,
+      .RuntimeBinaryPath = Project.Output.StagedRuntimeBinaryPath,
   };
   if (!SavePackageManifestFile(Project, Result)) {
     if (FailureReason != nullptr) {

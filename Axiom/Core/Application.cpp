@@ -20,6 +20,7 @@ Application::Application(const ApplicationConfig &Config,
 
   switch (m_Config.Mode) {
   case RuntimeMode::LocalWindowedEditor:
+  case RuntimeMode::LocalPackagedGame:
     m_Window = std::make_unique<GlfwWindow>(m_Config.Title, m_Config.Width,
                                             m_Config.Height);
     m_RenderSurface = std::make_shared<WindowRenderSurface>(*m_Window);

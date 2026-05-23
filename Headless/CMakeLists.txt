@@ -34,6 +34,12 @@ add_executable(AxiomRemoteViewportServer
   WebRtcSession.cpp
 )
 
+add_executable(AxiomPackagedRuntime
+  AxiomPackagedRuntime.cpp
+  PackagedRuntimeHost.cpp
+  HeadlessSessionLayer.cpp
+)
+
 if(APPLE)
   target_sources(AxiomHeadless PRIVATE
     MacOSWebRtcSession.mm
@@ -51,6 +57,15 @@ target_include_directories(AxiomRemoteViewportServer PRIVATE
 )
 
 target_link_libraries(AxiomRemoteViewportServer PRIVATE AxiomCore)
+target_link_libraries(AxiomPackagedRuntime PRIVATE AxiomCore)
+
+set_target_properties(AxiomPackagedRuntime PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/Headless"
+)
+
+target_compile_definitions(AxiomCore PUBLIC
+  AXIOM_PACKAGED_RUNTIME_BINARY_PATH="$<TARGET_FILE:AxiomPackagedRuntime>"
+)
 
 if(WIN32)
   target_link_libraries(AxiomRemoteViewportServer PRIVATE ws2_32)

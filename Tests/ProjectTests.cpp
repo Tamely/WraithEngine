@@ -287,9 +287,13 @@ TEST_F(ProjectSystemTests, PackageProjectContentStagesCookedProjectOutput) {
   EXPECT_TRUE(std::filesystem::exists(Created->Output.PackagedSceneAssetPath));
   EXPECT_TRUE(std::filesystem::exists(Created->Output.PackagedEngineContentDir));
   EXPECT_TRUE(std::filesystem::exists(Created->Output.PackageManifestPath));
+  EXPECT_TRUE(std::filesystem::exists(Created->Output.StagedRuntimeBinaryPath));
   EXPECT_GT(PackageResult->PackagedFileCount, 0u);
   EXPECT_TRUE(PackageResult->IncludedSceneAsset);
+  EXPECT_TRUE(PackageResult->IncludedRuntimeBinary);
   EXPECT_EQ(PackageResult->SceneAssetPath, Created->Output.PackagedSceneAssetPath);
+  EXPECT_EQ(PackageResult->RuntimeBinaryPath,
+            Created->Output.StagedRuntimeBinaryPath);
   EXPECT_FALSE(std::filesystem::exists(Created->Output.PackageDir / "Content" /
                                        "scene.json"));
 
@@ -397,6 +401,18 @@ TEST_F(ProjectSystemTests, PackagedProjectLoadsSceneFromCookedAssetsWithoutSourc
   EXPECT_EQ(*DetailsIt->second.Material->TextureAssetPath, "crate.jpg");
   EXPECT_FALSE(std::filesystem::exists(Created->Output.PackageDir / "Content" /
                                        "scene.json"));
+
+  Axiom::EditorSession Session(Axiom::SessionId{91});
+  Session.SetContentDir(Created->Output.PackagedContentDir);
+  ASSERT_TRUE(Axiom::LoadStartupScene(Session));
+  ASSERT_EQ(Session.GetState().Scene.MeshInstances.size(), 1u);
+  EXPECT_EQ(Session.GetState().Scene.MeshInstances[0].ObjectId, "crate-1");
+  const Axiom::EditorObjectDetails *LoadedDetails =
+      Session.FindObjectDetails("crate-1");
+  ASSERT_NE(LoadedDetails, nullptr);
+  ASSERT_TRUE(LoadedDetails->Material.has_value());
+  ASSERT_TRUE(LoadedDetails->Material->TextureAssetPath.has_value());
+  EXPECT_EQ(*LoadedDetails->Material->TextureAssetPath, "crate.jpg");
 }
 
 TEST_F(ProjectSystemTests, PackagedContentRequiresSceneFileAndWillNotFallback) {
