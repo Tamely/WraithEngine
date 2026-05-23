@@ -2,6 +2,7 @@
 
 #include "Assets/AssetCookManifest.h"
 #include "Assets/AssetCooker.h"
+#include "Assets/CookedAssetRuntime.h"
 #include "Assets/SceneFile.h"
 #include "Core/Log.h"
 
@@ -1042,6 +1043,13 @@ CookProjectContent(const ProjectDescriptor &Project, std::string *FailureReason)
   const auto Manifest =
       Assets::LoadAssetCookManifest(Project.Output.CookManifestPath)
           .value_or(Assets::AssetCookManifest{});
+  if (!std::filesystem::exists(Project.Output.CookManifestPath) &&
+      !Assets::SaveAssetCookManifest(Project.Output.CookManifestPath, Manifest)) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Failed to write the cooked asset manifest.";
+    }
+    return std::nullopt;
+  }
 
   return ProjectCookResult{
       .Output = Project.Output,
@@ -1152,6 +1160,25 @@ PackageProjectContent(const ProjectDescriptor &Project,
   if (!SavePackageManifestFile(Project, Result)) {
     if (FailureReason != nullptr) {
       *FailureReason = "Failed to write the package manifest.";
+    }
+    return std::nullopt;
+  }
+  std::string ValidationFailureReason;
+  const auto PackagedDescriptor =
+      Assets::ResolvePackagedContentDescriptor(Project.Output.PackagedContentDir,
+                                               &ValidationFailureReason);
+  if (!PackagedDescriptor.has_value()) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Packaged content validation failed: " +
+                       ValidationFailureReason;
+    }
+    return std::nullopt;
+  }
+  if (!Assets::ValidatePackagedContentDescriptor(*PackagedDescriptor,
+                                                 &ValidationFailureReason)) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Packaged content validation failed: " +
+                       ValidationFailureReason;
     }
     return std::nullopt;
   }

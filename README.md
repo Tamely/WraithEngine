@@ -220,6 +220,42 @@ pnpm install
 NEXT_PUBLIC_AXIOM_SERVER_ORIGIN=http://127.0.0.1:8080 pnpm dev
 ```
 
+### Packaged runtime
+
+`Package Project` now produces a cooked-only package under a project's `Package/`
+directory. The staged layout is:
+
+```text
+Package/
+  AxiomPackagedRuntime
+  package.wraith.json
+  Content/
+    Cooked/
+      scene.wscene
+      AssetCookManifest.json
+      ...
+    Engine/
+      ...
+```
+
+Packages do not ship `Content/scene.json` or project source assets. The packaged
+runtime expects `package.wraith.json`, `Content/Cooked/scene.wscene`, the cooked
+asset manifest, and all referenced cooked assets to be present.
+
+To run a staged package directly:
+
+```bash
+./Projects/<project-slug>/Package/AxiomPackagedRuntime
+```
+
+To test the packaged runtime binary built in `build/` against an existing staged
+package:
+
+```bash
+./build/debug/Headless/AxiomPackagedRuntime \
+  --package-root /absolute/path/to/Projects/<project-slug>/Package
+```
+
 Open `http://localhost:3000` in your browser.
 
 ### Local native editor (no browser required)

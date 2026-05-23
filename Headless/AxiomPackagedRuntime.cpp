@@ -60,6 +60,13 @@ int main(int argc, char **argv) {
   }
 
   const std::filesystem::path ContentRoot = Options->PackageRoot / "Content";
+  if (!std::filesystem::exists(ContentRoot) ||
+      !std::filesystem::is_directory(ContentRoot)) {
+    std::cerr << "Invalid package root '" << Options->PackageRoot.string()
+              << "': expected a Content directory at '" << ContentRoot.string()
+              << "'." << std::endl;
+    return 1;
+  }
   std::string FailureReason;
   const auto Descriptor =
       Axiom::Assets::ResolvePackagedContentDescriptor(ContentRoot, &FailureReason);
@@ -68,19 +75,10 @@ int main(int argc, char **argv) {
               << "': " << FailureReason << std::endl;
     return 1;
   }
-  if (!std::filesystem::exists(Descriptor->SceneAssetPath)) {
-    std::cerr << "Packaged scene asset is missing: "
-              << Descriptor->SceneAssetPath.string() << std::endl;
-    return 1;
-  }
-  if (!std::filesystem::exists(Descriptor->CookManifestPath)) {
-    std::cerr << "Packaged asset cook manifest is missing: "
-              << Descriptor->CookManifestPath.string() << std::endl;
-    return 1;
-  }
-  if (!std::filesystem::exists(Descriptor->EngineContentDir)) {
-    std::cerr << "Packaged engine content directory is missing: "
-              << Descriptor->EngineContentDir.string() << std::endl;
+  if (!Axiom::Assets::ValidatePackagedContentDescriptor(*Descriptor,
+                                                        &FailureReason)) {
+    std::cerr << "Invalid package root '" << Options->PackageRoot.string()
+              << "': " << FailureReason << std::endl;
     return 1;
   }
 

@@ -73,6 +73,7 @@ interface ProjectPackageResponse {
   includedRuntimeBinary: boolean
   sceneAssetPath: string
   runtimeBinaryPath: string
+  packagedContentPath: string
   packageDir: string
   packageManifestPath: string
 }
@@ -313,7 +314,7 @@ export function WraithEngine() {
         kind: "package",
         status: "success",
         title: "Package Complete",
-        message: `Packaged ${payload.project.name} to ${payload.packageDir}. ${payload.packagedFileCount} files staged${payload.includedRuntimeBinary ? `, including ${payload.runtimeBinaryPath}` : ""}${payload.includedSceneAsset ? ` and ${payload.sceneAssetPath}` : ""}.`,
+        message: `Packaged ${payload.project.name} to ${payload.packageDir}. Content: ${payload.packagedContentPath}.${payload.includedRuntimeBinary ? ` Runtime: ${payload.runtimeBinaryPath}.` : ""}${payload.includedSceneAsset ? ` Scene: ${payload.sceneAssetPath}.` : ""} ${payload.packagedFileCount} files staged.`,
       })
       setActiveProject(payload.project)
       await refreshProjects()

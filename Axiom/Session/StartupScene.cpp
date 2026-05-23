@@ -359,14 +359,9 @@ bool LoadStartupScene(EditorSession &Session) {
                    ContentRoot.string(), FailureReason);
       return false;
     }
-    if (!std::filesystem::exists(Descriptor->SceneAssetPath)) {
-      A_CORE_ERROR("StartupScene: packaged scene asset is missing at '{}'",
-                   Descriptor->SceneAssetPath.string());
-      return false;
-    }
-    if (!std::filesystem::exists(Descriptor->CookManifestPath)) {
-      A_CORE_ERROR("StartupScene: packaged asset cook manifest is missing at '{}'",
-                   Descriptor->CookManifestPath.string());
+    if (!Assets::ValidatePackagedContentDescriptor(*Descriptor, &FailureReason)) {
+      A_CORE_ERROR("StartupScene: packaged content validation failed for '{}': {}",
+                   ContentRoot.string(), FailureReason);
       return false;
     }
     auto Loaded = Assets::LoadCookedSceneFromFile(Descriptor->SceneAssetPath);

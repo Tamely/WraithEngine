@@ -4,8 +4,10 @@
 #include "Assets/CookedMeshAsset.h"
 #include "Assets/CookedTextureAsset.h"
 #include "Assets/IAssetSource.h"
+#include "Assets/SceneFile.h"
 
 #include <fstream>
+#include <unordered_set>
 #include <unordered_map>
 
 namespace Axiom::Assets {
@@ -159,6 +161,150 @@ ResolvePackagedContentDescriptor(const std::filesystem::path &Path,
       .CookManifestPath = PackageRoot / CookManifestIt->second,
       .EngineContentDir = PackageRoot / EngineContentIt->second,
   };
+}
+
+bool ValidatePackagedContentDescriptor(const PackagedContentDescriptor &Descriptor,
+                                       std::string *FailureReason) {
+  if (!std::filesystem::exists(Descriptor.ContentRoot) ||
+      !std::filesystem::is_directory(Descriptor.ContentRoot)) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Expected package root to contain a Content directory at '" +
+                       Descriptor.ContentRoot.string() + "'.";
+    }
+    return false;
+  }
+  if (!std::filesystem::exists(Descriptor.SceneAssetPath)) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Packaged scene asset is missing at '" +
+                       Descriptor.SceneAssetPath.string() + "'.";
+    }
+    return false;
+  }
+  if (!std::filesystem::exists(Descriptor.CookManifestPath)) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Packaged asset cook manifest is missing at '" +
+                       Descriptor.CookManifestPath.string() + "'.";
+    }
+    return false;
+  }
+  if (!std::filesystem::exists(Descriptor.EngineContentDir) ||
+      !std::filesystem::is_directory(Descriptor.EngineContentDir)) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Packaged engine content directory is missing at '" +
+                       Descriptor.EngineContentDir.string() + "'.";
+    }
+    return false;
+  }
+
+  const auto LoadedScene = LoadCookedSceneFromFile(Descriptor.SceneAssetPath);
+  if (!LoadedScene.has_value()) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Failed to load packaged scene asset '" +
+                       Descriptor.SceneAssetPath.string() + "'.";
+    }
+    return false;
+  }
+
+  const CookedAssetSource CookedSource(Descriptor.ContentRoot);
+  if (!CookedSource.HasManifest()) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Packaged asset cook manifest could not be loaded from '" +
+                       Descriptor.CookManifestPath.string() + "'.";
+    }
+    return false;
+  }
+
+  auto ValidateResolvedAssetPath = [&](std::string_view RelativePath,
+                                       std::string_view Usage) -> bool {
+    if (RelativePath.empty()) {
+      return true;
+    }
+
+    const std::filesystem::path RelativeAssetPath(RelativePath);
+    if (RelativeAssetPath.is_absolute()) {
+      if (FailureReason != nullptr) {
+        *FailureReason = std::string(Usage) + " '" + std::string(RelativePath) +
+                         "' must be content-relative, not absolute.";
+      }
+      return false;
+    }
+
+    const auto Begin = RelativeAssetPath.begin();
+    const bool IsEngineRelative =
+        Begin != RelativeAssetPath.end() && Begin->string() == "Engine";
+    if (IsEngineRelative) {
+      const auto EngineAssetPath = Descriptor.ContentRoot / RelativeAssetPath;
+      if (!std::filesystem::exists(EngineAssetPath)) {
+        if (FailureReason != nullptr) {
+          *FailureReason = std::string(Usage) + " '" +
+                           RelativeAssetPath.generic_string() +
+                           "' does not resolve inside packaged engine content.";
+        }
+        return false;
+      }
+      return true;
+    }
+
+    const auto CookedPath =
+        CookedSource.Resolve(AssetIdFromRelativePath(RelativeAssetPath));
+    if (!CookedPath.has_value()) {
+      if (FailureReason != nullptr) {
+        *FailureReason = std::string(Usage) + " '" +
+                         RelativeAssetPath.generic_string() +
+                         "' is not present in the packaged asset cook manifest.";
+      }
+      return false;
+    }
+    if (!std::filesystem::exists(*CookedPath)) {
+      if (FailureReason != nullptr) {
+        *FailureReason = std::string(Usage) + " '" +
+                         RelativeAssetPath.generic_string() +
+                         "' maps to missing cooked asset '" +
+                         CookedPath->string() + "'.";
+      }
+      return false;
+    }
+    return true;
+  };
+
+  std::unordered_set<std::string> MeshPaths;
+  std::unordered_set<std::string> TexturePaths;
+  for (const auto &Instance : LoadedScene->MeshInstances) {
+    if (!Instance.AssetRelativePath.empty()) {
+      MeshPaths.insert(Instance.AssetRelativePath);
+    }
+    if (Instance.Material != nullptr &&
+        !Instance.Material->TextureAssetPath.empty()) {
+      TexturePaths.insert(Instance.Material->TextureAssetPath);
+    }
+  }
+  for (const auto &[ObjectId, Details] : LoadedScene->ObjectDetailsById) {
+    static_cast<void>(ObjectId);
+    if (!Details.AssetRelativePath.empty()) {
+      MeshPaths.insert(Details.AssetRelativePath);
+    }
+    if (Details.Material.has_value() &&
+        Details.Material->TextureAssetPath.has_value() &&
+        !Details.Material->TextureAssetPath->empty()) {
+      TexturePaths.insert(*Details.Material->TextureAssetPath);
+    }
+  }
+  if (!LoadedScene->WorldSettings.SkyboxHDRPath.empty()) {
+    TexturePaths.insert(LoadedScene->WorldSettings.SkyboxHDRPath);
+  }
+
+  for (const std::string &MeshPath : MeshPaths) {
+    if (!ValidateResolvedAssetPath(MeshPath, "Mesh asset reference")) {
+      return false;
+    }
+  }
+  for (const std::string &TexturePath : TexturePaths) {
+    if (!ValidateResolvedAssetPath(TexturePath, "Texture asset reference")) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 std::optional<std::filesystem::path>

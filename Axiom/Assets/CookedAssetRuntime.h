@@ -27,6 +27,9 @@ std::optional<PackagedContentDescriptor>
 ResolvePackagedContentDescriptor(const std::filesystem::path &Path,
                                 std::string *FailureReason = nullptr);
 
+bool ValidatePackagedContentDescriptor(const PackagedContentDescriptor &Descriptor,
+                                       std::string *FailureReason = nullptr);
+
 std::optional<MeshSceneData>
 LoadCookedMeshAssetIfAvailable(const std::filesystem::path &Path);
 

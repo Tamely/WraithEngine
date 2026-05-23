@@ -603,6 +603,8 @@ std::string SerializeProjectPackageResult(
          << "\",\"runtimeBinaryPath\":\""
          << EscapeJsonString(Result.RuntimeBinaryPath.string())
          << "\""
+         << ",\"packagedContentPath\":\""
+         << EscapeJsonString(Result.Cook.Output.PackagedContentDir.string())
          << ",\"packageDir\":\""
          << EscapeJsonString(Result.Cook.Output.PackageDir.string())
          << "\",\"packageManifestPath\":\""
