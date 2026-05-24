@@ -1,6 +1,8 @@
 #include "Session/EditorSession.h"
 
 #include "Assets/AssetCooker.h"
+#include "Assets/CookedTextureAsset.h"
+#include "Assets/IAssetSource.h"
 #include "Assets/MeshAsset.h"
 #include "Physics/PhysicsWorld.h"
 
@@ -59,6 +61,7 @@ void CookHDRTextureAssetBestEffort(const std::filesystem::path &ContentDir,
 
 void HydrateWorldSettingsHDRData(EditorWorldSettings &Settings,
                                  const std::filesystem::path &ContentDir,
+                                 const std::filesystem::path &EngineContentDir,
                                  std::string_view LogContext) {
   if (Settings.SkyboxHDRPath.empty()) {
     Settings.SkyboxHDRData = nullptr;
@@ -73,11 +76,40 @@ void HydrateWorldSettingsHDRData(EditorWorldSettings &Settings,
     return;
   }
 
-  const auto FullPath = ContentDir / Settings.SkyboxHDRPath;
+  const std::filesystem::path HDRRelativePath(Settings.SkyboxHDRPath);
+  const bool IsEngineAsset =
+      !HDRRelativePath.empty() && *HDRRelativePath.begin() == "Engine";
+  std::filesystem::path EffectiveContentDir = ContentDir;
+  std::filesystem::path EffectiveRelativePath = HDRRelativePath;
+  if (IsEngineAsset && !EngineContentDir.empty()) {
+    EffectiveContentDir = EngineContentDir;
+    auto It = HDRRelativePath.begin();
+    ++It; // skip "Engine"
+    EffectiveRelativePath.clear();
+    for (; It != HDRRelativePath.end(); ++It) {
+      EffectiveRelativePath /= *It;
+    }
+  }
+
+  const auto FullPath = EffectiveContentDir / EffectiveRelativePath;
   if (std::filesystem::exists(FullPath)) {
-    CookHDRTextureAssetBestEffort(ContentDir, Settings.SkyboxHDRPath);
+    CookHDRTextureAssetBestEffort(EffectiveContentDir,
+                                  EffectiveRelativePath.generic_string());
   }
   auto Loaded = Assets::LoadHDRTextureFromFile(FullPath);
+  if (!Loaded) {
+    const Assets::CookedAssetSource CookedSource(EffectiveContentDir);
+    if (CookedSource.HasManifest()) {
+      const auto CookedPath = CookedSource.Resolve(
+          Assets::AssetIdFromRelativePath(EffectiveRelativePath));
+      if (CookedPath.has_value()) {
+        const auto CookedHDR = Assets::LoadCookedHDRTextureAsset(*CookedPath);
+        if (CookedHDR.has_value()) {
+          Loaded = std::make_shared<HDRTextureSourceData>(*CookedHDR);
+        }
+      }
+    }
+  }
   if (!Loaded) {
     A_CORE_WARN("{}: failed to load HDR '{}'", LogContext,
                 Settings.SkyboxHDRPath);
@@ -470,6 +502,7 @@ void EditorSession::SetPresenceState(SessionUserId User,
 void EditorSession::SetSceneState(EditorSceneState SceneState) {
   m_State.Scene = std::move(SceneState);
   HydrateWorldSettingsHDRData(m_State.Scene.WorldSettings, m_ContentDir,
+                              m_EngineContentDir,
                               "SetSceneState");
   // Populate Material on object details from mesh instances so the inspector
   // can display and edit material properties for mesh objects.
@@ -2343,6 +2376,7 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
     m_State.Scene.WorldSettings.SkyboxHDRData = std::move(PreviousHDRData);
   } else {
     HydrateWorldSettingsHDRData(m_State.Scene.WorldSettings, m_ContentDir,
+                                m_EngineContentDir,
                                 "SetWorldSettings");
   }
 }
@@ -2431,10 +2465,20 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
 
 void EditorSession::SetContentDir(std::filesystem::path ContentDir) {
   m_ContentDir = std::move(ContentDir);
+  if (!m_State.Scene.WorldSettings.SkyboxHDRPath.empty()) {
+    m_State.Scene.WorldSettings.SkyboxHDRData = nullptr;
+    HydrateWorldSettingsHDRData(m_State.Scene.WorldSettings, m_ContentDir,
+                                m_EngineContentDir, "SetContentDir");
+  }
 }
 
 void EditorSession::SetEngineContentDir(std::filesystem::path EngineContentDir) {
   m_EngineContentDir = std::move(EngineContentDir);
+  if (!m_State.Scene.WorldSettings.SkyboxHDRPath.empty()) {
+    m_State.Scene.WorldSettings.SkyboxHDRData = nullptr;
+    HydrateWorldSettingsHDRData(m_State.Scene.WorldSettings, m_ContentDir,
+                                m_EngineContentDir, "SetEngineContentDir");
+  }
 }
 
 void EditorSession::PublishScriptError(const std::string &ObjectId,

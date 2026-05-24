@@ -2331,6 +2331,134 @@ TEST(SceneLifecycleTests, SetSceneStateHydratesSkyboxHDRDataFromCookedContent) {
                   1.0f);
 }
 
+TEST(SceneLifecycleTests, SetSceneStateHydratesSkyboxHDRDataFromEngineContent) {
+  EnsureLogInitialized();
+  const auto TempRoot =
+      std::filesystem::temp_directory_path() / "wraithengine-engine-skybox-test";
+  std::error_code RemoveError;
+  std::filesystem::remove_all(TempRoot, RemoveError);
+  std::filesystem::create_directories(TempRoot / "ProjectContent");
+  std::filesystem::create_directories(TempRoot / "Content" / "Engine" / "Cooked");
+
+  const std::filesystem::path RelativeHDRPath = "Engine/Skies/studio.hdr";
+  const std::filesystem::path EngineRelativeHDRPath = "Skies/studio.hdr";
+  const std::filesystem::path CookedHDRRelativePath = "Cooked/Skies-studio.wtex";
+  const auto CookedHDRPath =
+      TempRoot / "Content" / "Engine" / CookedHDRRelativePath;
+
+  Axiom::HDRTextureSourceData HDRTexture;
+  HDRTexture.Width = 1;
+  HDRTexture.Height = 1;
+  HDRTexture.Pixels = {0.25f, 0.5f, 1.0f, 1.0f};
+  ASSERT_TRUE(Axiom::Assets::SaveCookedHDRTextureAsset(
+      CookedHDRPath, HDRTexture,
+      Axiom::Assets::AssetIdFromRelativePath(EngineRelativeHDRPath)));
+
+  Axiom::Assets::AssetCookManifest Manifest;
+  Manifest.Entries.push_back(Axiom::Assets::AssetCookManifestEntry{
+      .Id = Axiom::Assets::AssetIdFromRelativePath(EngineRelativeHDRPath),
+      .Kind = Axiom::Assets::AssetKind::Texture,
+      .RelativePath = EngineRelativeHDRPath.generic_string(),
+      .CookedPath = CookedHDRRelativePath.generic_string(),
+      .FormatVersion = Axiom::Assets::kCookedTextureFormatVersion,
+      .SourceHash = 0,
+  });
+  ASSERT_TRUE(Axiom::Assets::SaveAssetCookManifest(
+      TempRoot / "Content" / "Engine" / "Cooked" / "AssetCookManifest.json",
+      Manifest));
+
+  Axiom::EditorSceneState Scene;
+  Scene.Items = {{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+  }};
+  Scene.ObjectDetailsById["world"] = Axiom::EditorObjectDetails{
+      .ObjectId = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .SupportsTransform = false,
+      .TransformReadOnly = true,
+  };
+  Scene.WorldSettings.SkyboxHDRPath = RelativeHDRPath.generic_string();
+
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  Session.SetContentDir(TempRoot / "ProjectContent");
+  Session.SetEngineContentDir(TempRoot / "Content" / "Engine");
+  Session.SetSceneState(std::move(Scene));
+
+  ASSERT_TRUE(Session.GetState().Scene.WorldSettings.SkyboxHDRData != nullptr);
+  EXPECT_EQ(Session.GetState().Scene.WorldSettings.SkyboxHDRData->Width, 1u);
+  ASSERT_EQ(Session.GetState().Scene.WorldSettings.SkyboxHDRData->Pixels.size(), 4u);
+  EXPECT_FLOAT_EQ(Session.GetState().Scene.WorldSettings.SkyboxHDRData->Pixels[2],
+                  1.0f);
+}
+
+TEST(SceneLifecycleTests,
+     SetContentDirHydratesSkyboxHDRDataForExistingLoadedScene) {
+  EnsureLogInitialized();
+  const auto TempRoot =
+      std::filesystem::temp_directory_path() / "wraithengine-skybox-order-test";
+  std::error_code RemoveError;
+  std::filesystem::remove_all(TempRoot, RemoveError);
+  std::filesystem::create_directories(TempRoot / "Content" / "Cooked");
+
+  const std::filesystem::path RelativeHDRPath = "Skies/studio.hdr";
+  const std::filesystem::path CookedHDRRelativePath = "Cooked/Skies-studio.wtex";
+  const auto CookedHDRPath = TempRoot / "Content" / CookedHDRRelativePath;
+
+  Axiom::HDRTextureSourceData HDRTexture;
+  HDRTexture.Width = 1;
+  HDRTexture.Height = 1;
+  HDRTexture.Pixels = {0.75f, 0.5f, 0.25f, 1.0f};
+  ASSERT_TRUE(Axiom::Assets::SaveCookedHDRTextureAsset(
+      CookedHDRPath, HDRTexture,
+      Axiom::Assets::AssetIdFromRelativePath(RelativeHDRPath)));
+
+  Axiom::Assets::AssetCookManifest Manifest;
+  Manifest.Entries.push_back(Axiom::Assets::AssetCookManifestEntry{
+      .Id = Axiom::Assets::AssetIdFromRelativePath(RelativeHDRPath),
+      .Kind = Axiom::Assets::AssetKind::Texture,
+      .RelativePath = RelativeHDRPath.generic_string(),
+      .CookedPath = CookedHDRRelativePath.generic_string(),
+      .FormatVersion = Axiom::Assets::kCookedTextureFormatVersion,
+      .SourceHash = 0,
+  });
+  ASSERT_TRUE(Axiom::Assets::SaveAssetCookManifest(
+      TempRoot / "Content" / "Cooked" / "AssetCookManifest.json", Manifest));
+
+  Axiom::EditorSceneState Scene;
+  Scene.Items = {{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+  }};
+  Scene.ObjectDetailsById["world"] = Axiom::EditorObjectDetails{
+      .ObjectId = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .SupportsTransform = false,
+      .TransformReadOnly = true,
+  };
+  Scene.WorldSettings.SkyboxHDRPath = RelativeHDRPath.generic_string();
+
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  Session.SetSceneState(std::move(Scene));
+  ASSERT_EQ(Session.GetState().Scene.WorldSettings.SkyboxHDRData, nullptr);
+
+  Session.SetContentDir(TempRoot / "Content");
+
+  ASSERT_TRUE(Session.GetState().Scene.WorldSettings.SkyboxHDRData != nullptr);
+  EXPECT_EQ(Session.GetState().Scene.WorldSettings.SkyboxHDRData->Width, 1u);
+  ASSERT_EQ(Session.GetState().Scene.WorldSettings.SkyboxHDRData->Pixels.size(), 4u);
+  EXPECT_FLOAT_EQ(Session.GetState().Scene.WorldSettings.SkyboxHDRData->Pixels[0],
+                  0.75f);
+}
+
 TEST(SceneLifecycleTests, SetPhysicsPropertiesUpdatesAuthoritativeDetails) {
   Axiom::EditorSession Session = MakeWorldSession();
   RecordingSubscriber Subscriber;
