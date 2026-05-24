@@ -6,9 +6,13 @@ add_executable(AxiomTests
   ModuleManagerTests.cpp
   ProjectTests.cpp
   SceneLifecycleTests.cpp
+  UWebSocketsVendorTests.cpp
+  WraithNetworkingModuleTests.cpp
   ../Headless/HeadlessOverlayModule.cpp
+  ../Headless/HeadlessSessionHost.cpp
   ../Headless/HeadlessSessionLayer.cpp
   ../Headless/HeadlessCommandProtocol.cpp
+  ../Headless/HostModules.cpp
   ../Headless/WebRtcSession.cpp
 )
 
@@ -20,6 +24,7 @@ endif()
 
 target_link_libraries(AxiomTests PRIVATE
   AxiomCore
+  WraithNetworking
   GTest::gtest_main
 )
 

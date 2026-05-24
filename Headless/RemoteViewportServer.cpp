@@ -9,6 +9,9 @@
 
 #include "GizmoHitTest.h"
 #include "HeadlessCommandProtocol.h"
+#include <App.h>
+#include <HttpParser.h>
+#include <Loop.h>
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -23,9 +26,11 @@
 #include <chrono>
 #include <cctype>
 #include <cmath>
+#include <condition_variable>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <optional>
 #include <regex>
@@ -49,10 +54,28 @@
 #endif
 
 namespace Axiom {
+struct RemoteViewportServerUwsState {
+  std::mutex StartupMutex;
+  std::condition_variable StartupCondition;
+  bool StartupCompleted{false};
+  std::string StartupError;
+  uWS::Loop *Loop{nullptr};
+  std::unique_ptr<uWS::App> App;
+  us_listen_socket_t *ListenSocket{nullptr};
+};
+
 namespace {
-constexpr std::string_view WebSocketGuid =
-    "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 constexpr std::string_view ClientIdHeaderName = "X-Axiom-Client-Id";
+
+struct RemoteViewportWebSocketUserData {
+  uintptr_t ConnectionId{0};
+};
+
+using UwsHttpRequest = uWS::HttpRequest;
+using UwsHttpResponse = uWS::HttpResponse<false>;
+using UwsWebSocket =
+    uWS::WebSocket<false, true, RemoteViewportWebSocketUserData>;
+std::function<bool(uintptr_t, std::string_view)> g_HttpResponseSender;
 
 #if AXIOM_PLATFORM_WINDOWS
 using SocketHandle = SOCKET;
@@ -99,14 +122,6 @@ void SetReuseAddress(SocketHandle Socket) {
 #endif
 }
 
-struct HttpRequest {
-  std::string Method;
-  std::string Path;
-  std::string HeaderBlock;
-  std::string Body;
-  size_t ContentLength{0};
-};
-
 std::string BuildHttpResponse(std::string_view Status,
                               std::string_view ContentType,
                               std::string_view Body,
@@ -125,7 +140,74 @@ std::string BuildHttpResponse(std::string_view Status,
   return Stream.str();
 }
 
+std::string Trim(std::string_view Value);
+
+struct ParsedHttpResponse {
+  std::string Status;
+  std::vector<std::pair<std::string, std::string>> Headers;
+  std::string Body;
+};
+
+std::optional<ParsedHttpResponse> ParseHttpResponseText(std::string_view Response) {
+  const size_t HeaderEnd = Response.find("\r\n\r\n");
+  if (HeaderEnd == std::string_view::npos) {
+    return std::nullopt;
+  }
+
+  const std::string_view HeaderBlock = Response.substr(0, HeaderEnd);
+  const size_t StatusLineEnd = HeaderBlock.find("\r\n");
+  if (StatusLineEnd == std::string_view::npos) {
+    return std::nullopt;
+  }
+
+  const std::string_view StatusLine = HeaderBlock.substr(0, StatusLineEnd);
+  const size_t FirstSpace = StatusLine.find(' ');
+  if (FirstSpace == std::string_view::npos || FirstSpace + 1 >= StatusLine.size()) {
+    return std::nullopt;
+  }
+
+  ParsedHttpResponse Parsed{};
+  Parsed.Status = std::string(StatusLine.substr(FirstSpace + 1));
+  Parsed.Body = std::string(Response.substr(HeaderEnd + 4));
+
+  size_t LineStart = StatusLineEnd + 2;
+  while (LineStart < HeaderBlock.size()) {
+    const size_t LineEnd = HeaderBlock.find("\r\n", LineStart);
+    const std::string_view Line = HeaderBlock.substr(
+        LineStart, (LineEnd == std::string_view::npos ? HeaderBlock.size() : LineEnd) -
+                       LineStart);
+    const size_t Colon = Line.find(':');
+    if (Colon != std::string_view::npos) {
+      Parsed.Headers.emplace_back(std::string(Trim(Line.substr(0, Colon))),
+                                  std::string(Trim(Line.substr(Colon + 1))));
+    }
+
+    if (LineEnd == std::string_view::npos) {
+      break;
+    }
+    LineStart = LineEnd + 2;
+  }
+
+  return Parsed;
+}
+
+std::string BuildHeaderBlock(std::string_view Method, UwsHttpRequest &Request) {
+  std::ostringstream Stream;
+  Stream << Method << ' ' << Request.getFullUrl() << " HTTP/1.1\r\n";
+  for (const auto &[Key, Value] : Request) {
+    Stream << Key << ": " << Value << "\r\n";
+  }
+  Stream << "\r\n";
+  return Stream.str();
+}
+
 bool SendAll(SocketHandle Socket, const void *Data, size_t Size) {
+  if (g_HttpResponseSender) {
+    return g_HttpResponseSender(static_cast<uintptr_t>(Socket),
+                                std::string_view(static_cast<const char *>(Data),
+                                                 Size));
+  }
+
   const auto *Bytes = static_cast<const char *>(Data);
   size_t Offset = 0;
   while (Offset < Size) {
@@ -141,41 +223,6 @@ bool SendAll(SocketHandle Socket, const void *Data, size_t Size) {
     }
     Offset += static_cast<size_t>(Sent);
   }
-  return true;
-}
-
-bool RecvExact(SocketHandle Socket, void *Data, size_t Size) {
-  auto *Bytes = static_cast<unsigned char *>(Data);
-  size_t Offset = 0;
-  while (Offset < Size) {
-#if AXIOM_PLATFORM_WINDOWS
-    const int Received =
-        recv(Socket, reinterpret_cast<char *>(Bytes + Offset),
-             static_cast<int>(Size - Offset), 0);
-#else
-    const ssize_t Received = recv(
-        Socket, reinterpret_cast<char *>(Bytes + Offset), Size - Offset, 0);
-#endif
-    if (Received <= 0) {
-      return false;
-    }
-    Offset += static_cast<size_t>(Received);
-  }
-  return true;
-}
-
-bool RecvChunk(SocketHandle Socket, char *Data, size_t Size, size_t &ReceivedOut) {
-#if AXIOM_PLATFORM_WINDOWS
-  const int Received = recv(Socket, Data, static_cast<int>(Size), 0);
-#else
-  const ssize_t Received = recv(Socket, Data, Size, 0);
-#endif
-  if (Received <= 0) {
-    ReceivedOut = 0;
-    return false;
-  }
-
-  ReceivedOut = static_cast<size_t>(Received);
   return true;
 }
 
@@ -287,28 +334,6 @@ bool EqualsCaseInsensitive(std::string_view Left, std::string_view Right) {
   return true;
 }
 
-std::optional<size_t> ParseContentLength(std::string_view Headers) {
-  const std::string_view Key = "Content-Length:";
-  size_t Position = Headers.find(Key);
-  if (Position == std::string_view::npos) {
-    return 0u;
-  }
-
-  Position += Key.size();
-  const size_t End = Headers.find("\r\n", Position);
-  const std::string Value =
-      Trim(Headers.substr(Position, End == std::string_view::npos
-                                        ? std::string_view::npos
-                                        : End - Position));
-  size_t Result = 0;
-  const auto [Ptr, Ec] =
-      std::from_chars(Value.data(), Value.data() + Value.size(), Result);
-  if (Ec != std::errc{} || Ptr != Value.data() + Value.size()) {
-    return std::nullopt;
-  }
-  return Result;
-}
-
 std::optional<std::string> FindHeaderValue(std::string_view HeaderBlock,
                                            std::string_view HeaderName) {
   size_t LineStart = 0;
@@ -330,65 +355,6 @@ std::optional<std::string> FindHeaderValue(std::string_view HeaderBlock,
     LineStart = LineEnd + 2;
   }
   return std::nullopt;
-}
-
-bool ReadHttpRequest(SocketHandle Socket, HttpRequest &Request,
-                     std::string &Error) {
-  std::string Buffer;
-  std::array<char, 4096> Chunk{};
-  size_t HeaderEnd = std::string::npos;
-
-  while (HeaderEnd == std::string::npos) {
-    size_t Received = 0;
-    if (!RecvChunk(Socket, Chunk.data(), Chunk.size(), Received)) {
-      Error = "Failed to read HTTP request headers.";
-      return false;
-    }
-    Buffer.append(Chunk.data(), Received);
-    HeaderEnd = Buffer.find("\r\n\r\n");
-  }
-
-  const std::string_view HeaderView(Buffer.data(), HeaderEnd + 4);
-  const size_t RequestLineEnd = HeaderView.find("\r\n");
-  if (RequestLineEnd == std::string_view::npos) {
-    Error = "Malformed HTTP request line.";
-    return false;
-  }
-
-  const std::string_view RequestLine = HeaderView.substr(0, RequestLineEnd);
-  const size_t MethodEnd = RequestLine.find(' ');
-  const size_t PathEnd =
-      MethodEnd == std::string_view::npos ? std::string_view::npos
-                                          : RequestLine.find(' ', MethodEnd + 1);
-  if (MethodEnd == std::string_view::npos || PathEnd == std::string_view::npos) {
-    Error = "Malformed HTTP request line.";
-    return false;
-  }
-
-  Request.Method = std::string(RequestLine.substr(0, MethodEnd));
-  Request.Path =
-      std::string(RequestLine.substr(MethodEnd + 1, PathEnd - MethodEnd - 1));
-  Request.HeaderBlock = std::string(HeaderView);
-
-  const auto ContentLength = ParseContentLength(HeaderView);
-  if (!ContentLength.has_value()) {
-    Error = "Invalid Content-Length header.";
-    return false;
-  }
-  Request.ContentLength = *ContentLength;
-
-  const size_t BodyOffset = HeaderEnd + 4;
-  while (Buffer.size() < BodyOffset + Request.ContentLength) {
-    size_t Received = 0;
-    if (!RecvChunk(Socket, Chunk.data(), Chunk.size(), Received)) {
-      Error = "Failed to read HTTP request body.";
-      return false;
-    }
-    Buffer.append(Chunk.data(), Received);
-  }
-
-  Request.Body.assign(Buffer.data() + BodyOffset, Request.ContentLength);
-  return true;
 }
 
 std::string JsonResponse(std::string_view Status, std::string_view Payload) {
@@ -714,161 +680,6 @@ std::vector<uint8_t> MakeThumbnailJpeg(const std::filesystem::path &Path,
   return JpegBytes;
 }
 
-std::string Base64Encode(const unsigned char *Data, size_t Size) {
-  static constexpr char Alphabet[] =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-  std::string Encoded;
-  Encoded.reserve(((Size + 2u) / 3u) * 4u);
-  for (size_t Index = 0; Index < Size; Index += 3u) {
-    const uint32_t Byte0 = Data[Index];
-    const uint32_t Byte1 = Index + 1u < Size ? Data[Index + 1u] : 0u;
-    const uint32_t Byte2 = Index + 2u < Size ? Data[Index + 2u] : 0u;
-    const uint32_t Triple = (Byte0 << 16u) | (Byte1 << 8u) | Byte2;
-
-    Encoded.push_back(Alphabet[(Triple >> 18u) & 0x3Fu]);
-    Encoded.push_back(Alphabet[(Triple >> 12u) & 0x3Fu]);
-    Encoded.push_back(Index + 1u < Size ? Alphabet[(Triple >> 6u) & 0x3Fu]
-                                        : '=');
-    Encoded.push_back(Index + 2u < Size ? Alphabet[Triple & 0x3Fu] : '=');
-  }
-  return Encoded;
-}
-
-std::optional<std::array<unsigned char, 20>>
-ComputeSha1(std::string_view Input) {
-  std::array<unsigned char, 20> Digest{};
-  uint64_t BitLength = static_cast<uint64_t>(Input.size()) * 8u;
-  std::vector<unsigned char> Buffer(Input.begin(), Input.end());
-  Buffer.push_back(0x80u);
-  while ((Buffer.size() % 64u) != 56u) {
-    Buffer.push_back(0u);
-  }
-  for (int Shift = 56; Shift >= 0; Shift -= 8) {
-    Buffer.push_back(
-        static_cast<unsigned char>((BitLength >> Shift) & 0xFFu));
-  }
-
-  uint32_t H0 = 0x67452301u;
-  uint32_t H1 = 0xEFCDAB89u;
-  uint32_t H2 = 0x98BADCFEu;
-  uint32_t H3 = 0x10325476u;
-  uint32_t H4 = 0xC3D2E1F0u;
-
-  auto LeftRotate = [](uint32_t Value, int Shift) {
-    return static_cast<uint32_t>((Value << Shift) | (Value >> (32 - Shift)));
-  };
-
-  for (size_t ChunkOffset = 0; ChunkOffset < Buffer.size();
-       ChunkOffset += 64u) {
-    std::array<uint32_t, 80> Words{};
-    for (size_t Index = 0; Index < 16u; ++Index) {
-      const size_t Base = ChunkOffset + (Index * 4u);
-      Words[Index] = (static_cast<uint32_t>(Buffer[Base]) << 24u) |
-                     (static_cast<uint32_t>(Buffer[Base + 1u]) << 16u) |
-                     (static_cast<uint32_t>(Buffer[Base + 2u]) << 8u) |
-                     static_cast<uint32_t>(Buffer[Base + 3u]);
-    }
-    for (size_t Index = 16u; Index < Words.size(); ++Index) {
-      Words[Index] = LeftRotate(
-          Words[Index - 3u] ^ Words[Index - 8u] ^ Words[Index - 14u] ^
-              Words[Index - 16u],
-          1);
-    }
-
-    uint32_t A = H0;
-    uint32_t B = H1;
-    uint32_t C = H2;
-    uint32_t D = H3;
-    uint32_t E = H4;
-
-    for (size_t Index = 0; Index < Words.size(); ++Index) {
-      uint32_t F = 0;
-      uint32_t K = 0;
-      if (Index < 20u) {
-        F = (B & C) | ((~B) & D);
-        K = 0x5A827999u;
-      } else if (Index < 40u) {
-        F = B ^ C ^ D;
-        K = 0x6ED9EBA1u;
-      } else if (Index < 60u) {
-        F = (B & C) | (B & D) | (C & D);
-        K = 0x8F1BBCDCu;
-      } else {
-        F = B ^ C ^ D;
-        K = 0xCA62C1D6u;
-      }
-
-      const uint32_t Temp =
-          LeftRotate(A, 5) + F + E + K + Words[Index];
-      E = D;
-      D = C;
-      C = LeftRotate(B, 30);
-      B = A;
-      A = Temp;
-    }
-
-    H0 += A;
-    H1 += B;
-    H2 += C;
-    H3 += D;
-    H4 += E;
-  }
-
-  const std::array<uint32_t, 5> State{H0, H1, H2, H3, H4};
-  for (size_t Index = 0; Index < State.size(); ++Index) {
-    const uint32_t Word = State[Index];
-    Digest[Index * 4u] = static_cast<unsigned char>((Word >> 24u) & 0xFFu);
-    Digest[Index * 4u + 1u] =
-        static_cast<unsigned char>((Word >> 16u) & 0xFFu);
-    Digest[Index * 4u + 2u] =
-        static_cast<unsigned char>((Word >> 8u) & 0xFFu);
-    Digest[Index * 4u + 3u] = static_cast<unsigned char>(Word & 0xFFu);
-  }
-
-  return Digest;
-}
-
-bool IsWebSocketUpgradeRequest(std::string_view HeaderBlock) {
-  const auto Upgrade = FindHeaderValue(HeaderBlock, "Upgrade");
-  const auto Connection = FindHeaderValue(HeaderBlock, "Connection");
-  std::string LowerConnection =
-      Connection.has_value() ? *Connection : std::string();
-  std::transform(LowerConnection.begin(), LowerConnection.end(),
-                 LowerConnection.begin(),
-                 [](unsigned char Character) {
-                   return static_cast<char>(std::tolower(Character));
-                 });
-  return Upgrade.has_value() && Connection.has_value() &&
-         EqualsCaseInsensitive(*Upgrade, "websocket") &&
-         LowerConnection.find("upgrade") != std::string::npos;
-}
-
-std::vector<unsigned char> BuildWebSocketFrame(uint8_t Opcode, const void *Data,
-                                               size_t Size) {
-  std::vector<unsigned char> Frame;
-  Frame.reserve(Size + 10u);
-  Frame.push_back(static_cast<unsigned char>(0x80u | (Opcode & 0x0Fu)));
-  if (Size <= 125u) {
-    Frame.push_back(static_cast<unsigned char>(Size));
-  } else if (Size <= 0xFFFFu) {
-    Frame.push_back(126u);
-    Frame.push_back(static_cast<unsigned char>((Size >> 8u) & 0xFFu));
-    Frame.push_back(static_cast<unsigned char>(Size & 0xFFu));
-  } else {
-    Frame.push_back(127u);
-    for (int Shift = 56; Shift >= 0; Shift -= 8) {
-      Frame.push_back(
-          static_cast<unsigned char>((static_cast<uint64_t>(Size) >> Shift) &
-                                     0xFFu));
-    }
-  }
-
-  const auto *Bytes = static_cast<const unsigned char *>(Data);
-  Frame.insert(Frame.end(), Bytes, Bytes + Size);
-  return Frame;
-}
-
 std::string GenerateClientId() {
   static std::atomic<uint64_t> Counter{1};
   const uint64_t Value = Counter.fetch_add(1);
@@ -901,57 +712,199 @@ RemoteViewportServer::RemoteViewportServer(
 
 RemoteViewportServer::~RemoteViewportServer() { Stop(); }
 
+RemoteViewportServerMetrics RemoteViewportServer::GetMetrics() const {
+  RemoteViewportServerMetrics Metrics{};
+  Metrics.TransportConnected = m_TransportConnected.load();
+  Metrics.ListenPort = m_Options.Port;
+  Metrics.TotalHttpRequests = m_TotalHttpRequests.load();
+  Metrics.TotalWebSocketMessages = m_TotalWebSocketMessages.load();
+
+  std::scoped_lock Lock(m_ClientMutex);
+  Metrics.ActiveWebSocketClients = m_WebSocketClients.size();
+  Metrics.ActiveRemoteClients = m_RemoteClientsById.size();
+  for (const auto &[ClientId, Client] : m_RemoteClientsById) {
+    (void)ClientId;
+    if (Client.WebRtcSession != nullptr) {
+      ++Metrics.ActiveWebRtcSessions;
+    }
+  }
+  return Metrics;
+}
+
 bool RemoteViewportServer::Start(std::string &Error) {
-#if AXIOM_PLATFORM_WINDOWS
-  WinsockRuntime Winsock;
-  (void)Winsock;
-#endif
-
-  addrinfo Hint{};
-  Hint.ai_family = AF_INET;
-  Hint.ai_socktype = SOCK_STREAM;
-  Hint.ai_protocol = IPPROTO_TCP;
-  Hint.ai_flags = AI_PASSIVE;
-
-  addrinfo *AddressInfo = nullptr;
-  const std::string PortString = std::to_string(m_Options.Port);
-  if (getaddrinfo(m_Options.Host.c_str(), PortString.c_str(), &Hint,
-                  &AddressInfo) != 0) {
-    Error = "Failed to resolve the remote viewport server address.";
-    return false;
-  }
-
-  SocketHandle ListenSocket = InvalidSocket;
-  for (addrinfo *Current = AddressInfo; Current != nullptr;
-       Current = Current->ai_next) {
-    ListenSocket =
-        socket(Current->ai_family, Current->ai_socktype, Current->ai_protocol);
-    if (ListenSocket == InvalidSocket) {
-      continue;
-    }
-
-    SetReuseAddress(ListenSocket);
-
-    if (bind(ListenSocket, Current->ai_addr, Current->ai_addrlen) == 0 &&
-        listen(ListenSocket, SOMAXCONN) == 0) {
-      break;
-    }
-
-    CloseSocket(ListenSocket);
-    ListenSocket = InvalidSocket;
-  }
-
-  freeaddrinfo(AddressInfo);
-
-  if (ListenSocket == InvalidSocket) {
-    Error = "Failed to bind the remote viewport server socket.";
-    return false;
-  }
-
-  m_ListenSocket = ToValue(ListenSocket);
   m_StopRequested.store(false);
+  g_HttpResponseSender = [this](uintptr_t ClientSocketValue,
+                                std::string_view Response) {
+    return SendHttpResponse(ClientSocketValue, Response);
+  };
+  m_UwsState = std::make_unique<RemoteViewportServerUwsState>();
   m_Host.GetTransport().Connect(this);
-  m_AcceptThread = std::thread([this]() { AcceptLoop(); });
+  m_ServerThread = std::thread([this]() {
+    RemoteViewportServerUwsState *State = m_UwsState.get();
+    if (State == nullptr) {
+      return;
+    }
+
+    State->Loop = uWS::Loop::get();
+    State->App = std::make_unique<uWS::App>();
+
+    auto RegisterGetHandler = [this](UwsHttpResponse *Response,
+                                     UwsHttpRequest *Request) {
+      const uintptr_t ConnectionId = AllocateConnectionId();
+      RegisterPendingHttpResponse(ConnectionId, Response);
+      Response->onAborted([this, ConnectionId]() {
+        MarkPendingHttpResponseAborted(ConnectionId);
+      });
+
+      const std::string HeaderBlock = BuildHeaderBlock("GET", *Request);
+      m_TotalHttpRequests.fetch_add(1);
+      HandleGetRequest(ConnectionId, std::string(Request->getFullUrl()),
+                       HeaderBlock);
+    };
+
+    auto RegisterOptionsHandler = [this](UwsHttpResponse *Response,
+                                         UwsHttpRequest *Request) {
+      (void)Request;
+      const uintptr_t ConnectionId = AllocateConnectionId();
+      RegisterPendingHttpResponse(ConnectionId, Response);
+      Response->onAborted([this, ConnectionId]() {
+        MarkPendingHttpResponseAborted(ConnectionId);
+      });
+
+      m_TotalHttpRequests.fetch_add(1);
+      const std::string ResponseText = BuildHttpResponse(
+          "204 No Content", "text/plain; charset=utf-8", "",
+          "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+          "Access-Control-Allow-Headers: Content-Type, X-Axiom-Client-Id\r\n");
+      SendHttpResponse(ConnectionId, ResponseText);
+    };
+
+    auto RegisterPostHandler = [this](UwsHttpResponse *Response,
+                                      UwsHttpRequest *Request) {
+      const uintptr_t ConnectionId = AllocateConnectionId();
+      RegisterPendingHttpResponse(ConnectionId, Response);
+      Response->onAborted([this, ConnectionId]() {
+        MarkPendingHttpResponseAborted(ConnectionId);
+      });
+
+      auto HeaderBlock =
+          std::make_shared<std::string>(BuildHeaderBlock("POST", *Request));
+      auto Path = std::make_shared<std::string>(Request->getFullUrl());
+      auto Body = std::make_shared<std::string>();
+      m_TotalHttpRequests.fetch_add(1);
+
+      const std::string_view ContentLength = Request->getHeader("content-length");
+      if (ContentLength.empty() || ContentLength == "0") {
+        HandlePostRequest(ConnectionId, *Path, *HeaderBlock, "");
+        return;
+      }
+
+      Response->onData([this, ConnectionId, HeaderBlock, Path, Body](
+                           std::string_view Chunk, bool IsLast) {
+        Body->append(Chunk.data(), Chunk.size());
+        if (IsLast) {
+          HandlePostRequest(ConnectionId, *Path, *HeaderBlock, *Body);
+        }
+      });
+    };
+
+    uWS::App::WebSocketBehavior<RemoteViewportWebSocketUserData> Behavior{};
+    Behavior.compression = uWS::DISABLED;
+    Behavior.maxPayloadLength = 256 * 1024;
+    Behavior.upgrade =
+        [this](UwsHttpResponse *Response, UwsHttpRequest *Request,
+               us_socket_context_t *Context) {
+          const uintptr_t ConnectionId = AllocateConnectionId();
+          Response->template upgrade<RemoteViewportWebSocketUserData>(
+              {.ConnectionId = ConnectionId},
+              Request->getHeader("sec-websocket-key"),
+              Request->getHeader("sec-websocket-protocol"),
+              Request->getHeader("sec-websocket-extensions"), Context);
+        };
+    Behavior.open = [this](UwsWebSocket *Socket) {
+      const uintptr_t ConnectionId = Socket->getUserData()->ConnectionId;
+      {
+        std::scoped_lock Lock(m_ClientMutex);
+        m_WebSocketClients.push_back(
+            {.ConnectionId = ConnectionId, .Socket = Socket, .IsOpen = true});
+      }
+      std::cout << SerializeConnected() << std::endl;
+      SendTextMessage(ConnectionId,
+                      SerializeReady(m_Options.Width, m_Options.Height));
+      SendTextMessage(ConnectionId, SerializeConnected());
+    };
+    Behavior.message = [this](UwsWebSocket *Socket, std::string_view Message,
+                              uWS::OpCode OpCode) {
+      if (OpCode != uWS::OpCode::TEXT) {
+        return;
+      }
+      const uintptr_t ConnectionId = Socket->getUserData()->ConnectionId;
+      if (!HandleWebSocketMessage(ConnectionId, Message)) {
+        SendTextMessage(ConnectionId,
+                        SerializeError("Invalid WebSocket command payload."));
+      }
+    };
+    Behavior.close = [this](UwsWebSocket *Socket, int Code,
+                            std::string_view Message) {
+      (void)Code;
+      (void)Message;
+      RemoveWebSocketClient(Socket->getUserData()->ConnectionId);
+    };
+
+    State->App->ws<RemoteViewportWebSocketUserData>("/ws", std::move(Behavior))
+        .get("/*", std::move(RegisterGetHandler))
+        .post("/*", std::move(RegisterPostHandler))
+        .options("/*", std::move(RegisterOptionsHandler))
+        .listen(m_Options.Host, static_cast<int>(m_Options.Port),
+                [State](us_listen_socket_t *ListenSocket) {
+                  std::scoped_lock Lock(State->StartupMutex);
+                  State->ListenSocket = ListenSocket;
+                  State->StartupCompleted = true;
+                  if (ListenSocket == nullptr) {
+                    State->StartupError =
+                        "Failed to bind the remote viewport server socket.";
+                  }
+                  State->StartupCondition.notify_all();
+                });
+
+    {
+      std::scoped_lock Lock(State->StartupMutex);
+      if (!State->StartupCompleted) {
+        State->StartupCompleted = true;
+        State->StartupError =
+            "uWebSockets did not complete remote viewport startup.";
+        State->StartupCondition.notify_all();
+      }
+    }
+
+    if (State->ListenSocket != nullptr) {
+      State->Loop->run();
+    }
+
+    State->App.reset();
+    if (State->Loop != nullptr) {
+      State->Loop->free();
+      State->Loop = nullptr;
+    }
+  });
+
+  {
+    std::unique_lock Lock(m_UwsState->StartupMutex);
+    m_UwsState->StartupCondition.wait(
+        Lock, [this]() { return m_UwsState->StartupCompleted; });
+    Error = m_UwsState->StartupError;
+  }
+
+  if (!Error.empty()) {
+    m_StopRequested.store(true);
+    if (m_ServerThread.joinable()) {
+      m_ServerThread.join();
+    }
+    m_Host.GetTransport().Disconnect(this);
+    m_UwsState.reset();
+    return false;
+  }
+
   m_PresenceThread = std::thread([this]() { PresenceLoop(); });
   return true;
 }
@@ -962,12 +915,21 @@ void RemoteViewportServer::Stop() {
     return;
   }
 
-  const SocketHandle ListenSocket = ToSocket(m_ListenSocket);
-  m_ListenSocket = ToValue(InvalidSocket);
-  CloseSocket(ListenSocket);
   CloseAllClients();
-  if (m_AcceptThread.joinable()) {
-    m_AcceptThread.join();
+  if (m_UwsState != nullptr && m_UwsState->Loop != nullptr) {
+    RemoteViewportServerUwsState *State = m_UwsState.get();
+    m_UwsState->Loop->defer([State]() {
+      if (State->ListenSocket != nullptr) {
+        us_listen_socket_close(0, State->ListenSocket);
+        State->ListenSocket = nullptr;
+      }
+      if (State->App != nullptr) {
+        State->App->close();
+      }
+    });
+  }
+  if (m_ServerThread.joinable()) {
+    m_ServerThread.join();
   }
   if (m_PresenceThread.joinable()) {
     m_PresenceThread.join();
@@ -977,6 +939,8 @@ void RemoteViewportServer::Stop() {
   for (IWebRtcSession *Session : CollectClientWebRtcSessions()) {
     Session->ResetPeer("server_stopped");
   }
+  g_HttpResponseSender = nullptr;
+  m_UwsState.reset();
 }
 
 void RemoteViewportServer::OnSessionTransportConnected() {
@@ -1067,41 +1031,13 @@ void RemoteViewportServer::PresenceLoop() {
   }
 }
 
-void RemoteViewportServer::AcceptLoop() {
-  const SocketHandle ListenSocket = ToSocket(m_ListenSocket);
-  while (!m_StopRequested.load()) {
-    sockaddr_in ClientAddress{};
-    socklen_t ClientAddressLength = sizeof(ClientAddress);
-    const SocketHandle ClientSocket =
-        accept(ListenSocket, reinterpret_cast<sockaddr *>(&ClientAddress),
-               &ClientAddressLength);
-    if (ClientSocket == InvalidSocket) {
-      if (!m_StopRequested.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(25));
-      }
-      continue;
-    }
-
-    std::thread(&RemoteViewportServer::HandleClient, this, ToValue(ClientSocket))
-        .detach();
-  }
-}
-
-void RemoteViewportServer::HandleClient(uintptr_t ClientSocketValue) {
-  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
-  if (HandleHttpRequest(ClientSocketValue)) {
-    return;
-  }
-  CloseSocket(ClientSocket);
-}
-
 void RemoteViewportServer::BroadcastTextMessage(std::string Message) {
   std::vector<uintptr_t> Clients;
   {
     std::scoped_lock Lock(m_ClientMutex);
     for (const auto &Client : m_WebSocketClients) {
       if (Client.IsOpen) {
-        Clients.push_back(Client.SocketValue);
+        Clients.push_back(Client.ConnectionId);
       }
     }
   }
@@ -1119,18 +1055,16 @@ void RemoteViewportServer::BroadcastTextMessage(std::string Message) {
 }
 
 void RemoteViewportServer::CloseAllClients() {
-  std::vector<uintptr_t> ClientSockets;
   {
     std::scoped_lock Lock(m_ClientMutex);
     for (auto &Client : m_WebSocketClients) {
       Client.IsOpen = false;
-      ClientSockets.push_back(Client.SocketValue);
     }
     m_WebSocketClients.clear();
   }
-
-  for (const uintptr_t ClientSocketValue : ClientSockets) {
-    CloseSocket(ToSocket(ClientSocketValue));
+  {
+    std::scoped_lock Lock(m_HttpResponseMutex);
+    m_PendingHttpResponses.clear();
   }
 }
 
@@ -1140,7 +1074,7 @@ void RemoteViewportServer::RemoveWebSocketClient(uintptr_t ClientSocketValue) {
     std::scoped_lock Lock(m_ClientMutex);
     auto It = std::find_if(m_WebSocketClients.begin(), m_WebSocketClients.end(),
                            [ClientSocketValue](const WebSocketClient &Client) {
-                             return Client.SocketValue == ClientSocketValue;
+                             return Client.ConnectionId == ClientSocketValue;
                            });
     if (It != m_WebSocketClients.end()) {
       It->IsOpen = false;
@@ -1150,62 +1084,105 @@ void RemoteViewportServer::RemoveWebSocketClient(uintptr_t ClientSocketValue) {
   }
 
   if (Removed) {
-    CloseSocket(ToSocket(ClientSocketValue));
     std::cout << SerializeDisconnected() << std::endl;
   }
 }
 
 bool RemoteViewportServer::SendTextMessage(uintptr_t ClientSocketValue,
                                            std::string_view Message) {
-  const auto Frame = BuildWebSocketFrame(0x1u, Message.data(), Message.size());
+  void *SocketHandle = nullptr;
+  {
+    std::scoped_lock Lock(m_ClientMutex);
+    const auto It = std::find_if(
+        m_WebSocketClients.begin(), m_WebSocketClients.end(),
+        [ClientSocketValue](const WebSocketClient &Client) {
+          return Client.ConnectionId == ClientSocketValue && Client.IsOpen;
+        });
+    if (It == m_WebSocketClients.end()) {
+      return false;
+    }
+    SocketHandle = It->Socket;
+  }
+
+  auto *Socket = static_cast<UwsWebSocket *>(SocketHandle);
   std::scoped_lock Lock(m_SendMutex);
-  return SendAll(ToSocket(ClientSocketValue), Frame.data(), Frame.size());
+  return Socket->send(Message, uWS::OpCode::TEXT) != UwsWebSocket::DROPPED;
 }
 
 bool RemoteViewportServer::SendBinaryMessage(uintptr_t ClientSocketValue,
                                              const void *Data, size_t Size) {
-  const auto Frame = BuildWebSocketFrame(0x2u, Data, Size);
+  void *SocketHandle = nullptr;
+  {
+    std::scoped_lock Lock(m_ClientMutex);
+    const auto It = std::find_if(
+        m_WebSocketClients.begin(), m_WebSocketClients.end(),
+        [ClientSocketValue](const WebSocketClient &Client) {
+          return Client.ConnectionId == ClientSocketValue && Client.IsOpen;
+        });
+    if (It == m_WebSocketClients.end()) {
+      return false;
+    }
+    SocketHandle = It->Socket;
+  }
+
+  auto *Socket = static_cast<UwsWebSocket *>(SocketHandle);
+  const std::string_view Payload(static_cast<const char *>(Data), Size);
   std::scoped_lock Lock(m_SendMutex);
-  return SendAll(ToSocket(ClientSocketValue), Frame.data(), Frame.size());
+  return Socket->send(Payload, uWS::OpCode::BINARY) != UwsWebSocket::DROPPED;
 }
 
-bool RemoteViewportServer::HandleHttpRequest(uintptr_t ClientSocketValue) {
-  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
-  HttpRequest Request{};
-  std::string Error;
-  if (!ReadHttpRequest(ClientSocket, Request, Error)) {
-    const std::string Response =
-        JsonResponse("400 Bad Request", SerializeError(Error));
-    SendAll(ClientSocket, Response.data(), Response.size());
+bool RemoteViewportServer::SendHttpResponse(uintptr_t ClientSocketValue,
+                                            std::string_view Response) {
+  PendingHttpResponse Pending{};
+  {
+    std::scoped_lock Lock(m_HttpResponseMutex);
+    const auto It = m_PendingHttpResponses.find(ClientSocketValue);
+    if (It == m_PendingHttpResponses.end() || It->second.Aborted) {
+      return false;
+    }
+    Pending = It->second;
+    m_PendingHttpResponses.erase(It);
+  }
+
+  auto Parsed = ParseHttpResponseText(Response);
+  if (!Parsed.has_value()) {
     return false;
   }
 
-  if (Request.Method == "GET" &&
-      HandleWebSocketUpgrade(ClientSocketValue, Request.HeaderBlock,
-                             Request.Path)) {
-    return true;
+  auto *HttpResponse = static_cast<UwsHttpResponse *>(Pending.Response);
+  HttpResponse->writeStatus(Parsed->Status);
+  for (const auto &[HeaderName, HeaderValue] : Parsed->Headers) {
+    if (EqualsCaseInsensitive(HeaderName, "Content-Length") ||
+        EqualsCaseInsensitive(HeaderName, "Connection")) {
+      continue;
+    }
+    HttpResponse->writeHeader(HeaderName, HeaderValue);
   }
-  if (Request.Method == "GET") {
-    return HandleGetRequest(ClientSocketValue, Request.Path, Request.HeaderBlock);
-  }
-  if (Request.Method == "POST") {
-    return HandlePostRequest(ClientSocketValue, Request.Path, Request.HeaderBlock,
-                             Request.Body);
-  }
-  if (Request.Method == "OPTIONS") {
-    const std::string Response = BuildHttpResponse(
-        "204 No Content", "text/plain; charset=utf-8", "",
-        "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
-        "Access-Control-Allow-Headers: Content-Type, X-Axiom-Client-Id\r\n");
-    SendAll(ClientSocket, Response.data(), Response.size());
-    return false;
-  }
+  HttpResponse->end(Parsed->Body);
+  return true;
+}
 
-  const std::string Response = JsonResponse(
-      "405 Method Not Allowed",
-      SerializeError("Only GET, POST, and OPTIONS are supported."));
-  SendAll(ClientSocket, Response.data(), Response.size());
-  return false;
+uintptr_t RemoteViewportServer::AllocateConnectionId() {
+  return m_NextClientConnectionId.fetch_add(1);
+}
+
+void RemoteViewportServer::RegisterPendingHttpResponse(uintptr_t ClientSocketValue,
+                                                       void *Response) {
+  std::scoped_lock Lock(m_HttpResponseMutex);
+  m_PendingHttpResponses[ClientSocketValue] = PendingHttpResponse{
+      .Response = Response,
+      .Aborted = false,
+  };
+}
+
+void RemoteViewportServer::MarkPendingHttpResponseAborted(
+    uintptr_t ClientSocketValue) {
+  std::scoped_lock Lock(m_HttpResponseMutex);
+  auto It = m_PendingHttpResponses.find(ClientSocketValue);
+  if (It != m_PendingHttpResponses.end()) {
+    It->second.Aborted = true;
+    m_PendingHttpResponses.erase(It);
+  }
 }
 
 bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
@@ -2696,137 +2673,9 @@ void RemoteViewportServer::HandlePlaceActorCommand(SessionUserId User,
             }});
 }
 
-bool RemoteViewportServer::HandleWebSocketUpgrade(uintptr_t ClientSocketValue,
-                                                  std::string_view HeaderBlock,
-                                                  std::string_view Path) {
-  const std::string_view Route = StripQuery(Path);
-  if (Route != "/ws" || !IsWebSocketUpgradeRequest(HeaderBlock)) {
-    return false;
-  }
-
-  const auto Key = FindHeaderValue(HeaderBlock, "Sec-WebSocket-Key");
-  if (!Key.has_value()) {
-    const std::string Response = JsonResponse(
-        "400 Bad Request",
-        SerializeError("Missing Sec-WebSocket-Key for WebSocket upgrade."));
-    const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
-    SendAll(ClientSocket, Response.data(), Response.size());
-    return false;
-  }
-
-  const auto Digest = ComputeSha1(*Key + std::string(WebSocketGuid));
-  if (!Digest.has_value()) {
-    const std::string Response = JsonResponse(
-        "500 Internal Server Error",
-        SerializeError("Failed to compute WebSocket handshake."));
-    const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
-    SendAll(ClientSocket, Response.data(), Response.size());
-    return false;
-  }
-
-  const std::string Accept = Base64Encode(Digest->data(), Digest->size());
-  std::ostringstream Response;
-  Response << "HTTP/1.1 101 Switching Protocols\r\n"
-           << "Upgrade: websocket\r\n"
-           << "Connection: Upgrade\r\n"
-           << "Sec-WebSocket-Accept: " << Accept << "\r\n\r\n";
-  const std::string ResponseText = Response.str();
-  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
-  if (!SendAll(ClientSocket, ResponseText.data(), ResponseText.size())) {
-    return false;
-  }
-
-  {
-    std::scoped_lock Lock(m_ClientMutex);
-    m_WebSocketClients.push_back({.SocketValue = ClientSocketValue});
-  }
-
-  std::cout << SerializeConnected() << std::endl;
-  SendTextMessage(ClientSocketValue,
-                  SerializeReady(m_Options.Width, m_Options.Height));
-  SendTextMessage(ClientSocketValue, SerializeConnected());
-
-  RunWebSocketSession(ClientSocketValue);
-  return true;
-}
-
-void RemoteViewportServer::RunWebSocketSession(uintptr_t ClientSocketValue) {
-  const SocketHandle ClientSocket = ToSocket(ClientSocketValue);
-  while (!m_StopRequested.load()) {
-    std::array<unsigned char, 2> Header{};
-    if (!RecvExact(ClientSocket, Header.data(), Header.size())) {
-      break;
-    }
-
-    const bool IsFinal = (Header[0] & 0x80u) != 0u;
-    const uint8_t Opcode = static_cast<uint8_t>(Header[0] & 0x0Fu);
-    const bool IsMasked = (Header[1] & 0x80u) != 0u;
-    uint64_t PayloadLength = static_cast<uint64_t>(Header[1] & 0x7Fu);
-    if (!IsFinal || !IsMasked) {
-      break;
-    }
-
-    if (PayloadLength == 126u) {
-      std::array<unsigned char, 2> ExtendedLength{};
-      if (!RecvExact(ClientSocket, ExtendedLength.data(),
-                     ExtendedLength.size())) {
-        break;
-      }
-      PayloadLength = (static_cast<uint64_t>(ExtendedLength[0]) << 8u) |
-                      static_cast<uint64_t>(ExtendedLength[1]);
-    } else if (PayloadLength == 127u) {
-      std::array<unsigned char, 8> ExtendedLength{};
-      if (!RecvExact(ClientSocket, ExtendedLength.data(),
-                     ExtendedLength.size())) {
-        break;
-      }
-      PayloadLength = 0;
-      for (const unsigned char Byte : ExtendedLength) {
-        PayloadLength = (PayloadLength << 8u) | static_cast<uint64_t>(Byte);
-      }
-    }
-
-    std::array<unsigned char, 4> MaskingKey{};
-    if (!RecvExact(ClientSocket, MaskingKey.data(), MaskingKey.size())) {
-      break;
-    }
-
-    std::vector<unsigned char> Payload(PayloadLength);
-    if (PayloadLength > 0u &&
-        !RecvExact(ClientSocket, Payload.data(), Payload.size())) {
-      break;
-    }
-    for (size_t Index = 0; Index < Payload.size(); ++Index) {
-      Payload[Index] ^= MaskingKey[Index % MaskingKey.size()];
-    }
-
-    if (Opcode == 0x8u) {
-      break;
-    }
-    if (Opcode == 0x9u) {
-      const auto Pong = BuildWebSocketFrame(0xAu, Payload.data(), Payload.size());
-      std::scoped_lock Lock(m_SendMutex);
-      if (!SendAll(ClientSocket, Pong.data(), Pong.size())) {
-        break;
-      }
-      continue;
-    }
-    if (Opcode != 0x1u) {
-      continue;
-    }
-
-    const std::string TextPayload(Payload.begin(), Payload.end());
-    if (!HandleWebSocketMessage(ClientSocketValue, TextPayload)) {
-      SendTextMessage(ClientSocketValue,
-                      SerializeError("Invalid WebSocket command payload."));
-    }
-  }
-
-  RemoveWebSocketClient(ClientSocketValue);
-}
-
 bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
                                                   std::string_view Payload) {
+  m_TotalWebSocketMessages.fetch_add(1);
   std::string Error;
   const auto Command = ParseRemoteViewportCommand(Payload, Error);
   if (!Command.has_value()) {

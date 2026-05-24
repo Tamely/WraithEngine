@@ -23,6 +23,8 @@
 #include <vector>
 
 namespace Axiom {
+class RemoteViewportServerUwsState;
+
 struct RemoteViewportServerOptions {
   std::string Host{"127.0.0.1"};
   uint16_t Port{8080};
@@ -30,17 +32,42 @@ struct RemoteViewportServerOptions {
   uint32_t Height{900};
 };
 
-class RemoteViewportServer final : public ISessionTransportSubscriber {
+struct RemoteViewportServerMetrics {
+  bool TransportConnected{false};
+  uint16_t ListenPort{0};
+  size_t ActiveWebSocketClients{0};
+  size_t ActiveRemoteClients{0};
+  size_t ActiveWebRtcSessions{0};
+  uint64_t TotalHttpRequests{0};
+  uint64_t TotalWebSocketMessages{0};
+};
+
+class IRemoteViewportServer {
+public:
+  virtual ~IRemoteViewportServer() = default;
+
+  virtual bool Start(std::string &Error) = 0;
+  virtual void Stop() = 0;
+  [[nodiscard]] virtual bool ShouldStop() const = 0;
+  [[nodiscard]] virtual uint16_t GetPort() const = 0;
+  [[nodiscard]] virtual RemoteViewportServerMetrics GetMetrics() const = 0;
+};
+
+class RemoteViewportServer final : public IRemoteViewportServer,
+                                   public ISessionTransportSubscriber {
 public:
   RemoteViewportServer(HeadlessSessionHost &Host,
                        const RemoteViewportServerOptions &Options);
   ~RemoteViewportServer() override;
 
-  bool Start(std::string &Error);
-  void Stop();
+  bool Start(std::string &Error) override;
+  void Stop() override;
 
-  bool ShouldStop() const { return m_StopRequested.load(); }
-  uint16_t GetPort() const { return m_Options.Port; }
+  [[nodiscard]] bool ShouldStop() const override {
+    return m_StopRequested.load();
+  }
+  [[nodiscard]] uint16_t GetPort() const override { return m_Options.Port; }
+  [[nodiscard]] RemoteViewportServerMetrics GetMetrics() const override;
 
   void OnSessionTransportConnected() override;
   void OnSessionTransportDisconnected() override;
@@ -49,6 +76,11 @@ public:
   void OnSessionTransportViewportFrame(const ViewportFrame &Frame) override;
 
 private:
+  struct PendingHttpResponse {
+    void *Response{nullptr};
+    bool Aborted{false};
+  };
+
   struct GridSnapSettings {
     bool Enabled{true};
     float TranslationStep{1.0f};
@@ -57,7 +89,8 @@ private:
   };
 
   struct WebSocketClient {
-    uintptr_t SocketValue{static_cast<uintptr_t>(~0ull)};
+    uintptr_t ConnectionId{static_cast<uintptr_t>(~0ull)};
+    void *Socket{nullptr};
     bool IsOpen{true};
   };
 
@@ -90,16 +123,13 @@ private:
   };
 
 private:
-  void AcceptLoop();
   void PresenceLoop();
-  void HandleClient(uintptr_t ClientSocketValue);
   void BroadcastTextMessage(std::string Message);
   void CloseAllClients();
   void RemoveWebSocketClient(uintptr_t ClientSocketValue);
   bool SendTextMessage(uintptr_t ClientSocketValue, std::string_view Message);
   bool SendBinaryMessage(uintptr_t ClientSocketValue, const void *Data,
                          size_t Size);
-  bool HandleHttpRequest(uintptr_t ClientSocketValue);
   bool HandleGetRequest(uintptr_t ClientSocketValue, std::string_view Path,
                         std::string_view HeaderBlock);
   bool HandlePostRequest(uintptr_t ClientSocketValue, std::string_view Path,
@@ -139,10 +169,6 @@ private:
                                 std::string_view Path,
                                 std::string_view HeaderBlock,
                                 std::string_view Body);
-  bool HandleWebSocketUpgrade(uintptr_t ClientSocketValue,
-                              std::string_view HeaderBlock,
-                              std::string_view Path);
-  void RunWebSocketSession(uintptr_t ClientSocketValue);
   bool HandleWebSocketMessage(uintptr_t ClientSocketValue,
                               std::string_view Payload);
   bool HandleClientWebRtcMessage(std::string_view ClientId,
@@ -180,21 +206,30 @@ private:
   std::vector<Assets::AssetDescriptor> CollectVisibleAssets() const;
   std::optional<std::filesystem::path>
   ResolveVisibleAssetPath(std::string_view RelativePath) const;
+  uintptr_t AllocateConnectionId();
+  void RegisterPendingHttpResponse(uintptr_t ClientSocketValue, void *Response);
+  void MarkPendingHttpResponseAborted(uintptr_t ClientSocketValue);
+  bool SendHttpResponse(uintptr_t ClientSocketValue, std::string_view Response);
 
 private:
   HeadlessSessionHost &m_Host;
   RemoteViewportServerOptions m_Options;
   std::atomic<bool> m_StopRequested{false};
   std::atomic<bool> m_TransportConnected{false};
-  uintptr_t m_ListenSocket{static_cast<uintptr_t>(~0ull)};
-  std::thread m_AcceptThread;
+  std::atomic<uintptr_t> m_NextClientConnectionId{1};
+  std::unique_ptr<RemoteViewportServerUwsState> m_UwsState;
+  std::thread m_ServerThread;
   std::thread m_PresenceThread;
 
   mutable std::mutex m_ClientMutex;
   std::vector<WebSocketClient> m_WebSocketClients;
+  mutable std::mutex m_HttpResponseMutex;
+  std::unordered_map<uintptr_t, PendingHttpResponse> m_PendingHttpResponses;
   std::unordered_map<std::string, RemoteClientSession> m_RemoteClientsById;
   uint64_t m_NextRemoteUserId{2};
   mutable std::mutex m_SendMutex;
+  std::atomic<uint64_t> m_TotalHttpRequests{0};
+  std::atomic<uint64_t> m_TotalWebSocketMessages{0};
   const std::filesystem::path m_ProjectsRoot;
   mutable std::mutex m_ProjectMutex;
   std::optional<Project::ProjectDescriptor> m_ActiveProject;

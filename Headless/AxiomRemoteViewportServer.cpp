@@ -1,8 +1,10 @@
 #include "RemoteViewportServer.h"
+#include "WraithNetworkingModule.h"
 
 #include "HeadlessCommandProtocol.h"
 
 #include <iostream>
+#include <memory>
 
 int main(int argc, char **argv) {
   std::string Error;
@@ -19,18 +21,30 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  Axiom::RemoteViewportServer Server(Host, Options);
-  if (!Server.Start(Error)) {
-    std::cerr << Axiom::SerializeError(Error) << std::endl;
+  auto NetworkingModule =
+      std::make_unique<Axiom::WraithNetworkingModule>(Host, Options);
+  Axiom::WraithNetworkingModule *NetworkingModulePtr = NetworkingModule.get();
+  if (!Host.GetModuleManager().RegisterModule(std::move(NetworkingModule))) {
+    std::cerr
+        << Axiom::SerializeError("Failed to register the WraithNetworking module.")
+        << std::endl;
+    return 1;
+  }
+  const auto NetworkingState = NetworkingModulePtr->GetStateSnapshot();
+  if (!NetworkingModulePtr->IsInitialized()) {
+    std::cerr << Axiom::SerializeError(
+                     NetworkingState.LastError.empty()
+                         ? "Failed to initialize the WraithNetworking module."
+                         : NetworkingState.LastError)
+              << std::endl;
     return 1;
   }
 
   std::cout << Axiom::SerializeReady(Options.Width, Options.Height)
             << std::endl;
-  while (!Server.ShouldStop() && Host.Step()) {
+  while (!NetworkingModulePtr->ShouldStop() && Host.Step()) {
   }
 
-  Server.Stop();
   std::cout << Axiom::SerializeShutdown() << std::endl;
   return 0;
 }
