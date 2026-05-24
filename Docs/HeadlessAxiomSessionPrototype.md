@@ -39,6 +39,7 @@ The current slice includes a macOS-first H.264 path that is wired into the nativ
 - the browser client now pumps camera/input updates on `requestAnimationFrame` and flushes pointer-lock look input immediately instead of batching on a fixed timer
 - the current stream no longer has the severe FPS collapse seen in the older prototype, but there is still roughly half a second of residual input latency to investigate later
 - a multi-client frame-routing bug was fixed by stamping each offscreen capture with the submitting `SessionUserId` at render time instead of inferring ownership later from mutable active-pass state
+- the headless command/protocol layer and the remote project/script HTTP JSON helpers now use `rapidjson` internally; command/event/session payload schemas are unchanged, but the earlier handwritten JSON serializer/parser code on those paths has been removed
 - a root-level `EditorFrontend` workspace now hosts the primary browser editor shell using Next.js, React, and Tailwind CSS
 - `EditorFrontend` includes the docked editor layout, menu bar, toolbar, outliner, details panel, content browser, and the active WebRTC viewport client in `components/engine/viewport.tsx`
 - the old inline localhost:8080 page has been retired; the server now focuses on backend/session and diagnostics endpoints

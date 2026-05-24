@@ -25,6 +25,14 @@ AxiomRemoteViewportServer  (C++)
   └─ EditorSession  (authoritative scene state)
           ├─ Vulkan Renderer  (offscreen, per-client)
           └─ ScriptHost  (Coral .NET 9 / C# scripting)
+
+AxiomCore runtime flow
+  └─ ModuleManager  (register / enable / disable / query modules)
+          ├─ Application modules  (window polling, layer update, layer render, renderer frame)
+          ├─ Host modules  (session transport, script host lifecycle)
+          ├─ Editor feature modules  (viewport input, selection, scene render)
+          ├─ Headless overlay module  (billboards, colliders, presence, gizmo overlay state)
+          └─ EditorSession internal modules  (scene-state coordination, command validation)
 ```
 
 ## Features
@@ -33,6 +41,7 @@ AxiomRemoteViewportServer  (C++)
 - Vulkan rendering backend with MoltenVK on macOS
 - Headless offscreen rendering with H.264 encoding (VideoToolbox on macOS)
 - Authoritative command/event model for scene mutations
+- Foundational engine module/plugin system with lifecycle-managed runtime modules and queryable active state
 - DataModel scene hierarchy — folders, meshes, lights, cameras, actors
 - Transform gizmos (translate / scale / rotate) with server-side hit-testing
 - Multi-client rendering: each connected user gets their own viewport
@@ -59,6 +68,12 @@ AxiomRemoteViewportServer  (C++)
 - World Details panel for editing the skybox: color pickers for the gradient mode, plus an HDR file slot that accepts drag-drop from the content browser, a searchable folder-icon picker listing every `.hdr` in the project, or a typed content-relative path
 - Perspective / Orthographic viewport projection toggle; HDR skybox automatically falls back to gradient in orthographic mode
 - Place Actors panel: searchable, category-filtered panel with click-to-place and drag-to-viewport placement; shapes (Cube, Sphere, Cylinder, Cone, Plane) place a Mesh child inside an Actor wrapper; lights, cameras, and generic actors each place their appropriate type
+
+**Runtime architecture**
+- `IModule` / `ModuleManager` foundation for engine-owned feature registration, initialization, update, shutdown, active-state toggling, and future CVAR/config integration
+- `Application` loop now executes module phases instead of hardcoding subsystem updates
+- Core app flow, headless host flow, editor viewport flow, and headless overlay rendering are split into focused modules instead of living in monolithic layer/application classes
+- `EditorSession` now delegates scene-state/tree synchronization and command validation to dedicated internal session modules
 
 ## Prerequisites
 

@@ -2,7 +2,7 @@
 
 ## Document Status
 - Status: Draft
-- Date: 2026-05-11
+- Date: 2026-05-24
 - Audience: Engine, tools, networking, web, and infrastructure contributors
 - Intended outcome: Establish the target architecture for evolving WraithEngine into a distributed game engine and browser-based collaborative editor
 
@@ -62,7 +62,7 @@
 - `ListAssets` command returns `{"type":"asset_list","assets":[{id,name,kind,path}...]}`; the content browser triggers it on connection and renders real assets in grid/list views with mesh/texture filter tabs and a Refresh button
 - `GetSchema` command returns `{"type":"object_schema","objectId":"...","className":"...","properties":[{name,type,readOnly}...]}`; the details panel fetches schema on selection change and shows a `className` badge in the panel header
 - `SetProperty` command dispatches to `RenameObjectCommand`, `SetObjectVisibilityCommand`, or `SetTransformCommand` based on property name; vec3 fields (location, rotationDegrees, scale) read the current transform from `ObjectDetailsById` and patch only the changed component
-- `SceneFile` (`Axiom/Assets/SceneFile.h/.cpp`) provides `SaveSceneToFile` / `LoadSceneFromFile`; serialization uses a manual `ostringstream` JSON emitter in flat-node format with `parentId` links; deserialization uses a purpose-built recursive descent parser (no external JSON library)
+- `SceneFile` (`Axiom/Assets/SceneFile.h/.cpp`) provides `SaveSceneToFile` / `LoadSceneFromFile`; it now serializes and parses the flat-node `parentId`-linked scene format through `rapidjson`, with in-place parse where the current file-loading path allows it
 - `LoadStartupScene` now checks for `Content/scene.json` first and falls back to the hardcoded default scene; scene state persists across server restarts automatically
 - `SaveScene` command writes `Content/scene.json` and replies with `{"type":"scene_saved"}` or `{"type":"scene_save_failed"}`; the toolbar Save button animates to a green checkmark for 2.5 s on success or a red X on failure
 - Phase 7 (Asset Pipeline) is now implemented: mesh asset assignment, dynamic directional lighting, material property editing, texture thumbnail previews, texture assignment, FBX/OBJ import via assimp, and OS-level file import into the content browser
@@ -87,6 +87,12 @@
 - The cooked-texture format (`.wtex`) was extended to v2 with a `PixelFormat` field appended after the existing v1 header; legacy v1 LDR files continue to load unchanged, while HDR textures cook as v2 with full-float (`RGBA32F`) pixel data through new `SaveCookedHDRTextureAsset` / `LoadCookedHDRTextureAsset` / `CookHDRTextureAsset` paths, so the editor's authored HDR keeps its full dynamic range for future image-based lighting reuse
 - `.hdr` is now a first-class asset extension: `LocalAssetSource` indexes it as `AssetKind::Texture`, `RemoteViewportServer` accepts it through the upload endpoint, and the content browser picker filters it natively
 - A new `WorldDetailsPanel` (docked alongside the Details inspector) hosts a `Sky Gradient` section with linked color pickers and an `HDR Sky` section that combines a typed content-relative path input, drag-drop from the content browser (consuming the existing `axiom/asset-path` / `axiom/asset-kind` dataTransfer payload), and a folder-icon `AssetPickerButton` popover that lists every `.hdr` in the project searchably; the same `AssetPickerButton` is also wired into the script-class field on the Details panel so script attachment no longer requires typing a fully-qualified class name; the panel reuses the canonical Details-style section/input chrome and forces the shadcn popover surfaces into dark theme so they match the rest of the editor
+- Added a foundational engine module/plugin system: `IModule` defines standardized lifecycle hooks (`GetName`, `Initialize`, `Update`, `Shutdown`), and `ModuleManager` owns registration, initialization order, per-module active state, and query APIs intended for future CVAR/config integration
+- `Application` now owns a `ModuleManager` and drives the frame through module phases instead of hardcoded polling/update/render branches; default runtime responsibilities were extracted into engine modules for window events, layer update, layer render, and renderer frame orchestration
+- Headless runtime hosts now register focused host modules instead of wiring everything inline: transport/session bootstrap moved into `HeadlessSessionTransportModule`, and script-host lifecycle moved into `SessionScriptHostModule`
+- Editor viewport responsibilities were split out of `GlfwEditorLayer` into `EditorViewportInputModule`, `EditorViewportSelectionModule`, and `EditorSceneRenderModule`
+- Headless overlay and gizmo rendering responsibilities were split out of `HeadlessSessionLayer` into `HeadlessOverlayModule`, which now owns light billboards, collider overlays, presence markers, material caches, and per-user gizmo overlay state
+- `EditorSession` refactoring has started in earnest: scene/tree synchronization responsibilities now live in `EditorSessionSceneStateModule`, and command validation now lives in `EditorSessionValidationModule`, leaving `EditorSession` closer to the intended coordinator role
 
 ## 1. Executive Summary
 WraithEngine will evolve from a single-process native editor into a distributed platform with one shared C++ engine runtime that supports two execution styles:
@@ -96,7 +102,7 @@ WraithEngine will evolve from a single-process native editor into a distributed 
 
 The first major milestone is a `remote browser editor`. The browser will own most editor UI using React, Next.js, and Tailwind CSS, while a native engine session remains authoritative for rendering, world state, asset loading, and validation of edits. The viewport will be rendered server-side and streamed to the browser via WebRTC using H.264 first.
 
-The current repository is still a native Vulkan/GLFW/ImGui engine with a simple `Application -> Renderer -> RenderScene` flow, file-based mesh loading, and a native editor executable. That is a good base for the next phase because the rendering and runtime already exist, but the codebase needs new seams for headless execution, transport, collaboration state, asset reflection, scripting isolation, and deployment.
+The current repository has moved beyond the original single-process Vulkan/GLFW/ImGui-only shape: it now includes a headless runtime path, authoritative `EditorSession` state, remote viewport transport/server layers, browser-editor integration, and an engine module runtime seam. That is a good base for the next phase because the rendering and runtime already exist, but the codebase still needs continued decomposition around session dispatch, remote server responsibilities, and packaging/deployment boundaries.
 
 This document describes the target architecture, public concepts, service boundaries, trust model, rollout order, and acceptance criteria for that transition.
 
@@ -152,20 +158,22 @@ At the time of writing, the repository contains:
 
 The active architecture is roughly:
 
-1. `Application` owns a GLFW window and a renderer.
-2. `Layer`s update every frame and can render from authoritative state in a separate pass.
-3. A local `EditorSession` owns viewport camera/look state and drains queued commands deterministically each frame.
-4. `RenderCommand` writes authoritative frame data into a frame-local `RenderScene`.
-5. `Renderer` passes that scene into a Vulkan backend.
-6. The backend renders to a window-presented swapchain image.
+1. `Application` owns a window, renderer-facing runtime state, and a `ModuleManager`.
+2. Engine-owned modules now drive the core loop phases for window polling, layer update, layer render, and renderer frame orchestration.
+3. Local editor and headless hosts layer their own feature modules on top of that runtime seam instead of expanding `Application` or the host constructors directly.
+4. A local or headless `EditorSession` owns authoritative scene/editor state and drains queued commands deterministically each frame.
+5. `RenderCommand` writes authoritative frame data into a frame-local `RenderScene`.
+6. `Renderer` passes that scene into a Vulkan backend.
+7. The backend renders to either a window-presented swapchain image or an offscreen headless target.
 
 This is enough to establish:
 
 - there is already a separation between scene submission and rendering
+- there is now a first-class runtime module seam for enabling, disabling, and eventually configuring major engine features without re-hardcoding the app loop
 - there is now an initial engine-owned command/event authority seam for editor viewport state
 - the renderer can evolve into windowed and headless targets
-- the current authoritative domain is still narrow and local to viewport/input state rather than full world editing
-- there is not yet a reflection, network, collaboration, headless runtime, or scripting host layer
+- the current architecture already includes reflection, networking, collaboration, headless runtime, and scripting-host layers, but some of those areas still need cleaner boundaries and further hardening
+- `EditorSession` remains one of the main concentration points for authoritative world-editing logic even after the first extraction steps
 
 ## 5. Architectural Principles
 - One core runtime, multiple adapters
@@ -1047,7 +1055,7 @@ Progress update:
 - `IAssetSource` / `LocalAssetSource` VFS abstraction introduced in `Axiom/Assets/IAssetSource.h/.cpp`; `LocalAssetSource` scans a root directory and derives stable `AssetId` values from hashed relative paths; `ResolveRelative` provides typed engine-internal path lookup
 - `ListAssets`, `GetSchema`, `SetProperty`, and `SaveScene` command types added to `HeadlessCommandType` and `ParseRemoteViewportCommand`; all four are handled in both the WebSocket and WebRTC dispatch paths in `RemoteViewportServer`
 - `SerializeAssetList`, `SerializeObjectSchema`, and `SerializeSaveResult` serializers added to `HeadlessCommandProtocol`
-- `SceneFile` serializer/parser implemented in `Axiom/Assets/SceneFile.h/.cpp` using a manual ostringstream JSON emitter and a purpose-built recursive descent parser; flat-node format with `parentId` links avoids any external JSON library dependency
+- `SceneFile` serializer/parser implemented in `Axiom/Assets/SceneFile.h/.cpp` using `rapidjson`; the flat-node format with `parentId` links is preserved, but the handwritten emitter/parser has been retired
 - `LoadStartupScene` now checks for `Content/scene.json` first and falls back to the hardcoded default startup scene, making scene state persistent across restarts
 - `SaveScene` command writes `Content/scene.json` at runtime and returns `scene_saved` or `scene_save_failed`; the pre-existing toolbar Save button is now wired end-to-end and animates to a green checkmark (success) or red X (failure) for 2.5 s
 - content browser replaced with a live server-driven implementation: `listAssets` is dispatched on connection, results populate grid/list views with mesh/texture filter tabs and a Refresh button
@@ -1167,6 +1175,9 @@ Progress update:
   - manifest-backed cooked lookup resolution
   - `SetMeshAsset` and `SetMaterialTexture` command-path cooking
   - scene save/load round-trip of cooked material state
+- JSON infrastructure migration is now complete across the current packaging/runtime/protocol surface: `AssetCookManifest`, `CookedAssetRuntime`, `SceneFile`, `ProjectSystem`, `HeadlessCommandProtocol`, and the JSON-producing/JSON-consuming endpoints in `RemoteViewportServer` all use `rapidjson` internally rather than the earlier handwritten serializers/parsers
+- `rapidjson` is now fetched in CMake as a project dependency; current file-loading paths prefer in-place parse (`ParseInsitu`) where mutable buffers already exist, while writer-based serialization preserves the existing wire/file schemas
+- verification for the migration is covered by the focused `AxiomTests` JSON slice: `HeadlessProtocolTests.*`, `ProjectSystemTests.*`, `ProjectSystemStandaloneTests.*`, `SceneLifecycleTests.SceneFile_*`, `SceneLifecycleTests.CookedSceneFile_*`, and `CookedAssetTests.*`
 - remaining Phase 8 work is mostly hardening and packaging-facing:
   - importer-driven cook orchestration rather than today’s best-effort command/load triggers
   - richer material/texture reference tables and GPU-oriented texture layout if needed
@@ -1215,12 +1226,20 @@ Scope: Several classes have grown to 1,500 – 2,500 lines and now own multiple 
 responsibilities.  This phase extracts those responsibilities into focused units before
 the codebase becomes materially harder to extend.
 
+Current progress:
+- The first engine-wide extraction step is done: a reusable `IModule` / `ModuleManager` foundation now exists and the `Application` loop runs through it.
+- `Application` runtime responsibilities have already been split into `ApplicationModules`.
+- Headless host bootstrap responsibilities have already been split into `HostModules`.
+- `GlfwEditorLayer` responsibilities have already been split into `EditorFeatureModules`.
+- `HeadlessSessionLayer` overlay responsibilities have already been split into `HeadlessOverlayModule`.
+- `EditorSession` has begun the same transition via `EditorSessionSceneStateModule` and `EditorSessionValidationModule`, but command handling is still concentrated in `EditorSession.cpp`.
+
 #### 10.1 Candidates for refactoring (audit before Phase 10 begins)
 Likely targets based on current trajectory:
 
 | File | Approximate size | Concerns to extract |
 |------|-----------------|---------------------|
-| `Axiom/Session/EditorSession.cpp` | ~2,000 lines | Command dispatch, event publication, lock management, presence logic, schema generation |
+| `Axiom/Session/EditorSession.cpp` | ~2,500 lines before the current split; still large after it | Remaining command handling, runtime transitions, asset/material mutation, event publication, presence/lock helpers |
 | `Headless/RemoteViewportServer.cpp` | ~1,500 lines | HTTP routing, WebSocket framing, WebRTC signaling, command parsing, client lifecycle |
 | `Headless/HeadlessCommandProtocol.cpp` | ~800 lines | Growing with every new command; serialization/deserialization should be generated or table-driven |
 | viewport interaction / gizmo hit-testing path | multi-file | mode-specific hit testing, drag math, and interaction branching are starting to duplicate patterns and should move toward reusable primitives or strategies |
@@ -1229,7 +1248,9 @@ Likely targets based on current trajectory:
 
 **`EditorSession`** → split into:
 - `EditorSession` — thin coordinator; owns state, wires subsystems
-- `CommandDispatcher` — validates and routes incoming commands
+- `EditorSessionValidationModule` — validates incoming commands
+- `EditorSessionSceneStateModule` — owns scene snapshots, instance-tree rebuilding, transform recomputation, and selection pruning
+- `CommandDispatcher` — routes incoming commands
 - `EventBroadcaster` — serializes and fans out authoritative events
 - `LockManager` — manages object/asset lock lifecycle
 - `PresenceTracker` — heartbeat, idle detection, state transitions
@@ -1351,6 +1372,7 @@ Progress update:
 - scripting authoring is now project-local: each project gets a generated `Scripts/` workspace plus `.sln`/`.csproj`, the browser has a script editor with file CRUD and syntax highlighting, scripts can be attached to actors, and inspector `Open Script` jumps into the editor
 - Phase 7 (Asset Pipeline) is complete: `SetMeshAssetCommand` wires any discovered `.glb`/`.gltf`/`.fbx`/`.obj` to mesh objects and actor roots with scene-file persistence; `SetLightPropertiesCommand` drives a Blinn-Phong directional light from `SceneLight` world position; `SetMaterialPropertiesCommand` exposes `BaseColorFactor`/`Metallic`/`Roughness` push constants end-to-end through the inspector; `SetMaterialTextureCommand` assigns PNG/JPG textures to mesh base-color slots with persistence, inspector display, and drag-drop from both the content browser and outliner; FBX/OBJ import is implemented via assimp with embedded and external texture handling; the content browser accepts OS file drag-drop and a file picker Import button that upload to `POST /assets/upload`; texture thumbnail previews are served by the remote viewport server; the content browser navigates folders non-recursively; regression coverage now includes the `CreateObject`→`SetMeshAsset` runtime-creation path and actor mesh assignment
 - Phase 8 (Binary Asset Formats) and the first packaging foundation are now implemented: `.wmesh`, `.wtex`, and `.wmat` cooked formats exist; `AssetCookManifest` and `CookedAssetSource` resolve cooked content by stable `AssetId`; startup, scene reload, and mesh/texture editing flows all prefer cooked payloads while preserving source fallback during editor use; scene persistence now round-trips cooked material state through `materialAssetPath`; projects now cook into per-project `Content/Cooked/` and stage packaged outputs under per-project `Package/` directories
+- the supporting JSON layer under those systems has now been standardized on `rapidjson`: scene files, cook manifests, packaged project manifests, cooked-runtime validation, headless command/event serialization, and remote project/script HTTP payloads all moved off the earlier handwritten JSON code while preserving their public schemas
 - packaged runtime cutover is now implemented for the first desktop slice: staged packages include `AxiomPackagedRuntime`, cooked project content, `scene.wscene`, the asset cook manifest, shared engine content, and a package manifest; packaged content roots are treated as cooked-only at runtime and now fail fast on invalid package layout, missing cooked scene/cook manifest, or unresolved cooked asset references
 - the next step is now a targeted runtime/editor architecture refactor before further large feature work: the current codebase has enough cross-cutting packaging/editor/runtime/session state that cameras, gameplay input, and possession should not be layered on top of the existing seams without first tightening the boundaries
 - that refactor should stay narrow and gameplay-motivated rather than turning into general cleanup; the goal is to separate editor authoring state from runtime gameplay state, editor viewport controls from in-game input, and editor camera movement from runtime camera ownership/activation
