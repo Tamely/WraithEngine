@@ -9,10 +9,10 @@
 #include <Session/EditorSceneRendererAdapter.h>
 #include <Session/EditorSession.h>
 
+#include "HeadlessOverlayModule.h"
+
 #include <functional>
-#include <mutex>
 #include <optional>
-#include <unordered_map>
 
 namespace Axiom {
 struct HeadlessRenderViewState;
@@ -41,43 +41,48 @@ public:
   void SetRenderViewResolver(RenderViewResolver Resolver) {
     m_RenderViewResolver = std::move(Resolver);
   }
-  void SetPresenceMarkerMeshForTesting(MeshRef Mesh) { m_PresenceMarkerMesh = std::move(Mesh); }
+  void SetPresenceMarkerMeshForTesting(MeshRef Mesh) {
+    m_OverlayModule.SetPresenceMarkerMeshForTesting(std::move(Mesh));
+  }
   void SetColliderMeshesForTesting(MeshRef BoxMesh, MeshRef SphereMesh) {
-    m_ColliderBoxMesh = std::move(BoxMesh);
-    m_ColliderSphereMesh = std::move(SphereMesh);
+    m_OverlayModule.SetColliderMeshesForTesting(std::move(BoxMesh),
+                                                std::move(SphereMesh));
   }
   EditorSession &GetSession() { return m_Session; }
   SessionUserId GetLocalUserId() const { return m_LocalUserId; }
 
-  void SetGizmoHoveredAxis(SessionUserId User, int Axis);
-  int GetGizmoHoveredAxis(SessionUserId User) const;
-  void SetGizmoMode(SessionUserId User, GizmoMode Mode);
-  GizmoMode GetGizmoMode(SessionUserId User) const;
-  std::vector<LightBillboardOverlay> BuildLightBillboards() const;
-  std::vector<RenderMeshSubmission> BuildColliderOverlaySubmissions() const;
+  void SetGizmoHoveredAxis(SessionUserId User, int Axis) {
+    m_OverlayModule.SetGizmoHoveredAxis(User, Axis);
+  }
+  int GetGizmoHoveredAxis(SessionUserId User) const {
+    return m_OverlayModule.GetGizmoHoveredAxis(User);
+  }
+  void SetGizmoMode(SessionUserId User, GizmoMode Mode) {
+    m_OverlayModule.SetGizmoMode(User, Mode);
+  }
+  GizmoMode GetGizmoMode(SessionUserId User) const {
+    return m_OverlayModule.GetGizmoMode(User);
+  }
+  std::vector<LightBillboardOverlay> BuildLightBillboards() const {
+    return m_OverlayModule.BuildLightBillboards();
+  }
+  std::vector<RenderMeshSubmission> BuildColliderOverlaySubmissions() const {
+    return m_OverlayModule.BuildColliderOverlaySubmissions();
+  }
   std::vector<RenderMeshSubmission>
-  BuildPresenceOverlaySubmissions(SessionUserId RenderUser) const;
+  BuildPresenceOverlaySubmissions(SessionUserId RenderUser) const {
+    return m_OverlayModule.BuildPresenceOverlaySubmissions(RenderUser);
+  }
 
 private:
-  MaterialInstanceRef GetOrCreatePresenceMaterial(SessionUserId User) const;
-  MaterialInstanceRef
-  GetOrCreateColliderMaterial(EditorPhysicsBodyType BodyType) const;
   CommandContext MakeContext() const;
   CommandContext MakeContext(SessionUserId User) const;
 
   SessionId m_SessionId{1};
   SessionUserId m_LocalUserId{1};
   EditorSession m_Session;
+  HeadlessOverlayModule m_OverlayModule;
   EditorSceneRendererAdapter *m_RendererAdapter{nullptr};
-  MeshRef m_PresenceMarkerMesh;
-  MeshRef m_ColliderBoxMesh;
-  MeshRef m_ColliderSphereMesh;
   RenderViewResolver m_RenderViewResolver;
-  mutable std::unordered_map<uint64_t, MaterialInstanceRef> m_PresenceMaterials;
-  mutable std::unordered_map<int, MaterialInstanceRef> m_ColliderMaterials;
-  mutable std::mutex m_GizmoHoverMutex;
-  std::unordered_map<uint64_t, int> m_GizmoHoveredAxisByUser;
-  mutable std::mutex m_GizmoModeMutex;
-  std::unordered_map<uint64_t, GizmoMode> m_GizmoModeByUser;
 };
 } // namespace Axiom

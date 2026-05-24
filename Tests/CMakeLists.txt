@@ -6,6 +6,7 @@ add_executable(AxiomTests
   ModuleManagerTests.cpp
   ProjectTests.cpp
   SceneLifecycleTests.cpp
+  ../Headless/HeadlessOverlayModule.cpp
   ../Headless/HeadlessSessionLayer.cpp
   ../Headless/HeadlessCommandProtocol.cpp
   ../Headless/WebRtcSession.cpp

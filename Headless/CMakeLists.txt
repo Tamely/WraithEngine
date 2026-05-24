@@ -1,6 +1,7 @@
 add_executable(AxiomHeadless
   AxiomHeadless.cpp
   HeadlessCommandProtocol.cpp
+  HeadlessOverlayModule.cpp
   HostModules.cpp
   HeadlessSessionHost.cpp
   HeadlessSessionLayer.cpp
@@ -10,6 +11,7 @@ add_executable(AxiomHeadless
 add_executable(AxiomRemoteViewportDevClient
   DevRemoteViewportClient.cpp
   HeadlessCommandProtocol.cpp
+  HeadlessOverlayModule.cpp
   HostModules.cpp
   HeadlessSessionHost.cpp
   HeadlessSessionLayer.cpp
@@ -31,6 +33,7 @@ add_executable(AxiomRemoteViewportServer
   AxiomRemoteViewportServer.cpp
   RemoteViewportServer.cpp
   HeadlessCommandProtocol.cpp
+  HeadlessOverlayModule.cpp
   HostModules.cpp
   HeadlessSessionHost.cpp
   HeadlessSessionLayer.cpp
@@ -39,6 +42,7 @@ add_executable(AxiomRemoteViewportServer
 
 add_executable(AxiomPackagedRuntime
   AxiomPackagedRuntime.cpp
+  HeadlessOverlayModule.cpp
   HostModules.cpp
   PackagedRuntimeHost.cpp
   HeadlessSessionLayer.cpp
