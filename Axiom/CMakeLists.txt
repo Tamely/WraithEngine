@@ -31,6 +31,8 @@ set(ENGINE_SOURCES
   Session/EditorMessageBus.cpp
   Session/EditorSceneRendererAdapter.cpp
   Session/EditorSession.cpp
+  Session/EditorSessionSceneStateModule.cpp
+  Session/EditorSessionValidationModule.cpp
   Session/StartupScene.cpp
   Renderer/Camera.cpp
   Renderer/ForwardRenderer.cpp

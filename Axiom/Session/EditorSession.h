@@ -20,6 +20,8 @@
 
 namespace Axiom {
 class PhysicsWorld;
+class EditorSessionSceneStateModule;
+class EditorSessionValidationModule;
 
 struct EditorSessionConfig {
   glm::vec3 InitialCameraPosition{0.0f, 0.8f, 3.5f};
@@ -209,6 +211,9 @@ public:
   void PublishScriptError(const std::string &ObjectId, const std::string &Message);
 
 private:
+  friend class EditorSessionSceneStateModule;
+  friend class EditorSessionValidationModule;
+
   static std::unordered_map<std::string, EditorObjectDetails>
   BuildObjectDetailsMap(std::vector<EditorObjectDetails> ObjectDetails);
   static bool IsBlankString(std::string_view Value);
@@ -329,6 +334,8 @@ private:
   EditorSessionConfig m_Config;
   EditorSessionState m_State;
   EditorMessageBus m_MessageBus;
+  std::unique_ptr<EditorSessionSceneStateModule> m_SceneStateModule;
+  std::unique_ptr<EditorSessionValidationModule> m_ValidationModule;
   std::unique_ptr<DataModel> m_SceneRoot;
   std::filesystem::path m_ContentDir;
   std::filesystem::path m_EngineContentDir;

@@ -5,6 +5,8 @@
 #include "Assets/IAssetSource.h"
 #include "Assets/MeshAsset.h"
 #include "Physics/PhysicsWorld.h"
+#include "Session/EditorSessionSceneStateModule.h"
+#include "Session/EditorSessionValidationModule.h"
 
 #include <Core/Log.h>
 
@@ -449,8 +451,11 @@ EditorSceneState CloneEditorSceneState(const EditorSceneState &Scene) {
 } // namespace
 
 EditorSession::EditorSession(SessionId Session, EditorSessionConfig Config)
-    : m_Config(Config), m_State({.Session = Session}) {
-  InitSceneRoot();
+    : m_Config(Config),
+      m_State({.Session = Session}),
+      m_SceneStateModule(std::make_unique<EditorSessionSceneStateModule>(*this)),
+      m_ValidationModule(std::make_unique<EditorSessionValidationModule>(*this)) {
+  m_SceneStateModule->InitSceneRoot();
 }
 
 EditorSession::~EditorSession() = default;
@@ -500,26 +505,7 @@ void EditorSession::SetPresenceState(SessionUserId User,
 }
 
 void EditorSession::SetSceneState(EditorSceneState SceneState) {
-  m_State.Scene = std::move(SceneState);
-  HydrateWorldSettingsHDRData(m_State.Scene.WorldSettings, m_ContentDir,
-                              m_EngineContentDir,
-                              "SetSceneState");
-  // Populate Material on object details from mesh instances so the inspector
-  // can display and edit material properties for mesh objects.
-  for (const auto &MeshInst : m_State.Scene.MeshInstances) {
-    auto DetailsIt = m_State.Scene.ObjectDetailsById.find(MeshInst.ObjectId);
-    if (DetailsIt != m_State.Scene.ObjectDetailsById.end() &&
-        MeshInst.Material && !DetailsIt->second.Material.has_value()) {
-      DetailsIt->second.Material = EditorMaterialProperties{
-          .BaseColorFactor = MeshInst.Material->BaseColorFactor,
-          .Metallic        = MeshInst.Material->Metallic,
-          .Roughness       = MeshInst.Material->Roughness,
-      };
-    }
-  }
-  RebuildInstanceTree(m_State.Scene.Items, m_SceneRoot.get());
-  PruneInvalidSelections();
-  RecomputeAllWorldTransforms();
+  m_SceneStateModule->SetSceneState(std::move(SceneState));
 }
 
 void EditorSession::SetSceneMeshInstances(
@@ -528,16 +514,12 @@ void EditorSession::SetSceneMeshInstances(
 }
 
 void EditorSession::SetSceneItems(std::vector<EditorSceneItem> SceneItems) {
-  m_State.Scene.Items = std::move(SceneItems);
-  RebuildInstanceTree(m_State.Scene.Items, m_SceneRoot.get());
-  PruneInvalidSelections();
-  RecomputeAllWorldTransforms();
+  m_SceneStateModule->SetSceneItems(std::move(SceneItems));
 }
 
 void EditorSession::SetObjectDetails(
     std::vector<EditorObjectDetails> ObjectDetails) {
-  m_State.Scene.ObjectDetailsById = BuildObjectDetailsMap(std::move(ObjectDetails));
-  RecomputeAllWorldTransforms();
+  m_SceneStateModule->SetObjectDetails(std::move(ObjectDetails));
 }
 
 void EditorSession::SetPresence(std::vector<EditorUserPresence> Presence) {
@@ -562,7 +544,7 @@ const EditorViewportState *EditorSession::FindViewport(SessionUserId User) const
 }
 
 const EditorSceneItem *EditorSession::FindSceneItem(std::string_view ObjectId) const {
-  return FindSceneItemRecursive(m_State.Scene.Items, ObjectId);
+  return m_SceneStateModule->FindSceneItem(ObjectId);
 }
 
 const std::string *EditorSession::FindSelectedObjectId(SessionUserId User) const {
@@ -666,17 +648,12 @@ const EditorObjectCollaborationState *EditorSession::FindCollaborationState(
 std::unordered_map<std::string, EditorObjectDetails>
 EditorSession::BuildObjectDetailsMap(
     std::vector<EditorObjectDetails> ObjectDetails) {
-  std::unordered_map<std::string, EditorObjectDetails> DetailsByObjectId;
-  DetailsByObjectId.reserve(ObjectDetails.size());
-  for (EditorObjectDetails &Details : ObjectDetails) {
-    DetailsByObjectId.emplace(Details.ObjectId, std::move(Details));
-  }
-  return DetailsByObjectId;
+  return EditorSessionSceneStateModule::BuildObjectDetailsMap(
+      std::move(ObjectDetails));
 }
 
 void EditorSession::InitSceneRoot() {
-  m_SceneRoot = std::make_unique<DataModel>();
-  Instance::Create<SceneFolder>("world")->SetParent(m_SceneRoot.get());
+  m_SceneStateModule->InitSceneRoot();
 }
 
 Instance *EditorSession::FindWorldFolder() const {
@@ -724,42 +701,15 @@ Instance *EditorSession::EnsureWorldFolder() {
 
 void EditorSession::RebuildInstanceTree(const std::vector<EditorSceneItem> &Items,
                                         Instance *Parent) {
-  if (!Parent) return;
-  std::vector<Instance *> OldChildren = Parent->GetChildren();
-  for (Instance *Child : OldChildren)
-    Child->Destroy();
-  for (const EditorSceneItem &Item : Items) {
-    Instance *Node = CreateInstanceForTemplate(
-        std::string(TemplateIdForKind(Item.Kind)), Item.Id);
-    if (!Node) continue;
-    Node->SetParent(Parent);
-    if (!Item.Children.empty())
-      RebuildInstanceTree(Item.Children, Node);
-  }
+  m_SceneStateModule->RebuildInstanceTree(Items, Parent);
 }
 
 void EditorSession::SyncItemsFromTree() {
-  m_State.Scene.Items.clear();
-  if (!m_SceneRoot) return;
-  for (const Instance *Child : m_SceneRoot->GetChildren())
-    m_State.Scene.Items.push_back(BuildItemFromInstance(Child));
+  m_SceneStateModule->SyncItemsFromTree();
 }
 
 EditorSceneItem EditorSession::BuildItemFromInstance(const Instance *Node) const {
-  EditorSceneItem Item;
-  Item.Id = Node->GetName();
-  Item.Kind = KindForInstance(Node);
-  Item.Visible = true;
-  Item.DisplayName = Node->GetName();
-  const auto It = m_State.Scene.ObjectDetailsById.find(Node->GetName());
-  if (It != m_State.Scene.ObjectDetailsById.end()) {
-    Item.DisplayName = It->second.DisplayName;
-    Item.Visible = It->second.Visible;
-    Item.Kind = It->second.Kind;
-  }
-  for (const Instance *Child : Node->GetChildren())
-    Item.Children.push_back(BuildItemFromInstance(Child));
-  return Item;
+  return m_SceneStateModule->BuildItemFromInstance(Node);
 }
 
 Instance *EditorSession::CreateInstanceForTemplate(const std::string &TemplateId,
@@ -773,7 +723,7 @@ Instance *EditorSession::CreateInstanceForTemplate(const std::string &TemplateId
 }
 
 EditorSceneItemKind EditorSession::KindForInstance(const Instance *Node) const {
-  return KindForClassName(Node->GetClassName());
+  return m_SceneStateModule->KindForInstance(Node);
 }
 
 bool EditorSession::IsValidTemplateId(const std::string &TemplateId) const {
@@ -1097,80 +1047,23 @@ void EditorSession::ClearSelectionsForObject(std::string_view ObjectId) {
 }
 
 void EditorSession::PruneInvalidSelections() {
-  for (auto It = m_State.SelectedObjectIds.begin();
-       It != m_State.SelectedObjectIds.end();) {
-    if (FindSceneItem(It->second) == nullptr) {
-      It = m_State.SelectedObjectIds.erase(It);
-    } else {
-      ++It;
-    }
-  }
+  m_SceneStateModule->PruneInvalidSelections();
 }
 
 glm::mat4 EditorSession::ComputeWorldTransformMatrix(const Instance *Node) const {
-  if (!Node) return glm::mat4(1.0f);
-  std::vector<const Instance *> Chain;
-  const Instance *Cur = Node;
-  while (Cur && Cur != m_SceneRoot.get()) {
-    Chain.push_back(Cur);
-    Cur = Cur->GetParent();
-  }
-  glm::mat4 World(1.0f);
-  for (auto It = Chain.rbegin(); It != Chain.rend(); ++It) {
-    const auto DetailsIt = m_State.Scene.ObjectDetailsById.find((*It)->GetName());
-    if (DetailsIt != m_State.Scene.ObjectDetailsById.end() &&
-        DetailsIt->second.Transform.has_value()) {
-      World = World * BuildTransformMatrix(*DetailsIt->second.Transform);
-    }
-  }
-  return World;
+  return m_SceneStateModule->ComputeWorldTransformMatrix(Node);
 }
 
 EditorTransformDetails EditorSession::DecomposeMatrix(const glm::mat4 &Matrix) const {
-  const glm::vec3 Location = glm::vec3(Matrix[3]);
-  glm::vec3 Col0 = glm::vec3(Matrix[0]);
-  glm::vec3 Col1 = glm::vec3(Matrix[1]);
-  glm::vec3 Col2 = glm::vec3(Matrix[2]);
-  const float ScaleX = glm::length(Col0);
-  const float ScaleY = glm::length(Col1);
-  const float ScaleZ = glm::length(Col2);
-  if (ScaleX > 0.0f) Col0 /= ScaleX;
-  if (ScaleY > 0.0f) Col1 /= ScaleY;
-  if (ScaleZ > 0.0f) Col2 /= ScaleZ;
-  // YXZ Euler decomposition matching BuildTransformMatrix order (Ry * Rx * Rz)
-  const float AngleX = glm::degrees(glm::asin(glm::clamp(-Col2.y, -1.0f, 1.0f)));
-  const float AngleY = glm::degrees(glm::atan(Col2.x, Col2.z));
-  const float AngleZ = glm::degrees(glm::atan(Col0.y, Col1.y));
-  return EditorTransformDetails{
-      .Location = Location,
-      .RotationDegrees = {AngleX, AngleY, AngleZ},
-      .Scale = {ScaleX, ScaleY, ScaleZ},
-  };
+  return m_SceneStateModule->DecomposeMatrix(Matrix);
 }
 
 void EditorSession::RecomputeSubtreeWorldTransforms(const Instance *Node) {
-  if (!Node) return;
-  const std::string &Id = Node->GetName();
-  const auto DetailsIt = m_State.Scene.ObjectDetailsById.find(Id);
-  if (DetailsIt != m_State.Scene.ObjectDetailsById.end() &&
-      DetailsIt->second.Transform.has_value()) {
-    const glm::mat4 WorldMatrix = ComputeWorldTransformMatrix(Node);
-    DetailsIt->second.WorldTransform = DecomposeMatrix(WorldMatrix);
-    for (EditorSceneMeshInstance &Inst : m_State.Scene.MeshInstances) {
-      if (Inst.ObjectId == Id) {
-        Inst.Transform = WorldMatrix;
-        break;
-      }
-    }
-  }
-  for (const Instance *Child : Node->GetChildren())
-    RecomputeSubtreeWorldTransforms(Child);
+  m_SceneStateModule->RecomputeSubtreeWorldTransforms(Node);
 }
 
 void EditorSession::RecomputeAllWorldTransforms() {
-  if (!m_SceneRoot) return;
-  for (const Instance *Child : m_SceneRoot->GetChildren())
-    RecomputeSubtreeWorldTransforms(Child);
+  m_SceneStateModule->RecomputeAllWorldTransforms();
 }
 
 void EditorSession::AcquireLock(const std::string &ObjectId, SessionUserId User) {
@@ -1260,19 +1153,7 @@ EditorViewportState &EditorSession::EnsureViewport(SessionUserId User) {
 
 const EditorSceneItem *EditorSession::FindSceneItemRecursive(
     const std::vector<EditorSceneItem> &Items, std::string_view ObjectId) const {
-  for (const EditorSceneItem &Item : Items) {
-    if (Item.Id == ObjectId) {
-      return &Item;
-    }
-
-    if (const EditorSceneItem *Child =
-            FindSceneItemRecursive(Item.Children, ObjectId);
-        Child != nullptr) {
-      return Child;
-    }
-  }
-
-  return nullptr;
+  return m_SceneStateModule->FindSceneItemRecursive(Items, ObjectId);
 }
 
 void EditorSession::ProcessCommand(const QueuedEditorCommand &QueuedCommand) {
@@ -1305,408 +1186,7 @@ void EditorSession::ProcessCommand(const QueuedEditorCommand &QueuedCommand) {
 
 bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
                                     std::string &FailureReason) {
-  if (QueuedCommand.Context.Session != m_State.Session) {
-    FailureReason = "Command targeted a different session.";
-    return false;
-  }
-
-  if ((std::holds_alternative<PlaySessionCommand>(QueuedCommand.Command.Payload) ||
-       std::holds_alternative<PauseSessionCommand>(QueuedCommand.Command.Payload) ||
-       std::holds_alternative<ResumeSessionCommand>(QueuedCommand.Command.Payload) ||
-       std::holds_alternative<StopSessionCommand>(QueuedCommand.Command.Payload)) &&
-      QueuedCommand.Context.User.Value != ResolveRuntimeControllerUser().Value) {
-    FailureReason =
-        "Only the current simulation host can control simulation state.";
-    return false;
-  }
-
-  if (!QueuedCommand.Context.IsScriptContext &&
-      m_State.RuntimeState != EditorRuntimeState::Edit &&
-      IsAuthoringMutationCommand(QueuedCommand.Command.Payload)) {
-    FailureReason =
-        "Authoring edits are disabled while shared simulation is active.";
-    return false;
-  }
-
-  const EditorViewportState &Viewport =
-      const_cast<EditorSession *>(this)->EnsureViewport(QueuedCommand.Context.User);
-
-  if (const auto *CameraCommand =
-          std::get_if<UpdateViewportCameraCommand>(
-              &QueuedCommand.Command.Payload)) {
-    if (Viewport.IsLooking && !CameraCommand->CursorPosition.has_value()) {
-      FailureReason = "Look-enabled camera updates require cursor position.";
-      return false;
-    }
-  }
-
-  if (const auto *SelectionCommand =
-          std::get_if<SelectObjectCommand>(&QueuedCommand.Command.Payload)) {
-    if (SelectionCommand->ObjectId.empty()) {
-      FailureReason = "Selection commands require a non-empty object id.";
-      return false;
-    }
-    if (FindSceneItem(SelectionCommand->ObjectId) == nullptr) {
-      FailureReason = "Selection targeted an unknown object.";
-      return false;
-    }
-  }
-
-  // Lock guard: reject mutating commands if another user owns the lock.
-  {
-    const std::string *LockedObjectId = nullptr;
-    std::string SingleId;
-    if (const auto *C = std::get_if<SetTransformCommand>(&QueuedCommand.Command.Payload))
-      SingleId = C->ObjectId;
-    else if (const auto *C = std::get_if<RenameObjectCommand>(&QueuedCommand.Command.Payload))
-      SingleId = C->ObjectId;
-    else if (const auto *C = std::get_if<SetObjectVisibilityCommand>(&QueuedCommand.Command.Payload))
-      SingleId = C->ObjectId;
-    else if (const auto *C = std::get_if<DeleteObjectCommand>(&QueuedCommand.Command.Payload))
-      SingleId = C->ObjectId;
-    else if (const auto *C = std::get_if<ReparentObjectCommand>(&QueuedCommand.Command.Payload))
-      SingleId = C->ObjectId;
-    else if (const auto *C = std::get_if<SetPhysicsPropertiesCommand>(&QueuedCommand.Command.Payload))
-      SingleId = C->ObjectId;
-    if (!SingleId.empty()) {
-      const auto CollabIt = m_State.Scene.CollaborationByObjectId.find(SingleId);
-      if (CollabIt != m_State.Scene.CollaborationByObjectId.end() &&
-          CollabIt->second.LockState == EditorObjectLockState::Locked &&
-          CollabIt->second.LockOwner.has_value() &&
-          *CollabIt->second.LockOwner != QueuedCommand.Context.User) {
-        FailureReason = "Object is locked by another user.";
-        return false;
-      }
-    }
-  }
-
-  if (const auto *TransformCommand =
-          std::get_if<SetTransformCommand>(&QueuedCommand.Command.Payload)) {
-    if (TransformCommand->ObjectId.empty()) {
-      FailureReason = "Transform commands require a non-empty object id.";
-      return false;
-    }
-
-    const EditorObjectDetails *Details = FindObjectDetails(TransformCommand->ObjectId);
-    if (Details == nullptr) {
-      FailureReason = "Transform targeted an unknown object.";
-      return false;
-    }
-    if (!Details->SupportsTransform || !Details->Transform.has_value()) {
-      FailureReason = "This object does not support transform edits.";
-      return false;
-    }
-    if (Details->TransformReadOnly) {
-      FailureReason = "This object is read-only.";
-      return false;
-    }
-    if (TransformCommand->Scale.x <= 0.0f || TransformCommand->Scale.y <= 0.0f ||
-        TransformCommand->Scale.z <= 0.0f) {
-      FailureReason = "Scale values must be greater than zero.";
-      return false;
-    }
-  }
-
-  if (const auto *PhysicsCommand =
-          std::get_if<SetPhysicsPropertiesCommand>(&QueuedCommand.Command.Payload)) {
-    if (PhysicsCommand->ObjectId.empty()) {
-      FailureReason = "Physics commands require a non-empty object id.";
-      return false;
-    }
-
-    const EditorObjectDetails *Details = FindObjectDetails(PhysicsCommand->ObjectId);
-    if (Details == nullptr) {
-      FailureReason = "Physics targeted an unknown object.";
-      return false;
-    }
-    if (!Details->SupportsTransform) {
-      FailureReason = "Physics can only be assigned to transformable objects.";
-      return false;
-    }
-    if (PhysicsCommand->Physics.BodyType == EditorPhysicsBodyType::Dynamic &&
-        PhysicsCommand->Physics.Mass <= 0.0f) {
-      FailureReason = "Dynamic physics bodies require a positive mass.";
-      return false;
-    }
-    if (PhysicsCommand->Physics.ColliderType == EditorPhysicsColliderType::Box &&
-        !IsPositive(PhysicsCommand->Physics.BoxHalfExtents)) {
-      FailureReason = "Box colliders require positive half extents.";
-      return false;
-    }
-    if (PhysicsCommand->Physics.ColliderType == EditorPhysicsColliderType::Sphere &&
-        PhysicsCommand->Physics.SphereRadius <= 0.0f) {
-      FailureReason = "Sphere colliders require a positive radius.";
-      return false;
-    }
-    if (PhysicsCommand->Physics.Friction < 0.0f) {
-      FailureReason = "Physics friction must be zero or greater.";
-      return false;
-    }
-    if (PhysicsCommand->Physics.Restitution < 0.0f) {
-      FailureReason = "Physics restitution must be zero or greater.";
-      return false;
-    }
-  }
-
-  if (const auto *RenameCommand =
-          std::get_if<RenameObjectCommand>(&QueuedCommand.Command.Payload)) {
-    if (RenameCommand->ObjectId.empty()) {
-      FailureReason = "Rename commands require a non-empty object id.";
-      return false;
-    }
-    if (FindSceneItem(RenameCommand->ObjectId) == nullptr) {
-      FailureReason = "Rename targeted an unknown object.";
-      return false;
-    }
-    if (RenameCommand->DisplayName.empty() ||
-        IsBlankString(RenameCommand->DisplayName)) {
-      FailureReason = "Rename commands require a non-empty display name.";
-      return false;
-    }
-  }
-
-  if (const auto *VisibilityCommand =
-          std::get_if<SetObjectVisibilityCommand>(
-              &QueuedCommand.Command.Payload)) {
-    if (VisibilityCommand->ObjectId.empty()) {
-      FailureReason = "Visibility commands require a non-empty object id.";
-      return false;
-    }
-    if (FindSceneItem(VisibilityCommand->ObjectId) == nullptr) {
-      FailureReason = "Visibility targeted an unknown object.";
-      return false;
-    }
-  }
-
-  if (const auto *CreateCmd =
-          std::get_if<CreateObjectCommand>(&QueuedCommand.Command.Payload)) {
-    if (CreateCmd->TemplateId.empty()) {
-      FailureReason = "Create commands require a non-empty TemplateId.";
-      return false;
-    }
-    if (!IsValidTemplateId(CreateCmd->TemplateId)) {
-      FailureReason = "Unknown TemplateId: " + CreateCmd->TemplateId + ".";
-      return false;
-    }
-  }
-
-  if (const auto *CreateMeshCmd =
-          std::get_if<CreateMeshObjectCommand>(&QueuedCommand.Command.Payload)) {
-    if (CreateMeshCmd->AssetPath.empty()) {
-      FailureReason = "CreateMeshObject requires a non-empty asset path.";
-      return false;
-    }
-    if (CreateMeshCmd->Scale.x <= 0.0f || CreateMeshCmd->Scale.y <= 0.0f ||
-        CreateMeshCmd->Scale.z <= 0.0f) {
-      FailureReason = "Scale values must be greater than zero.";
-      return false;
-    }
-    if (m_ContentDir.empty()) {
-      FailureReason = "CreateMeshObject requires a configured content directory.";
-      return false;
-    }
-    CookMeshAssetBestEffort(m_ContentDir, CreateMeshCmd->AssetPath);
-    const std::filesystem::path FullPath = m_ContentDir / CreateMeshCmd->AssetPath;
-    const auto SceneData = Assets::LoadBasicMeshAsset(FullPath);
-    if (!SceneData.has_value() || SceneData->Instances.empty()) {
-      FailureReason = "CreateMeshObject failed to load mesh asset: " +
-                      CreateMeshCmd->AssetPath + ".";
-      return false;
-    }
-  }
-
-  if (const auto *DupCmd =
-          std::get_if<DuplicateObjectCommand>(&QueuedCommand.Command.Payload)) {
-    if (DupCmd->ObjectId.empty()) {
-      FailureReason = "Duplicate commands require a non-empty object id.";
-      return false;
-    }
-    if (FindSceneItem(DupCmd->ObjectId) == nullptr) {
-      FailureReason = "Duplicate targeted an unknown object.";
-      return false;
-    }
-  }
-
-  if (const auto *DelCmd =
-          std::get_if<DeleteObjectCommand>(&QueuedCommand.Command.Payload)) {
-    if (DelCmd->ObjectId.empty()) {
-      FailureReason = "Delete commands require a non-empty object id.";
-      return false;
-    }
-    if (FindSceneItem(DelCmd->ObjectId) == nullptr) {
-      FailureReason = "Delete targeted an unknown object.";
-      return false;
-    }
-    if (DelCmd->ObjectId == "world") {
-      FailureReason = "The world folder cannot be deleted.";
-      return false;
-    }
-  }
-
-  if (const auto *ReparentCmd =
-          std::get_if<ReparentObjectCommand>(&QueuedCommand.Command.Payload)) {
-    if (ReparentCmd->ObjectId.empty()) {
-      FailureReason = "Reparent commands require a non-empty object id.";
-      return false;
-    }
-    if (ReparentCmd->NewParentId.empty()) {
-      FailureReason = "Reparent commands require a non-empty new parent id.";
-      return false;
-    }
-    if (FindSceneItem(ReparentCmd->ObjectId) == nullptr) {
-      FailureReason = "Reparent targeted an unknown object.";
-      return false;
-    }
-    if (FindSceneItem(ReparentCmd->NewParentId) == nullptr) {
-      FailureReason = "Reparent new parent is an unknown object.";
-      return false;
-    }
-    if (ReparentCmd->ObjectId == ReparentCmd->NewParentId) {
-      FailureReason = "Cannot reparent an object onto itself.";
-      return false;
-    }
-    if (ReparentCmd->ObjectId == "world") {
-      FailureReason = "The world folder cannot be reparented.";
-      return false;
-    }
-    // Reject if new parent is a descendant of the object (would create cycle)
-    const Instance *Target =
-        FindInstanceById(m_SceneRoot.get(), ReparentCmd->ObjectId);
-    if (Target != nullptr) {
-      for (const std::string &DescId : CollectDescendantIds(Target)) {
-        if (DescId == ReparentCmd->NewParentId) {
-          FailureReason = "Cannot reparent an object onto one of its descendants.";
-          return false;
-        }
-      }
-    }
-  }
-
-  if (const auto *AttachCmd =
-          std::get_if<AttachScriptCommand>(&QueuedCommand.Command.Payload)) {
-    if (AttachCmd->ObjectId.empty()) {
-      FailureReason = "AttachScript requires a non-empty object id.";
-      return false;
-    }
-    if (AttachCmd->ScriptClassName.empty()) {
-      FailureReason = "AttachScript requires a non-empty script class name.";
-      return false;
-    }
-    const EditorObjectDetails *Details = FindObjectDetails(AttachCmd->ObjectId);
-    if (Details == nullptr) {
-      FailureReason = "AttachScript targeted an unknown object.";
-      return false;
-    }
-    if (Details->Kind != EditorSceneItemKind::Actor) {
-      FailureReason = "Scripts can only be attached to Actor objects.";
-      return false;
-    }
-  }
-
-  if (const auto *DetachCmd =
-          std::get_if<DetachScriptCommand>(&QueuedCommand.Command.Payload)) {
-    if (DetachCmd->ObjectId.empty()) {
-      FailureReason = "DetachScript requires a non-empty object id.";
-      return false;
-    }
-    if (FindObjectDetails(DetachCmd->ObjectId) == nullptr) {
-      FailureReason = "DetachScript targeted an unknown object.";
-      return false;
-    }
-  }
-
-  if (const auto *MeshAssetCmd =
-          std::get_if<SetMeshAssetCommand>(&QueuedCommand.Command.Payload)) {
-    if (MeshAssetCmd->ObjectId.empty()) {
-      FailureReason = "SetMeshAsset requires a non-empty object id.";
-      return false;
-    }
-    if (MeshAssetCmd->AssetPath.empty()) {
-      FailureReason = "SetMeshAsset requires a non-empty asset path.";
-      return false;
-    }
-    const EditorObjectDetails *Details = FindObjectDetails(MeshAssetCmd->ObjectId);
-    if (Details == nullptr) {
-      FailureReason = "SetMeshAsset targeted an unknown object.";
-      return false;
-    }
-    if (Details->Kind != EditorSceneItemKind::Mesh &&
-        Details->Kind != EditorSceneItemKind::Actor) {
-      FailureReason = "SetMeshAsset target must be a Mesh or Actor object.";
-      return false;
-    }
-  }
-
-  if (const auto *LightCmd =
-          std::get_if<SetLightPropertiesCommand>(&QueuedCommand.Command.Payload)) {
-    const EditorObjectDetails *Details = FindObjectDetails(LightCmd->ObjectId);
-    if (Details == nullptr) {
-      FailureReason = "SetLightProperties targeted an unknown object.";
-      return false;
-    }
-    if (Details->Kind != EditorSceneItemKind::Light) {
-      FailureReason = "SetLightProperties target must be a Light object.";
-      return false;
-    }
-  }
-
-  if (const auto *MatCmd =
-          std::get_if<SetMaterialPropertiesCommand>(&QueuedCommand.Command.Payload)) {
-    const EditorObjectDetails *Details = FindObjectDetails(MatCmd->ObjectId);
-    if (Details == nullptr) {
-      FailureReason = "SetMaterialProperties targeted an unknown object.";
-      return false;
-    }
-    if (Details->Kind != EditorSceneItemKind::Mesh) {
-      FailureReason = "SetMaterialProperties target must be a Mesh object.";
-      return false;
-    }
-  }
-
-  if (const auto *TexCmd =
-          std::get_if<SetMaterialTextureCommand>(&QueuedCommand.Command.Payload)) {
-    const EditorObjectDetails *Details = FindObjectDetails(TexCmd->ObjectId);
-    if (Details == nullptr) {
-      FailureReason = "SetMaterialTexture targeted an unknown object.";
-      return false;
-    }
-    if (Details->Kind != EditorSceneItemKind::Mesh) {
-      FailureReason = "SetMaterialTexture target must be a Mesh object.";
-      return false;
-    }
-  }
-
-  if (std::holds_alternative<PlaySessionCommand>(QueuedCommand.Command.Payload)) {
-    if (m_State.RuntimeState != EditorRuntimeState::Edit) {
-      FailureReason = "PlaySession is only valid while in edit mode.";
-      return false;
-    }
-  }
-
-  if (std::holds_alternative<PauseSessionCommand>(QueuedCommand.Command.Payload)) {
-    if (m_State.RuntimeState != EditorRuntimeState::Playing) {
-      FailureReason = "PauseSession is only valid while playing.";
-      return false;
-    }
-  }
-
-  if (std::holds_alternative<ResumeSessionCommand>(QueuedCommand.Command.Payload)) {
-    if (m_State.RuntimeState != EditorRuntimeState::Paused) {
-      FailureReason = "ResumeSession is only valid while paused.";
-      return false;
-    }
-  }
-
-  if (std::holds_alternative<StopSessionCommand>(QueuedCommand.Command.Payload)) {
-    if (m_State.RuntimeState == EditorRuntimeState::Edit) {
-      FailureReason = "StopSession is only valid while simulation is active.";
-      return false;
-    }
-  }
-
-  // SetWorldSettingsCommand requires no specific validation since colors are just vec3
-
-  return true;
+  return m_ValidationModule->ValidateCommand(QueuedCommand, FailureReason);
 }
 
 void EditorSession::HandleCommand(
