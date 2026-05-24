@@ -2,8 +2,6 @@
 
 #include <algorithm>
 
-#include <Renderer/VideoEncoderFactory.h>
-
 namespace Axiom {
 HeadlessSessionHost::HeadlessSessionHost(const ApplicationArgs &Args,
                                          uint32_t Width, uint32_t Height)
@@ -23,40 +21,35 @@ HeadlessSessionHost::HeadlessSessionHost(const ApplicationArgs &Args,
         return std::nullopt;
       });
   PushLayer(m_Layer);
-  m_Endpoint = std::make_unique<AxiomSessionEndpoint>(m_Layer->GetSession());
-  m_Endpoint->SetVideoEncoder(CreateDefaultVideoEncoder());
   m_RenderViews.EnsureLocalView(m_Layer->GetLocalUserId());
-  m_FrameBridge = std::make_unique<HeadlessViewportFrameBridge>(
-      *m_Endpoint, [this]() -> std::optional<HeadlessRenderViewState> {
+  auto TransportModule = std::make_unique<HeadlessSessionTransportModule>(
+      m_Layer->GetSession(), [this]() -> std::optional<HeadlessRenderViewState> {
         if (const HeadlessRenderViewState *View = GetActiveRenderView();
             View != nullptr) {
           return *View;
         }
         return std::nullopt;
       });
-  SetViewportFrameOutput(m_FrameBridge.get());
-  m_ScriptHost.Initialize(
-      AXIOM_CORAL_MANAGED_DIR,
-      AXIOM_SCRIPTING_TRUST_RESTRICTED ? ScriptTrustProfile::Restricted
-                                       : ScriptTrustProfile::Trusted);
-  m_ScriptHost.LoadEngineAssembly(AXIOM_MANAGED_DIR);
-  m_ScriptHost.RegisterInternalCalls(m_Layer->GetSession(),
-                                     SessionId{1},
-                                     m_Layer->GetLocalUserId());
-  m_Layer->GetSession().Subscribe(&m_ScriptHost);
-  m_Layer->SetScriptHost(&m_ScriptHost);
+  m_TransportModule = TransportModule.get();
+  GetModuleManager().RegisterModule(std::move(TransportModule));
+
+  auto ScriptingModule = std::make_unique<SessionScriptHostModule>(
+      "Headless.SessionScriptHost", m_Layer->GetSession(), SessionId{1},
+      m_Layer->GetLocalUserId());
+  m_ScriptingModule = ScriptingModule.get();
+  GetModuleManager().RegisterModule(std::move(ScriptingModule));
 }
 
 bool HeadlessSessionHost::Step() { return Application::Step(); }
 
 void HeadlessSessionHost::LoadUserScripts(
     const std::filesystem::path &AssemblyPath) {
-  m_ScriptHost.LoadUserAssembly(AssemblyPath);
-  m_ScriptHost.StartFileWatcher();
+  GetScriptingModule().GetScriptHost().LoadUserAssembly(AssemblyPath);
+  GetScriptingModule().GetScriptHost().StartFileWatcher();
 }
 
 void HeadlessSessionHost::ReloadUserScripts() {
-  m_ScriptHost.ReloadUserAssembly();
+  GetScriptingModule().GetScriptHost().ReloadUserAssembly();
 }
 
 bool HeadlessSessionHost::LoadStartupSceneIntoSession() {
@@ -73,17 +66,17 @@ void HeadlessSessionHost::SubmitLocalCommand(const EditorCommand &Command) {
 }
 
 void HeadlessSessionHost::SubmitRemoteCommand(const EditorCommand &Command) {
-  m_Layer->SubmitToTransport(*m_Endpoint, Command);
+  m_Layer->SubmitToTransport(GetTransport(), Command);
 }
 
 void HeadlessSessionHost::SubmitRemoteCommand(SessionUserId User,
                                               const EditorCommand &Command) {
-  m_Layer->SubmitToTransport(*m_Endpoint, User, Command);
+  m_Layer->SubmitToTransport(GetTransport(), User, Command);
 }
 
 void HeadlessSessionHost::SetTransportVideoEncoder(
     std::unique_ptr<IVideoEncoder> Encoder) {
-  m_Endpoint->SetVideoEncoder(std::move(Encoder));
+  m_TransportModule->SetVideoEncoder(std::move(Encoder));
 }
 
 void HeadlessSessionHost::SetRemoteViewMode(RendererViewMode ViewMode) {

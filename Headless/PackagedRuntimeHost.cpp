@@ -15,16 +15,11 @@ PackagedRuntimeHost::PackagedRuntimeHost(const ApplicationArgs &Args,
   m_Layer = new HeadlessSessionLayer();
   m_Layer->SetSharedRendererAdapter(&m_RendererAdapter);
   PushLayer(m_Layer);
-
-  m_ScriptHost.Initialize(
-      AXIOM_CORAL_MANAGED_DIR,
-      AXIOM_SCRIPTING_TRUST_RESTRICTED ? ScriptTrustProfile::Restricted
-                                       : ScriptTrustProfile::Trusted);
-  m_ScriptHost.LoadEngineAssembly(AXIOM_MANAGED_DIR);
-  m_ScriptHost.RegisterInternalCalls(m_Layer->GetSession(), SessionId{1},
-                                     m_Layer->GetLocalUserId());
-  m_Layer->GetSession().Subscribe(&m_ScriptHost);
-  m_Layer->SetScriptHost(&m_ScriptHost);
+  auto ScriptingModule = std::make_unique<SessionScriptHostModule>(
+      "PackagedRuntime.SessionScriptHost", m_Layer->GetSession(), SessionId{1},
+      m_Layer->GetLocalUserId());
+  m_ScriptingModule = ScriptingModule.get();
+  GetModuleManager().RegisterModule(std::move(ScriptingModule));
 }
 
 bool PackagedRuntimeHost::LoadPackagedProject(const std::filesystem::path &ContentDir,

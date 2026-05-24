@@ -14,6 +14,7 @@ set(ENGINE_SOURCES
   Assets/SceneFile.cpp
   Assets/SvgTexture.cpp
   Core/Application.cpp
+  Core/ApplicationModules.cpp
   Core/GlfwEditorInputSource.cpp
   Core/GlfwWindow.cpp
   Core/HeadlessWindow.cpp

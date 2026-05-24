@@ -1,8 +1,8 @@
 #include "Application.h"
 
+#include "Core/ApplicationModules.h"
 #include "Core/GlfwWindow.h"
 #include "Core/HeadlessWindow.h"
-#include "Core/IModule.h"
 #include "Core/Log.h"
 
 #include <algorithm>
@@ -10,112 +10,6 @@
 #include <utility>
 
 namespace Axiom {
-namespace {
-class WindowEventsModule final : public IModule {
-public:
-  [[nodiscard]] std::string_view GetName() const override {
-    return "Core.WindowEvents";
-  }
-
-  bool Initialize(Application &App) override {
-    (void)App;
-    return true;
-  }
-
-  void Update(const ModuleUpdateContext &Context) override {
-    if (Context.Phase != ModuleUpdatePhase::FrameStart) {
-      return;
-    }
-
-    if (Window *Window = Context.App.GetWindow(); Window != nullptr) {
-      Window->PollEvents();
-    }
-  }
-
-  void Shutdown(Application &App) override { (void)App; }
-};
-
-class LayerUpdateModule final : public IModule {
-public:
-  [[nodiscard]] std::string_view GetName() const override {
-    return "Core.LayerUpdate";
-  }
-
-  bool Initialize(Application &App) override {
-    (void)App;
-    return true;
-  }
-
-  void Update(const ModuleUpdateContext &Context) override {
-    if (Context.Phase != ModuleUpdatePhase::FrameStart) {
-      return;
-    }
-
-    Context.App.ForEachLayer([](Layer *Layer) { Layer->OnUpdate(); });
-  }
-
-  void Shutdown(Application &App) override { (void)App; }
-};
-
-class LayerRenderModule final : public IModule {
-public:
-  [[nodiscard]] std::string_view GetName() const override {
-    return "Core.LayerRender";
-  }
-
-  bool Initialize(Application &App) override {
-    (void)App;
-    return true;
-  }
-
-  void Update(const ModuleUpdateContext &Context) override {
-    if (Context.Phase == ModuleUpdatePhase::Render) {
-      Context.App.ForEachLayer([](Layer *Layer) { Layer->OnRender(); });
-      return;
-    }
-
-    if (Context.Phase == ModuleUpdatePhase::ImGuiRender) {
-      Context.App.ForEachLayer([](Layer *Layer) { Layer->OnImGuiRender(); });
-    }
-  }
-
-  void Shutdown(Application &App) override { (void)App; }
-};
-
-class RendererFrameModule final : public IModule {
-public:
-  [[nodiscard]] std::string_view GetName() const override {
-    return "Core.RendererFrame";
-  }
-
-  bool Initialize(Application &App) override {
-    (void)App;
-    return true;
-  }
-
-  void Update(const ModuleUpdateContext &Context) override {
-    switch (Context.Phase) {
-    case ModuleUpdatePhase::FrameStart:
-      Context.App.GetRenderer().SetCpuFrameTime(Context.DeltaTimeSeconds *
-                                                1000.0f);
-      break;
-    case ModuleUpdatePhase::RenderBegin:
-      Context.App.GetRenderer().BeginFrame();
-      break;
-    case ModuleUpdatePhase::Render:
-      Context.App.GetRenderer().Render();
-      break;
-    case ModuleUpdatePhase::RenderEnd:
-      Context.App.GetRenderer().EndFrame();
-      break;
-    case ModuleUpdatePhase::ImGuiRender:
-      break;
-    }
-  }
-
-  void Shutdown(Application &App) override { (void)App; }
-};
-} // namespace
 
 Application *Application::s_Instance = nullptr;
 

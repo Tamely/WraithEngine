@@ -3,8 +3,8 @@
 #include <filesystem>
 
 #include <Core/Application.h>
-#include <Scripting/ScriptHost.h>
 
+#include "HostModules.h"
 #include "HeadlessSessionLayer.h"
 
 namespace Axiom {
@@ -19,8 +19,8 @@ public:
 
 private:
   HeadlessSessionLayer *m_Layer{nullptr};
+  SessionScriptHostModule *m_ScriptingModule{nullptr};
   EditorSceneRendererAdapter m_RendererAdapter;
-  ScriptHost m_ScriptHost;
 };
 
 } // namespace Axiom

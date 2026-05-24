@@ -16,7 +16,6 @@
 
 namespace Axiom {
 struct HeadlessRenderViewState;
-class ScriptHost;
 
 class HeadlessSessionLayer final : public Layer {
 public:
@@ -47,7 +46,6 @@ public:
     m_ColliderBoxMesh = std::move(BoxMesh);
     m_ColliderSphereMesh = std::move(SphereMesh);
   }
-  void SetScriptHost(ScriptHost *Host) { m_ScriptHost = Host; }
   EditorSession &GetSession() { return m_Session; }
   SessionUserId GetLocalUserId() const { return m_LocalUserId; }
 
@@ -70,7 +68,6 @@ private:
   SessionId m_SessionId{1};
   SessionUserId m_LocalUserId{1};
   EditorSession m_Session;
-  ScriptHost *m_ScriptHost{nullptr};
   EditorSceneRendererAdapter *m_RendererAdapter{nullptr};
   MeshRef m_PresenceMarkerMesh;
   MeshRef m_ColliderBoxMesh;
