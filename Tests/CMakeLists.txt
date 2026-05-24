@@ -3,6 +3,7 @@ add_executable(AxiomTests
   LayerTests.cpp
   HeadlessProtocolTests.cpp
   MeshPickingTests.cpp
+  ModuleManagerTests.cpp
   ProjectTests.cpp
   SceneLifecycleTests.cpp
   ../Headless/HeadlessSessionLayer.cpp

@@ -2,6 +2,7 @@
 
 #include "Core/GlfwWindow.h"
 #include "Core/HeadlessWindow.h"
+#include "Core/IModule.h"
 #include "Core/Log.h"
 
 #include <algorithm>
@@ -9,42 +10,168 @@
 #include <utility>
 
 namespace Axiom {
+namespace {
+class WindowEventsModule final : public IModule {
+public:
+  [[nodiscard]] std::string_view GetName() const override {
+    return "Core.WindowEvents";
+  }
+
+  bool Initialize(Application &App) override {
+    (void)App;
+    return true;
+  }
+
+  void Update(const ModuleUpdateContext &Context) override {
+    if (Context.Phase != ModuleUpdatePhase::FrameStart) {
+      return;
+    }
+
+    if (Window *Window = Context.App.GetWindow(); Window != nullptr) {
+      Window->PollEvents();
+    }
+  }
+
+  void Shutdown(Application &App) override { (void)App; }
+};
+
+class LayerUpdateModule final : public IModule {
+public:
+  [[nodiscard]] std::string_view GetName() const override {
+    return "Core.LayerUpdate";
+  }
+
+  bool Initialize(Application &App) override {
+    (void)App;
+    return true;
+  }
+
+  void Update(const ModuleUpdateContext &Context) override {
+    if (Context.Phase != ModuleUpdatePhase::FrameStart) {
+      return;
+    }
+
+    Context.App.ForEachLayer([](Layer *Layer) { Layer->OnUpdate(); });
+  }
+
+  void Shutdown(Application &App) override { (void)App; }
+};
+
+class LayerRenderModule final : public IModule {
+public:
+  [[nodiscard]] std::string_view GetName() const override {
+    return "Core.LayerRender";
+  }
+
+  bool Initialize(Application &App) override {
+    (void)App;
+    return true;
+  }
+
+  void Update(const ModuleUpdateContext &Context) override {
+    if (Context.Phase == ModuleUpdatePhase::Render) {
+      Context.App.ForEachLayer([](Layer *Layer) { Layer->OnRender(); });
+      return;
+    }
+
+    if (Context.Phase == ModuleUpdatePhase::ImGuiRender) {
+      Context.App.ForEachLayer([](Layer *Layer) { Layer->OnImGuiRender(); });
+    }
+  }
+
+  void Shutdown(Application &App) override { (void)App; }
+};
+
+class RendererFrameModule final : public IModule {
+public:
+  [[nodiscard]] std::string_view GetName() const override {
+    return "Core.RendererFrame";
+  }
+
+  bool Initialize(Application &App) override {
+    (void)App;
+    return true;
+  }
+
+  void Update(const ModuleUpdateContext &Context) override {
+    switch (Context.Phase) {
+    case ModuleUpdatePhase::FrameStart:
+      Context.App.GetRenderer().SetCpuFrameTime(Context.DeltaTimeSeconds *
+                                                1000.0f);
+      break;
+    case ModuleUpdatePhase::RenderBegin:
+      Context.App.GetRenderer().BeginFrame();
+      break;
+    case ModuleUpdatePhase::Render:
+      Context.App.GetRenderer().Render();
+      break;
+    case ModuleUpdatePhase::RenderEnd:
+      Context.App.GetRenderer().EndFrame();
+      break;
+    case ModuleUpdatePhase::ImGuiRender:
+      break;
+    }
+  }
+
+  void Shutdown(Application &App) override { (void)App; }
+};
+} // namespace
+
 Application *Application::s_Instance = nullptr;
 
 Application::Application(const ApplicationConfig &Config,
                          const ApplicationArgs &Args)
-    : m_Config(Config) {
+    : Application(Config, Args, {}) {}
+
+Application::Application(const ApplicationConfig &Config,
+                         const ApplicationArgs &Args,
+                         RuntimeDependencies Dependencies)
+    : m_Config(Config),
+      m_Window(std::move(Dependencies.Window)),
+      m_RenderSurface(std::move(Dependencies.RenderSurface)),
+      m_Renderer(std::move(Dependencies.Renderer)) {
   (void)Args;
   s_Instance = this;
   Log::Init();
 
-  switch (m_Config.Mode) {
-  case RuntimeMode::LocalWindowedEditor:
-  case RuntimeMode::LocalPackagedGame:
-    m_Window = std::make_unique<GlfwWindow>(m_Config.Title, m_Config.Width,
-                                            m_Config.Height);
-    m_RenderSurface = std::make_shared<WindowRenderSurface>(*m_Window);
-    break;
-  case RuntimeMode::HeadlessEditorSession:
-    m_Window = std::make_unique<HeadlessWindow>(m_Config.Title, m_Config.Width,
-                                                m_Config.Height);
-    m_RenderSurface =
-        std::make_shared<OffscreenRenderSurface>(m_Config.Width, m_Config.Height);
-    break;
+  if (m_Window == nullptr || m_RenderSurface == nullptr) {
+    switch (m_Config.Mode) {
+    case RuntimeMode::LocalWindowedEditor:
+    case RuntimeMode::LocalPackagedGame:
+      m_Window = std::make_unique<GlfwWindow>(m_Config.Title, m_Config.Width,
+                                              m_Config.Height);
+      m_RenderSurface = std::make_shared<WindowRenderSurface>(*m_Window);
+      break;
+    case RuntimeMode::HeadlessEditorSession:
+      m_Window = std::make_unique<HeadlessWindow>(m_Config.Title, m_Config.Width,
+                                                  m_Config.Height);
+      m_RenderSurface = std::make_shared<OffscreenRenderSurface>(
+          m_Config.Width, m_Config.Height);
+      break;
+    }
   }
 
-  m_Renderer = std::make_unique<Renderer>();
-  m_Renderer->Init({
-      .TargetWindow = m_Window.get(),
-      .TargetSurface = m_RenderSurface,
-      .FrameOutput = m_Config.FrameOutput,
-      .Width = m_Window->GetWidth(),
-      .Height = m_Window->GetHeight(),
-  });
+  if (m_Renderer == nullptr && Dependencies.InitializeRenderer) {
+    m_Renderer = std::make_unique<Renderer>();
+  }
+  if (m_Renderer != nullptr && Dependencies.InitializeRenderer) {
+    m_Renderer->Init({
+        .TargetWindow = m_Window.get(),
+        .TargetSurface = m_RenderSurface,
+        .FrameOutput = m_Config.FrameOutput,
+        .Width = m_Window->GetWidth(),
+        .Height = m_Window->GetHeight(),
+    });
+  }
+  if (Dependencies.RegisterDefaultModules) {
+    RegisterDefaultModules();
+  }
+  m_ModuleManager.InitializeModules(*this);
   m_LastFrameTime = std::chrono::steady_clock::now();
 }
 
 Application::~Application() {
+  m_ModuleManager.ShutdownModules(*this);
   m_LayerStack.Clear();
   m_Renderer.reset();
   m_Window.reset();
@@ -58,6 +185,12 @@ Application &Application::Get() { return *s_Instance; }
 Window *Application::GetWindow() const { return m_Window.get(); }
 
 void Application::PushLayer(Layer *Layer) { m_LayerStack.PushLayer(Layer); }
+
+void Application::ForEachLayer(const std::function<void(Layer *)> &Visitor) {
+  for (Layer *Layer : m_LayerStack) {
+    Visitor(Layer);
+  }
+}
 
 void Application::RequestClose() {
   if (m_Window) {
@@ -89,6 +222,15 @@ void Application::Run() {
   }
 }
 
+void Application::RegisterDefaultModules() {
+  m_ModuleManager.RegisterModule(std::make_unique<WindowEventsModule>());
+  m_ModuleManager.RegisterModule(std::make_unique<LayerUpdateModule>());
+  m_ModuleManager.RegisterModule(std::make_unique<LayerRenderModule>());
+  if (m_Renderer != nullptr) {
+    m_ModuleManager.RegisterModule(std::make_unique<RendererFrameModule>());
+  }
+}
+
 size_t Application::BeginRenderPasses() { return 1u; }
 
 void Application::PrepareRenderPass(size_t PassIndex) { (void)PassIndex; }
@@ -107,32 +249,53 @@ bool Application::Step() {
   m_DeltaTime = std::chrono::duration<float>(Now - m_LastFrameTime).count();
   m_LastFrameTime = Now;
   ++m_FrameIndex;
-  m_Renderer->SetCpuFrameTime(m_DeltaTime * 1000.0f);
-
-  m_Window->PollEvents();
-
-  for (Layer *Layer : m_LayerStack) {
-    Layer->OnUpdate();
-  }
+  m_ModuleManager.UpdateActiveModules({
+      .App = *this,
+      .DeltaTimeSeconds = m_DeltaTime,
+      .FrameIndex = m_FrameIndex,
+      .Phase = ModuleUpdatePhase::FrameStart,
+  });
 
   const size_t RenderPassCount = std::max<size_t>(1u, BeginRenderPasses());
   for (size_t PassIndex = 0; PassIndex < RenderPassCount; ++PassIndex) {
     PrepareRenderPass(PassIndex);
-    m_Renderer->BeginFrame();
-
-    for (Layer *Layer : m_LayerStack) {
-      Layer->OnRender();
-    }
-
-    m_Renderer->Render();
+    const ModuleUpdateContext RenderContext{
+        .App = *this,
+        .DeltaTimeSeconds = m_DeltaTime,
+        .FrameIndex = m_FrameIndex,
+        .Phase = ModuleUpdatePhase::RenderBegin,
+        .RenderPassIndex = PassIndex,
+        .RenderPassCount = RenderPassCount,
+    };
+    m_ModuleManager.UpdateActiveModules(RenderContext);
+    m_ModuleManager.UpdateActiveModules({
+        .App = *this,
+        .DeltaTimeSeconds = m_DeltaTime,
+        .FrameIndex = m_FrameIndex,
+        .Phase = ModuleUpdatePhase::Render,
+        .RenderPassIndex = PassIndex,
+        .RenderPassCount = RenderPassCount,
+    });
 
     if (ShouldRenderImGuiForPass(PassIndex, RenderPassCount)) {
-      for (Layer *Layer : m_LayerStack) {
-        Layer->OnImGuiRender();
-      }
+      m_ModuleManager.UpdateActiveModules({
+          .App = *this,
+          .DeltaTimeSeconds = m_DeltaTime,
+          .FrameIndex = m_FrameIndex,
+          .Phase = ModuleUpdatePhase::ImGuiRender,
+          .RenderPassIndex = PassIndex,
+          .RenderPassCount = RenderPassCount,
+      });
     }
 
-    m_Renderer->EndFrame();
+    m_ModuleManager.UpdateActiveModules({
+        .App = *this,
+        .DeltaTimeSeconds = m_DeltaTime,
+        .FrameIndex = m_FrameIndex,
+        .Phase = ModuleUpdatePhase::RenderEnd,
+        .RenderPassIndex = PassIndex,
+        .RenderPassCount = RenderPassCount,
+    });
   }
   return !m_Window->ShouldClose();
 }
