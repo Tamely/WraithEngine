@@ -57,6 +57,34 @@ void CookHDRTextureAssetBestEffort(const std::filesystem::path &ContentDir,
   }
 }
 
+void HydrateWorldSettingsHDRData(EditorWorldSettings &Settings,
+                                 const std::filesystem::path &ContentDir,
+                                 std::string_view LogContext) {
+  if (Settings.SkyboxHDRPath.empty()) {
+    Settings.SkyboxHDRData = nullptr;
+    return;
+  }
+  if (Settings.SkyboxHDRData) {
+    return;
+  }
+  if (ContentDir.empty()) {
+    A_CORE_WARN("{}: content directory not configured; cannot load HDR '{}'",
+                LogContext, Settings.SkyboxHDRPath);
+    return;
+  }
+
+  const auto FullPath = ContentDir / Settings.SkyboxHDRPath;
+  if (std::filesystem::exists(FullPath)) {
+    CookHDRTextureAssetBestEffort(ContentDir, Settings.SkyboxHDRPath);
+  }
+  auto Loaded = Assets::LoadHDRTextureFromFile(FullPath);
+  if (!Loaded) {
+    A_CORE_WARN("{}: failed to load HDR '{}'", LogContext,
+                Settings.SkyboxHDRPath);
+  }
+  Settings.SkyboxHDRData = std::move(Loaded);
+}
+
 std::string DefaultUserDisplayName(SessionUserId User) {
   if (User.Value == 1) {
     return "Host";
@@ -441,6 +469,8 @@ void EditorSession::SetPresenceState(SessionUserId User,
 
 void EditorSession::SetSceneState(EditorSceneState SceneState) {
   m_State.Scene = std::move(SceneState);
+  HydrateWorldSettingsHDRData(m_State.Scene.WorldSettings, m_ContentDir,
+                              "SetSceneState");
   // Populate Material on object details from mesh instances so the inspector
   // can display and edit material properties for mesh objects.
   for (const auto &MeshInst : m_State.Scene.MeshInstances) {
@@ -2311,21 +2341,9 @@ void EditorSession::HandleCommand(const QueuedEditorCommand &QueuedCommand,
              PreviousHDRData) {
     // Path unchanged and we already have the data loaded — reuse it.
     m_State.Scene.WorldSettings.SkyboxHDRData = std::move(PreviousHDRData);
-  } else if (m_ContentDir.empty()) {
-    A_CORE_WARN("SetWorldSettings: content directory not configured; cannot "
-                "load HDR '{}'",
-                Command.Settings.SkyboxHDRPath);
-    m_State.Scene.WorldSettings.SkyboxHDRData = nullptr;
   } else {
-    CookHDRTextureAssetBestEffort(m_ContentDir,
-                                  Command.Settings.SkyboxHDRPath);
-    const auto FullPath = m_ContentDir / Command.Settings.SkyboxHDRPath;
-    auto Loaded = Assets::LoadHDRTextureFromFile(FullPath);
-    if (!Loaded) {
-      A_CORE_WARN("SetWorldSettings: failed to load HDR '{}'",
-                  Command.Settings.SkyboxHDRPath);
-    }
-    m_State.Scene.WorldSettings.SkyboxHDRData = std::move(Loaded);
+    HydrateWorldSettingsHDRData(m_State.Scene.WorldSettings, m_ContentDir,
+                                "SetWorldSettings");
   }
 }
 

@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <Assets/AssetCookManifest.h>
+#include <Assets/CookedTextureAsset.h>
+#include <Assets/IAssetSource.h>
 #include <Assets/SceneFile.h>
 #include <Core/Log.h>
 #include <Session/EditorSession.h>
@@ -2266,6 +2268,67 @@ TEST(SceneLifecycleTests, CookedSceneFile_SaveLoadRoundTripsWorldAndMaterialStat
   ASSERT_TRUE(DetailsIt->second.Material->TextureAssetPath.has_value());
   EXPECT_EQ(*DetailsIt->second.Material->TextureAssetPath,
             "Engine/tf2 coconut.jpg");
+}
+
+TEST(SceneLifecycleTests, SetSceneStateHydratesSkyboxHDRDataFromCookedContent) {
+  EnsureLogInitialized();
+  const auto TempRoot =
+      std::filesystem::temp_directory_path() / "wraithengine-skybox-reload-test";
+  std::error_code RemoveError;
+  std::filesystem::remove_all(TempRoot, RemoveError);
+  std::filesystem::create_directories(TempRoot / "Content" / "Cooked");
+
+  const std::filesystem::path RelativeHDRPath = "Skies/studio.hdr";
+  const std::filesystem::path CookedHDRRelativePath = "Cooked/Skies-studio.wtex";
+  const auto CookedHDRPath = TempRoot / "Content" / CookedHDRRelativePath;
+
+  Axiom::HDRTextureSourceData HDRTexture;
+  HDRTexture.Width = 1;
+  HDRTexture.Height = 1;
+  HDRTexture.Pixels = {1.0f, 0.5f, 0.25f, 1.0f};
+  ASSERT_TRUE(Axiom::Assets::SaveCookedHDRTextureAsset(
+      CookedHDRPath, HDRTexture,
+      Axiom::Assets::AssetIdFromRelativePath(RelativeHDRPath)));
+
+  Axiom::Assets::AssetCookManifest Manifest;
+  Manifest.Entries.push_back(Axiom::Assets::AssetCookManifestEntry{
+      .Id = Axiom::Assets::AssetIdFromRelativePath(RelativeHDRPath),
+      .Kind = Axiom::Assets::AssetKind::Texture,
+      .RelativePath = RelativeHDRPath.generic_string(),
+      .CookedPath = CookedHDRRelativePath.generic_string(),
+      .FormatVersion = Axiom::Assets::kCookedTextureFormatVersion,
+      .SourceHash = 0,
+  });
+  ASSERT_TRUE(Axiom::Assets::SaveAssetCookManifest(
+      TempRoot / "Content" / "Cooked" / "AssetCookManifest.json", Manifest));
+
+  Axiom::EditorSceneState Scene;
+  Scene.Items = {{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+  }};
+  Scene.ObjectDetailsById["world"] = Axiom::EditorObjectDetails{
+      .ObjectId = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .SupportsTransform = false,
+      .TransformReadOnly = true,
+  };
+  Scene.WorldSettings.SkyboxHDRPath = RelativeHDRPath.generic_string();
+
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  Session.SetContentDir(TempRoot / "Content");
+  Session.SetSceneState(std::move(Scene));
+
+  ASSERT_TRUE(Session.GetState().Scene.WorldSettings.SkyboxHDRData != nullptr);
+  EXPECT_EQ(Session.GetState().Scene.WorldSettings.SkyboxHDRData->Width, 1u);
+  EXPECT_EQ(Session.GetState().Scene.WorldSettings.SkyboxHDRData->Height, 1u);
+  ASSERT_EQ(Session.GetState().Scene.WorldSettings.SkyboxHDRData->Pixels.size(), 4u);
+  EXPECT_FLOAT_EQ(Session.GetState().Scene.WorldSettings.SkyboxHDRData->Pixels[0],
+                  1.0f);
 }
 
 TEST(SceneLifecycleTests, SetPhysicsPropertiesUpdatesAuthoritativeDetails) {
