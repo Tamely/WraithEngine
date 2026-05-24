@@ -350,6 +350,33 @@ bool LoadStartupScene(EditorSession &Session) {
       Session.GetContentDir().empty() ? std::filesystem::path(AXIOM_CONTENT_DIR)
                                       : Session.GetContentDir();
   const bool CookedOnlyContent = Assets::IsCookedOnlyContentPath(ContentRoot);
+  if (CookedOnlyContent) {
+    std::string FailureReason;
+    const auto Descriptor =
+        Assets::ResolvePackagedContentDescriptor(ContentRoot, &FailureReason);
+    if (!Descriptor.has_value()) {
+      A_CORE_ERROR("StartupScene: packaged content at '{}' is invalid: {}",
+                   ContentRoot.string(), FailureReason);
+      return false;
+    }
+    if (!Assets::ValidatePackagedContentDescriptor(*Descriptor, &FailureReason)) {
+      A_CORE_ERROR("StartupScene: packaged content validation failed for '{}': {}",
+                   ContentRoot.string(), FailureReason);
+      return false;
+    }
+    auto Loaded = Assets::LoadCookedSceneFromFile(Descriptor->SceneAssetPath);
+    if (!Loaded.has_value()) {
+      A_CORE_ERROR("StartupScene: failed to load packaged scene asset '{}'",
+                   Descriptor->SceneAssetPath.string());
+      return false;
+    }
+    EnsureWorldFolder(*Loaded);
+    A_CORE_INFO("StartupScene: loaded packaged scene from {0}",
+                Descriptor->SceneAssetPath.string());
+    Session.SetSceneState(std::move(*Loaded));
+    return true;
+  }
+
   const Assets::LocalAssetSource ContentDir{ContentRoot};
   const auto SceneFilePath = ContentDir.ResolveRelative("scene.json");
 
@@ -364,13 +391,6 @@ bool LoadStartupScene(EditorSession &Session) {
     }
     A_CORE_WARN("StartupScene: scene file found but failed to load, "
                 "falling back to defaults");
-  }
-
-  if (CookedOnlyContent) {
-    A_CORE_ERROR(
-        "StartupScene: packaged cooked-only content at '{}' requires a valid scene.json and will not fall back to editor defaults",
-        ContentRoot.string());
-    return false;
   }
 
   EditorSceneState SceneState = BuildStartupSceneState(ContentRoot);

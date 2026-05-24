@@ -23,7 +23,7 @@ function hexToVec3(hex: string): [number, number, number] {
 }
 
 export function WorldDetailsPanel() {
-  const { worldSettings, setWorldSettings, assets, listAssets } = useRemoteViewport()
+  const { worldSettings, setWorldSettings, assets, listAssets, projectionType } = useRemoteViewport()
 
   // Derive primitive remote values so effect deps compare by value, not by the
   // worldSettings object reference (a fresh object on every snapshot refresh).
@@ -137,6 +137,12 @@ export function WorldDetailsPanel() {
                 Drop a .hdr from the content browser or pick one with the folder icon.
                 Leave empty to use the gradient above.
               </p>
+              {hdrActive && projectionType === "orthographic" ? (
+                <p className="text-[10px] leading-snug text-amber-400">
+                  HDR skies only render in Perspective mode right now. In Orthographic,
+                  the viewport falls back to the gradient colors.
+                </p>
+              ) : null}
             </div>
           </section>
         </div>

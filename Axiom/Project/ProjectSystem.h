@@ -44,9 +44,10 @@ struct ProjectOutputLayout {
   std::filesystem::path PackagedContentDir;
   std::filesystem::path PackagedCookedDir;
   std::filesystem::path PackagedCookManifestPath;
-  std::filesystem::path PackagedSceneFilePath;
+  std::filesystem::path PackagedSceneAssetPath;
   std::filesystem::path PackagedEngineContentDir;
   std::filesystem::path PackageManifestPath;
+  std::filesystem::path StagedRuntimeBinaryPath;
 };
 
 struct ProjectCookResult {
@@ -58,8 +59,11 @@ struct ProjectCookResult {
 struct ProjectPackageResult {
   ProjectCookResult Cook;
   std::size_t PackagedFileCount{0};
-  bool IncludedSceneFile{false};
+  bool IncludedSceneAsset{false};
   bool IncludedEngineContent{false};
+  bool IncludedRuntimeBinary{false};
+  std::filesystem::path SceneAssetPath;
+  std::filesystem::path RuntimeBinaryPath;
 };
 
 struct ProjectDescriptor {

@@ -23,7 +23,8 @@ export interface ProjectDescriptor {
   packageDir: string
   packagedContentDir: string
   packagedCookedDir: string
-  packagedSceneFilePath: string
+  packagedSceneAssetPath: string
+  stagedRuntimeBinaryPath: string
   packageManifestPath: string
   engineContentDir: string
   sceneFilePath: string

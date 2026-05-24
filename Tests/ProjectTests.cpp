@@ -1,3 +1,5 @@
+#include <Assets/AssetCookManifest.h>
+#include <Assets/CookedAssetRuntime.h>
 #include <Assets/SceneFile.h>
 #include <Core/Log.h>
 #include <Project/ProjectSystem.h>
@@ -5,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -284,10 +287,18 @@ TEST_F(ProjectSystemTests, PackageProjectContentStagesCookedProjectOutput) {
   EXPECT_TRUE(std::filesystem::exists(Created->Output.CookManifestPath));
   EXPECT_TRUE(std::filesystem::exists(Created->Output.PackagedCookedDir));
   EXPECT_TRUE(std::filesystem::exists(Created->Output.PackagedCookManifestPath));
-  EXPECT_TRUE(std::filesystem::exists(Created->Output.PackagedSceneFilePath));
+  EXPECT_TRUE(std::filesystem::exists(Created->Output.PackagedSceneAssetPath));
   EXPECT_TRUE(std::filesystem::exists(Created->Output.PackagedEngineContentDir));
   EXPECT_TRUE(std::filesystem::exists(Created->Output.PackageManifestPath));
+  EXPECT_TRUE(std::filesystem::exists(Created->Output.StagedRuntimeBinaryPath));
   EXPECT_GT(PackageResult->PackagedFileCount, 0u);
+  EXPECT_TRUE(PackageResult->IncludedSceneAsset);
+  EXPECT_TRUE(PackageResult->IncludedRuntimeBinary);
+  EXPECT_EQ(PackageResult->SceneAssetPath, Created->Output.PackagedSceneAssetPath);
+  EXPECT_EQ(PackageResult->RuntimeBinaryPath,
+            Created->Output.StagedRuntimeBinaryPath);
+  EXPECT_FALSE(std::filesystem::exists(Created->Output.PackageDir / "Content" /
+                                       "scene.json"));
 
   std::ifstream PackageManifestFile(Created->Output.PackageManifestPath);
   ASSERT_TRUE(PackageManifestFile.is_open());
@@ -295,10 +306,13 @@ TEST_F(ProjectSystemTests, PackageProjectContentStagesCookedProjectOutput) {
       (std::istreambuf_iterator<char>(PackageManifestFile)),
       std::istreambuf_iterator<char>());
   EXPECT_NE(PackageManifestText.find(
-                "\"contentMode\": \"transitional-scene-plus-cooked-assets\""),
+                "\"contentMode\": \"cooked-only-v1\""),
             std::string::npos);
   EXPECT_NE(PackageManifestText.find(
                 "\"assetCookManifest\": \"Content/Cooked/AssetCookManifest.json\""),
+            std::string::npos);
+  EXPECT_NE(PackageManifestText.find(
+                "\"sceneAsset\": \"Content/Cooked/scene.wscene\""),
             std::string::npos);
 }
 
@@ -376,8 +390,8 @@ TEST_F(ProjectSystemTests, PackagedProjectLoadsSceneFromCookedAssetsWithoutSourc
   EXPECT_FALSE(std::filesystem::exists(Created->Output.PackageDir / "Content" /
                                        "crate.jpg"));
 
-  const auto Loaded = Axiom::Assets::LoadSceneFromFile(
-      Created->Output.PackagedSceneFilePath);
+  const auto Loaded = Axiom::Assets::LoadCookedSceneFromFile(
+      Created->Output.PackagedSceneAssetPath);
   ASSERT_TRUE(Loaded.has_value());
   ASSERT_EQ(Loaded->MeshInstances.size(), 1u);
   EXPECT_EQ(Loaded->MeshInstances[0].ObjectId, "crate-1");
@@ -388,6 +402,20 @@ TEST_F(ProjectSystemTests, PackagedProjectLoadsSceneFromCookedAssetsWithoutSourc
   ASSERT_TRUE(DetailsIt->second.Material.has_value());
   ASSERT_TRUE(DetailsIt->second.Material->TextureAssetPath.has_value());
   EXPECT_EQ(*DetailsIt->second.Material->TextureAssetPath, "crate.jpg");
+  EXPECT_FALSE(std::filesystem::exists(Created->Output.PackageDir / "Content" /
+                                       "scene.json"));
+
+  Axiom::EditorSession Session(Axiom::SessionId{91});
+  Session.SetContentDir(Created->Output.PackagedContentDir);
+  ASSERT_TRUE(Axiom::LoadStartupScene(Session));
+  ASSERT_EQ(Session.GetState().Scene.MeshInstances.size(), 1u);
+  EXPECT_EQ(Session.GetState().Scene.MeshInstances[0].ObjectId, "crate-1");
+  const Axiom::EditorObjectDetails *LoadedDetails =
+      Session.FindObjectDetails("crate-1");
+  ASSERT_NE(LoadedDetails, nullptr);
+  ASSERT_TRUE(LoadedDetails->Material.has_value());
+  ASSERT_TRUE(LoadedDetails->Material->TextureAssetPath.has_value());
+  EXPECT_EQ(*LoadedDetails->Material->TextureAssetPath, "crate.jpg");
 }
 
 TEST_F(ProjectSystemTests, PackagedContentRequiresSceneFileAndWillNotFallback) {
@@ -399,4 +427,110 @@ TEST_F(ProjectSystemTests, PackagedContentRequiresSceneFileAndWillNotFallback) {
   Axiom::EditorSession Session(Axiom::SessionId{88});
   Session.SetContentDir(PackagedRoot / "Content");
   EXPECT_FALSE(Axiom::LoadStartupScene(Session));
+}
+
+TEST_F(ProjectSystemTests, PackagedContentValidationRejectsMissingCookedSceneAsset) {
+  EnsureLogInitialized();
+  std::string FailureReason;
+  const auto Created =
+      Axiom::Project::CreateProjectScaffold(Root, "Validate Scene", &FailureReason);
+  ASSERT_TRUE(Created.has_value()) << FailureReason;
+
+  const auto PackageResult =
+      Axiom::Project::PackageProjectContent(*Created, &FailureReason);
+  ASSERT_TRUE(PackageResult.has_value()) << FailureReason;
+
+  const auto Descriptor = Axiom::Assets::ResolvePackagedContentDescriptor(
+      Created->Output.PackagedContentDir, &FailureReason);
+  ASSERT_TRUE(Descriptor.has_value()) << FailureReason;
+
+  std::filesystem::remove(Descriptor->SceneAssetPath);
+  EXPECT_FALSE(
+      Axiom::Assets::ValidatePackagedContentDescriptor(*Descriptor, &FailureReason));
+  EXPECT_NE(FailureReason.find("scene asset is missing"), std::string::npos);
+}
+
+TEST_F(ProjectSystemTests,
+       PackagedContentValidationRejectsManifestEntriesThatDoNotResolve) {
+  EnsureLogInitialized();
+  std::string FailureReason;
+  const auto Created =
+      Axiom::Project::CreateProjectScaffold(Root, "Validate Manifest", &FailureReason);
+  ASSERT_TRUE(Created.has_value()) << FailureReason;
+
+  WriteSingleMeshObj(Created->Root.ContentDir, "singlemesh.obj");
+  std::filesystem::copy_file(
+      std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine" / "tf2 coconut.jpg",
+      Created->Root.ContentDir / "crate.jpg",
+      std::filesystem::copy_options::overwrite_existing);
+
+  Axiom::EditorSceneState Scene;
+  Scene.Items = {{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {{
+          .Id = "crate-1",
+          .DisplayName = "Crate",
+          .Kind = Axiom::EditorSceneItemKind::Mesh,
+          .Visible = true,
+      }},
+  }};
+  Scene.ObjectDetailsById["world"] = Axiom::EditorObjectDetails{
+      .ObjectId = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .SupportsTransform = false,
+      .TransformReadOnly = true,
+  };
+  Scene.ObjectDetailsById["crate-1"] = Axiom::EditorObjectDetails{
+      .ObjectId = "crate-1",
+      .DisplayName = "Crate",
+      .Kind = Axiom::EditorSceneItemKind::Mesh,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      .Transform = Axiom::EditorTransformDetails{},
+      .Material = Axiom::EditorMaterialProperties{
+          .TextureAssetPath = std::string("crate.jpg"),
+      },
+      .AssetRelativePath = "singlemesh.obj",
+  };
+  auto Material = std::make_shared<Axiom::MaterialInstance>();
+  Material->TextureAssetPath = "crate.jpg";
+  Scene.MeshInstances = {{
+      .ObjectId = "crate-1",
+      .Mesh = {},
+      .Material = Material,
+      .RenderPath = Axiom::MeshRenderPath::Graphics,
+      .Transform = glm::mat4(1.0f),
+      .AssetRelativePath = "singlemesh.obj",
+  }};
+  ASSERT_TRUE(Axiom::Assets::SaveSceneToFile(Created->Root.SceneFilePath, Scene));
+
+  const auto PackageResult =
+      Axiom::Project::PackageProjectContent(*Created, &FailureReason);
+  ASSERT_TRUE(PackageResult.has_value()) << FailureReason;
+
+  const auto Descriptor = Axiom::Assets::ResolvePackagedContentDescriptor(
+      Created->Output.PackagedContentDir, &FailureReason);
+  ASSERT_TRUE(Descriptor.has_value()) << FailureReason;
+
+  const auto Manifest =
+      Axiom::Assets::LoadAssetCookManifest(Descriptor->CookManifestPath);
+  ASSERT_TRUE(Manifest.has_value());
+  const auto EntryIt = std::find_if(
+      Manifest->Entries.begin(), Manifest->Entries.end(),
+      [](const Axiom::Assets::AssetCookManifestEntry &Entry) {
+        return Entry.RelativePath == "singlemesh.obj";
+      });
+  ASSERT_NE(EntryIt, Manifest->Entries.end());
+
+  ASSERT_TRUE(std::filesystem::remove(Descriptor->ContentRoot / EntryIt->CookedPath));
+  EXPECT_FALSE(
+      Axiom::Assets::ValidatePackagedContentDescriptor(*Descriptor, &FailureReason));
+  EXPECT_NE(FailureReason.find("singlemesh.obj"), std::string::npos);
+  EXPECT_NE(FailureReason.find("missing cooked asset"), std::string::npos);
 }

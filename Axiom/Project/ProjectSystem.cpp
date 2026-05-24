@@ -2,12 +2,15 @@
 
 #include "Assets/AssetCookManifest.h"
 #include "Assets/AssetCooker.h"
+#include "Assets/CookedAssetRuntime.h"
+#include "Assets/SceneFile.h"
 #include "Core/Log.h"
 
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <charconv>
+#include <cstdlib>
 #include <iomanip>
 #include <fstream>
 #include <sstream>
@@ -23,6 +26,10 @@
 
 #ifndef AXIOM_CONTENT_DIR
 #define AXIOM_CONTENT_DIR "Content"
+#endif
+
+#ifndef AXIOM_PACKAGED_RUNTIME_BINARY_PATH
+#define AXIOM_PACKAGED_RUNTIME_BINARY_PATH ""
 #endif
 
 namespace Axiom::Project {
@@ -572,8 +579,8 @@ bool SavePackageManifestFile(const ProjectDescriptor &Project,
          << "\",\n"
          << "  \"name\": \"" << EscapeJsonString(Project.Manifest.Name) << "\",\n"
          << "  \"slug\": \"" << EscapeJsonString(Project.Manifest.Slug) << "\",\n"
-         << "  \"contentMode\": \"transitional-scene-plus-cooked-assets\",\n"
-         << "  \"sceneFile\": \"Content/scene.json\",\n"
+         << "  \"contentMode\": \"cooked-only-v1\",\n"
+         << "  \"sceneAsset\": \"Content/Cooked/scene.wscene\",\n"
          << "  \"cookedDir\": \"Content/Cooked\",\n"
          << "  \"assetCookManifest\": \"Content/Cooked/AssetCookManifest.json\",\n"
          << "  \"engineContentDir\": \"Content/Engine\",\n"
@@ -639,10 +646,14 @@ ProjectOutputLayout ResolveProjectOutputLayout(const ProjectRoot &Root) {
       .PackagedCookManifestPath =
           Root.RootPath / "Package" / "Content" / "Cooked" /
           "AssetCookManifest.json",
-      .PackagedSceneFilePath = Root.RootPath / "Package" / "Content" / "scene.json",
+      .PackagedSceneAssetPath =
+          Root.RootPath / "Package" / "Content" / "Cooked" / "scene.wscene",
       .PackagedEngineContentDir =
           Root.RootPath / "Package" / "Content" / "Engine",
       .PackageManifestPath = Root.RootPath / "Package" / "package.wraith.json",
+      .StagedRuntimeBinaryPath =
+          Root.RootPath / "Package" /
+          std::filesystem::path(AXIOM_PACKAGED_RUNTIME_BINARY_PATH).filename(),
   };
 }
 
@@ -1032,6 +1043,13 @@ CookProjectContent(const ProjectDescriptor &Project, std::string *FailureReason)
   const auto Manifest =
       Assets::LoadAssetCookManifest(Project.Output.CookManifestPath)
           .value_or(Assets::AssetCookManifest{});
+  if (!std::filesystem::exists(Project.Output.CookManifestPath) &&
+      !Assets::SaveAssetCookManifest(Project.Output.CookManifestPath, Manifest)) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Failed to write the cooked asset manifest.";
+    }
+    return std::nullopt;
+  }
 
   return ProjectCookResult{
       .Output = Project.Output,
@@ -1066,16 +1084,26 @@ PackageProjectContent(const ProjectDescriptor &Project,
     return std::nullopt;
   }
 
-  if (std::filesystem::exists(Project.Root.SceneFilePath)) {
-    std::filesystem::copy_file(
-        Project.Root.SceneFilePath, Project.Output.PackagedSceneFilePath,
-        std::filesystem::copy_options::overwrite_existing, Error);
-    if (Error) {
-      if (FailureReason != nullptr) {
-        *FailureReason = "Failed to copy the project scene into the package.";
-      }
-      return std::nullopt;
+  if (!std::filesystem::exists(Project.Root.SceneFilePath)) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Failed to package the project scene because scene.json is missing.";
     }
+    return std::nullopt;
+  }
+
+  const auto LoadedScene = Assets::LoadSceneFromFile(Project.Root.SceneFilePath);
+  if (!LoadedScene.has_value()) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Failed to load the project scene before packaging.";
+    }
+    return std::nullopt;
+  }
+  if (!Assets::SaveCookedSceneToFile(Project.Output.PackagedSceneAssetPath,
+                                     *LoadedScene)) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Failed to write the cooked packaged scene asset.";
+    }
+    return std::nullopt;
   }
 
   const auto EngineContentDir =
@@ -1087,16 +1115,70 @@ PackageProjectContent(const ProjectDescriptor &Project,
     return std::nullopt;
   }
 
+  const std::filesystem::path RuntimeBinaryPath =
+      std::filesystem::path(AXIOM_PACKAGED_RUNTIME_BINARY_PATH);
+  if (RuntimeBinaryPath.empty() || !std::filesystem::exists(RuntimeBinaryPath)) {
+    if (FailureReason != nullptr) {
+      *FailureReason =
+          "Failed to stage AxiomPackagedRuntime because the built runtime binary was not found.";
+    }
+    return std::nullopt;
+  }
+
+  Error.clear();
+  std::filesystem::copy_file(
+      RuntimeBinaryPath, Project.Output.StagedRuntimeBinaryPath,
+      std::filesystem::copy_options::overwrite_existing, Error);
+  if (Error) {
+    if (FailureReason != nullptr) {
+      *FailureReason =
+          "Failed to copy AxiomPackagedRuntime into the package output.";
+    }
+    return std::nullopt;
+  }
+#ifndef _WIN32
+  std::filesystem::permissions(
+      Project.Output.StagedRuntimeBinaryPath,
+      std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec |
+          std::filesystem::perms::others_exec,
+      std::filesystem::perm_options::add, Error);
+  Error.clear();
+#endif
+
   ProjectPackageResult Result{
       .Cook = *CookResult,
       .PackagedFileCount = CountPackagedFiles(Project.Output.PackageDir),
-      .IncludedSceneFile = std::filesystem::exists(Project.Output.PackagedSceneFilePath),
+      .IncludedSceneAsset =
+          std::filesystem::exists(Project.Output.PackagedSceneAssetPath),
       .IncludedEngineContent =
           std::filesystem::exists(Project.Output.PackagedEngineContentDir),
+      .IncludedRuntimeBinary =
+          std::filesystem::exists(Project.Output.StagedRuntimeBinaryPath),
+      .SceneAssetPath = Project.Output.PackagedSceneAssetPath,
+      .RuntimeBinaryPath = Project.Output.StagedRuntimeBinaryPath,
   };
   if (!SavePackageManifestFile(Project, Result)) {
     if (FailureReason != nullptr) {
       *FailureReason = "Failed to write the package manifest.";
+    }
+    return std::nullopt;
+  }
+  std::string ValidationFailureReason;
+  const auto PackagedDescriptor =
+      Assets::ResolvePackagedContentDescriptor(Project.Output.PackagedContentDir,
+                                               &ValidationFailureReason);
+  if (!PackagedDescriptor.has_value()) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Packaged content validation failed: " +
+                       ValidationFailureReason;
+    }
+    return std::nullopt;
+  }
+  if (!Assets::ValidatePackagedContentDescriptor(*PackagedDescriptor,
+                                                 &ValidationFailureReason)) {
+    if (FailureReason != nullptr) {
+      *FailureReason = "Packaged content validation failed: " +
+                       ValidationFailureReason;
     }
     return std::nullopt;
   }
