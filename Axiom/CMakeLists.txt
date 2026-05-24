@@ -294,6 +294,7 @@ target_include_directories(AxiomCore PUBLIC
   "${CMAKE_SOURCE_DIR}/ThirdParty/vma"
   "${CMAKE_SOURCE_DIR}/ThirdParty/volk"
   "${CMAKE_SOURCE_DIR}/ThirdParty/spdlog/include"
+  "${rapidjson_SOURCE_DIR}/include"
   "$<$<BOOL:${AXIOM_ENABLE_PHYSICS}>:${AXIOM_JOLT_SOURCE_DIR}>"
   "${Vulkan_INCLUDE_DIRS}"
 )

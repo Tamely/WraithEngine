@@ -9,6 +9,9 @@
 
 #include "GizmoHitTest.h"
 #include "HeadlessCommandProtocol.h"
+#include <rapidjson/document.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
 #include <Session/MeshPicking.h>
 #include <Renderer/VideoEncoderFactory.h>
 #include <stb_image.h>
@@ -392,226 +395,196 @@ std::string JsonResponse(std::string_view Status, std::string_view Payload) {
   return BuildHttpResponse(Status, "application/json; charset=utf-8", Payload);
 }
 
-std::optional<std::string> ExtractJsonStringField(std::string_view Body,
-                                                  std::string_view FieldName) {
-  const std::string Needle = "\"" + std::string(FieldName) + "\"";
-  const size_t KeyPos = Body.find(Needle);
-  if (KeyPos == std::string_view::npos) {
-    return std::nullopt;
-  }
+using JsonWriter = rapidjson::Writer<rapidjson::StringBuffer>;
 
-  const size_t ColonPos = Body.find(':', KeyPos + Needle.size());
-  if (ColonPos == std::string_view::npos) {
-    return std::nullopt;
-  }
-
-  size_t ValuePos = ColonPos + 1;
-  while (ValuePos < Body.size() &&
-         std::isspace(static_cast<unsigned char>(Body[ValuePos])) != 0) {
-    ++ValuePos;
-  }
-  if (ValuePos >= Body.size() || Body[ValuePos] != '"') {
-    return std::nullopt;
-  }
-  ++ValuePos;
-
-  std::string Result;
-  while (ValuePos < Body.size()) {
-    const char Character = Body[ValuePos++];
-    if (Character == '"') {
-      return Result;
-    }
-    if (Character == '\\') {
-      if (ValuePos >= Body.size()) {
-        return std::nullopt;
-      }
-      const char Escaped = Body[ValuePos++];
-      switch (Escaped) {
-      case '\\':
-      case '"':
-      case '/':
-        Result.push_back(Escaped);
-        break;
-      case 'n':
-        Result.push_back('\n');
-        break;
-      case 'r':
-        Result.push_back('\r');
-        break;
-      case 't':
-        Result.push_back('\t');
-        break;
-      default:
-        return std::nullopt;
-      }
-      continue;
-    }
-    Result.push_back(Character);
-  }
-
-  return std::nullopt;
+void WriteJsonString(JsonWriter &Writer, std::string_view Value) {
+  Writer.String(Value.data(), static_cast<rapidjson::SizeType>(Value.size()));
 }
 
-std::string EscapeJsonString(std::string_view Value) {
-  std::string Result;
-  Result.reserve(Value.size() + 4);
-  for (const char Character : Value) {
-    switch (Character) {
-    case '\\':
-      Result += "\\\\";
-      break;
-    case '"':
-      Result += "\\\"";
-      break;
-    case '\n':
-      Result += "\\n";
-      break;
-    case '\r':
-      Result += "\\r";
-      break;
-    case '\t':
-      Result += "\\t";
-      break;
-    default:
-      Result.push_back(Character);
-      break;
-    }
+template <typename Fn> std::string BuildJson(Fn &&FnWriter) {
+  rapidjson::StringBuffer Buffer;
+  JsonWriter Writer(Buffer);
+  FnWriter(Writer);
+  return std::string(Buffer.GetString(), Buffer.GetSize());
+}
+
+std::string SerializeTypeOnlyJson(std::string_view Type) {
+  return BuildJson([&](JsonWriter &Writer) {
+    Writer.StartObject();
+    Writer.Key("type");
+    WriteJsonString(Writer, Type);
+    Writer.EndObject();
+  });
+}
+
+std::optional<std::string> ExtractJsonStringField(std::string_view Body,
+                                                  std::string_view FieldName) {
+  std::string MutableBody(Body);
+  rapidjson::Document Document;
+  Document.ParseInsitu<rapidjson::kParseStopWhenDoneFlag>(MutableBody.data());
+  if (Document.HasParseError() || !Document.IsObject()) {
+    return std::nullopt;
   }
-  return Result;
+
+  const auto It = Document.FindMember(
+      std::string(FieldName).c_str());
+  if (It == Document.MemberEnd() || !It->value.IsString()) {
+    return std::nullopt;
+  }
+  return std::string(It->value.GetString(), It->value.GetStringLength());
+}
+
+void WriteProjectJson(JsonWriter &Writer,
+                      const Project::ProjectDescriptor &Project) {
+  Writer.StartObject();
+  Writer.Key("projectId");
+  WriteJsonString(Writer, Project.Manifest.ProjectId);
+  Writer.Key("name");
+  WriteJsonString(Writer, Project.Manifest.Name);
+  Writer.Key("slug");
+  WriteJsonString(Writer, Project.Manifest.Slug);
+  Writer.Key("rootPath");
+  WriteJsonString(Writer, Project.Root.RootPath.string());
+  Writer.Key("contentDir");
+  WriteJsonString(Writer, Project.Root.ContentDir.string());
+  Writer.Key("scriptsDir");
+  WriteJsonString(Writer, Project.ScriptWorkspace.ScriptsDir.string());
+  Writer.Key("scriptProjectPath");
+  WriteJsonString(Writer, Project.ScriptWorkspace.ScriptProjectPath.string());
+  Writer.Key("scriptSolutionPath");
+  WriteJsonString(Writer, Project.ScriptWorkspace.ScriptSolutionPath.string());
+  Writer.Key("scriptAssemblyName");
+  WriteJsonString(Writer, Project.ScriptWorkspace.AssemblyName);
+  Writer.Key("scriptRootNamespace");
+  WriteJsonString(Writer, Project.ScriptWorkspace.RootNamespace);
+  Writer.Key("starterScriptPath");
+  WriteJsonString(Writer, Project.ScriptWorkspace.StarterScriptPath.string());
+  Writer.Key("starterScriptClassName");
+  WriteJsonString(Writer, Project.ScriptWorkspace.StarterScriptClassName);
+  Writer.Key("starterScriptQualifiedClassName");
+  WriteJsonString(Writer,
+                  Project.ScriptWorkspace.StarterScriptQualifiedClassName);
+  Writer.Key("cookedDir");
+  WriteJsonString(Writer, Project.Output.CookedDir.string());
+  Writer.Key("cookManifestPath");
+  WriteJsonString(Writer, Project.Output.CookManifestPath.string());
+  Writer.Key("buildDir");
+  WriteJsonString(Writer, Project.Output.BuildDir.string());
+  Writer.Key("packageDir");
+  WriteJsonString(Writer, Project.Output.PackageDir.string());
+  Writer.Key("packagedContentDir");
+  WriteJsonString(Writer, Project.Output.PackagedContentDir.string());
+  Writer.Key("packagedCookedDir");
+  WriteJsonString(Writer, Project.Output.PackagedCookedDir.string());
+  Writer.Key("packagedSceneAssetPath");
+  WriteJsonString(Writer, Project.Output.PackagedSceneAssetPath.string());
+  Writer.Key("stagedRuntimeBinaryPath");
+  WriteJsonString(Writer, Project.Output.StagedRuntimeBinaryPath.string());
+  Writer.Key("packageManifestPath");
+  WriteJsonString(Writer, Project.Output.PackageManifestPath.string());
+  Writer.Key("engineContentDir");
+  WriteJsonString(
+      Writer, (std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine").string());
+  Writer.Key("sceneFilePath");
+  WriteJsonString(Writer, Project.Root.SceneFilePath.string());
+  Writer.EndObject();
 }
 
 std::string SerializeProjectJson(const Project::ProjectDescriptor &Project) {
-  std::ostringstream Stream;
-  Stream << "{"
-         << "\"projectId\":\"" << EscapeJsonString(Project.Manifest.ProjectId)
-         << "\",\"name\":\"" << EscapeJsonString(Project.Manifest.Name)
-         << "\",\"slug\":\"" << EscapeJsonString(Project.Manifest.Slug)
-         << "\",\"rootPath\":\""
-         << EscapeJsonString(Project.Root.RootPath.string())
-         << "\",\"contentDir\":\""
-         << EscapeJsonString(Project.Root.ContentDir.string())
-         << "\",\"scriptsDir\":\""
-         << EscapeJsonString(Project.ScriptWorkspace.ScriptsDir.string())
-         << "\",\"scriptProjectPath\":\""
-         << EscapeJsonString(Project.ScriptWorkspace.ScriptProjectPath.string())
-         << "\",\"scriptSolutionPath\":\""
-         << EscapeJsonString(Project.ScriptWorkspace.ScriptSolutionPath.string())
-         << "\",\"scriptAssemblyName\":\""
-         << EscapeJsonString(Project.ScriptWorkspace.AssemblyName)
-         << "\",\"scriptRootNamespace\":\""
-         << EscapeJsonString(Project.ScriptWorkspace.RootNamespace)
-         << "\",\"starterScriptPath\":\""
-         << EscapeJsonString(Project.ScriptWorkspace.StarterScriptPath.string())
-         << "\",\"starterScriptClassName\":\""
-         << EscapeJsonString(Project.ScriptWorkspace.StarterScriptClassName)
-         << "\",\"starterScriptQualifiedClassName\":\""
-         << EscapeJsonString(
-                Project.ScriptWorkspace.StarterScriptQualifiedClassName)
-         << "\",\"cookedDir\":\""
-         << EscapeJsonString(Project.Output.CookedDir.string())
-         << "\",\"cookManifestPath\":\""
-         << EscapeJsonString(Project.Output.CookManifestPath.string())
-         << "\",\"buildDir\":\""
-         << EscapeJsonString(Project.Output.BuildDir.string())
-         << "\",\"packageDir\":\""
-         << EscapeJsonString(Project.Output.PackageDir.string())
-         << "\",\"packagedContentDir\":\""
-         << EscapeJsonString(Project.Output.PackagedContentDir.string())
-         << "\",\"packagedCookedDir\":\""
-         << EscapeJsonString(Project.Output.PackagedCookedDir.string())
-         << "\",\"packagedSceneAssetPath\":\""
-         << EscapeJsonString(Project.Output.PackagedSceneAssetPath.string())
-         << "\",\"stagedRuntimeBinaryPath\":\""
-         << EscapeJsonString(Project.Output.StagedRuntimeBinaryPath.string())
-         << "\",\"packageManifestPath\":\""
-         << EscapeJsonString(Project.Output.PackageManifestPath.string())
-         << "\",\"engineContentDir\":\""
-         << EscapeJsonString((std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine").string())
-         << "\",\"sceneFilePath\":\""
-         << EscapeJsonString(Project.Root.SceneFilePath.string())
-         << "\"}";
-  return Stream.str();
+  return BuildJson([&](JsonWriter &Writer) { WriteProjectJson(Writer, Project); });
 }
 
 std::string SerializeProjectList(
     const std::vector<Project::ProjectDescriptor> &Projects,
     const std::optional<Project::ProjectDescriptor> &ActiveProject) {
-  std::ostringstream Stream;
-  Stream << "{\"type\":\"projects\",\"activeProjectSlug\":";
-  if (ActiveProject.has_value()) {
-    Stream << "\"" << EscapeJsonString(ActiveProject->Manifest.Slug) << "\"";
-  } else {
-    Stream << "null";
-  }
-  Stream << ",\"projects\":[";
-  for (size_t Index = 0; Index < Projects.size(); ++Index) {
-    if (Index > 0) {
-      Stream << ",";
+  return BuildJson([&](JsonWriter &Writer) {
+    Writer.StartObject();
+    Writer.Key("type");
+    Writer.String("projects");
+    Writer.Key("activeProjectSlug");
+    if (ActiveProject.has_value()) {
+      WriteJsonString(Writer, ActiveProject->Manifest.Slug);
+    } else {
+      Writer.Null();
     }
-    Stream << SerializeProjectJson(Projects[Index]);
-  }
-  Stream << "]}";
-  return Stream.str();
+    Writer.Key("projects");
+    Writer.StartArray();
+    for (const auto &Project : Projects) {
+      WriteProjectJson(Writer, Project);
+    }
+    Writer.EndArray();
+    Writer.EndObject();
+  });
 }
 
 std::string SerializeCurrentProject(
     const std::optional<Project::ProjectDescriptor> &ActiveProject) {
-  std::ostringstream Stream;
-  Stream << "{\"type\":\"current_project\",\"project\":";
-  if (ActiveProject.has_value()) {
-    Stream << SerializeProjectJson(*ActiveProject);
-  } else {
-    Stream << "null";
-  }
-  Stream << "}";
-  return Stream.str();
+  return BuildJson([&](JsonWriter &Writer) {
+    Writer.StartObject();
+    Writer.Key("type");
+    Writer.String("current_project");
+    Writer.Key("project");
+    if (ActiveProject.has_value()) {
+      WriteProjectJson(Writer, *ActiveProject);
+    } else {
+      Writer.Null();
+    }
+    Writer.EndObject();
+  });
 }
 
 std::string SerializeProjectCookResult(
     const Project::ProjectDescriptor &Project,
     const Project::ProjectCookResult &Result) {
-  std::ostringstream Stream;
-  Stream << "{"
-         << "\"type\":\"project_cooked\""
-         << ",\"project\":" << SerializeProjectJson(Project)
-         << ",\"cookedSourceAssetCount\":" << Result.CookedSourceAssetCount
-         << ",\"manifestEntryCount\":" << Result.ManifestEntryCount
-         << ",\"cookManifestPath\":\""
-         << EscapeJsonString(Result.Output.CookManifestPath.string())
-         << "\"}";
-  return Stream.str();
+  return BuildJson([&](JsonWriter &Writer) {
+    Writer.StartObject();
+    Writer.Key("type");
+    Writer.String("project_cooked");
+    Writer.Key("project");
+    WriteProjectJson(Writer, Project);
+    Writer.Key("cookedSourceAssetCount");
+    Writer.Uint64(Result.CookedSourceAssetCount);
+    Writer.Key("manifestEntryCount");
+    Writer.Uint64(Result.ManifestEntryCount);
+    Writer.Key("cookManifestPath");
+    WriteJsonString(Writer, Result.Output.CookManifestPath.string());
+    Writer.EndObject();
+  });
 }
 
 std::string SerializeProjectPackageResult(
     const Project::ProjectDescriptor &Project,
     const Project::ProjectPackageResult &Result) {
-  std::ostringstream Stream;
-  Stream << "{"
-         << "\"type\":\"project_packaged\""
-         << ",\"project\":" << SerializeProjectJson(Project)
-         << ",\"cookedSourceAssetCount\":" << Result.Cook.CookedSourceAssetCount
-         << ",\"manifestEntryCount\":" << Result.Cook.ManifestEntryCount
-         << ",\"packagedFileCount\":" << Result.PackagedFileCount
-         << ",\"includedSceneAsset\":"
-         << (Result.IncludedSceneAsset ? "true" : "false")
-         << ",\"includedEngineContent\":"
-         << (Result.IncludedEngineContent ? "true" : "false")
-         << ",\"includedRuntimeBinary\":"
-         << (Result.IncludedRuntimeBinary ? "true" : "false")
-         << ",\"sceneAssetPath\":\""
-         << EscapeJsonString(Result.SceneAssetPath.string())
-         << "\",\"runtimeBinaryPath\":\""
-         << EscapeJsonString(Result.RuntimeBinaryPath.string())
-         << "\""
-         << ",\"packagedContentPath\":\""
-         << EscapeJsonString(Result.Cook.Output.PackagedContentDir.string())
-         << "\""
-         << ",\"packageDir\":\""
-         << EscapeJsonString(Result.Cook.Output.PackageDir.string())
-         << "\",\"packageManifestPath\":\""
-         << EscapeJsonString(Result.Cook.Output.PackageManifestPath.string())
-         << "\"}";
-  return Stream.str();
+  return BuildJson([&](JsonWriter &Writer) {
+    Writer.StartObject();
+    Writer.Key("type");
+    Writer.String("project_packaged");
+    Writer.Key("project");
+    WriteProjectJson(Writer, Project);
+    Writer.Key("cookedSourceAssetCount");
+    Writer.Uint64(Result.Cook.CookedSourceAssetCount);
+    Writer.Key("manifestEntryCount");
+    Writer.Uint64(Result.Cook.ManifestEntryCount);
+    Writer.Key("packagedFileCount");
+    Writer.Uint64(Result.PackagedFileCount);
+    Writer.Key("includedSceneAsset");
+    Writer.Bool(Result.IncludedSceneAsset);
+    Writer.Key("includedEngineContent");
+    Writer.Bool(Result.IncludedEngineContent);
+    Writer.Key("includedRuntimeBinary");
+    Writer.Bool(Result.IncludedRuntimeBinary);
+    Writer.Key("sceneAssetPath");
+    WriteJsonString(Writer, Result.SceneAssetPath.string());
+    Writer.Key("runtimeBinaryPath");
+    WriteJsonString(Writer, Result.RuntimeBinaryPath.string());
+    Writer.Key("packagedContentPath");
+    WriteJsonString(Writer, Result.Cook.Output.PackagedContentDir.string());
+    Writer.Key("packageDir");
+    WriteJsonString(Writer, Result.Cook.Output.PackageDir.string());
+    Writer.Key("packageManifestPath");
+    WriteJsonString(Writer, Result.Cook.Output.PackageManifestPath.string());
+    Writer.EndObject();
+  });
 }
 
 bool IsValidScriptRelativePath(std::filesystem::path RelativePath) {
@@ -633,49 +606,65 @@ bool IsValidScriptRelativePath(std::filesystem::path RelativePath) {
 }
 
 std::string SerializeScriptListJson(const std::vector<std::string> &Files) {
-  std::ostringstream Stream;
-  Stream << "{\"type\":\"scripts_list\",\"files\":[";
-  for (size_t Index = 0; Index < Files.size(); ++Index) {
-    if (Index > 0) {
-      Stream << ",";
+  return BuildJson([&](JsonWriter &Writer) {
+    Writer.StartObject();
+    Writer.Key("type");
+    Writer.String("scripts_list");
+    Writer.Key("files");
+    Writer.StartArray();
+    for (const auto &File : Files) {
+      WriteJsonString(Writer, File);
     }
-    Stream << "\"" << EscapeJsonString(Files[Index]) << "\"";
-  }
-  Stream << "]}";
-  return Stream.str();
+    Writer.EndArray();
+    Writer.EndObject();
+  });
 }
 
 std::string SerializeScriptFileJson(std::string_view RelativePath,
                                     std::string_view Content) {
-  std::ostringstream Stream;
-  Stream << "{\"type\":\"script_file\",\"path\":\""
-         << EscapeJsonString(RelativePath) << "\",\"content\":\""
-         << EscapeJsonString(Content) << "\"}";
-  return Stream.str();
+  return BuildJson([&](JsonWriter &Writer) {
+    Writer.StartObject();
+    Writer.Key("type");
+    Writer.String("script_file");
+    Writer.Key("path");
+    WriteJsonString(Writer, RelativePath);
+    Writer.Key("content");
+    WriteJsonString(Writer, Content);
+    Writer.EndObject();
+  });
 }
 
 std::string SerializeScriptMutationJson(std::string_view MutationType,
                                         std::string_view RelativePath) {
-  std::ostringstream Stream;
-  Stream << "{\"type\":\"" << MutationType << "\",\"path\":\""
-         << EscapeJsonString(RelativePath) << "\"}";
-  return Stream.str();
+  return BuildJson([&](JsonWriter &Writer) {
+    Writer.StartObject();
+    Writer.Key("type");
+    WriteJsonString(Writer, MutationType);
+    Writer.Key("path");
+    WriteJsonString(Writer, RelativePath);
+    Writer.EndObject();
+  });
 }
 
 std::string SerializeScriptClassesJson(
     const std::vector<std::pair<std::string, std::string>> &Classes) {
-  std::ostringstream Stream;
-  Stream << "{\"type\":\"script_classes\",\"classes\":[";
-  for (size_t Index = 0; Index < Classes.size(); ++Index) {
-    if (Index > 0) {
-      Stream << ",";
+  return BuildJson([&](JsonWriter &Writer) {
+    Writer.StartObject();
+    Writer.Key("type");
+    Writer.String("script_classes");
+    Writer.Key("classes");
+    Writer.StartArray();
+    for (const auto &Entry : Classes) {
+      Writer.StartObject();
+      Writer.Key("className");
+      WriteJsonString(Writer, Entry.first);
+      Writer.Key("path");
+      WriteJsonString(Writer, Entry.second);
+      Writer.EndObject();
     }
-    Stream << "{\"className\":\"" << EscapeJsonString(Classes[Index].first)
-           << "\",\"path\":\"" << EscapeJsonString(Classes[Index].second)
-           << "\"}";
-  }
-  Stream << "]}";
-  return Stream.str();
+    Writer.EndArray();
+    Writer.EndObject();
+  });
 }
 
 // Loads an image file, scales it to fit within MaxDim x MaxDim (preserving
@@ -1361,7 +1350,7 @@ bool RemoteViewportServer::HandlePostRequest(uintptr_t ClientSocketValue,
   }
 
   const std::string Response =
-      JsonResponse("202 Accepted", "{\"type\":\"accepted\"}");
+      JsonResponse("202 Accepted", SerializeTypeOnlyJson("accepted"));
   SendAll(ClientSocket, Response.data(), Response.size());
   return false;
 }
@@ -2073,7 +2062,7 @@ bool RemoteViewportServer::HandleWebRtcIceCandidateRequest(
   }
 
   const std::string Response =
-      JsonResponse("202 Accepted", "{\"type\":\"accepted\"}");
+      JsonResponse("202 Accepted", SerializeTypeOnlyJson("accepted"));
   SendAll(ClientSocket, Response.data(), Response.size());
   return false;
 }
@@ -2299,15 +2288,19 @@ bool RemoteViewportServer::HandleAssetUploadRequest(
     BroadcastTextMessage(SerializeAssetList(CollectVisibleAssets()));
   }
 
-  // Build JSON response with saved paths.
-  std::ostringstream Out;
-  Out << "{\"type\":\"assets_uploaded\",\"files\":[";
-  for (size_t i = 0; i < Saved.size(); ++i) {
-    if (i > 0) Out << ",";
-    Out << "\"" << EscapeJson(Saved[i]) << "\"";
-  }
-  Out << "]}";
-  const std::string Response = JsonResponse("200 OK", Out.str());
+  const std::string Payload = BuildJson([&](JsonWriter &Writer) {
+    Writer.StartObject();
+    Writer.Key("type");
+    Writer.String("assets_uploaded");
+    Writer.Key("files");
+    Writer.StartArray();
+    for (const auto &SavedPath : Saved) {
+      WriteJsonString(Writer, SavedPath);
+    }
+    Writer.EndArray();
+    Writer.EndObject();
+  });
+  const std::string Response = JsonResponse("200 OK", Payload);
   SendAll(ClientSocket, Response.data(), Response.size());
   return false;
 }
@@ -2982,7 +2975,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     m_Host.ReloadUserScripts();
     if (Client->WebRtcSession != nullptr) {
       Client->WebRtcSession->SendReliableMessage(
-          "{\"type\":\"scripts_reloaded\"}");
+          SerializeTypeOnlyJson("scripts_reloaded"));
     }
     return true;
   }

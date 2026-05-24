@@ -31,6 +31,16 @@ add_subdirectory(ThirdParty/glm/glm)
 
 include(FetchContent)
 FetchContent_Declare(
+  rapidjson
+  URL https://github.com/Tencent/rapidjson/archive/refs/tags/v1.1.0.zip
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_GetProperties(rapidjson)
+if(NOT rapidjson_POPULATED)
+  FetchContent_Populate(rapidjson)
+endif()
+
+FetchContent_Declare(
   assimp
   URL https://github.com/assimp/assimp/archive/refs/tags/v5.4.3.zip
   DOWNLOAD_EXTRACT_TIMESTAMP TRUE

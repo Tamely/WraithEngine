@@ -6,6 +6,10 @@
 #include "Assets/SceneFile.h"
 #include "Core/Log.h"
 
+#include <rapidjson/document.h>
+#include <rapidjson/prettywriter.h>
+#include <rapidjson/stringbuffer.h>
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -38,162 +42,13 @@ constexpr std::string_view kDefaultStarterScriptClassName = "StarterScript";
 constexpr std::string_view kCsProjectTypeGuid =
     "{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}";
 
-std::string EscapeJsonString(std::string_view Value) {
-  std::string Result;
-  Result.reserve(Value.size() + 4);
-  for (const char Character : Value) {
-    switch (Character) {
-    case '\\':
-      Result += "\\\\";
-      break;
-    case '"':
-      Result += "\\\"";
-      break;
-    case '\n':
-      Result += "\\n";
-      break;
-    case '\r':
-      Result += "\\r";
-      break;
-    case '\t':
-      Result += "\\t";
-      break;
-    default:
-      Result.push_back(Character);
-      break;
-    }
-  }
-  return Result;
+std::string SerializePrettyJson(const rapidjson::Document &Document) {
+  rapidjson::StringBuffer Buffer;
+  rapidjson::PrettyWriter<rapidjson::StringBuffer> Writer(Buffer);
+  Writer.SetIndent(' ', 2);
+  Document.Accept(Writer);
+  return std::string(Buffer.GetString(), Buffer.GetSize()) + '\n';
 }
-
-class JsonObjectParser {
-public:
-  explicit JsonObjectParser(std::string_view Text) : m_Text(Text) {}
-
-  bool ParseObject(std::unordered_map<std::string, std::string> &Out) {
-    SkipWhitespace();
-    if (!Consume('{')) {
-      return false;
-    }
-
-    SkipWhitespace();
-    if (Consume('}')) {
-      return true;
-    }
-
-    while (m_Index < m_Text.size()) {
-      const auto Key = ParseString();
-      if (!Key.has_value()) {
-        return false;
-      }
-
-      SkipWhitespace();
-      if (!Consume(':')) {
-        return false;
-      }
-
-      SkipWhitespace();
-      std::string Value;
-      if (Peek() == '"') {
-        const auto Parsed = ParseString();
-        if (!Parsed.has_value()) {
-          return false;
-        }
-        Value = *Parsed;
-      } else {
-        const size_t Start = m_Index;
-        while (m_Index < m_Text.size()) {
-          const char Character = m_Text[m_Index];
-          if (Character == ',' || Character == '}' ||
-              std::isspace(static_cast<unsigned char>(Character))) {
-            break;
-          }
-          ++m_Index;
-        }
-        Value = std::string(m_Text.substr(Start, m_Index - Start));
-      }
-      Out.emplace(*Key, std::move(Value));
-
-      SkipWhitespace();
-      if (Consume('}')) {
-        return true;
-      }
-      if (!Consume(',')) {
-        return false;
-      }
-      SkipWhitespace();
-    }
-
-    return false;
-  }
-
-private:
-  std::optional<std::string> ParseString() {
-    if (!Consume('"')) {
-      return std::nullopt;
-    }
-
-    std::string Result;
-    while (m_Index < m_Text.size()) {
-      const char Character = m_Text[m_Index++];
-      if (Character == '"') {
-        return Result;
-      }
-      if (Character == '\\') {
-        if (m_Index >= m_Text.size()) {
-          return std::nullopt;
-        }
-        const char Escaped = m_Text[m_Index++];
-        switch (Escaped) {
-        case '\\':
-        case '"':
-        case '/':
-          Result.push_back(Escaped);
-          break;
-        case 'n':
-          Result.push_back('\n');
-          break;
-        case 'r':
-          Result.push_back('\r');
-          break;
-        case 't':
-          Result.push_back('\t');
-          break;
-        default:
-          return std::nullopt;
-        }
-        continue;
-      }
-      Result.push_back(Character);
-    }
-    return std::nullopt;
-  }
-
-  void SkipWhitespace() {
-    while (m_Index < m_Text.size() &&
-           std::isspace(static_cast<unsigned char>(m_Text[m_Index]))) {
-      ++m_Index;
-    }
-  }
-
-  bool Consume(char Expected) {
-    if (Peek() != Expected) {
-      return false;
-    }
-    ++m_Index;
-    return true;
-  }
-
-  char Peek() const {
-    if (m_Index >= m_Text.size()) {
-      return '\0';
-    }
-    return m_Text[m_Index];
-  }
-
-  std::string_view m_Text;
-  size_t m_Index{0};
-};
 
 std::string BuildProjectId(std::string_view Slug) {
   // Stable enough for v1 scaffold creation without adding a UUID dependency.
@@ -572,24 +427,53 @@ bool CopyDirectoryTree(const std::filesystem::path &Source,
 
 bool SavePackageManifestFile(const ProjectDescriptor &Project,
                              const ProjectPackageResult &PackageResult) {
-  std::ostringstream Stream;
-  Stream << "{\n"
-         << "  \"version\": 1,\n"
-         << "  \"projectId\": \"" << EscapeJsonString(Project.Manifest.ProjectId)
-         << "\",\n"
-         << "  \"name\": \"" << EscapeJsonString(Project.Manifest.Name) << "\",\n"
-         << "  \"slug\": \"" << EscapeJsonString(Project.Manifest.Slug) << "\",\n"
-         << "  \"contentMode\": \"cooked-only-v1\",\n"
-         << "  \"sceneAsset\": \"Content/Cooked/scene.wscene\",\n"
-         << "  \"cookedDir\": \"Content/Cooked\",\n"
-         << "  \"assetCookManifest\": \"Content/Cooked/AssetCookManifest.json\",\n"
-         << "  \"engineContentDir\": \"Content/Engine\",\n"
-         << "  \"cookedSourceAssetCount\": "
-         << PackageResult.Cook.CookedSourceAssetCount << ",\n"
-         << "  \"manifestEntryCount\": " << PackageResult.Cook.ManifestEntryCount
-         << "\n"
-         << "}\n";
-  return WriteTextFile(Project.Output.PackageManifestPath, Stream.str());
+  rapidjson::Document Document;
+  Document.SetObject();
+  auto &Allocator = Document.GetAllocator();
+
+  Document.AddMember("version", 1u, Allocator);
+  Document.AddMember(
+      "projectId",
+      rapidjson::Value(Project.Manifest.ProjectId.c_str(),
+                       static_cast<rapidjson::SizeType>(
+                           Project.Manifest.ProjectId.size()),
+                       Allocator)
+          .Move(),
+      Allocator);
+  Document.AddMember(
+      "name",
+      rapidjson::Value(Project.Manifest.Name.c_str(),
+                       static_cast<rapidjson::SizeType>(Project.Manifest.Name.size()),
+                       Allocator)
+          .Move(),
+      Allocator);
+  Document.AddMember(
+      "slug",
+      rapidjson::Value(Project.Manifest.Slug.c_str(),
+                       static_cast<rapidjson::SizeType>(Project.Manifest.Slug.size()),
+                       Allocator)
+          .Move(),
+      Allocator);
+  Document.AddMember("contentMode", "cooked-only-v1", Allocator);
+  Document.AddMember("sceneAsset", "Content/Cooked/scene.wscene", Allocator);
+  Document.AddMember("cookedDir", "Content/Cooked", Allocator);
+  Document.AddMember("assetCookManifest",
+                     "Content/Cooked/AssetCookManifest.json", Allocator);
+  Document.AddMember("engineContentDir", "Content/Engine", Allocator);
+  Document.AddMember(
+      "cookedSourceAssetCount",
+      rapidjson::Value()
+          .SetUint64(
+              static_cast<uint64_t>(PackageResult.Cook.CookedSourceAssetCount)),
+      Allocator);
+  Document.AddMember(
+      "manifestEntryCount",
+      rapidjson::Value().SetUint64(
+          static_cast<uint64_t>(PackageResult.Cook.ManifestEntryCount)),
+      Allocator);
+
+  return WriteTextFile(Project.Output.PackageManifestPath,
+                       SerializePrettyJson(Document));
 }
 
 } // namespace
@@ -749,24 +633,51 @@ bool SaveProjectManifest(const std::filesystem::path &ManifestPath,
     return false;
   }
 
-  std::ofstream File(ManifestPath);
-  if (!File.is_open()) {
-    A_CORE_ERROR("ProjectSystem: failed to open manifest '{}'",
-                 ManifestPath.string());
-    return false;
-  }
+  rapidjson::Document Document;
+  Document.SetObject();
+  auto &Allocator = Document.GetAllocator();
 
-  File << "{\n"
-       << "  \"version\": " << Manifest.Version << ",\n"
-       << "  \"projectId\": \"" << EscapeJsonString(Manifest.ProjectId) << "\",\n"
-       << "  \"name\": \"" << EscapeJsonString(Manifest.Name) << "\",\n"
-       << "  \"slug\": \"" << EscapeJsonString(Manifest.Slug) << "\",\n"
-       << "  \"scriptAssemblyName\": \""
-       << EscapeJsonString(Manifest.ScriptAssemblyName) << "\",\n"
-       << "  \"scriptRootNamespace\": \""
-       << EscapeJsonString(Manifest.ScriptRootNamespace) << "\"\n"
-       << "}\n";
-  return File.good();
+  Document.AddMember("version", Manifest.Version, Allocator);
+  Document.AddMember(
+      "projectId",
+      rapidjson::Value(Manifest.ProjectId.c_str(),
+                       static_cast<rapidjson::SizeType>(
+                           Manifest.ProjectId.size()),
+                       Allocator)
+          .Move(),
+      Allocator);
+  Document.AddMember(
+      "name",
+      rapidjson::Value(Manifest.Name.c_str(),
+                       static_cast<rapidjson::SizeType>(Manifest.Name.size()),
+                       Allocator)
+          .Move(),
+      Allocator);
+  Document.AddMember(
+      "slug",
+      rapidjson::Value(Manifest.Slug.c_str(),
+                       static_cast<rapidjson::SizeType>(Manifest.Slug.size()),
+                       Allocator)
+          .Move(),
+      Allocator);
+  Document.AddMember(
+      "scriptAssemblyName",
+      rapidjson::Value(
+          Manifest.ScriptAssemblyName.c_str(),
+          static_cast<rapidjson::SizeType>(Manifest.ScriptAssemblyName.size()),
+          Allocator)
+          .Move(),
+      Allocator);
+  Document.AddMember(
+      "scriptRootNamespace",
+      rapidjson::Value(
+          Manifest.ScriptRootNamespace.c_str(),
+          static_cast<rapidjson::SizeType>(Manifest.ScriptRootNamespace.size()),
+          Allocator)
+          .Move(),
+      Allocator);
+
+  return WriteTextFile(ManifestPath, SerializePrettyJson(Document));
 }
 
 std::optional<ProjectManifest>
@@ -776,44 +687,56 @@ LoadProjectManifest(const std::filesystem::path &ManifestPath) {
     return std::nullopt;
   }
 
-  JsonObjectParser Parser(Text);
-  std::unordered_map<std::string, std::string> Fields;
-  if (!Parser.ParseObject(Fields)) {
+  rapidjson::Document Document;
+  Document.ParseInsitu<rapidjson::kParseStopWhenDoneFlag>(Text.data());
+  if (Document.HasParseError() || !Document.IsObject()) {
     A_CORE_WARN("ProjectSystem: failed to parse manifest '{}'",
                 ManifestPath.string());
     return std::nullopt;
   }
 
-  const auto VersionIt = Fields.find("version");
-  const auto ProjectIdIt = Fields.find("projectId");
-  const auto NameIt = Fields.find("name");
-  const auto SlugIt = Fields.find("slug");
-  if (VersionIt == Fields.end() || ProjectIdIt == Fields.end() ||
-      NameIt == Fields.end() || SlugIt == Fields.end()) {
+  const auto VersionIt = Document.FindMember("version");
+  const auto ProjectIdIt = Document.FindMember("projectId");
+  const auto NameIt = Document.FindMember("name");
+  const auto SlugIt = Document.FindMember("slug");
+  if (VersionIt == Document.MemberEnd() || ProjectIdIt == Document.MemberEnd() ||
+      NameIt == Document.MemberEnd() || SlugIt == Document.MemberEnd() ||
+      !VersionIt->value.IsUint() || !ProjectIdIt->value.IsString() ||
+      !NameIt->value.IsString() || !SlugIt->value.IsString()) {
     return std::nullopt;
   }
 
-  const auto Version = ParseUint32(VersionIt->second);
-  if (!Version.has_value() || !IsValidProjectSlug(SlugIt->second)) {
+  const auto Version = ParseUint32(
+      std::to_string(static_cast<std::uint32_t>(VersionIt->value.GetUint())));
+  const std::string_view Slug(SlugIt->value.GetString(),
+                              SlugIt->value.GetStringLength());
+  const std::string_view Name(NameIt->value.GetString(),
+                              NameIt->value.GetStringLength());
+  if (!Version.has_value() || !IsValidProjectSlug(Slug)) {
     return std::nullopt;
   }
 
   return ProjectManifest{
       .Version = *Version,
-      .ProjectId = ProjectIdIt->second,
-      .Name = NameIt->second,
-      .Slug = SlugIt->second,
-      .ScriptAssemblyName = [&Fields, &NameIt]() {
-        const auto ScriptAssemblyIt = Fields.find("scriptAssemblyName");
-        return ScriptAssemblyIt != Fields.end()
-                   ? ScriptAssemblyIt->second
-                   : BuildScriptAssemblyName(NameIt->second);
+      .ProjectId = std::string(ProjectIdIt->value.GetString(),
+                               ProjectIdIt->value.GetStringLength()),
+      .Name = std::string(Name),
+      .Slug = std::string(Slug),
+      .ScriptAssemblyName = [&Document, Name]() {
+        const auto ScriptAssemblyIt = Document.FindMember("scriptAssemblyName");
+        return ScriptAssemblyIt != Document.MemberEnd() &&
+                       ScriptAssemblyIt->value.IsString()
+                   ? std::string(ScriptAssemblyIt->value.GetString(),
+                                 ScriptAssemblyIt->value.GetStringLength())
+                   : BuildScriptAssemblyName(Name);
       }(),
-      .ScriptRootNamespace = [&Fields, &NameIt]() {
-        const auto ScriptNamespaceIt = Fields.find("scriptRootNamespace");
-        return ScriptNamespaceIt != Fields.end()
-                   ? ScriptNamespaceIt->second
-                   : BuildScriptRootNamespace(NameIt->second);
+      .ScriptRootNamespace = [&Document, Name]() {
+        const auto ScriptNamespaceIt = Document.FindMember("scriptRootNamespace");
+        return ScriptNamespaceIt != Document.MemberEnd() &&
+                       ScriptNamespaceIt->value.IsString()
+                   ? std::string(ScriptNamespaceIt->value.GetString(),
+                                 ScriptNamespaceIt->value.GetStringLength())
+                   : BuildScriptRootNamespace(Name);
       }(),
   };
 }
@@ -827,37 +750,24 @@ bool SaveDefaultSceneFile(const std::filesystem::path &SceneFilePath) {
     return false;
   }
 
-  std::ofstream File(SceneFilePath);
-  if (!File.is_open()) {
-    A_CORE_ERROR("ProjectSystem: failed to open scene file '{}'",
-                 SceneFilePath.string());
-    return false;
-  }
-
-  File << "{\n"
-       << "  \"version\": 1,\n"
-       << "  \"meshAsset\": \"\",\n"
-       << "  \"nodes\": [\n"
-       << "    {\n"
-       << "      \"id\": \"world\",\n"
-       << "      \"parentId\": null,\n"
-       << "      \"displayName\": \"World\",\n"
-       << "      \"kind\": \"Folder\",\n"
-       << "      \"visible\": true\n"
-       << "    }\n"
-       << "  ],\n"
-       << "  \"objects\": [\n"
-       << "    {\n"
-       << "      \"id\": \"world\",\n"
-       << "      \"displayName\": \"World\",\n"
-       << "      \"kind\": \"Folder\",\n"
-       << "      \"visible\": true,\n"
-       << "      \"supportsTransform\": false,\n"
-       << "      \"transformReadOnly\": true\n"
-       << "    }\n"
-       << "  ]\n"
-       << "}\n";
-  return File.good();
+  EditorSceneState Scene;
+  Scene.Items = {{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = EditorSceneItemKind::Folder,
+      .Visible = true,
+  }};
+  Scene.ObjectDetailsById.emplace(
+      "world",
+      EditorObjectDetails{
+          .ObjectId = "world",
+          .DisplayName = "World",
+          .Kind = EditorSceneItemKind::Folder,
+          .Visible = true,
+          .SupportsTransform = false,
+          .TransformReadOnly = true,
+      });
+  return Assets::SaveSceneToFile(SceneFilePath, Scene);
 }
 
 std::optional<ProjectDescriptor>

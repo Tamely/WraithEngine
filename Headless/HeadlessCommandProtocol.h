@@ -136,7 +136,6 @@ std::optional<HeadlessAppOptions> ParseHeadlessOptions(int argc, char **argv,
                                                        std::string &Error);
 std::optional<HeadlessCommand> ParseHeadlessCommand(std::string_view JsonLine,
                                                     std::string &Error);
-std::string EscapeJson(std::string_view Value);
 std::string SerializeEvent(const PublishedEditorEvent &Event);
 std::string SerializeReady(uint32_t Width, uint32_t Height);
 std::string SerializeConnected();

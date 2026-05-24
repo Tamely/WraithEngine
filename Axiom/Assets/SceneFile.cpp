@@ -9,13 +9,15 @@
 #include <glm/geometric.hpp>
 #include <glm/trigonometric.hpp>
 
-#include <charconv>
+#include <rapidjson/document.h>
+#include <rapidjson/prettywriter.h>
+#include <rapidjson/stringbuffer.h>
+
 #include <cstdint>
 #include <cstring>
+#include <array>
 #include <fstream>
 #include <functional>
-#include <sstream>
-#include <array>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -34,24 +36,30 @@ namespace {
 constexpr char kCookedSceneMagic[] = {'W', 'S', 'C', 'N'};
 constexpr std::uint32_t kCookedSceneVersion = 1;
 
-std::string EscStr(std::string_view S) {
-  std::string Out;
-  Out.reserve(S.size() + 2);
-  Out += '"';
-  for (char C : S) {
-    if (C == '"')  { Out += "\\\""; }
-    else if (C == '\\') { Out += "\\\\"; }
-    else if (C == '\n')  { Out += "\\n"; }
-    else               { Out += C; }
-  }
-  Out += '"';
-  return Out;
+rapidjson::Value CopyString(std::string_view Value,
+                            rapidjson::Document::AllocatorType &Allocator) {
+  rapidjson::Value StringValue;
+  StringValue.SetString(Value.data(),
+                        static_cast<rapidjson::SizeType>(Value.size()),
+                        Allocator);
+  return StringValue;
 }
 
-std::string SerializeVec3(const glm::vec3 &V) {
-  std::ostringstream S;
-  S << "[" << V.x << "," << V.y << "," << V.z << "]";
-  return S.str();
+rapidjson::Value SerializeVec3(const glm::vec3 &Value,
+                               rapidjson::Document::AllocatorType &Allocator) {
+  rapidjson::Value ArrayValue(rapidjson::kArrayType);
+  ArrayValue.PushBack(Value.x, Allocator);
+  ArrayValue.PushBack(Value.y, Allocator);
+  ArrayValue.PushBack(Value.z, Allocator);
+  return ArrayValue;
+}
+
+std::string SerializePrettyJson(const rapidjson::Document &Document) {
+  rapidjson::StringBuffer Buffer;
+  rapidjson::PrettyWriter<rapidjson::StringBuffer> Writer(Buffer);
+  Writer.SetIndent(' ', 2);
+  Document.Accept(Writer);
+  return std::string(Buffer.GetString(), Buffer.GetSize()) + '\n';
 }
 
 std::string SanitizeGeneratedAssetToken(std::string_view Value) {
@@ -114,22 +122,30 @@ const char *KindStr(EditorSceneItemKind K) {
 }
 
 void SerializeSceneItemsFlat(
-    std::ostringstream &Out, const std::vector<EditorSceneItem> &Items,
+    rapidjson::Value &Out, const std::vector<EditorSceneItem> &Items,
     const std::unordered_map<std::string, EditorObjectDetails> &DetailsById,
-    const std::string &ParentId, bool &First) {
+    std::string_view ParentId,
+    rapidjson::Document::AllocatorType &Allocator) {
   for (const auto &Item : Items) {
     const auto DetailsIt = DetailsById.find(Item.Id);
     if (DetailsIt != DetailsById.end() && DetailsIt->second.IsGeneratedAssetChild) {
       continue;
     }
-    if (!First) Out << ",\n";
-    First = false;
-    Out << "    {\"id\":" << EscStr(Item.Id)
-        << ",\"parentId\":" << (ParentId.empty() ? "null" : EscStr(ParentId))
-        << ",\"displayName\":" << EscStr(Item.DisplayName)
-        << ",\"kind\":\"" << KindStr(Item.Kind) << "\""
-        << ",\"visible\":" << (Item.Visible ? "true" : "false") << "}";
-    SerializeSceneItemsFlat(Out, Item.Children, DetailsById, Item.Id, First);
+    rapidjson::Value NodeValue(rapidjson::kObjectType);
+    NodeValue.AddMember("id", CopyString(Item.Id, Allocator), Allocator);
+    if (ParentId.empty()) {
+      NodeValue.AddMember("parentId", rapidjson::Value().SetNull(), Allocator);
+    } else {
+      NodeValue.AddMember("parentId", CopyString(ParentId, Allocator),
+                          Allocator);
+    }
+    NodeValue.AddMember("displayName", CopyString(Item.DisplayName, Allocator),
+                        Allocator);
+    NodeValue.AddMember("kind", CopyString(KindStr(Item.Kind), Allocator),
+                        Allocator);
+    NodeValue.AddMember("visible", Item.Visible, Allocator);
+    Out.PushBack(NodeValue, Allocator);
+    SerializeSceneItemsFlat(Out, Item.Children, DetailsById, Item.Id, Allocator);
   }
 }
 
@@ -414,51 +430,67 @@ std::string SerializeSceneToJsonString(const std::filesystem::path &Path,
     }
   }
 
-  std::ostringstream Out;
-  Out << "{\n";
-  Out << "  \"version\": 1,\n";
-  Out << "  \"meshAsset\": "
-      << EscStr(HasImplicitGlobalMeshAsset ? "basicmesh.glb" : "") << ",\n";
+  rapidjson::Document Document;
+  Document.SetObject();
+  auto &Allocator = Document.GetAllocator();
 
-  // Flat node list (scene tree + parent links)
-  Out << "  \"nodes\": [\n";
-  bool FirstNode = true;
-  SerializeSceneItemsFlat(Out, Scene.Items, Scene.ObjectDetailsById, "", FirstNode);
-  Out << "\n  ],\n";
+  Document.AddMember("version", 1u, Allocator);
+  Document.AddMember("meshAsset",
+                     CopyString(HasImplicitGlobalMeshAsset ? "basicmesh.glb" : "",
+                                Allocator),
+                     Allocator);
 
-  // Object details (transforms, visibility, mesh name mapping)
-  Out << "  \"objects\": [\n";
-  bool FirstObj = true;
+  rapidjson::Value Nodes(rapidjson::kArrayType);
+  SerializeSceneItemsFlat(Nodes, Scene.Items, Scene.ObjectDetailsById, "",
+                          Allocator);
+  Document.AddMember("nodes", Nodes, Allocator);
+
+  rapidjson::Value Objects(rapidjson::kArrayType);
   for (const auto &[Id, Details] : Scene.ObjectDetailsById) {
     if (Details.IsGeneratedAssetChild) {
       continue;
     }
-    if (!FirstObj) Out << ",\n";
-    FirstObj = false;
-    Out << "    {\"id\":" << EscStr(Id)
-        << ",\"displayName\":" << EscStr(Details.DisplayName)
-        << ",\"kind\":\"" << KindStr(Details.Kind) << "\""
-        << ",\"visible\":" << (Details.Visible ? "true" : "false")
-        << ",\"isGeneratedAssetChild\":"
-        << (Details.IsGeneratedAssetChild ? "true" : "false")
-        << ",\"supportsTransform\":" << (Details.SupportsTransform ? "true" : "false")
-        << ",\"transformReadOnly\":" << (Details.TransformReadOnly ? "true" : "false");
+    rapidjson::Value ObjectValue(rapidjson::kObjectType);
+    ObjectValue.AddMember("id", CopyString(Id, Allocator), Allocator);
+    ObjectValue.AddMember("displayName", CopyString(Details.DisplayName, Allocator),
+                          Allocator);
+    ObjectValue.AddMember("kind", CopyString(KindStr(Details.Kind), Allocator),
+                          Allocator);
+    ObjectValue.AddMember("visible", Details.Visible, Allocator);
+    ObjectValue.AddMember("isGeneratedAssetChild", Details.IsGeneratedAssetChild,
+                          Allocator);
+    ObjectValue.AddMember("supportsTransform", Details.SupportsTransform,
+                          Allocator);
+    ObjectValue.AddMember("transformReadOnly", Details.TransformReadOnly,
+                          Allocator);
     if (Details.Transform.has_value()) {
-      Out << ",\"location\":" << SerializeVec3(Details.Transform->Location)
-          << ",\"rotationDegrees\":" << SerializeVec3(Details.Transform->RotationDegrees)
-          << ",\"scale\":" << SerializeVec3(Details.Transform->Scale);
+      ObjectValue.AddMember("location",
+                            SerializeVec3(Details.Transform->Location, Allocator),
+                            Allocator);
+      ObjectValue.AddMember(
+          "rotationDegrees",
+          SerializeVec3(Details.Transform->RotationDegrees, Allocator),
+          Allocator);
+      ObjectValue.AddMember("scale",
+                            SerializeVec3(Details.Transform->Scale, Allocator),
+                            Allocator);
     }
     if (Details.ScriptClass.has_value()) {
-      Out << ",\"scriptClass\":" << EscStr(*Details.ScriptClass);
+      ObjectValue.AddMember("scriptClass",
+                            CopyString(*Details.ScriptClass, Allocator),
+                            Allocator);
     }
     if (Details.GeneratedFromAssetRootId.has_value()) {
-      Out << ",\"generatedFromAssetRootId\":"
-          << EscStr(*Details.GeneratedFromAssetRootId);
+      ObjectValue.AddMember("generatedFromAssetRootId",
+                            CopyString(*Details.GeneratedFromAssetRootId,
+                                       Allocator),
+                            Allocator);
     }
     if (Details.Kind == EditorSceneItemKind::Mesh) {
       const auto AssetIt = AssetPathByObjectId.find(Id);
       if (AssetIt != AssetPathByObjectId.end()) {
-        Out << ",\"assetRelativePath\":" << EscStr(AssetIt->second);
+        ObjectValue.AddMember("assetRelativePath",
+                              CopyString(AssetIt->second, Allocator), Allocator);
       }
       if (Details.Material.has_value()) {
         const std::filesystem::path MaterialPath =
@@ -471,70 +503,94 @@ std::string SerializeSceneToJsonString(const std::filesystem::path &Path,
              .TextureAssetPath =
                  Details.Material->TextureAssetPath.value_or("")});
         if (MaterialCooked.has_value()) {
-          Out << ",\"materialAssetPath\":"
-              << EscStr(MaterialCooked->RelativePath);
+          ObjectValue.AddMember("materialAssetPath",
+                                CopyString(MaterialCooked->RelativePath,
+                                           Allocator),
+                                Allocator);
         }
       }
       if (Details.Material.has_value() && Details.Material->TextureAssetPath.has_value()) {
-        Out << ",\"textureAssetPath\":" << EscStr(*Details.Material->TextureAssetPath);
+        ObjectValue.AddMember("textureAssetPath",
+                              CopyString(*Details.Material->TextureAssetPath,
+                                         Allocator),
+                              Allocator);
       }
     }
     if (Details.Light.has_value()) {
-      Out << ",\"lightColor\":" << SerializeVec3(Details.Light->Color)
-          << ",\"lightIntensity\":" << Details.Light->Intensity
-          << ",\"lightDirection\":" << SerializeVec3(Details.Light->Direction);
+      ObjectValue.AddMember("lightColor",
+                            SerializeVec3(Details.Light->Color, Allocator),
+                            Allocator);
+      ObjectValue.AddMember("lightIntensity", Details.Light->Intensity,
+                            Allocator);
+      ObjectValue.AddMember("lightDirection",
+                            SerializeVec3(Details.Light->Direction, Allocator),
+                            Allocator);
     }
     if (Details.Physics.has_value()) {
-      Out << ",\"physicsBodyType\":"
-          << EscStr(Details.Physics->BodyType == EditorPhysicsBodyType::Dynamic
-                        ? "dynamic"
-                        : (Details.Physics->BodyType == EditorPhysicsBodyType::Static
-                               ? "static"
-                               : "none"))
-          << ",\"physicsColliderType\":"
-          << EscStr(Details.Physics->ColliderType == EditorPhysicsColliderType::Sphere
-                        ? "sphere"
-                        : (Details.Physics->ColliderType == EditorPhysicsColliderType::Box
-                               ? "box"
-                               : "none"))
-          << ",\"physicsBoxHalfExtents\":"
-          << SerializeVec3(Details.Physics->BoxHalfExtents)
-          << ",\"physicsSphereRadius\":" << Details.Physics->SphereRadius
-          << ",\"physicsMass\":" << Details.Physics->Mass
-          << ",\"physicsFriction\":" << Details.Physics->Friction
-          << ",\"physicsRestitution\":" << Details.Physics->Restitution;
+      ObjectValue.AddMember(
+          "physicsBodyType",
+          CopyString(Details.Physics->BodyType == EditorPhysicsBodyType::Dynamic
+                         ? "dynamic"
+                         : (Details.Physics->BodyType ==
+                                    EditorPhysicsBodyType::Static
+                                ? "static"
+                                : "none"),
+                     Allocator),
+          Allocator);
+      ObjectValue.AddMember(
+          "physicsColliderType",
+          CopyString(
+              Details.Physics->ColliderType == EditorPhysicsColliderType::Sphere
+                  ? "sphere"
+                  : (Details.Physics->ColliderType ==
+                             EditorPhysicsColliderType::Box
+                         ? "box"
+                         : "none"),
+              Allocator),
+          Allocator);
+      ObjectValue.AddMember(
+          "physicsBoxHalfExtents",
+          SerializeVec3(Details.Physics->BoxHalfExtents, Allocator), Allocator);
+      ObjectValue.AddMember("physicsSphereRadius",
+                            Details.Physics->SphereRadius, Allocator);
+      ObjectValue.AddMember("physicsMass", Details.Physics->Mass, Allocator);
+      ObjectValue.AddMember("physicsFriction", Details.Physics->Friction,
+                            Allocator);
+      ObjectValue.AddMember("physicsRestitution",
+                            Details.Physics->Restitution, Allocator);
     }
-    Out << "}";
+    Objects.PushBack(ObjectValue, Allocator);
   }
-  Out << "\n  ],\n";
+  Document.AddMember("objects", Objects, Allocator);
 
-  // Mesh name → object ID mapping (needed to re-hydrate MeshInstances)
-  Out << "  \"meshNameToObjectId\": {\n";
-  bool FirstMesh = true;
+  rapidjson::Value MeshNameToObjectId(rapidjson::kObjectType);
   for (const auto &Instance : Scene.MeshInstances) {
     const auto DetailsIt = Scene.ObjectDetailsById.find(Instance.ObjectId);
     if (DetailsIt == Scene.ObjectDetailsById.end() ||
         DetailsIt->second.IsGeneratedAssetChild) {
       continue;
     }
-    // We stored the display name as the mesh source name via ResolveStartupObjectId
-    // Look up the display name from ObjectDetailsById
-    const auto It = DetailsIt;
-    if (!FirstMesh) Out << ",\n";
-    FirstMesh = false;
-    Out << "    " << EscStr(It->second.DisplayName) << ": " << EscStr(Instance.ObjectId);
+    MeshNameToObjectId.AddMember(
+        CopyString(DetailsIt->second.DisplayName, Allocator),
+        CopyString(Instance.ObjectId, Allocator), Allocator);
   }
-  Out << "\n  },\n";
-  Out << "  \"worldSettings\": {\n"
-      << "    \"skyboxColorTop\": "
-      << SerializeVec3(Scene.WorldSettings.SkyboxColorTop) << ",\n"
-      << "    \"skyboxColorBottom\": "
-      << SerializeVec3(Scene.WorldSettings.SkyboxColorBottom) << ",\n"
-      << "    \"skyboxHDRPath\": "
-      << EscStr(Scene.WorldSettings.SkyboxHDRPath) << "\n"
-      << "  }\n";
-  Out << "}\n";
-  return Out.str();
+  Document.AddMember("meshNameToObjectId", MeshNameToObjectId, Allocator);
+
+  rapidjson::Value WorldSettings(rapidjson::kObjectType);
+  WorldSettings.AddMember(
+      "skyboxColorTop",
+      SerializeVec3(Scene.WorldSettings.SkyboxColorTop, Allocator), Allocator);
+  WorldSettings.AddMember(
+      "skyboxColorBottom",
+      SerializeVec3(Scene.WorldSettings.SkyboxColorBottom, Allocator),
+      Allocator);
+  WorldSettings.AddMember("skyboxHDRPath",
+                          CopyString(Scene.WorldSettings.SkyboxHDRPath,
+                                     Allocator),
+                          Allocator);
+  Document.AddMember("worldSettings", WorldSettings, Allocator);
+
+  return SerializePrettyJson(Document);
 }
 
 bool SaveSceneToFile(const std::filesystem::path &Path,
@@ -567,158 +623,7 @@ bool SaveCookedSceneToFile(const std::filesystem::path &Path,
   return File.good();
 }
 
-// ---------------------------------------------------------------------------
-// Minimal JSON parser (purpose-built for the known scene file schema)
-// ---------------------------------------------------------------------------
-
 namespace {
-
-struct Parser {
-  std::string_view Src;
-  size_t Pos{0};
-
-  char Peek() const { return Pos < Src.size() ? Src[Pos] : '\0'; }
-  char Eat()  { return Pos < Src.size() ? Src[Pos++] : '\0'; }
-
-  void SkipWs() {
-    while (Pos < Src.size() && (Src[Pos] == ' ' || Src[Pos] == '\t' ||
-                                 Src[Pos] == '\r' || Src[Pos] == '\n'))
-      ++Pos;
-  }
-
-  bool Expect(char C) {
-    SkipWs();
-    if (Peek() == C) { ++Pos; return true; }
-    return false;
-  }
-
-  std::optional<std::string> ParseString() {
-    SkipWs();
-    if (Peek() != '"') return std::nullopt;
-    ++Pos;
-    std::string Out;
-    while (Pos < Src.size()) {
-      char C = Eat();
-      if (C == '"') return Out;
-      if (C == '\\') {
-        char E = Eat();
-        if (E == 'n')       Out += '\n';
-        else if (E == '\\') Out += '\\';
-        else if (E == '"')  Out += '"';
-        else                Out += E;
-      } else {
-        Out += C;
-      }
-    }
-    return std::nullopt;
-  }
-
-  std::optional<double> ParseNumber() {
-    SkipWs();
-    const size_t Start = Pos;
-    if (Peek() == '-') ++Pos;
-    while (Pos < Src.size() &&
-           (std::isdigit(static_cast<unsigned char>(Src[Pos])) ||
-            Src[Pos] == '.' || Src[Pos] == 'e' || Src[Pos] == 'E' ||
-            Src[Pos] == '+' || Src[Pos] == '-'))
-      ++Pos;
-    // std::from_chars for floating-point requires macOS 13.3+; use strtod instead.
-    char *End = nullptr;
-    double V = std::strtod(Src.data() + Start, &End);
-    if (End == Src.data() + Start) return std::nullopt;
-    return V;
-  }
-
-  std::optional<bool> ParseBool() {
-    SkipWs();
-    if (Src.substr(Pos, 4) == "true")  { Pos += 4; return true; }
-    if (Src.substr(Pos, 5) == "false") { Pos += 5; return false; }
-    return std::nullopt;
-  }
-
-  bool ParseNull() {
-    SkipWs();
-    if (Src.substr(Pos, 4) == "null") { Pos += 4; return true; }
-    return false;
-  }
-
-  std::optional<glm::vec3> ParseVec3() {
-    if (!Expect('[')) return std::nullopt;
-    auto X = ParseNumber(); if (!X) return std::nullopt;
-    if (!Expect(',')) return std::nullopt;
-    auto Y = ParseNumber(); if (!Y) return std::nullopt;
-    if (!Expect(',')) return std::nullopt;
-    auto Z = ParseNumber(); if (!Z) return std::nullopt;
-    if (!Expect(']')) return std::nullopt;
-    return glm::vec3{static_cast<float>(*X), static_cast<float>(*Y),
-                     static_cast<float>(*Z)};
-  }
-
-  // Skip any JSON value (string, number, bool, null, array, object)
-  void SkipValue() {
-    SkipWs();
-    char C = Peek();
-    if (C == '"')  { ParseString(); return; }
-    if (C == '{')  { SkipObject(); return; }
-    if (C == '[')  { SkipArray();  return; }
-    if (C == 't' || C == 'f') { ParseBool(); return; }
-    if (C == 'n')  { ParseNull(); return; }
-    ParseNumber();
-  }
-
-  void SkipObject() {
-    Expect('{');
-    SkipWs();
-    if (Peek() == '}') { ++Pos; return; }
-    do {
-      ParseString(); Expect(':'); SkipValue(); SkipWs();
-    } while (Expect(','));
-    Expect('}');
-  }
-
-  void SkipArray() {
-    Expect('[');
-    SkipWs();
-    if (Peek() == ']') { ++Pos; return; }
-    do {
-      SkipValue(); SkipWs();
-    } while (Expect(','));
-    Expect(']');
-  }
-
-  // Parse {"key": value, ...} calling Handler(key) for each known field.
-  // Handler should read the value via this Parser before returning.
-  template <typename Fn>
-  bool ParseObject(Fn Handler) {
-    if (!Expect('{')) return false;
-    SkipWs();
-    if (Peek() == '}') { ++Pos; return true; }
-    do {
-      SkipWs();
-      auto Key = ParseString();
-      if (!Key) return false;
-      if (!Expect(':')) return false;
-      SkipWs();
-      if (!Handler(*Key)) SkipValue();
-      SkipWs();
-    } while (Expect(','));
-    return Expect('}');
-  }
-
-  // Parse [element, ...] calling Handler() for each element.
-  template <typename Fn>
-  bool ParseArray(Fn Handler) {
-    if (!Expect('[')) return false;
-    SkipWs();
-    if (Peek() == ']') { ++Pos; return true; }
-    do {
-      SkipWs();
-      Handler();
-      SkipWs();
-    } while (Expect(','));
-    return Expect(']');
-  }
-};
 
 EditorSceneItemKind KindFromStr(std::string_view S) {
   if (S == "Mesh")   return EditorSceneItemKind::Mesh;
@@ -726,6 +631,30 @@ EditorSceneItemKind KindFromStr(std::string_view S) {
   if (S == "Camera") return EditorSceneItemKind::Camera;
   if (S == "Actor")  return EditorSceneItemKind::Actor;
   return EditorSceneItemKind::Folder;
+}
+
+std::optional<std::string> GetOptionalString(
+    const rapidjson::Value &Object, const char *Name) {
+  const auto It = Object.FindMember(Name);
+  if (It == Object.MemberEnd()) {
+    return std::nullopt;
+  }
+  if (It->value.IsNull()) {
+    return std::string();
+  }
+  if (!It->value.IsString()) {
+    return std::nullopt;
+  }
+  return std::string(It->value.GetString(), It->value.GetStringLength());
+}
+
+std::optional<glm::vec3> ParseVec3(const rapidjson::Value &Value) {
+  if (!Value.IsArray() || Value.Size() != 3 || !Value[0].IsNumber() ||
+      !Value[1].IsNumber() || !Value[2].IsNumber()) {
+    return std::nullopt;
+  }
+  return glm::vec3(Value[0].GetFloat(), Value[1].GetFloat(),
+                   Value[2].GetFloat());
 }
 
 } // namespace
@@ -739,8 +668,13 @@ DeserializeSceneFromJsonString(const std::filesystem::path &Path,
                                std::string_view Text) {
   const std::filesystem::path ContentRoot = ResolveContentRootForScenePath(Path);
   const bool CookedOnlyContent = IsCookedOnlyContentPath(ContentRoot);
-
-  Parser P{Text};
+  std::string MutableText(Text);
+  rapidjson::Document Document;
+  Document.ParseInsitu<rapidjson::kParseStopWhenDoneFlag>(MutableText.data());
+  if (Document.HasParseError() || !Document.IsObject()) {
+    A_CORE_ERROR("SceneFile: failed to parse {0}", Path.string());
+    return std::nullopt;
+  }
 
   // --- Stage 1: parse flat data ---
   struct FlatNode {
@@ -770,208 +704,295 @@ DeserializeSceneFromJsonString(const std::filesystem::path &Path,
   std::unordered_map<std::string, ObjectData> Objects;
   std::unordered_map<std::string, std::string> MeshNameToObjectId;
   EditorWorldSettings WorldSettings;
+  if (const auto MeshAssetIt = Document.FindMember("meshAsset");
+      MeshAssetIt != Document.MemberEnd() && MeshAssetIt->value.IsString()) {
+    MeshAsset.assign(MeshAssetIt->value.GetString(),
+                     MeshAssetIt->value.GetStringLength());
+  }
 
-  bool Ok = P.ParseObject([&](const std::string &Key) -> bool {
-    if (Key == "version") { P.ParseNumber(); return true; }
-    if (Key == "meshAsset") {
-      auto V = P.ParseString(); if (V) MeshAsset = *V; return true;
+  if (const auto NodesIt = Document.FindMember("nodes");
+      NodesIt != Document.MemberEnd() && NodesIt->value.IsArray()) {
+    for (const auto &NodeValue : NodesIt->value.GetArray()) {
+      if (!NodeValue.IsObject()) {
+        continue;
+      }
+      FlatNode Node;
+      if (const auto Id = GetOptionalString(NodeValue, "id"); Id.has_value()) {
+        Node.Id = *Id;
+      }
+      if (const auto ParentId = GetOptionalString(NodeValue, "parentId");
+          ParentId.has_value()) {
+        Node.ParentId = *ParentId;
+      }
+      if (const auto DisplayName = GetOptionalString(NodeValue, "displayName");
+          DisplayName.has_value()) {
+        Node.DisplayName = *DisplayName;
+      }
+      if (const auto KindIt = NodeValue.FindMember("kind");
+          KindIt != NodeValue.MemberEnd() && KindIt->value.IsString()) {
+        Node.Kind = KindFromStr(
+            std::string_view(KindIt->value.GetString(),
+                             KindIt->value.GetStringLength()));
+      }
+      if (const auto VisibleIt = NodeValue.FindMember("visible");
+          VisibleIt != NodeValue.MemberEnd() && VisibleIt->value.IsBool()) {
+        Node.Visible = VisibleIt->value.GetBool();
+      }
+      Nodes.push_back(std::move(Node));
     }
-    if (Key == "nodes") {
-      P.ParseArray([&] {
-        FlatNode Node;
-        P.ParseObject([&](const std::string &K) -> bool {
-          if (K == "id")          { auto V = P.ParseString(); if (V) Node.Id          = *V; return true; }
-          if (K == "parentId")    { P.SkipWs(); if (P.Peek() == 'n') { P.ParseNull(); } else { auto V = P.ParseString(); if (V) Node.ParentId = *V; } return true; }
-          if (K == "displayName") { auto V = P.ParseString(); if (V) Node.DisplayName = *V; return true; }
-          if (K == "kind")        { auto V = P.ParseString(); if (V) Node.Kind = KindFromStr(*V); return true; }
-          if (K == "visible")     { auto V = P.ParseBool();   if (V) Node.Visible     = *V; return true; }
-          return false;
-        });
-        Nodes.push_back(std::move(Node));
-      });
-      return true;
-    }
-    if (Key == "objects") {
-      P.ParseArray([&] {
-        std::string ObjId;
-        ObjectData Data;
-        P.ParseObject([&](const std::string &K) -> bool {
-          if (K == "id")               { auto V = P.ParseString(); if (V) ObjId                   = *V; return true; }
-          if (K == "displayName")      { auto V = P.ParseString(); if (V) Data.DisplayName         = *V; return true; }
-          if (K == "kind")             { auto V = P.ParseString(); if (V) Data.Kind = KindFromStr(*V); return true; }
-          if (K == "visible")          { auto V = P.ParseBool();   if (V) Data.Visible             = *V; return true; }
-          if (K == "isGeneratedAssetChild") { auto V = P.ParseBool(); if (V) Data.IsGeneratedAssetChild = *V; return true; }
-          if (K == "supportsTransform"){ auto V = P.ParseBool();   if (V) Data.SupportsTransform   = *V; return true; }
-          if (K == "transformReadOnly"){ auto V = P.ParseBool();   if (V) Data.TransformReadOnly   = *V; return true; }
-          if (K == "location") {
-            auto V = P.ParseVec3();
-            if (V) {
-              if (!Data.Transform) Data.Transform = EditorTransformDetails{};
-              Data.Transform->Location = *V;
-            }
-            return true;
-          }
-          if (K == "rotationDegrees") {
-            auto V = P.ParseVec3();
-            if (V) {
-              if (!Data.Transform) Data.Transform = EditorTransformDetails{};
-              Data.Transform->RotationDegrees = *V;
-            }
-            return true;
-          }
-          if (K == "scale") {
-            auto V = P.ParseVec3();
-            if (V) {
-              if (!Data.Transform) Data.Transform = EditorTransformDetails{};
-              Data.Transform->Scale = *V;
-            }
-            return true;
-          }
-          if (K == "scriptClass") {
-            P.SkipWs();
-            if (P.Peek() == 'n') { P.ParseNull(); } else { auto V = P.ParseString(); if (V) Data.ScriptClass = *V; }
-            return true;
-          }
-          if (K == "generatedFromAssetRootId") {
-            P.SkipWs();
-            if (P.Peek() == 'n') { P.ParseNull(); } else { auto V = P.ParseString(); if (V) Data.GeneratedFromAssetRootId = *V; }
-            return true;
-          }
-          if (K == "assetRelativePath") {
-            auto V = P.ParseString(); if (V) Data.AssetRelativePath = *V; return true;
-          }
-          if (K == "materialAssetPath") {
-            auto V = P.ParseString(); if (V) Data.MaterialAssetPath = *V; return true;
-          }
-          if (K == "textureAssetPath") {
-            P.SkipWs();
-            if (P.Peek() == 'n') { P.ParseNull(); } else { auto V = P.ParseString(); if (V) Data.TextureAssetPath = *V; }
-            return true;
-          }
-          if (K == "lightColor") {
-            auto V = P.ParseVec3();
-            if (V) { if (!Data.Light) Data.Light = EditorLightProperties{}; Data.Light->Color = *V; }
-            return true;
-          }
-          if (K == "lightIntensity") {
-            auto V = P.ParseNumber();
-            if (V) { if (!Data.Light) Data.Light = EditorLightProperties{}; Data.Light->Intensity = static_cast<float>(*V); }
-            return true;
-          }
-          if (K == "lightDirection") {
-            auto V = P.ParseVec3();
-            if (V) { if (!Data.Light) Data.Light = EditorLightProperties{}; Data.Light->Direction = *V; }
-            return true;
-          }
-          if (K == "physicsBodyType") {
-            auto V = P.ParseString();
-            if (V) {
-              if (!Data.Physics) Data.Physics = EditorPhysicsProperties{};
-              if (*V == "static") {
-                Data.Physics->BodyType = EditorPhysicsBodyType::Static;
-              } else if (*V == "dynamic") {
-                Data.Physics->BodyType = EditorPhysicsBodyType::Dynamic;
-              } else {
-                Data.Physics->BodyType = EditorPhysicsBodyType::None;
-              }
-            }
-            return true;
-          }
-          if (K == "physicsColliderType") {
-            auto V = P.ParseString();
-            if (V) {
-              if (!Data.Physics) Data.Physics = EditorPhysicsProperties{};
-              if (*V == "box") {
-                Data.Physics->ColliderType = EditorPhysicsColliderType::Box;
-              } else if (*V == "sphere") {
-                Data.Physics->ColliderType = EditorPhysicsColliderType::Sphere;
-              } else {
-                Data.Physics->ColliderType = EditorPhysicsColliderType::None;
-              }
-            }
-            return true;
-          }
-          if (K == "physicsBoxHalfExtents") {
-            auto V = P.ParseVec3();
-            if (V) {
-              if (!Data.Physics) Data.Physics = EditorPhysicsProperties{};
-              Data.Physics->BoxHalfExtents = *V;
-            }
-            return true;
-          }
-          if (K == "physicsSphereRadius") {
-            auto V = P.ParseNumber();
-            if (V) {
-              if (!Data.Physics) Data.Physics = EditorPhysicsProperties{};
-              Data.Physics->SphereRadius = static_cast<float>(*V);
-            }
-            return true;
-          }
-          if (K == "physicsMass") {
-            auto V = P.ParseNumber();
-            if (V) {
-              if (!Data.Physics) Data.Physics = EditorPhysicsProperties{};
-              Data.Physics->Mass = static_cast<float>(*V);
-            }
-            return true;
-          }
-          if (K == "physicsFriction") {
-            auto V = P.ParseNumber();
-            if (V) {
-              if (!Data.Physics) Data.Physics = EditorPhysicsProperties{};
-              Data.Physics->Friction = static_cast<float>(*V);
-            }
-            return true;
-          }
-          if (K == "physicsRestitution") {
-            auto V = P.ParseNumber();
-            if (V) {
-              if (!Data.Physics) Data.Physics = EditorPhysicsProperties{};
-              Data.Physics->Restitution = static_cast<float>(*V);
-            }
-            return true;
-          }
-          return false;
-        });
-        if (!ObjId.empty()) Objects[ObjId] = std::move(Data);
-      });
-      return true;
-    }
-    if (Key == "meshNameToObjectId") {
-      P.ParseObject([&](const std::string &MeshName) -> bool {
-        auto ObjId = P.ParseString();
-        if (ObjId) MeshNameToObjectId[MeshName] = *ObjId;
-        return true;
-      });
-      return true;
-    }
-    if (Key == "worldSettings") {
-      P.ParseObject([&](const std::string &K) -> bool {
-        if (K == "skyboxColorTop") {
-          auto V = P.ParseVec3();
-          if (V) WorldSettings.SkyboxColorTop = *V;
-          return true;
-        }
-        if (K == "skyboxColorBottom") {
-          auto V = P.ParseVec3();
-          if (V) WorldSettings.SkyboxColorBottom = *V;
-          return true;
-        }
-        if (K == "skyboxHDRPath") {
-          auto V = P.ParseString();
-          if (V) WorldSettings.SkyboxHDRPath = *V;
-          return true;
-        }
-        return false;
-      });
-      return true;
-    }
-    return false;
-  });
+  }
 
-  if (!Ok) {
-    A_CORE_ERROR("SceneFile: failed to parse {0}", Path.string());
-    return std::nullopt;
+  if (const auto ObjectsIt = Document.FindMember("objects");
+      ObjectsIt != Document.MemberEnd() && ObjectsIt->value.IsArray()) {
+    for (const auto &ObjectValue : ObjectsIt->value.GetArray()) {
+      if (!ObjectValue.IsObject()) {
+        continue;
+      }
+
+      std::string ObjId;
+      ObjectData Data;
+      if (const auto Id = GetOptionalString(ObjectValue, "id"); Id.has_value()) {
+        ObjId = *Id;
+      }
+      if (const auto DisplayName = GetOptionalString(ObjectValue, "displayName");
+          DisplayName.has_value()) {
+        Data.DisplayName = *DisplayName;
+      }
+      if (const auto KindIt = ObjectValue.FindMember("kind");
+          KindIt != ObjectValue.MemberEnd() && KindIt->value.IsString()) {
+        Data.Kind = KindFromStr(
+            std::string_view(KindIt->value.GetString(),
+                             KindIt->value.GetStringLength()));
+      }
+      if (const auto VisibleIt = ObjectValue.FindMember("visible");
+          VisibleIt != ObjectValue.MemberEnd() && VisibleIt->value.IsBool()) {
+        Data.Visible = VisibleIt->value.GetBool();
+      }
+      if (const auto GeneratedIt =
+              ObjectValue.FindMember("isGeneratedAssetChild");
+          GeneratedIt != ObjectValue.MemberEnd() && GeneratedIt->value.IsBool()) {
+        Data.IsGeneratedAssetChild = GeneratedIt->value.GetBool();
+      }
+      if (const auto SupportsTransformIt =
+              ObjectValue.FindMember("supportsTransform");
+          SupportsTransformIt != ObjectValue.MemberEnd() &&
+          SupportsTransformIt->value.IsBool()) {
+        Data.SupportsTransform = SupportsTransformIt->value.GetBool();
+      }
+      if (const auto TransformReadOnlyIt =
+              ObjectValue.FindMember("transformReadOnly");
+          TransformReadOnlyIt != ObjectValue.MemberEnd() &&
+          TransformReadOnlyIt->value.IsBool()) {
+        Data.TransformReadOnly = TransformReadOnlyIt->value.GetBool();
+      }
+      if (const auto LocationIt = ObjectValue.FindMember("location");
+          LocationIt != ObjectValue.MemberEnd()) {
+        if (const auto Value = ParseVec3(LocationIt->value); Value.has_value()) {
+          if (!Data.Transform.has_value()) {
+            Data.Transform = EditorTransformDetails{};
+          }
+          Data.Transform->Location = *Value;
+        }
+      }
+      if (const auto RotationIt = ObjectValue.FindMember("rotationDegrees");
+          RotationIt != ObjectValue.MemberEnd()) {
+        if (const auto Value = ParseVec3(RotationIt->value); Value.has_value()) {
+          if (!Data.Transform.has_value()) {
+            Data.Transform = EditorTransformDetails{};
+          }
+          Data.Transform->RotationDegrees = *Value;
+        }
+      }
+      if (const auto ScaleIt = ObjectValue.FindMember("scale");
+          ScaleIt != ObjectValue.MemberEnd()) {
+        if (const auto Value = ParseVec3(ScaleIt->value); Value.has_value()) {
+          if (!Data.Transform.has_value()) {
+            Data.Transform = EditorTransformDetails{};
+          }
+          Data.Transform->Scale = *Value;
+        }
+      }
+      if (const auto ScriptClass = GetOptionalString(ObjectValue, "scriptClass");
+          ScriptClass.has_value() && !ScriptClass->empty()) {
+        Data.ScriptClass = *ScriptClass;
+      }
+      if (const auto GeneratedRootId =
+              GetOptionalString(ObjectValue, "generatedFromAssetRootId");
+          GeneratedRootId.has_value() && !GeneratedRootId->empty()) {
+        Data.GeneratedFromAssetRootId = *GeneratedRootId;
+      }
+      if (const auto AssetRelativePath =
+              GetOptionalString(ObjectValue, "assetRelativePath");
+          AssetRelativePath.has_value()) {
+        Data.AssetRelativePath = *AssetRelativePath;
+      }
+      if (const auto MaterialAssetPath =
+              GetOptionalString(ObjectValue, "materialAssetPath");
+          MaterialAssetPath.has_value()) {
+        Data.MaterialAssetPath = *MaterialAssetPath;
+      }
+      if (const auto TextureAssetPath =
+              GetOptionalString(ObjectValue, "textureAssetPath");
+          TextureAssetPath.has_value()) {
+        Data.TextureAssetPath = *TextureAssetPath;
+      }
+      if (const auto LightColorIt = ObjectValue.FindMember("lightColor");
+          LightColorIt != ObjectValue.MemberEnd()) {
+        if (const auto Value = ParseVec3(LightColorIt->value);
+            Value.has_value()) {
+          if (!Data.Light.has_value()) {
+            Data.Light = EditorLightProperties{};
+          }
+          Data.Light->Color = *Value;
+        }
+      }
+      if (const auto LightIntensityIt =
+              ObjectValue.FindMember("lightIntensity");
+          LightIntensityIt != ObjectValue.MemberEnd() &&
+          LightIntensityIt->value.IsNumber()) {
+        if (!Data.Light.has_value()) {
+          Data.Light = EditorLightProperties{};
+        }
+        Data.Light->Intensity = LightIntensityIt->value.GetFloat();
+      }
+      if (const auto LightDirectionIt =
+              ObjectValue.FindMember("lightDirection");
+          LightDirectionIt != ObjectValue.MemberEnd()) {
+        if (const auto Value = ParseVec3(LightDirectionIt->value);
+            Value.has_value()) {
+          if (!Data.Light.has_value()) {
+            Data.Light = EditorLightProperties{};
+          }
+          Data.Light->Direction = *Value;
+        }
+      }
+      if (const auto PhysicsBodyTypeIt =
+              ObjectValue.FindMember("physicsBodyType");
+          PhysicsBodyTypeIt != ObjectValue.MemberEnd() &&
+          PhysicsBodyTypeIt->value.IsString()) {
+        if (!Data.Physics.has_value()) {
+          Data.Physics = EditorPhysicsProperties{};
+        }
+        const std::string_view PhysicsBodyType(
+            PhysicsBodyTypeIt->value.GetString(),
+            PhysicsBodyTypeIt->value.GetStringLength());
+        if (PhysicsBodyType == "static") {
+          Data.Physics->BodyType = EditorPhysicsBodyType::Static;
+        } else if (PhysicsBodyType == "dynamic") {
+          Data.Physics->BodyType = EditorPhysicsBodyType::Dynamic;
+        } else {
+          Data.Physics->BodyType = EditorPhysicsBodyType::None;
+        }
+      }
+      if (const auto PhysicsColliderTypeIt =
+              ObjectValue.FindMember("physicsColliderType");
+          PhysicsColliderTypeIt != ObjectValue.MemberEnd() &&
+          PhysicsColliderTypeIt->value.IsString()) {
+        if (!Data.Physics.has_value()) {
+          Data.Physics = EditorPhysicsProperties{};
+        }
+        const std::string_view PhysicsColliderType(
+            PhysicsColliderTypeIt->value.GetString(),
+            PhysicsColliderTypeIt->value.GetStringLength());
+        if (PhysicsColliderType == "box") {
+          Data.Physics->ColliderType = EditorPhysicsColliderType::Box;
+        } else if (PhysicsColliderType == "sphere") {
+          Data.Physics->ColliderType = EditorPhysicsColliderType::Sphere;
+        } else {
+          Data.Physics->ColliderType = EditorPhysicsColliderType::None;
+        }
+      }
+      if (const auto PhysicsBoxHalfExtentsIt =
+              ObjectValue.FindMember("physicsBoxHalfExtents");
+          PhysicsBoxHalfExtentsIt != ObjectValue.MemberEnd()) {
+        if (const auto Value = ParseVec3(PhysicsBoxHalfExtentsIt->value);
+            Value.has_value()) {
+          if (!Data.Physics.has_value()) {
+            Data.Physics = EditorPhysicsProperties{};
+          }
+          Data.Physics->BoxHalfExtents = *Value;
+        }
+      }
+      if (const auto PhysicsSphereRadiusIt =
+              ObjectValue.FindMember("physicsSphereRadius");
+          PhysicsSphereRadiusIt != ObjectValue.MemberEnd() &&
+          PhysicsSphereRadiusIt->value.IsNumber()) {
+        if (!Data.Physics.has_value()) {
+          Data.Physics = EditorPhysicsProperties{};
+        }
+        Data.Physics->SphereRadius = PhysicsSphereRadiusIt->value.GetFloat();
+      }
+      if (const auto PhysicsMassIt = ObjectValue.FindMember("physicsMass");
+          PhysicsMassIt != ObjectValue.MemberEnd() &&
+          PhysicsMassIt->value.IsNumber()) {
+        if (!Data.Physics.has_value()) {
+          Data.Physics = EditorPhysicsProperties{};
+        }
+        Data.Physics->Mass = PhysicsMassIt->value.GetFloat();
+      }
+      if (const auto PhysicsFrictionIt =
+              ObjectValue.FindMember("physicsFriction");
+          PhysicsFrictionIt != ObjectValue.MemberEnd() &&
+          PhysicsFrictionIt->value.IsNumber()) {
+        if (!Data.Physics.has_value()) {
+          Data.Physics = EditorPhysicsProperties{};
+        }
+        Data.Physics->Friction = PhysicsFrictionIt->value.GetFloat();
+      }
+      if (const auto PhysicsRestitutionIt =
+              ObjectValue.FindMember("physicsRestitution");
+          PhysicsRestitutionIt != ObjectValue.MemberEnd() &&
+          PhysicsRestitutionIt->value.IsNumber()) {
+        if (!Data.Physics.has_value()) {
+          Data.Physics = EditorPhysicsProperties{};
+        }
+        Data.Physics->Restitution = PhysicsRestitutionIt->value.GetFloat();
+      }
+
+      if (!ObjId.empty()) {
+        Objects[ObjId] = std::move(Data);
+      }
+    }
+  }
+
+  if (const auto MeshNameToObjectIdIt =
+          Document.FindMember("meshNameToObjectId");
+      MeshNameToObjectIdIt != Document.MemberEnd() &&
+      MeshNameToObjectIdIt->value.IsObject()) {
+    for (const auto &Member : MeshNameToObjectIdIt->value.GetObject()) {
+      if (Member.value.IsString()) {
+        MeshNameToObjectId.emplace(
+            Member.name.GetString(),
+            std::string(Member.value.GetString(),
+                        Member.value.GetStringLength()));
+      }
+    }
+  }
+
+  if (const auto WorldSettingsIt = Document.FindMember("worldSettings");
+      WorldSettingsIt != Document.MemberEnd() &&
+      WorldSettingsIt->value.IsObject()) {
+    if (const auto SkyboxColorTopIt =
+            WorldSettingsIt->value.FindMember("skyboxColorTop");
+        SkyboxColorTopIt != WorldSettingsIt->value.MemberEnd()) {
+      if (const auto Value = ParseVec3(SkyboxColorTopIt->value);
+          Value.has_value()) {
+        WorldSettings.SkyboxColorTop = *Value;
+      }
+    }
+    if (const auto SkyboxColorBottomIt =
+            WorldSettingsIt->value.FindMember("skyboxColorBottom");
+        SkyboxColorBottomIt != WorldSettingsIt->value.MemberEnd()) {
+      if (const auto Value = ParseVec3(SkyboxColorBottomIt->value);
+          Value.has_value()) {
+        WorldSettings.SkyboxColorBottom = *Value;
+      }
+    }
+    if (const auto SkyboxHDRPath = GetOptionalString(WorldSettingsIt->value,
+                                                     "skyboxHDRPath");
+        SkyboxHDRPath.has_value()) {
+      WorldSettings.SkyboxHDRPath = *SkyboxHDRPath;
+    }
   }
 
   // --- Stage 2: reconstruct scene tree from flat nodes ---

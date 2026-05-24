@@ -1,9 +1,30 @@
 #include <gtest/gtest.h>
 
+#include <rapidjson/document.h>
+
 #include "../Headless/HeadlessCommandProtocol.h"
 #include "../Headless/WebRtcSession.h"
 
 #include <string>
+
+namespace {
+
+rapidjson::Document ParseJson(const std::string &Json) {
+  rapidjson::Document Document;
+  Document.Parse(Json.c_str());
+  EXPECT_FALSE(Document.HasParseError());
+  EXPECT_TRUE(Document.IsObject());
+  return Document;
+}
+
+const rapidjson::Value &RequireMember(const rapidjson::Value &Object,
+                                      const char *Name) {
+  const auto It = Object.FindMember(Name);
+  EXPECT_NE(It, Object.MemberEnd());
+  return It->value;
+}
+
+} // namespace
 
 TEST(HeadlessProtocolTests, ParsesSetLookActiveCommandWithCursorPosition) {
   std::string Error;
@@ -302,11 +323,24 @@ TEST(HeadlessProtocolTests, SerializesObjectTransformUpdatedEvent) {
                 }}};
 
   const std::string Json = Axiom::SerializeEvent(Event);
-  EXPECT_NE(Json.find("\"payloadType\":\"object_transform_updated\""),
-            std::string::npos);
-  EXPECT_NE(Json.find("\"location\":[1,2,3]"), std::string::npos);
-  EXPECT_NE(Json.find("\"rotationDegrees\":[4,5,6]"), std::string::npos);
-  EXPECT_NE(Json.find("\"scale\":[1,1.5,2]"), std::string::npos);
+  const rapidjson::Document Document = ParseJson(Json);
+  EXPECT_STREQ(RequireMember(Document, "payloadType").GetString(),
+               "object_transform_updated");
+  const auto &Location = RequireMember(Document, "location");
+  ASSERT_TRUE(Location.IsArray());
+  EXPECT_FLOAT_EQ(Location[0].GetFloat(), 1.0f);
+  EXPECT_FLOAT_EQ(Location[1].GetFloat(), 2.0f);
+  EXPECT_FLOAT_EQ(Location[2].GetFloat(), 3.0f);
+  const auto &RotationDegrees = RequireMember(Document, "rotationDegrees");
+  ASSERT_TRUE(RotationDegrees.IsArray());
+  EXPECT_FLOAT_EQ(RotationDegrees[0].GetFloat(), 4.0f);
+  EXPECT_FLOAT_EQ(RotationDegrees[1].GetFloat(), 5.0f);
+  EXPECT_FLOAT_EQ(RotationDegrees[2].GetFloat(), 6.0f);
+  const auto &Scale = RequireMember(Document, "scale");
+  ASSERT_TRUE(Scale.IsArray());
+  EXPECT_FLOAT_EQ(Scale[0].GetFloat(), 1.0f);
+  EXPECT_FLOAT_EQ(Scale[1].GetFloat(), 1.5f);
+  EXPECT_FLOAT_EQ(Scale[2].GetFloat(), 2.0f);
 }
 
 TEST(HeadlessProtocolTests, SerializesRuntimeStateChangedEvent) {
@@ -412,36 +446,52 @@ TEST(HeadlessProtocolTests, SerializesSessionSnapshot) {
 
   const std::string Json = Axiom::SerializeSessionSnapshot(
       State, Axiom::SessionUserId{1}, true, true, "connected", "connected");
-  EXPECT_NE(Json.find("\"type\":\"session_snapshot\""), std::string::npos);
-  EXPECT_NE(Json.find("\"currentUserId\":1"), std::string::npos);
-  EXPECT_NE(Json.find("\"runtimeControllerUserId\":1"), std::string::npos);
-  EXPECT_NE(Json.find("\"showColliders\":true"), std::string::npos);
-  EXPECT_NE(Json.find("\"runtimeState\":\"edit\""), std::string::npos);
-  EXPECT_NE(Json.find("\"participants\""), std::string::npos);
-  EXPECT_NE(Json.find("\"displayName\":\"Local User\""), std::string::npos);
-  EXPECT_NE(Json.find("\"presenceState\":\"connected\""), std::string::npos);
-  EXPECT_NE(Json.find("\"selectionObjectId\":\"PlayerCharacter\""),
-            std::string::npos);
-  EXPECT_NE(Json.find("\"camera\":{\"position\":[1,2,3],\"yawDegrees\":-90"),
-            std::string::npos);
-  EXPECT_NE(Json.find("\"pitchDegrees\":0"), std::string::npos);
-  EXPECT_NE(Json.find("\"objectId\":\"PlayerCharacter\""), std::string::npos);
-  EXPECT_NE(Json.find("\"displayName\":\"World\""), std::string::npos);
-  EXPECT_NE(Json.find("\"kind\":\"actor\""), std::string::npos);
-  EXPECT_NE(Json.find("\"selectedObjectDetails\""), std::string::npos);
-  EXPECT_NE(Json.find("\"supportsTransform\":true"), std::string::npos);
-  EXPECT_NE(Json.find("\"transformReadOnly\":true"), std::string::npos);
-  EXPECT_NE(Json.find("\"location\":[1,2,3]"), std::string::npos);
-  EXPECT_NE(Json.find("\"physics\":{\"bodyType\":\"dynamic\""),
-            std::string::npos);
-  EXPECT_NE(Json.find("\"colliderType\":\"sphere\""), std::string::npos);
-  EXPECT_NE(Json.find("\"sphereRadius\":1.25"), std::string::npos);
-  EXPECT_NE(Json.find("\"mass\":3.5"), std::string::npos);
-  EXPECT_NE(Json.find("\"friction\":0.6"), std::string::npos);
-  EXPECT_NE(Json.find("\"restitution\":0.4"), std::string::npos);
-  EXPECT_NE(Json.find("\"selectedByUserIds\":[1]"), std::string::npos);
-  EXPECT_NE(Json.find("\"lockState\":\"locked\""), std::string::npos);
-  EXPECT_NE(Json.find("\"lockOwnerUserId\":1"), std::string::npos);
+  const rapidjson::Document Document = ParseJson(Json);
+  EXPECT_STREQ(RequireMember(Document, "type").GetString(), "session_snapshot");
+  EXPECT_EQ(RequireMember(Document, "currentUserId").GetUint64(), 1u);
+  EXPECT_EQ(RequireMember(Document, "runtimeControllerUserId").GetUint64(), 1u);
+  EXPECT_TRUE(RequireMember(Document, "showColliders").GetBool());
+  EXPECT_STREQ(RequireMember(Document, "runtimeState").GetString(), "edit");
+  const auto &Participants = RequireMember(Document, "participants");
+  ASSERT_TRUE(Participants.IsArray());
+  ASSERT_FALSE(Participants.Empty());
+  const auto &Participant = Participants[0];
+  EXPECT_STREQ(RequireMember(Participant, "displayName").GetString(), "Local User");
+  EXPECT_STREQ(RequireMember(Participant, "presenceState").GetString(), "connected");
+  EXPECT_STREQ(RequireMember(Participant, "selectionObjectId").GetString(),
+               "PlayerCharacter");
+  const auto &CameraJson = RequireMember(Participant, "camera");
+  const auto &Position = RequireMember(CameraJson, "position");
+  EXPECT_FLOAT_EQ(Position[0].GetFloat(), 1.0f);
+  EXPECT_FLOAT_EQ(Position[1].GetFloat(), 2.0f);
+  EXPECT_FLOAT_EQ(Position[2].GetFloat(), 3.0f);
+  EXPECT_FLOAT_EQ(RequireMember(CameraJson, "yawDegrees").GetFloat(), -90.0f);
+  EXPECT_FLOAT_EQ(RequireMember(CameraJson, "pitchDegrees").GetFloat(), 0.0f);
+  const auto &SelectedObjectDetails = RequireMember(Document, "selectedObjectDetails");
+  EXPECT_STREQ(RequireMember(SelectedObjectDetails, "objectId").GetString(),
+               "PlayerCharacter");
+  const auto &Capabilities = RequireMember(SelectedObjectDetails, "capabilities");
+  EXPECT_TRUE(RequireMember(Capabilities, "supportsTransform").GetBool());
+  EXPECT_TRUE(RequireMember(Capabilities, "transformReadOnly").GetBool());
+  const auto &Transform = RequireMember(SelectedObjectDetails, "transform");
+  const auto &SelectedLocation = RequireMember(Transform, "location");
+  EXPECT_FLOAT_EQ(SelectedLocation[0].GetFloat(), 1.0f);
+  EXPECT_FLOAT_EQ(SelectedLocation[1].GetFloat(), 2.0f);
+  EXPECT_FLOAT_EQ(SelectedLocation[2].GetFloat(), 3.0f);
+  const auto &Physics = RequireMember(SelectedObjectDetails, "physics");
+  EXPECT_STREQ(RequireMember(Physics, "bodyType").GetString(), "dynamic");
+  EXPECT_STREQ(RequireMember(Physics, "colliderType").GetString(), "sphere");
+  EXPECT_FLOAT_EQ(RequireMember(Physics, "sphereRadius").GetFloat(), 1.25f);
+  EXPECT_FLOAT_EQ(RequireMember(Physics, "mass").GetFloat(), 3.5f);
+  EXPECT_FLOAT_EQ(RequireMember(Physics, "friction").GetFloat(), 0.6f);
+  EXPECT_FLOAT_EQ(RequireMember(Physics, "restitution").GetFloat(), 0.4f);
+  const auto &Collaboration = RequireMember(SelectedObjectDetails, "collaboration");
+  const auto &SelectedByUserIds = RequireMember(Collaboration, "selectedByUserIds");
+  ASSERT_TRUE(SelectedByUserIds.IsArray());
+  ASSERT_EQ(SelectedByUserIds.Size(), 1u);
+  EXPECT_EQ(SelectedByUserIds[0].GetUint64(), 1u);
+  EXPECT_STREQ(RequireMember(Collaboration, "lockState").GetString(), "locked");
+  EXPECT_EQ(RequireMember(Collaboration, "lockOwnerUserId").GetUint64(), 1u);
 }
 
 TEST(HeadlessProtocolTests, SerializesSessionConnectResponse) {
@@ -720,10 +770,12 @@ TEST(HeadlessProtocolTests, SerializesMaterialPropertiesChangedEvent) {
                 }}};
 
   const std::string Json = Axiom::SerializeEvent(Event);
-  EXPECT_NE(Json.find("\"payloadType\":\"material_properties_changed\""), std::string::npos);
-  EXPECT_NE(Json.find("\"objectId\":\"crate-1\""), std::string::npos);
-  EXPECT_NE(Json.find("\"metallic\":0.9"), std::string::npos);
-  EXPECT_NE(Json.find("\"roughness\":0.1"), std::string::npos);
+  const rapidjson::Document Document = ParseJson(Json);
+  EXPECT_STREQ(RequireMember(Document, "payloadType").GetString(),
+               "material_properties_changed");
+  EXPECT_STREQ(RequireMember(Document, "objectId").GetString(), "crate-1");
+  EXPECT_FLOAT_EQ(RequireMember(Document, "metallic").GetFloat(), 0.9f);
+  EXPECT_FLOAT_EQ(RequireMember(Document, "roughness").GetFloat(), 0.1f);
 }
 
 TEST(HeadlessProtocolTests, SerializesObjectDetailsWithMaterial) {
@@ -745,10 +797,18 @@ TEST(HeadlessProtocolTests, SerializesObjectDetailsWithMaterial) {
 
   const std::string Json = Axiom::SerializeSessionSnapshot(
       State, Axiom::SessionUserId{1}, true, true, "connected", "connected");
-  EXPECT_NE(Json.find("\"material\":{"), std::string::npos);
-  EXPECT_NE(Json.find("\"baseColorFactor\":[0.5,0.5,0.5,1]"), std::string::npos);
-  EXPECT_NE(Json.find("\"metallic\":0"), std::string::npos);
-  EXPECT_NE(Json.find("\"roughness\":0.5"), std::string::npos);
+  const rapidjson::Document Document = ParseJson(Json);
+  const auto &Material = RequireMember(RequireMember(Document, "selectedObjectDetails"),
+                                       "material");
+  ASSERT_TRUE(Material.IsObject());
+  const auto &BaseColorFactor = RequireMember(Material, "baseColorFactor");
+  ASSERT_TRUE(BaseColorFactor.IsArray());
+  EXPECT_FLOAT_EQ(BaseColorFactor[0].GetFloat(), 0.5f);
+  EXPECT_FLOAT_EQ(BaseColorFactor[1].GetFloat(), 0.5f);
+  EXPECT_FLOAT_EQ(BaseColorFactor[2].GetFloat(), 0.5f);
+  EXPECT_FLOAT_EQ(BaseColorFactor[3].GetFloat(), 1.0f);
+  EXPECT_FLOAT_EQ(RequireMember(Material, "metallic").GetFloat(), 0.0f);
+  EXPECT_FLOAT_EQ(RequireMember(Material, "roughness").GetFloat(), 0.5f);
 }
 
 TEST(HeadlessProtocolTests, SerializesObjectDetailsWithNullMaterialForLights) {
