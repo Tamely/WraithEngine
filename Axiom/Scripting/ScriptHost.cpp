@@ -1,15 +1,10 @@
 #include "ScriptHost.h"
 #include "InternalCalls.h"
 
+#include "HAL/FileWatcher.h"
+
 #include <Core/Log.h>
 #include <Session/EditorSession.h>
-
-#if AXIOM_SCRIPTING_WATCH
-#include <fcntl.h>
-#include <sys/event.h>
-#include <sys/time.h>
-#include <unistd.h>
-#endif
 
 namespace Axiom {
 
@@ -426,87 +421,47 @@ void ScriptHost::Shutdown() {
 // ---------------------------------------------------------------------------
 
 void ScriptHost::StartFileWatcher() {
-#if AXIOM_SCRIPTING_WATCH
-  if (m_WatcherRunning.load()) {
-    return; // already running
-  }
+#if !AXIOM_SCRIPTING_WATCH
+  A_CORE_WARN("ScriptHost: file watcher not available "
+              "(rebuild with -DAXIOM_SCRIPTING_WATCH=ON)");
+  return;
+#endif
+
   if (m_UserAssemblyPath.empty()) {
     A_CORE_WARN("ScriptHost: StartFileWatcher called before LoadUserAssembly");
     return;
   }
 
-  m_WatcherRunning.store(true);
-  m_WatcherThread = std::thread([this] {
-    const std::filesystem::path WatchPath = m_UserAssemblyPath;
+  if (m_FileWatcher != nullptr && m_FileWatcher->IsWatching()) {
+    return;
+  }
 
-    // Watch the parent directory — the DLL itself may be replaced atomically
-    // (deleted + rewritten) which would invalidate a vnode watch on the file.
-    const std::filesystem::path WatchDir = WatchPath.parent_path();
+  if (m_FileWatcher == nullptr) {
+    m_FileWatcher = HAL::CreateFileWatcher();
+  }
 
-    const int KQ = kqueue();
-    if (KQ < 0) {
-      A_CORE_ERROR("ScriptHost watcher: kqueue() failed");
-      m_WatcherRunning.store(false);
-      return;
-    }
+  std::string Error;
+  if (!m_FileWatcher->StartWatching(
+          m_UserAssemblyPath,
+          [this]() {
+            A_CORE_INFO("ScriptHost watcher: assembly change detected, reloading");
+            ReloadUserAssembly();
+          },
+          Error)) {
+    A_CORE_WARN("ScriptHost: file watcher unavailable: {}", Error);
+    m_FileWatcher.reset();
+    return;
+  }
 
-    const int DirFd = open(WatchDir.c_str(), O_RDONLY | O_EVTONLY);
-    if (DirFd < 0) {
-      close(KQ);
-      A_CORE_ERROR("ScriptHost watcher: could not open '{}' for watching",
-                   WatchDir.string());
-      m_WatcherRunning.store(false);
-      return;
-    }
-
-    struct kevent Change;
-    EV_SET(&Change, DirFd, EVFILT_VNODE,
-           EV_ADD | EV_CLEAR,
-           NOTE_WRITE | NOTE_EXTEND | NOTE_RENAME,
-           0, nullptr);
-    kevent(KQ, &Change, 1, nullptr, 0, nullptr);
-
-    std::filesystem::file_time_type LastMtime{};
-    if (std::filesystem::exists(WatchPath)) {
-      LastMtime = std::filesystem::last_write_time(WatchPath);
-    }
-
-    A_CORE_INFO("ScriptHost watcher: watching '{}' for changes",
-                WatchPath.string());
-
-    while (m_WatcherRunning.load()) {
-      struct kevent Event;
-      struct timespec Timeout{1, 0}; // 1-second timeout so we can check the stop flag
-      const int N = kevent(KQ, nullptr, 0, &Event, 1, &Timeout);
-      if (N <= 0) {
-        continue; // timeout or error — loop back and check stop flag
-      }
-
-      // Directory was modified — check if our DLL's mtime changed
-      if (!std::filesystem::exists(WatchPath)) {
-        continue;
-      }
-      const auto NewMtime = std::filesystem::last_write_time(WatchPath);
-      if (NewMtime != LastMtime) {
-        LastMtime = NewMtime;
-        A_CORE_INFO("ScriptHost watcher: assembly change detected, reloading");
-        ReloadUserAssembly();
-      }
-    }
-
-    close(DirFd);
-    close(KQ);
-    A_CORE_INFO("ScriptHost watcher: stopped");
-  });
-#else
-  A_CORE_WARN("ScriptHost: file watcher not available "
-              "(rebuild with -DAXIOM_SCRIPTING_WATCH=ON)");
-#endif
+  A_CORE_INFO("ScriptHost watcher: watching '{}' for changes",
+              m_UserAssemblyPath.string());
 }
 
 void ScriptHost::StopFileWatcher() {
-  if (m_WatcherRunning.exchange(false) && m_WatcherThread.joinable()) {
-    m_WatcherThread.join();
+  if (m_FileWatcher != nullptr) {
+    m_FileWatcher->StopWatching();
+    m_FileWatcher.reset();
+    A_CORE_INFO("ScriptHost watcher: stopped");
   }
 }
 

@@ -85,18 +85,6 @@ add_executable(AxiomPackagedRuntime
   HeadlessSessionLayer.cpp
 )
 
-if(APPLE)
-  target_sources(AxiomHeadless PRIVATE
-    MacOSWebRtcSession.mm
-  )
-  target_sources(AxiomRemoteViewportDevClient PRIVATE
-    MacOSWebRtcSession.mm
-  )
-  target_sources(AxiomRemoteViewportServer PRIVATE
-    MacOSWebRtcSession.mm
-  )
-endif()
-
 target_include_directories(AxiomRemoteViewportServer PRIVATE
   "${CMAKE_SOURCE_DIR}/ThirdParty/glfw/deps"
 )

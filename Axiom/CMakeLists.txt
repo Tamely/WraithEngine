@@ -67,12 +67,6 @@ set(ENGINE_SOURCES
   Renderer/Vulkan/VulkanSwapchain.cpp
 )
 
-if(APPLE)
-  list(APPEND ENGINE_SOURCES
-    Renderer/MacOSVideoToolboxH264Encoder.mm
-  )
-endif()
-
 set(THIRDPARTY_SOURCES
   "${CMAKE_SOURCE_DIR}/ThirdParty/imgui/imgui.h"
   "${CMAKE_SOURCE_DIR}/ThirdParty/imgui/imgui.cpp"
@@ -295,6 +289,8 @@ message(STATUS "Vulkan_INCLUDE_DIRS: ${Vulkan_INCLUDE_DIRS}")
 message(STATUS "Vulkan_LIBRARIES: ${Vulkan_LIBRARIES}")
 message(STATUS "Vulkan_VERSION: ${Vulkan_VERSION}")
 
+add_subdirectory("${CMAKE_SOURCE_DIR}/HAL" "${CMAKE_BINARY_DIR}/HAL")
+
 target_include_directories(AxiomCore PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}"
   "${CMAKE_SOURCE_DIR}/ThirdParty/glfw/include"
@@ -312,7 +308,7 @@ target_include_directories(AxiomCore PUBLIC
 )
 
 target_link_libraries(AxiomCore PUBLIC
-  glfw Vulkan::Vulkan fastgltf glm
+  AxiomHAL glfw Vulkan::Vulkan fastgltf glm
   spdlog assimp
 )
 
@@ -380,6 +376,7 @@ if(AXIOM_ENABLE_SCRIPTING)
 else()
   target_compile_definitions(AxiomCore PUBLIC AXIOM_SCRIPTING_ENABLED=0)
   target_compile_definitions(AxiomCore PUBLIC AXIOM_CORAL_MANAGED_DIR="")
+  target_compile_definitions(AxiomCore PUBLIC AXIOM_MANAGED_DIR="")
   target_compile_definitions(AxiomCore PUBLIC AXIOM_SCRIPTING_WATCH=0)
   target_compile_definitions(AxiomCore PUBLIC AXIOM_SCRIPTING_TRUST_RESTRICTED=1)
 endif()

@@ -1,5 +1,7 @@
 #include "RemoteViewportServer.h"
 
+#include <HAL/Socket.h>
+
 #include <Core/Platform.h>
 #include <Project/ProjectSystem.h>
 
@@ -38,21 +40,6 @@
 #include <string_view>
 #include <vector>
 
-#if AXIOM_PLATFORM_WINDOWS
-#  ifndef NOMINMAX
-#    define NOMINMAX
-#  endif
-#include <winsock2.h>
-#include <windows.h>
-#include <ws2tcpip.h>
-#else
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
-#endif
-
 namespace Axiom {
 struct RemoteViewportServerUwsState {
   std::mutex StartupMutex;
@@ -77,50 +64,9 @@ using UwsWebSocket =
     uWS::WebSocket<false, true, RemoteViewportWebSocketUserData>;
 std::function<bool(uintptr_t, std::string_view)> g_HttpResponseSender;
 
-#if AXIOM_PLATFORM_WINDOWS
-using SocketHandle = SOCKET;
-constexpr SocketHandle InvalidSocket = INVALID_SOCKET;
+using SocketHandle = HAL::SocketHandle;
 
-class WinsockRuntime final {
-public:
-  WinsockRuntime() {
-    static std::once_flag Flag;
-    std::call_once(Flag, []() {
-      WSADATA Data{};
-      WSAStartup(MAKEWORD(2, 2), &Data);
-    });
-  }
-};
-#else
-using SocketHandle = int;
-constexpr SocketHandle InvalidSocket = -1;
-#endif
-
-SocketHandle ToSocket(uintptr_t Value) {
-  return static_cast<SocketHandle>(Value);
-}
-
-uintptr_t ToValue(SocketHandle Socket) { return static_cast<uintptr_t>(Socket); }
-
-void CloseSocket(SocketHandle Socket) {
-  if (Socket != InvalidSocket) {
-#if AXIOM_PLATFORM_WINDOWS
-    closesocket(Socket);
-#else
-    close(Socket);
-#endif
-  }
-}
-
-void SetReuseAddress(SocketHandle Socket) {
-  constexpr int Reuse = 1;
-#if AXIOM_PLATFORM_WINDOWS
-  setsockopt(Socket, SOL_SOCKET, SO_REUSEADDR,
-             reinterpret_cast<const char *>(&Reuse), sizeof(Reuse));
-#else
-  setsockopt(Socket, SOL_SOCKET, SO_REUSEADDR, &Reuse, sizeof(Reuse));
-#endif
-}
+SocketHandle ToSocket(uintptr_t Value) { return Value; }
 
 std::string BuildHttpResponse(std::string_view Status,
                               std::string_view ContentType,
@@ -208,22 +154,7 @@ bool SendAll(SocketHandle Socket, const void *Data, size_t Size) {
                                                  Size));
   }
 
-  const auto *Bytes = static_cast<const char *>(Data);
-  size_t Offset = 0;
-  while (Offset < Size) {
-#if AXIOM_PLATFORM_WINDOWS
-    const int Sent =
-        send(Socket, Bytes + Offset, static_cast<int>(Size - Offset), 0);
-    if (Sent == SOCKET_ERROR || Sent == 0) {
-#else
-    const ssize_t Sent = send(Socket, Bytes + Offset, Size - Offset, 0);
-    if (Sent <= 0) {
-#endif
-      return false;
-    }
-    Offset += static_cast<size_t>(Sent);
-  }
-  return true;
+  return HAL::SendSocketBytes(Socket, Data, Size);
 }
 
 std::string_view StripQuery(std::string_view Path) {

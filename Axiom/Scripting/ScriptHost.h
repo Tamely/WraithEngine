@@ -1,12 +1,12 @@
 #pragma once
 
+#include <HAL/FileWatcher.h>
 #include <Session/EditorEvent.h>
 #include <Session/SessionTypes.h>
 
-#include <atomic>
 #include <filesystem>
+#include <memory>
 #include <string>
-#include <thread>
 #include <unordered_map>
 
 #if AXIOM_SCRIPTING_ENABLED
@@ -57,9 +57,8 @@ public:
   // before the reload.  No-op if no user assembly has been loaded yet.
   void ReloadUserAssembly();
 
-  // Start/stop the kqueue-based file watcher that auto-reloads when the
-  // assembly on disk changes.  Only available when AXIOM_SCRIPTING_WATCH=1
-  // (macOS only).  No-op on other platforms / when the flag is off.
+  // Start/stop the HAL-managed file watcher that auto-reloads when the
+  // assembly on disk changes. Only available when AXIOM_SCRIPTING_WATCH=1.
   void StartFileWatcher();
   void StopFileWatcher();
 
@@ -129,9 +128,7 @@ private:
   bool m_Initialized{false};
   bool m_EngineAssemblyLoaded{false};
   bool m_UserAssemblyLoaded{false};
-  // File watcher (kqueue, macOS, AXIOM_SCRIPTING_WATCH=1 only)
-  std::thread m_WatcherThread;
-  std::atomic<bool> m_WatcherRunning{false};
+  std::unique_ptr<HAL::IFileWatcher> m_FileWatcher;
 };
 
 } // namespace Axiom
