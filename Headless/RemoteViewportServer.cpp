@@ -3072,7 +3072,9 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     }
     const EditorObjectDetails *Selected =
         Session.FindSelectedObjectDetails(Client->User);
-    const auto *DragTD = (Selected != nullptr && Selected->SupportsTransform)
+    const auto *DragTD =
+        (Selected != nullptr && Selected->SupportsTransform &&
+         !Selected->TransformReadOnly)
         ? (Selected->WorldTransform.has_value() ? &*Selected->WorldTransform
                : (Selected->Transform.has_value() ? &*Selected->Transform : nullptr))
         : nullptr;
@@ -3124,8 +3126,19 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
         Command->MousePosition, Session.GetState().Scene.MeshInstances,
         m_Host.GetHeadlessLayer().BuildLightBillboards());
     if (Hit.has_value() && !Hit->ObjectId.empty()) {
+      // Multi-instance mesh assets expand into read-only generated children
+      // (one per sub-mesh) that share the parent's transform. Picking one of
+      // these visually selects the asset, but transforms can only be applied
+      // to the movable root — so promote the selection to the root.
+      std::string SelectId = Hit->ObjectId;
+      if (const EditorObjectDetails *Picked =
+              Session.FindObjectDetails(SelectId);
+          Picked != nullptr && Picked->IsGeneratedAssetChild &&
+          Picked->GeneratedFromAssetRootId.has_value()) {
+        SelectId = *Picked->GeneratedFromAssetRootId;
+      }
       m_Host.SubmitRemoteCommand(Client->User,
-          EditorCommand{SelectObjectCommand{.ObjectId = Hit->ObjectId}});
+          EditorCommand{SelectObjectCommand{.ObjectId = SelectId}});
     }
     return true;
   }
