@@ -17,8 +17,12 @@ public:
   void SetCursorMode(CursorMode Mode) override;
   [[nodiscard]] CursorMode GetCursorMode() const override;
   [[nodiscard]] bool ShouldClose() const override;
+  [[nodiscard]] bool IsMinimized() const override;
   void RequestClose() override;
   [[nodiscard]] void *GetNativeHandle() const override;
+  [[nodiscard]] bool SupportsVulkanPresentation() const override;
+  VkResult CreateVulkanSurface(VkInstance Instance,
+                               VkSurfaceKHR *Surface) const override;
 
 private:
   GLFWwindow *m_NativeHandle{nullptr};

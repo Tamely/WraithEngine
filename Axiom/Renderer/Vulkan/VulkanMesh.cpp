@@ -1,6 +1,5 @@
 #include "Renderer/Vulkan/VulkanMesh.h"
 
-#include "Renderer/Vulkan/VulkanRendererBackend.h"
 #include "Renderer/Vulkan/VulkanBuffer.h"
 #include "Renderer/Vulkan/VulkanInitializers.h"
 
@@ -11,13 +10,12 @@ namespace Axiom {
 VulkanMesh::VulkanMesh(VmaAllocator InAllocator) : Allocator(InAllocator) {}
 
 VulkanMesh::~VulkanMesh() {
-  if (auto *Backend = VulkanRendererBackend::TryGet();
-      Backend != nullptr && Backend->IsInitialized()) {
+  if (std::shared_ptr<GPUResourceQueue> Queue = ResourceQueue.lock()) {
     AllocatedBuffer VertexBufferCopy = VertexBuffer;
     AllocatedBuffer IndexBufferCopy = IndexBuffer;
     AllocatedBuffer ProjectedVertexBufferCopy = ProjectedVertexBuffer;
     VmaAllocator AllocatorCopy = Allocator;
-    Backend->EnqueueDeferredDestroy(
+    Queue->Enqueue(
         [AllocatorCopy, VertexBufferCopy, IndexBufferCopy,
          ProjectedVertexBufferCopy]() mutable {
           VkBufferUtil::DestroyBuffer(AllocatorCopy, VertexBufferCopy);
@@ -40,9 +38,11 @@ VulkanMesh::Create(const MeshData &MeshSource, VmaAllocator Allocator,
                    VkDevice Device, VkQueue GraphicsQueue,
                    VkCommandPool CommandPool,
                    ::DescriptorAllocator &DescriptorAllocator,
+                   const std::shared_ptr<GPUResourceQueue> &ResourceQueue,
                    const MeshCreateOptions &Options,
                    VkDescriptorSetLayout MeshDescriptorLayout) {
   auto MeshRef = std::make_shared<VulkanMesh>(Allocator);
+  MeshRef->ResourceQueue = ResourceQueue;
   MeshRef->BoundsMin = MeshSource.BoundsMin;
   MeshRef->BoundsMax = MeshSource.BoundsMax;
   MeshRef->VertexCount = static_cast<uint32_t>(MeshSource.Vertices.size());

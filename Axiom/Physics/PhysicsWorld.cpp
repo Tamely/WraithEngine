@@ -182,14 +182,17 @@ struct PhysicsWorld::Impl {
     System->SetGravity(JPH::Vec3(0.0f, -9.81f, 0.0f));
   }
 
-  JPH::ShapeRefC BuildShape(const EditorPhysicsProperties &Physics, const glm::vec3 &Scale) {
-    switch (Physics.ColliderType) {
+  JPH::ShapeRefC BuildShape(const RuntimeSceneBodyState &Body) {
+    switch (Body.ColliderType) {
     case EditorPhysicsColliderType::Box:
-      return new JPH::BoxShape(ToJoltVec3(Physics.BoxHalfExtents * Scale));
+      return new JPH::BoxShape(
+          ToJoltVec3(Body.BoxHalfExtents * Body.WorldTransform.Scale));
     case EditorPhysicsColliderType::Sphere:
-      return new JPH::SphereShape(Physics.SphereRadius *
-                                  std::max({std::abs(Scale.x), std::abs(Scale.y),
-                                            std::abs(Scale.z)}));
+      return new JPH::SphereShape(
+          Body.SphereRadius *
+          std::max({std::abs(Body.WorldTransform.Scale.x),
+                    std::abs(Body.WorldTransform.Scale.y),
+                    std::abs(Body.WorldTransform.Scale.z)}));
     default:
       return nullptr;
     }
@@ -241,7 +244,7 @@ bool PhysicsWorld::IsRunning() const {
 #endif
 }
 
-void PhysicsWorld::Start(const EditorSceneState &Scene) {
+void PhysicsWorld::Start(const RuntimeSceneState &Scene) {
 #if AXIOM_ENABLE_PHYSICS
   if (m_Impl == nullptr) {
     return;
@@ -250,61 +253,61 @@ void PhysicsWorld::Start(const EditorSceneState &Scene) {
   m_Impl->Reset();
   auto &BodyInterface = m_Impl->System->GetBodyInterface();
 
-  for (const auto &[ObjectId, Details] : Scene.ObjectDetailsById) {
-    if (!Details.Transform.has_value() || !Details.Physics.has_value()) {
+  for (const RuntimeSceneBodyState &Body : Scene.Bodies) {
+    if (Body.BodyType == EditorPhysicsBodyType::None ||
+        Body.ColliderType == EditorPhysicsColliderType::None) {
       continue;
     }
 
-    const EditorPhysicsProperties &Physics = *Details.Physics;
-    if (Physics.BodyType == EditorPhysicsBodyType::None ||
-        Physics.ColliderType == EditorPhysicsColliderType::None) {
+    if (Body.MaterialIndex >= Scene.Materials.size()) {
+      A_CORE_WARN("PhysicsWorld: body '{}' referenced invalid material index {}",
+                  Body.ObjectId, Body.MaterialIndex);
       continue;
     }
 
-    const EditorTransformDetails &Transform = Details.WorldTransform.has_value()
-                                                  ? *Details.WorldTransform
-                                                  : *Details.Transform;
+    const RuntimePhysicsMaterial &Material = Scene.Materials[Body.MaterialIndex];
 
-    JPH::ShapeRefC Shape = m_Impl->BuildShape(Physics, Transform.Scale);
+    JPH::ShapeRefC Shape = m_Impl->BuildShape(Body);
     if (Shape == nullptr) {
       continue;
     }
 
     const JPH::EMotionType MotionType =
-        Physics.BodyType == EditorPhysicsBodyType::Dynamic
+        Body.BodyType == EditorPhysicsBodyType::Dynamic
             ? JPH::EMotionType::Dynamic
             : JPH::EMotionType::Static;
     const JPH::ObjectLayer Layer =
-        Physics.BodyType == EditorPhysicsBodyType::Dynamic ? kDynamicObjectLayer
-                                                           : kStaticObjectLayer;
+        Body.BodyType == EditorPhysicsBodyType::Dynamic ? kDynamicObjectLayer
+                                                        : kStaticObjectLayer;
 
-    JPH::BodyCreationSettings Settings(
-        Shape.GetPtr(), ToJoltRVec3(Transform.Location),
-        ToJoltQuatDegrees(Transform.RotationDegrees), MotionType, Layer);
-    Settings.mFriction = Physics.Friction;
-    Settings.mRestitution = Physics.Restitution;
-    if (Physics.BodyType == EditorPhysicsBodyType::Dynamic &&
-        Physics.Mass > 0.0f) {
-      Settings.mMassPropertiesOverride.mMass = Physics.Mass;
+    JPH::BodyCreationSettings Settings(Shape.GetPtr(),
+                                       ToJoltRVec3(Body.WorldTransform.Location),
+                                       ToJoltQuatDegrees(
+                                           Body.WorldTransform.RotationDegrees),
+                                       MotionType, Layer);
+    Settings.mFriction = Material.Friction;
+    Settings.mRestitution = Material.Restitution;
+    if (Body.BodyType == EditorPhysicsBodyType::Dynamic && Body.Mass > 0.0f) {
+      Settings.mMassPropertiesOverride.mMass = Body.Mass;
       Settings.mOverrideMassProperties =
           JPH::EOverrideMassProperties::CalculateInertia;
     }
 
     const JPH::BodyID BodyId = BodyInterface.CreateAndAddBody(
-        Settings, Physics.BodyType == EditorPhysicsBodyType::Dynamic
+        Settings, Body.BodyType == EditorPhysicsBodyType::Dynamic
                       ? JPH::EActivation::Activate
                       : JPH::EActivation::DontActivate);
     if (BodyId.IsInvalid()) {
-      A_CORE_WARN("PhysicsWorld: failed to create body for '{}'", ObjectId);
+      A_CORE_WARN("PhysicsWorld: failed to create body for '{}'", Body.ObjectId);
       continue;
     }
 
     const size_t Index = m_Impl->Bodies.size();
-    m_Impl->Bodies.push_back({.ObjectId = ObjectId,
-                              .BodyType = Physics.BodyType,
+    m_Impl->Bodies.push_back({.ObjectId = Body.ObjectId,
+                              .BodyType = Body.BodyType,
                               .BodyId = BodyId,
-                              .Scale = Transform.Scale});
-    m_Impl->BodyIndexByObjectId.emplace(ObjectId, Index);
+                              .Scale = Body.WorldTransform.Scale});
+    m_Impl->BodyIndexByObjectId.emplace(Body.ObjectId, Index);
   }
 
   m_Impl->Running = true;

@@ -2,6 +2,7 @@
 
 #include "Renderer/RendererBackend.h"
 #include "Renderer/RenderSurface.h"
+#include "Renderer/Vulkan/GPUResourceQueue.h"
 #include "Renderer/Vulkan/VulkanCommandContext.h"
 #include "Renderer/Vulkan/VulkanContext.h"
 #include "Renderer/Vulkan/VulkanDeletionQueue.h"
@@ -22,8 +23,6 @@
 #include <memory>
 #include <optional>
 #include <vector>
-
-struct GLFWwindow;
 
 namespace Axiom {
 class VulkanRendererBackend final : public RendererBackend {
@@ -48,7 +47,6 @@ public:
   std::optional<CapturedFrame> ConsumeCapturedFrame() override;
 
   void ImmediateSubmit(std::function<void(VkCommandBuffer cmd)> &&Function);
-  void EnqueueDeferredDestroy(std::function<void()> &&Function);
   bool IsInitialized() const { return m_IsInitialized; }
 
 private:
@@ -105,7 +103,6 @@ private:
   bool m_HasPresentationSurface{false};
   bool m_EnableImGui{true};
 
-  GLFWwindow *m_Window{nullptr};
   RenderSurfacePtr m_Surface;
   IViewportFrameOutput *m_FrameOutput{nullptr};
 
@@ -168,6 +165,7 @@ private:
   VulkanMaterialResources m_MaterialResources;
   VulkanOcclusionCulling m_OcclusionCulling;
   VulkanSceneRenderer m_SceneRenderer;
+  std::shared_ptr<GPUResourceQueue> m_GpuResourceQueue;
   MaterialInstanceRef m_LightBillboardMaterial;
   RenderScene *m_ActiveScene{nullptr};
   RendererFrameStats m_FrameStats{};

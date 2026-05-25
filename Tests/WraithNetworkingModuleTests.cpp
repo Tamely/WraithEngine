@@ -33,8 +33,20 @@ public:
     return Cursor;
   }
   [[nodiscard]] bool ShouldClose() const override { return Closed; }
+  [[nodiscard]] bool IsMinimized() const override { return false; }
   void RequestClose() override { Closed = true; }
   [[nodiscard]] void *GetNativeHandle() const override { return nullptr; }
+  [[nodiscard]] bool SupportsVulkanPresentation() const override {
+    return false;
+  }
+  VkResult CreateVulkanSurface(VkInstance Instance,
+                               VkSurfaceKHR *Surface) const override {
+    (void)Instance;
+    if (Surface != nullptr) {
+      *Surface = VK_NULL_HANDLE;
+    }
+    return VK_ERROR_INITIALIZATION_FAILED;
+  }
 
 private:
   bool Closed{false};

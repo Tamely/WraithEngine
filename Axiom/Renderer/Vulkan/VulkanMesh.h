@@ -1,12 +1,13 @@
 #pragma once
 
 #include "Renderer/Mesh.h"
+#include "Renderer/Vulkan/GPUResourceQueue.h"
 #include "Renderer/Vulkan/VulkanDescriptors.h"
 #include "Renderer/Vulkan/VulkanRendererTypes.h"
 #include "Renderer/Vulkan/VulkanTypes.h"
 
-#include <optional>
 #include <memory>
+#include <optional>
 
 namespace Axiom {
 class VulkanMesh final : public Mesh {
@@ -18,6 +19,7 @@ public:
   Create(const MeshData &MeshSource, VmaAllocator Allocator, VkDevice Device,
          VkQueue GraphicsQueue, VkCommandPool CommandPool,
          ::DescriptorAllocator &DescriptorAllocator,
+         const std::shared_ptr<GPUResourceQueue> &ResourceQueue,
          const MeshCreateOptions &Options,
          VkDescriptorSetLayout MeshDescriptorLayout);
 
@@ -32,6 +34,7 @@ public:
   uint32_t VertexCount{0};
   uint32_t IndexCount{0};
   uint32_t TriangleCount{0};
+  std::weak_ptr<GPUResourceQueue> ResourceQueue;
   bool KeepsCpuData() const { return CpuData.has_value(); }
   size_t RetainedCpuBytes() const;
 };

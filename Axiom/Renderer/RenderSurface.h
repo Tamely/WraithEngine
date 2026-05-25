@@ -2,6 +2,8 @@
 
 #include "Core/Window.h"
 
+#include <vulkan/vulkan_core.h>
+
 #include <cstdint>
 #include <memory>
 
@@ -16,7 +18,11 @@ public:
   [[nodiscard]] virtual bool SupportsPresentation() const = 0;
   [[nodiscard]] virtual uint32_t GetWidth() const = 0;
   [[nodiscard]] virtual uint32_t GetHeight() const = 0;
+  [[nodiscard]] virtual bool IsMinimized() const = 0;
   [[nodiscard]] virtual void *GetNativeWindowHandle() const = 0;
+  [[nodiscard]] virtual bool SupportsVulkanPresentation() const = 0;
+  virtual VkResult CreateVulkanSurface(VkInstance Instance,
+                                       VkSurfaceKHR *Surface) const = 0;
 };
 
 class WindowRenderSurface final : public IRenderSurface {
@@ -33,8 +39,18 @@ public:
   [[nodiscard]] uint32_t GetHeight() const override {
     return m_TargetWindow.GetHeight();
   }
+  [[nodiscard]] bool IsMinimized() const override {
+    return m_TargetWindow.IsMinimized();
+  }
   [[nodiscard]] void *GetNativeWindowHandle() const override {
     return m_TargetWindow.GetNativeHandle();
+  }
+  [[nodiscard]] bool SupportsVulkanPresentation() const override {
+    return m_TargetWindow.SupportsVulkanPresentation();
+  }
+  VkResult CreateVulkanSurface(VkInstance Instance,
+                               VkSurfaceKHR *Surface) const override {
+    return m_TargetWindow.CreateVulkanSurface(Instance, Surface);
   }
 
 private:
@@ -52,7 +68,17 @@ public:
   [[nodiscard]] bool SupportsPresentation() const override { return false; }
   [[nodiscard]] uint32_t GetWidth() const override { return m_Width; }
   [[nodiscard]] uint32_t GetHeight() const override { return m_Height; }
+  [[nodiscard]] bool IsMinimized() const override { return false; }
   [[nodiscard]] void *GetNativeWindowHandle() const override { return nullptr; }
+  [[nodiscard]] bool SupportsVulkanPresentation() const override { return false; }
+  VkResult CreateVulkanSurface(VkInstance Instance,
+                               VkSurfaceKHR *Surface) const override {
+    (void)Instance;
+    if (Surface != nullptr) {
+      *Surface = VK_NULL_HANDLE;
+    }
+    return VK_ERROR_INITIALIZATION_FAILED;
+  }
 
 private:
   uint32_t m_Width{0};

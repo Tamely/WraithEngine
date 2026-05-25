@@ -78,7 +78,18 @@ bool GlfwWindow::ShouldClose() const {
   return glfwWindowShouldClose(m_NativeHandle);
 }
 
+bool GlfwWindow::IsMinimized() const {
+  return glfwGetWindowAttrib(m_NativeHandle, GLFW_ICONIFIED) != 0;
+}
+
 void GlfwWindow::RequestClose() { glfwSetWindowShouldClose(m_NativeHandle, 1); }
 
 void *GlfwWindow::GetNativeHandle() const { return m_NativeHandle; }
+
+bool GlfwWindow::SupportsVulkanPresentation() const { return glfwVulkanSupported(); }
+
+VkResult GlfwWindow::CreateVulkanSurface(VkInstance Instance,
+                                         VkSurfaceKHR *Surface) const {
+  return glfwCreateWindowSurface(Instance, m_NativeHandle, nullptr, Surface);
+}
 } // namespace Axiom

@@ -6,6 +6,7 @@
 #include "Session/EditorCommand.h"
 #include "Session/EditorEvent.h"
 #include "Session/EditorMessageBus.h"
+#include "Session/RuntimeSceneState.h"
 
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
@@ -51,12 +52,6 @@ struct EditorSceneItem {
   EditorSceneItemKind Kind{EditorSceneItemKind::Mesh};
   bool Visible{true};
   std::vector<EditorSceneItem> Children;
-};
-
-struct EditorTransformDetails {
-  glm::vec3 Location{0.0f};
-  glm::vec3 RotationDegrees{0.0f};
-  glm::vec3 Scale{1.0f};
 };
 
 struct EditorLightProperties {

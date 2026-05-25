@@ -16,9 +16,6 @@
 #include <volk.h>
 #include <vulkan/vulkan_core.h>
 
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
-
 #include <vk_mem_alloc.h>
 
 #include <algorithm>
@@ -88,12 +85,10 @@ void VulkanRendererBackend::Init(const RendererCreateInfo &CreateInfo) {
   m_FrameOutput = CreateInfo.FrameOutput;
   m_HasPresentationSurface = m_Surface->SupportsPresentation();
   m_EnableImGui = m_HasPresentationSurface;
-  m_Window = m_HasPresentationSurface
-                 ? static_cast<GLFWwindow *>(m_Surface->GetNativeWindowHandle())
-                 : nullptr;
   m_WindowExtent = {CreateInfo.Width, CreateInfo.Height};
+  m_GpuResourceQueue = std::make_shared<GPUResourceQueue>();
 
-  m_Context.Init(m_Surface->GetNativeWindowHandle(), m_HasPresentationSurface);
+  m_Context.Init(*m_Surface);
   m_Device.Init(m_Context);
 
   VkPhysicalDeviceProperties DeviceProperties{};
@@ -120,7 +115,7 @@ void VulkanRendererBackend::Init(const RendererCreateInfo &CreateInfo) {
   InitPipelines();
   InitMeshFrameResources();
   if (m_EnableImGui) {
-    m_ImGuiRenderer.Init({.WindowHandle = m_Window,
+    m_ImGuiRenderer.Init({.WindowHandle = m_Surface->GetNativeWindowHandle(),
                           .Instance = m_Context.Instance,
                           .PhysicalDevice = m_Device.PhysicalDevice,
                           .Device = m_Device.Device,
@@ -324,6 +319,8 @@ void VulkanRendererBackend::Shutdown() {
     }
 
     m_CommandContext.Shutdown(m_Device.Device);
+    m_GpuResourceQueue->Flush();
+    m_GpuResourceQueue.reset();
     m_MainDeletionQueue.Flush();
     m_Swapchain.Shutdown(m_Device);
     m_Device.Shutdown();
@@ -1082,7 +1079,8 @@ VulkanRendererBackend::CreateMesh(const MeshData &MeshSource,
                                   const MeshCreateOptions &Options) {
   return VulkanMesh::Create(MeshSource, m_Device.Allocator, m_Device.Device,
                             m_Device.GraphicsQueue, GetCurrentFrame().CommandPool,
-                            m_GlobalDescriptorAllocator, Options,
+                            m_GlobalDescriptorAllocator, m_GpuResourceQueue,
+                            Options,
                             m_MeshDescriptorLayout);
 }
 
@@ -1690,14 +1688,8 @@ void VulkanRendererBackend::ImmediateSubmit(
                                    std::move(Function));
 }
 
-void VulkanRendererBackend::EnqueueDeferredDestroy(
-    std::function<void()> &&Function) {
-  m_MainDeletionQueue.PushFunction(std::move(Function));
-}
-
 void VulkanRendererBackend::BeginFrame() {
-  m_StopRendering =
-      m_HasPresentationSurface && glfwGetWindowAttrib(m_Window, GLFW_ICONIFIED);
+  m_StopRendering = m_HasPresentationSurface && m_Surface->IsMinimized();
   m_RenderFallbackBackground = false;
   m_ActiveScene = nullptr;
   if (m_StopRendering) {

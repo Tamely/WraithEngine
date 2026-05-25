@@ -10,6 +10,12 @@
 #include <glm/vec3.hpp>
 
 namespace Axiom {
+struct EditorTransformDetails {
+  glm::vec3 Location{0.0f};
+  glm::vec3 RotationDegrees{0.0f};
+  glm::vec3 Scale{1.0f};
+};
+
 struct CommandId {
   uint64_t Value{0};
   auto operator<=>(const CommandId &) const = default;

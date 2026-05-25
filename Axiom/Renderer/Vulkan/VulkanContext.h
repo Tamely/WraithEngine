@@ -6,9 +6,11 @@
 #include <VkBootstrap.h>
 
 namespace Axiom {
+class IRenderSurface;
+
 class VulkanContext {
 public:
-  void Init(void *WindowHandle, bool CreateSurface);
+  void Init(const IRenderSurface &Surface);
   void Shutdown();
 
   VkInstance Instance{VK_NULL_HANDLE};
@@ -20,4 +22,3 @@ private:
   DeletionQueue m_DeletionQueue;
 };
 } // namespace Axiom
-

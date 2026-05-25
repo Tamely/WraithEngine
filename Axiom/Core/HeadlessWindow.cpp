@@ -28,7 +28,20 @@ CursorMode HeadlessWindow::GetCursorMode() const { return m_CursorMode; }
 
 bool HeadlessWindow::ShouldClose() const { return m_ShouldClose; }
 
+bool HeadlessWindow::IsMinimized() const { return false; }
+
 void HeadlessWindow::RequestClose() { m_ShouldClose = true; }
 
 void *HeadlessWindow::GetNativeHandle() const { return nullptr; }
+
+bool HeadlessWindow::SupportsVulkanPresentation() const { return false; }
+
+VkResult HeadlessWindow::CreateVulkanSurface(VkInstance Instance,
+                                             VkSurfaceKHR *Surface) const {
+  (void)Instance;
+  if (Surface != nullptr) {
+    *Surface = VK_NULL_HANDLE;
+  }
+  return VK_ERROR_INITIALIZATION_FAILED;
+}
 } // namespace Axiom

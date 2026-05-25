@@ -2,6 +2,8 @@
 
 #include "Core/CursorMode.h"
 
+#include <vulkan/vulkan_core.h>
+
 #include <cstdint>
 #include <string>
 
@@ -21,8 +23,12 @@ public:
   virtual void SetCursorMode(CursorMode Mode) = 0;
   [[nodiscard]] virtual CursorMode GetCursorMode() const = 0;
   [[nodiscard]] virtual bool ShouldClose() const = 0;
+  [[nodiscard]] virtual bool IsMinimized() const = 0;
   virtual void RequestClose() = 0;
   [[nodiscard]] virtual void *GetNativeHandle() const = 0;
+  [[nodiscard]] virtual bool SupportsVulkanPresentation() const = 0;
+  virtual VkResult CreateVulkanSurface(VkInstance Instance,
+                                       VkSurfaceKHR *Surface) const = 0;
 
   [[nodiscard]] uint32_t GetWidth() const { return m_Width; }
   [[nodiscard]] uint32_t GetHeight() const { return m_Height; }

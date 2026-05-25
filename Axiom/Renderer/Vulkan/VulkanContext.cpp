@@ -1,9 +1,8 @@
 #include "Renderer/Vulkan/VulkanContext.h"
 
-#include <volk.h>
+#include "Renderer/RenderSurface.h"
 
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
+#include <volk.h>
 #include <VkBootstrap.h>
 
 #include <cstdlib>
@@ -31,7 +30,7 @@ VulkanDebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT MessageSeverity,
 } // namespace
 
 namespace Axiom {
-void VulkanContext::Init(void *WindowHandle, bool CreateSurface) {
+void VulkanContext::Init(const IRenderSurface &Surface) {
   const VulkanLoaderInfo &LoaderInfo = GetVulkanLoaderInfo();
   if (!LoaderInfo.IsAvailable) {
     A_CORE_CRITICAL("Failed to resolve a Vulkan loader for Vulkan context init");
@@ -45,7 +44,7 @@ void VulkanContext::Init(void *WindowHandle, bool CreateSurface) {
   A_CORE_INFO("Volk successfully initialized using {0}",
               LoaderInfo.UsesCustomLoader ? "custom loader" : "default loader");
 
-  if (CreateSurface && !glfwVulkanSupported()) {
+  if (Surface.SupportsPresentation() && !Surface.SupportsVulkanPresentation()) {
     A_CORE_CRITICAL("GLFW reports Vulkan is not supported on this machine!");
     Axiom::Log::Flush();
     std::abort();
@@ -58,7 +57,7 @@ void VulkanContext::Init(void *WindowHandle, bool CreateSurface) {
     return vkb::InstanceBuilder{};
   }();
 
-  if (!CreateSurface) {
+  if (!Surface.SupportsPresentation()) {
     Builder.set_headless();
   }
 
@@ -107,9 +106,9 @@ void VulkanContext::Init(void *WindowHandle, bool CreateSurface) {
 
   volkLoadInstance(Instance);
 
-  if (CreateSurface) {
-    const VkResult SurfaceResult = glfwCreateWindowSurface(
-        Instance, static_cast<GLFWwindow *>(WindowHandle), nullptr, &Surface);
+  if (Surface.SupportsPresentation()) {
+    const VkResult SurfaceResult =
+        Surface.CreateVulkanSurface(Instance, &this->Surface);
     if (SurfaceResult != VK_SUCCESS) {
       A_CORE_CRITICAL("Failed to create Vulkan window surface: {0}",
                       VkResultToString(SurfaceResult));

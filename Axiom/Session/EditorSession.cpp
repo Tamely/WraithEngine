@@ -18,6 +18,8 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
+#include <unordered_map>
 #include <utility>
 
 namespace Axiom {
@@ -447,6 +449,68 @@ EditorSceneState CloneEditorSceneState(const EditorSceneState &Scene) {
     MeshInstance.Material = CloneMaterialInstance(MeshInstance.Material);
   }
   return Copy;
+}
+
+RuntimeSceneState BuildRuntimeSceneState(const EditorSceneState &Scene) {
+  RuntimeSceneState RuntimeScene;
+  RuntimeScene.Materials.push_back({});
+
+  struct MaterialKey {
+    float Friction{0.2f};
+    float Restitution{0.0f};
+
+    bool operator==(const MaterialKey &) const = default;
+  };
+
+  struct MaterialKeyHash {
+    size_t operator()(const MaterialKey &Key) const noexcept {
+      const uint32_t FrictionBits = std::bit_cast<uint32_t>(Key.Friction);
+      const uint32_t RestitutionBits = std::bit_cast<uint32_t>(Key.Restitution);
+      return (static_cast<size_t>(FrictionBits) << 32u) ^
+             static_cast<size_t>(RestitutionBits);
+    }
+  };
+
+  std::unordered_map<MaterialKey, uint32_t, MaterialKeyHash> MaterialIndices;
+  MaterialIndices.emplace(MaterialKey{}, 0u);
+
+  for (const auto &[ObjectId, Details] : Scene.ObjectDetailsById) {
+    if (!Details.Transform.has_value() || !Details.Physics.has_value()) {
+      continue;
+    }
+
+    const EditorPhysicsProperties &Physics = *Details.Physics;
+    if (Physics.BodyType == EditorPhysicsBodyType::None ||
+        Physics.ColliderType == EditorPhysicsColliderType::None) {
+      continue;
+    }
+
+    const EditorTransformDetails &WorldTransform =
+        Details.WorldTransform.has_value() ? *Details.WorldTransform
+                                           : *Details.Transform;
+    const MaterialKey Key{.Friction = Physics.Friction,
+                          .Restitution = Physics.Restitution};
+    const auto [It, Inserted] =
+        MaterialIndices.emplace(
+            Key, static_cast<uint32_t>(RuntimeScene.Materials.size()));
+    if (Inserted) {
+      RuntimeScene.Materials.push_back(
+          {.Friction = Physics.Friction, .Restitution = Physics.Restitution});
+    }
+
+    RuntimeScene.Bodies.push_back({
+        .ObjectId = ObjectId,
+        .WorldTransform = WorldTransform,
+        .BodyType = Physics.BodyType,
+        .ColliderType = Physics.ColliderType,
+        .BoxHalfExtents = Physics.BoxHalfExtents,
+        .SphereRadius = Physics.SphereRadius,
+        .Mass = Physics.Mass,
+        .MaterialIndex = It->second,
+    });
+  }
+
+  return RuntimeScene;
 }
 } // namespace
 
@@ -1753,7 +1817,7 @@ void EditorSession::EnsurePhysicsWorldStarted() {
     A_CORE_WARN("EditorSession: physics requested but backend is unavailable");
     return;
   }
-  m_PhysicsWorld->Start(m_State.Scene);
+  m_PhysicsWorld->Start(BuildRuntimeSceneState(m_State.Scene));
 }
 
 void EditorSession::StopPhysicsWorld() {

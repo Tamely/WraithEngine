@@ -26,7 +26,6 @@ enum class RendererViewMode : uint32_t {
 };
 
 struct RendererCreateInfo {
-  Window *TargetWindow{nullptr};
   RenderSurfacePtr TargetSurface;
   IViewportFrameOutput *FrameOutput{nullptr};
   uint32_t Width{0};

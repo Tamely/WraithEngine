@@ -50,7 +50,6 @@ Application::Application(const ApplicationConfig &Config,
   }
   if (m_Renderer != nullptr && Dependencies.InitializeRenderer) {
     m_Renderer->Init({
-        .TargetWindow = m_Window.get(),
         .TargetSurface = m_RenderSurface,
         .FrameOutput = m_Config.FrameOutput,
         .Width = m_Window->GetWidth(),
