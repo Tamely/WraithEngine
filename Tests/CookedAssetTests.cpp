@@ -50,11 +50,11 @@ TEST(CookedAssetTests, CookedMeshRoundTripsThroughBinaryFormat) {
           Axiom::MeshData{
               .Vertices =
                   {
-                      {.Position = {1.0f, 2.0f, 3.0f, 1.0f},
-                       .Normal = {0.0f, 1.0f, 0.0f, 0.0f},
+                      {.Position = {1.0f, 2.0f, 3.0f},
+                       .Normal = {0.0f, 1.0f, 0.0f},
                        .TexCoord = {0.25f, 0.75f}},
-                      {.Position = {4.0f, 5.0f, 6.0f, 1.0f},
-                       .Normal = {1.0f, 0.0f, 0.0f, 0.0f},
+                      {.Position = {4.0f, 5.0f, 6.0f},
+                       .Normal = {1.0f, 0.0f, 0.0f},
                        .TexCoord = {0.5f, 0.5f}},
                   },
               .Indices = {0, 1, 0},

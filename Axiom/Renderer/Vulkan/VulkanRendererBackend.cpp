@@ -848,9 +848,9 @@ void VulkanRendererBackend::InitMeshPipelines() {
       .stride = sizeof(MeshVertex),
       .inputRate = VK_VERTEX_INPUT_RATE_VERTEX};
   std::array<VkVertexInputAttributeDescription, 3> AttributeDescriptions = {
-      VkVertexInputAttributeDescription{0, 0, VK_FORMAT_R32G32B32A32_SFLOAT,
+      VkVertexInputAttributeDescription{0, 0, VK_FORMAT_R32G32B32_SFLOAT,
                                         offsetof(MeshVertex, Position)},
-      VkVertexInputAttributeDescription{1, 0, VK_FORMAT_R32G32B32A32_SFLOAT,
+      VkVertexInputAttributeDescription{1, 0, VK_FORMAT_R32G32B32_SFLOAT,
                                         offsetof(MeshVertex, Normal)},
       VkVertexInputAttributeDescription{2, 0, VK_FORMAT_R32G32_SFLOAT,
                                         offsetof(MeshVertex, TexCoord)}};
@@ -1078,10 +1078,12 @@ void VulkanRendererBackend::InitMeshFrameResources() {
 }
 
 std::shared_ptr<Mesh>
-VulkanRendererBackend::CreateMesh(const MeshData &MeshSource) {
+VulkanRendererBackend::CreateMesh(const MeshData &MeshSource,
+                                  const MeshCreateOptions &Options) {
   return VulkanMesh::Create(MeshSource, m_Device.Allocator, m_Device.Device,
                             m_Device.GraphicsQueue, GetCurrentFrame().CommandPool,
-                            m_GlobalDescriptorAllocator, m_MeshDescriptorLayout);
+                            m_GlobalDescriptorAllocator, Options,
+                            m_MeshDescriptorLayout);
 }
 
 void VulkanRendererBackend::CollectFrameStats(MeshFrameResources &Frame) {

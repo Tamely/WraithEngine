@@ -10,7 +10,7 @@
 
 namespace Axiom::Assets {
 
-constexpr uint32_t kCookedMeshFormatVersion = 2;
+constexpr uint32_t kCookedMeshFormatVersion = 3;
 
 struct CookedMeshSceneData {
   struct InstanceData {

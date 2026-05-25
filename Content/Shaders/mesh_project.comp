@@ -2,11 +2,6 @@
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
-struct MeshVertex {
-    vec4 position;
-    vec4 normal;
-};
-
 struct ProjectedVertex {
     vec4 pixelAndDepth;
     vec4 normalAndValid;
@@ -14,7 +9,7 @@ struct ProjectedVertex {
 };
 
 layout(std430, set = 1, binding = 0) readonly buffer VertexBuffer {
-    MeshVertex vertices[];
+    float vertexData[];
 };
 layout(std430, set = 1, binding = 2) writeonly buffer ProjectedVertexBuffer {
     ProjectedVertex projectedVertices[];
@@ -39,13 +34,23 @@ void main() {
         return;
     }
 
-    MeshVertex vertex = vertices[vertexIndex];
-    vec4 worldPosition = pushConstants.model * vec4(vertex.position.xyz, 1.0);
+    uint vertexBase = vertexIndex * 8;
+    vec3 position = vec3(
+        vertexData[vertexBase + 0],
+        vertexData[vertexBase + 1],
+        vertexData[vertexBase + 2]
+    );
+    vec3 normal = vec3(
+        vertexData[vertexBase + 3],
+        vertexData[vertexBase + 4],
+        vertexData[vertexBase + 5]
+    );
+    vec4 worldPosition = pushConstants.model * vec4(position, 1.0);
     vec4 clipPosition = cameraFrame.viewProjection * worldPosition;
 
     ProjectedVertex result;
     result.clipPosition = clipPosition;
-    result.normalAndValid.xyz = normalize(mat3(pushConstants.model) * vertex.normal.xyz);
+    result.normalAndValid.xyz = normalize(mat3(pushConstants.model) * normal);
     result.normalAndValid.w = clipPosition.w > 0.0001 ? 1.0 : 0.0;
 
     if (result.normalAndValid.w > 0.5) {

@@ -36,6 +36,7 @@ set(ENGINE_SOURCES
   Session/StartupScene.cpp
   Renderer/Camera.cpp
   Renderer/ForwardRenderer.cpp
+  Renderer/Mesh.cpp
   Renderer/RenderCommand.cpp
   Renderer/Renderer.cpp
   Renderer/RenderScene.cpp

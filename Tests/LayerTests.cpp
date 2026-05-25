@@ -1366,7 +1366,8 @@ TEST(HeadlessSessionLayerTests, BuildColliderOverlaySubmissionsUsesPhysicsData) 
   const auto StaticIt = std::find_if(
       Submissions.begin(), Submissions.end(),
       [](const Axiom::RenderMeshSubmission &Submission) {
-        return Submission.Name == "static-box-collider";
+        return Axiom::GetRenderMeshSubmissionDebugName(Submission.DebugDataId) ==
+               "static-box-collider";
       });
   ASSERT_NE(StaticIt, Submissions.end());
   EXPECT_TRUE(StaticIt->Translucent);
@@ -1380,7 +1381,8 @@ TEST(HeadlessSessionLayerTests, BuildColliderOverlaySubmissionsUsesPhysicsData) 
   const auto DynamicIt = std::find_if(
       Submissions.begin(), Submissions.end(),
       [](const Axiom::RenderMeshSubmission &Submission) {
-        return Submission.Name == "dynamic-sphere-collider";
+        return Axiom::GetRenderMeshSubmissionDebugName(Submission.DebugDataId) ==
+               "dynamic-sphere-collider";
       });
   ASSERT_NE(DynamicIt, Submissions.end());
   EXPECT_TRUE(DynamicIt->Translucent);

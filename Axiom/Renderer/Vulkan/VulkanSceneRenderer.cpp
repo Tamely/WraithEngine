@@ -49,11 +49,11 @@ glm::vec3 VulkanSceneRenderer::ComputeWorldCenter(
 }
 
 void VulkanSceneRenderer::BindMeshBuffers(
-    VkCommandBuffer CommandBuffer, const std::shared_ptr<VulkanMesh> &MeshRef) {
+    VkCommandBuffer CommandBuffer, const VulkanMesh &Mesh) {
   VkDeviceSize VertexOffset = 0;
-  vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &MeshRef->VertexBuffer.Buffer,
+  vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &Mesh.VertexBuffer.Buffer,
                          &VertexOffset);
-  vkCmdBindIndexBuffer(CommandBuffer, MeshRef->IndexBuffer.Buffer, 0,
+  vkCmdBindIndexBuffer(CommandBuffer, Mesh.IndexBuffer.Buffer, 0,
                        VK_INDEX_TYPE_UINT32);
 }
 
@@ -173,7 +173,7 @@ void VulkanSceneRenderer::RecordDepthPrepass(
     vkCmdPushConstants(Context.CommandBuffer, Context.MeshDepthPipelineLayout,
                        VK_SHADER_STAGE_VERTEX_BIT, 0,
                        sizeof(MeshGraphicsPushConstants), &PushConstants);
-    BindMeshBuffers(Context.CommandBuffer, VisibleSubmission.Mesh);
+    BindMeshBuffers(Context.CommandBuffer, *VisibleSubmission.Mesh);
     vkCmdDrawIndexed(Context.CommandBuffer, VisibleSubmission.Mesh->IndexCount, 1,
                      0, 0, 0);
   };
@@ -325,7 +325,7 @@ void VulkanSceneRenderer::RecordGraphicsPass(
     vkCmdPushConstants(Context.CommandBuffer, Context.MeshGraphicsPipelineLayout,
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                        sizeof(MeshGraphicsPushConstants), &PushConstants);
-    BindMeshBuffers(Context.CommandBuffer, VisibleSubmission.Mesh);
+    BindMeshBuffers(Context.CommandBuffer, *VisibleSubmission.Mesh);
     vkCmdDrawIndexed(Context.CommandBuffer, VisibleSubmission.Mesh->IndexCount, 1,
                      0, 0, 0);
   }
@@ -387,7 +387,7 @@ void VulkanSceneRenderer::RecordTranslucentGraphicsPass(
     vkCmdPushConstants(Context.CommandBuffer, Context.MeshGraphicsPipelineLayout,
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                        sizeof(MeshGraphicsPushConstants), &PushConstants);
-    BindMeshBuffers(Context.CommandBuffer, VisibleSubmission.Mesh);
+    BindMeshBuffers(Context.CommandBuffer, *VisibleSubmission.Mesh);
     vkCmdDrawIndexed(Context.CommandBuffer, VisibleSubmission.Mesh->IndexCount, 1,
                      0, 0, 0);
   }
@@ -420,10 +420,14 @@ void VulkanSceneRenderer::RenderScenePasses(const RenderContext &Context) const 
   Context.FrameStats.MeshSubmissionCount = 0;
   Context.FrameStats.TriangleCount = 0;
 
-  std::vector<CandidateSubmission> Candidates;
-  std::vector<VisibleMeshSubmission> OpaqueGraphicsSubmissions;
-  std::vector<VisibleMeshSubmission> TranslucentGraphicsSubmissions;
-  std::vector<VisibleMeshSubmission> ComputeSubmissions;
+  auto &Candidates = m_CandidateScratch;
+  auto &OpaqueGraphicsSubmissions = m_OpaqueGraphicsScratch;
+  auto &TranslucentGraphicsSubmissions = m_TranslucentGraphicsScratch;
+  auto &ComputeSubmissions = m_ComputeScratch;
+  Candidates.clear();
+  OpaqueGraphicsSubmissions.clear();
+  TranslucentGraphicsSubmissions.clear();
+  ComputeSubmissions.clear();
   Candidates.reserve(SubmissionCount);
   OpaqueGraphicsSubmissions.reserve(SubmissionCount);
   TranslucentGraphicsSubmissions.reserve(SubmissionCount);
@@ -431,8 +435,8 @@ void VulkanSceneRenderer::RenderScenePasses(const RenderContext &Context) const 
 
   for (size_t Index = 0; Index < SubmissionCount; ++Index) {
     const auto &Submission = Context.Scene.Submissions[Index];
-    auto VulkanMeshRef = std::dynamic_pointer_cast<VulkanMesh>(Submission.Mesh);
-    if (!VulkanMeshRef) {
+    VulkanMesh *VulkanMeshRef = Submission.TypedMesh;
+    if (VulkanMeshRef == nullptr) {
       continue;
     }
 
@@ -447,7 +451,7 @@ void VulkanSceneRenderer::RenderScenePasses(const RenderContext &Context) const 
     const glm::vec3 WorldCenter = ComputeWorldCenter(Submission, *VulkanMeshRef);
     const glm::vec3 Delta = WorldCenter - Camera.GetPosition();
     Candidates.push_back({.Submission = &Submission,
-                          .Mesh = std::move(VulkanMeshRef),
+                          .Mesh = VulkanMeshRef,
                           .SortDepth = glm::dot(Delta, Delta)});
   }
 

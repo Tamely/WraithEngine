@@ -5,22 +5,24 @@
 #include "Renderer/Vulkan/VulkanRendererTypes.h"
 #include "Renderer/Vulkan/VulkanTypes.h"
 
+#include <optional>
 #include <memory>
 
 namespace Axiom {
 class VulkanMesh final : public Mesh {
 public:
-  explicit VulkanMesh(MeshData SourceData, VmaAllocator InAllocator);
+  explicit VulkanMesh(VmaAllocator InAllocator);
   ~VulkanMesh() override;
 
   static std::shared_ptr<VulkanMesh>
   Create(const MeshData &MeshSource, VmaAllocator Allocator, VkDevice Device,
          VkQueue GraphicsQueue, VkCommandPool CommandPool,
          ::DescriptorAllocator &DescriptorAllocator,
+         const MeshCreateOptions &Options,
          VkDescriptorSetLayout MeshDescriptorLayout);
 
   VmaAllocator Allocator{nullptr};
-  MeshData CpuData;
+  std::optional<MeshData> CpuData;
   AllocatedBuffer VertexBuffer;
   AllocatedBuffer IndexBuffer;
   AllocatedBuffer ProjectedVertexBuffer;
@@ -30,5 +32,7 @@ public:
   uint32_t VertexCount{0};
   uint32_t IndexCount{0};
   uint32_t TriangleCount{0};
+  bool KeepsCpuData() const { return CpuData.has_value(); }
+  size_t RetainedCpuBytes() const;
 };
 } // namespace Axiom

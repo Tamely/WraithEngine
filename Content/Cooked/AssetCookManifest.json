@@ -69,7 +69,7 @@
       "kind": "mesh",
       "relativePath": "sponza_atrium_3.glb",
       "cookedPath": "Cooked/sponza_atrium_3.wmesh",
-      "formatVersion": 2,
+      "formatVersion": 3,
       "sourceHash": 13152113367551948137
     },
     {

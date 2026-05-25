@@ -35,8 +35,10 @@ EditorSceneRendererAdapter::BuildRenderSubmissions(const EditorSession &Session)
 
     Submissions.push_back({
         .Mesh = Cached.Mesh,
+        .TypedMesh = ResolveVulkanMesh(Cached.Mesh),
         .Material = Instance.Material,  // always live — picks up material edits
-        .Name = Instance.ObjectId,
+        .DebugDataId = RegisterRenderMeshSubmissionDebugData(
+            {.Name = Instance.ObjectId}),
         .RenderPath = Cached.RenderPath,
         .Transform = Instance.Transform,
     });

@@ -53,13 +53,13 @@ public:
 private:
   struct VisibleMeshSubmission {
     const RenderMeshSubmission *Submission{nullptr};
-    std::shared_ptr<VulkanMesh> Mesh;
+    VulkanMesh *Mesh{nullptr};
     float SortDepth{0.0f};
   };
 
   struct CandidateSubmission {
     const RenderMeshSubmission *Submission{nullptr};
-    std::shared_ptr<VulkanMesh> Mesh;
+    VulkanMesh *Mesh{nullptr};
     float SortDepth{0.0f};
   };
 
@@ -67,7 +67,7 @@ private:
   static glm::vec3 ComputeWorldCenter(const RenderMeshSubmission &Submission,
                                       const VulkanMesh &Mesh);
   static void BindMeshBuffers(VkCommandBuffer CommandBuffer,
-                              const std::shared_ptr<VulkanMesh> &MeshRef);
+                              const VulkanMesh &Mesh);
   static void UpdateComputeFrameDescriptors(const RenderContext &Context,
                                             const VkDescriptorBufferInfo
                                                 &CameraBufferInfo);
@@ -96,5 +96,10 @@ private:
       const VkRect2D &Scissor,
       const std::vector<VisibleMeshSubmission> &GraphicsSubmissions,
       const VkDescriptorBufferInfo &CameraBufferInfo, bool ForceWireframe);
+
+  mutable std::vector<CandidateSubmission> m_CandidateScratch;
+  mutable std::vector<VisibleMeshSubmission> m_OpaqueGraphicsScratch;
+  mutable std::vector<VisibleMeshSubmission> m_TranslucentGraphicsScratch;
+  mutable std::vector<VisibleMeshSubmission> m_ComputeScratch;
 };
 } // namespace Axiom

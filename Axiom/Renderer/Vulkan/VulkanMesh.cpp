@@ -8,9 +8,7 @@
 #include <utility>
 
 namespace Axiom {
-VulkanMesh::VulkanMesh(MeshData SourceData, VmaAllocator InAllocator)
-    : Allocator(InAllocator), CpuData(std::move(SourceData)),
-      BoundsMin(CpuData.BoundsMin), BoundsMax(CpuData.BoundsMax) {}
+VulkanMesh::VulkanMesh(VmaAllocator InAllocator) : Allocator(InAllocator) {}
 
 VulkanMesh::~VulkanMesh() {
   if (auto *Backend = VulkanRendererBackend::TryGet();
@@ -42,8 +40,11 @@ VulkanMesh::Create(const MeshData &MeshSource, VmaAllocator Allocator,
                    VkDevice Device, VkQueue GraphicsQueue,
                    VkCommandPool CommandPool,
                    ::DescriptorAllocator &DescriptorAllocator,
+                   const MeshCreateOptions &Options,
                    VkDescriptorSetLayout MeshDescriptorLayout) {
-  auto MeshRef = std::make_shared<VulkanMesh>(MeshSource, Allocator);
+  auto MeshRef = std::make_shared<VulkanMesh>(Allocator);
+  MeshRef->BoundsMin = MeshSource.BoundsMin;
+  MeshRef->BoundsMax = MeshSource.BoundsMax;
   MeshRef->VertexCount = static_cast<uint32_t>(MeshSource.Vertices.size());
   MeshRef->IndexCount = static_cast<uint32_t>(MeshSource.Indices.size());
   MeshRef->TriangleCount = MeshRef->IndexCount / 3;
@@ -85,6 +86,18 @@ VulkanMesh::Create(const MeshData &MeshSource, VmaAllocator Allocator,
   vkUpdateDescriptorSets(Device, static_cast<uint32_t>(Writes.size()),
                          Writes.data(), 0, VK_NULL_HANDLE);
 
+  if (Options.KeepCpuData) {
+    MeshRef->CpuData = MeshSource;
+  }
+
   return MeshRef;
+}
+
+size_t VulkanMesh::RetainedCpuBytes() const {
+  if (!CpuData.has_value()) {
+    return 0;
+  }
+  return CpuData->Vertices.size() * sizeof(MeshVertex) +
+         CpuData->Indices.size() * sizeof(uint32_t);
 }
 } // namespace Axiom

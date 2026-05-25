@@ -17,11 +17,11 @@ constexpr float ColliderCornerScale = 0.085f;
 MeshData BuildPresenceMarkerMeshData() {
   MeshData Mesh{};
   Mesh.Vertices = {
-      {.Position = {-0.35f, -0.2f, 0.5f, 1.0f}},
-      {.Position = {0.35f, -0.2f, 0.5f, 1.0f}},
-      {.Position = {0.35f, 0.2f, 0.5f, 1.0f}},
-      {.Position = {-0.35f, 0.2f, 0.5f, 1.0f}},
-      {.Position = {0.0f, 0.0f, -0.9f, 1.0f}},
+      {.Position = {-0.35f, -0.2f, 0.5f}},
+      {.Position = {0.35f, -0.2f, 0.5f}},
+      {.Position = {0.35f, 0.2f, 0.5f}},
+      {.Position = {-0.35f, 0.2f, 0.5f}},
+      {.Position = {0.0f, 0.0f, -0.9f}},
   };
   Mesh.Indices = {0, 1, 2, 0, 2, 3, 0, 1, 4, 1, 2, 4, 2, 3, 4, 3, 0, 4};
   Mesh.BoundsMin = {-0.35f, -0.2f, -0.9f};
@@ -32,30 +32,30 @@ MeshData BuildPresenceMarkerMeshData() {
 MeshData BuildUnitBoxMeshData() {
   MeshData Mesh{};
   Mesh.Vertices = {
-      {.Position = {-1.0f, -1.0f, 1.0f, 1.0f}, .Normal = {0.0f, 0.0f, 1.0f, 0.0f}},
-      {.Position = {1.0f, -1.0f, 1.0f, 1.0f}, .Normal = {0.0f, 0.0f, 1.0f, 0.0f}},
-      {.Position = {1.0f, 1.0f, 1.0f, 1.0f}, .Normal = {0.0f, 0.0f, 1.0f, 0.0f}},
-      {.Position = {-1.0f, 1.0f, 1.0f, 1.0f}, .Normal = {0.0f, 0.0f, 1.0f, 0.0f}},
-      {.Position = {-1.0f, -1.0f, -1.0f, 1.0f}, .Normal = {0.0f, 0.0f, -1.0f, 0.0f}},
-      {.Position = {1.0f, -1.0f, -1.0f, 1.0f}, .Normal = {0.0f, 0.0f, -1.0f, 0.0f}},
-      {.Position = {1.0f, 1.0f, -1.0f, 1.0f}, .Normal = {0.0f, 0.0f, -1.0f, 0.0f}},
-      {.Position = {-1.0f, 1.0f, -1.0f, 1.0f}, .Normal = {0.0f, 0.0f, -1.0f, 0.0f}},
-      {.Position = {-1.0f, -1.0f, -1.0f, 1.0f}, .Normal = {-1.0f, 0.0f, 0.0f, 0.0f}},
-      {.Position = {-1.0f, -1.0f, 1.0f, 1.0f}, .Normal = {-1.0f, 0.0f, 0.0f, 0.0f}},
-      {.Position = {-1.0f, 1.0f, 1.0f, 1.0f}, .Normal = {-1.0f, 0.0f, 0.0f, 0.0f}},
-      {.Position = {-1.0f, 1.0f, -1.0f, 1.0f}, .Normal = {-1.0f, 0.0f, 0.0f, 0.0f}},
-      {.Position = {1.0f, -1.0f, -1.0f, 1.0f}, .Normal = {1.0f, 0.0f, 0.0f, 0.0f}},
-      {.Position = {1.0f, -1.0f, 1.0f, 1.0f}, .Normal = {1.0f, 0.0f, 0.0f, 0.0f}},
-      {.Position = {1.0f, 1.0f, 1.0f, 1.0f}, .Normal = {1.0f, 0.0f, 0.0f, 0.0f}},
-      {.Position = {1.0f, 1.0f, -1.0f, 1.0f}, .Normal = {1.0f, 0.0f, 0.0f, 0.0f}},
-      {.Position = {-1.0f, 1.0f, -1.0f, 1.0f}, .Normal = {0.0f, 1.0f, 0.0f, 0.0f}},
-      {.Position = {-1.0f, 1.0f, 1.0f, 1.0f}, .Normal = {0.0f, 1.0f, 0.0f, 0.0f}},
-      {.Position = {1.0f, 1.0f, 1.0f, 1.0f}, .Normal = {0.0f, 1.0f, 0.0f, 0.0f}},
-      {.Position = {1.0f, 1.0f, -1.0f, 1.0f}, .Normal = {0.0f, 1.0f, 0.0f, 0.0f}},
-      {.Position = {-1.0f, -1.0f, -1.0f, 1.0f}, .Normal = {0.0f, -1.0f, 0.0f, 0.0f}},
-      {.Position = {-1.0f, -1.0f, 1.0f, 1.0f}, .Normal = {0.0f, -1.0f, 0.0f, 0.0f}},
-      {.Position = {1.0f, -1.0f, 1.0f, 1.0f}, .Normal = {0.0f, -1.0f, 0.0f, 0.0f}},
-      {.Position = {1.0f, -1.0f, -1.0f, 1.0f}, .Normal = {0.0f, -1.0f, 0.0f, 0.0f}},
+      {.Position = {-1.0f, -1.0f, 1.0f}, .Normal = {0.0f, 0.0f, 1.0f}},
+      {.Position = {1.0f, -1.0f, 1.0f}, .Normal = {0.0f, 0.0f, 1.0f}},
+      {.Position = {1.0f, 1.0f, 1.0f}, .Normal = {0.0f, 0.0f, 1.0f}},
+      {.Position = {-1.0f, 1.0f, 1.0f}, .Normal = {0.0f, 0.0f, 1.0f}},
+      {.Position = {-1.0f, -1.0f, -1.0f}, .Normal = {0.0f, 0.0f, -1.0f}},
+      {.Position = {1.0f, -1.0f, -1.0f}, .Normal = {0.0f, 0.0f, -1.0f}},
+      {.Position = {1.0f, 1.0f, -1.0f}, .Normal = {0.0f, 0.0f, -1.0f}},
+      {.Position = {-1.0f, 1.0f, -1.0f}, .Normal = {0.0f, 0.0f, -1.0f}},
+      {.Position = {-1.0f, -1.0f, -1.0f}, .Normal = {-1.0f, 0.0f, 0.0f}},
+      {.Position = {-1.0f, -1.0f, 1.0f}, .Normal = {-1.0f, 0.0f, 0.0f}},
+      {.Position = {-1.0f, 1.0f, 1.0f}, .Normal = {-1.0f, 0.0f, 0.0f}},
+      {.Position = {-1.0f, 1.0f, -1.0f}, .Normal = {-1.0f, 0.0f, 0.0f}},
+      {.Position = {1.0f, -1.0f, -1.0f}, .Normal = {1.0f, 0.0f, 0.0f}},
+      {.Position = {1.0f, -1.0f, 1.0f}, .Normal = {1.0f, 0.0f, 0.0f}},
+      {.Position = {1.0f, 1.0f, 1.0f}, .Normal = {1.0f, 0.0f, 0.0f}},
+      {.Position = {1.0f, 1.0f, -1.0f}, .Normal = {1.0f, 0.0f, 0.0f}},
+      {.Position = {-1.0f, 1.0f, -1.0f}, .Normal = {0.0f, 1.0f, 0.0f}},
+      {.Position = {-1.0f, 1.0f, 1.0f}, .Normal = {0.0f, 1.0f, 0.0f}},
+      {.Position = {1.0f, 1.0f, 1.0f}, .Normal = {0.0f, 1.0f, 0.0f}},
+      {.Position = {1.0f, 1.0f, -1.0f}, .Normal = {0.0f, 1.0f, 0.0f}},
+      {.Position = {-1.0f, -1.0f, -1.0f}, .Normal = {0.0f, -1.0f, 0.0f}},
+      {.Position = {-1.0f, -1.0f, 1.0f}, .Normal = {0.0f, -1.0f, 0.0f}},
+      {.Position = {1.0f, -1.0f, 1.0f}, .Normal = {0.0f, -1.0f, 0.0f}},
+      {.Position = {1.0f, -1.0f, -1.0f}, .Normal = {0.0f, -1.0f, 0.0f}},
   };
   Mesh.Indices = {
       0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 8, 9, 10, 8, 10, 11,
@@ -83,8 +83,8 @@ MeshData BuildUnitSphereMeshData(uint32_t LongitudeSegments = 16,
       const float CosPhi = std::cos(Phi);
       const glm::vec3 Normal{SinTheta * CosPhi, CosTheta, SinTheta * SinPhi};
       Mesh.Vertices.push_back({
-          .Position = glm::vec4(Normal, 1.0f),
-          .Normal = glm::vec4(glm::normalize(Normal), 0.0f),
+          .Position = Normal,
+          .Normal = glm::normalize(Normal),
           .TexCoord = {U, V},
       });
     }
@@ -250,8 +250,10 @@ HeadlessOverlayModule::BuildColliderOverlaySubmissions() const {
     }
     Result.push_back({
         .Mesh = ColliderMesh,
+        .TypedMesh = ResolveVulkanMesh(ColliderMesh),
         .Material = GetOrCreateColliderMaterial(Physics.BodyType),
-        .Name = Details.ObjectId + "-collider",
+        .DebugDataId = RegisterRenderMeshSubmissionDebugData(
+            {.Name = Details.ObjectId + "-collider"}),
         .RenderPath = MeshRenderPath::Graphics,
         .Transform = ColliderTransform,
         .Translucent = true,
@@ -278,8 +280,10 @@ HeadlessOverlayModule::BuildColliderOverlaySubmissions() const {
                                                      ColliderCornerScale)));
           Result.push_back({
               .Mesh = m_ColliderBoxMesh,
+              .TypedMesh = ResolveVulkanMesh(m_ColliderBoxMesh),
               .Material = GetOrCreateColliderMaterial(Physics.BodyType),
-              .Name = Details.ObjectId + "-collider-corner",
+              .DebugDataId = RegisterRenderMeshSubmissionDebugData(
+                  {.Name = Details.ObjectId + "-collider-corner"}),
               .RenderPath = MeshRenderPath::Graphics,
               .Transform = CornerTransform,
               .Translucent = false,
@@ -307,8 +311,11 @@ HeadlessOverlayModule::BuildPresenceOverlaySubmissions(SessionUserId RenderUser)
     }
     Result.push_back({
         .Mesh = m_PresenceMarkerMesh,
+        .TypedMesh = ResolveVulkanMesh(m_PresenceMarkerMesh),
         .Material = GetOrCreatePresenceMaterial(Participant.User),
-        .Name = "participant-camera-" + std::to_string(Participant.User.Value),
+        .DebugDataId = RegisterRenderMeshSubmissionDebugData(
+            {.Name = "participant-camera-" +
+                     std::to_string(Participant.User.Value)}),
         .RenderPath = MeshRenderPath::Graphics,
         .Transform = BuildPresenceTransform(*Participant.Camera),
     });

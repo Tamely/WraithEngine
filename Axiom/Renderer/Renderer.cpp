@@ -99,8 +99,10 @@ const RendererFrameStats &Renderer::GetFrameStats() const {
   return m_Backend->GetFrameStats();
 }
 
-std::shared_ptr<Mesh> Renderer::CreateMesh(const MeshData &MeshData) {
-  return m_Backend != nullptr ? m_Backend->CreateMesh(MeshData) : nullptr;
+std::shared_ptr<Mesh> Renderer::CreateMesh(const MeshData &MeshData,
+                                           const MeshCreateOptions &Options) {
+  return m_Backend != nullptr ? m_Backend->CreateMesh(MeshData, Options)
+                              : nullptr;
 }
 
 void Renderer::UpdateCpuRenderTime(float CpuRenderMs) {
@@ -130,8 +132,10 @@ Renderer::LoadMeshSceneFromFile(const std::filesystem::path &Path,
             : Options.DefaultRenderPath;
     Result.push_back(
         {.Mesh = Mesh,
+         .TypedMesh = ResolveVulkanMesh(Mesh),
          .Material = Instance.Material,
-         .Name = Instance.Name,
+         .DebugDataId = RegisterRenderMeshSubmissionDebugData(
+             {.Name = Instance.Name}),
          .RenderPath = RenderPath,
          .Transform = Instance.Transform});
   }

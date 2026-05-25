@@ -31,7 +31,8 @@ public:
   std::optional<CapturedFrame> ConsumeCapturedFrame();
   void SetCpuFrameTime(float CpuFrameMs);
   const RendererFrameStats &GetFrameStats() const;
-  std::shared_ptr<Mesh> CreateMesh(const MeshData &MeshData);
+  std::shared_ptr<Mesh>
+  CreateMesh(const MeshData &MeshData, const MeshCreateOptions &Options = {});
   std::vector<RenderMeshSubmission>
   LoadMeshSceneFromFile(
       const std::filesystem::path &Path,

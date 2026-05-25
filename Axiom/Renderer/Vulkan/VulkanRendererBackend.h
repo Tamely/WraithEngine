@@ -34,7 +34,8 @@ public:
   void Init(const RendererCreateInfo &CreateInfo) override;
   void Shutdown() override;
   void BeginFrame() override;
-  std::shared_ptr<Mesh> CreateMesh(const MeshData &Mesh) override;
+  std::shared_ptr<Mesh>
+  CreateMesh(const MeshData &Mesh, const MeshCreateOptions &Options = {}) override;
   void RenderSceneMeshes(RenderScene &Scene) override;
   void RenderFallbackBackground(RenderScene &Scene) override;
   RendererFrameStats &AccessFrameStats() override;

@@ -164,7 +164,7 @@ BuildMeshData(const fastgltf::Asset &Asset, const fastgltf::Primitive &Primitive
 
   fastgltf::iterateAccessorWithIndex<glm::vec3>(
       Asset, PositionAccessor, [&](const glm::vec3 &Position, size_t Index) {
-        Result.Mesh.Vertices[Index].Position = glm::vec4(Position, 1.0f);
+        Result.Mesh.Vertices[Index].Position = Position;
         Result.Mesh.BoundsMin = glm::min(Result.Mesh.BoundsMin, Position);
         Result.Mesh.BoundsMax = glm::max(Result.Mesh.BoundsMax, Position);
       });
@@ -173,12 +173,11 @@ BuildMeshData(const fastgltf::Asset &Asset, const fastgltf::Primitive &Primitive
     const auto &NormalAccessor = Asset.accessors[*NormalAccessorIndex];
     fastgltf::iterateAccessorWithIndex<glm::vec3>(
         Asset, NormalAccessor, [&](const glm::vec3 &Normal, size_t Index) {
-          Result.Mesh.Vertices[Index].Normal =
-              glm::vec4(glm::normalize(Normal), 0.0f);
+          Result.Mesh.Vertices[Index].Normal = glm::normalize(Normal);
         });
   } else {
     for (auto &Vertex : Result.Mesh.Vertices) {
-      Vertex.Normal = glm::vec4(0.0f, 0.0f, 1.0f, 0.0f);
+      Vertex.Normal = glm::vec3(0.0f, 0.0f, 1.0f);
     }
   }
 
