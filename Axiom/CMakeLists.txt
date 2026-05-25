@@ -29,9 +29,13 @@ set(ENGINE_SOURCES
   Physics/PhysicsWorld.cpp
   Session/BufferedEditorInputSource.cpp
   Session/EditorMessageBus.cpp
+  Session/EditorCommandDispatcher.cpp
+  Session/EditorCommandDispatcherRuntime.cpp
+  Session/EditorPhysicsController.cpp
   Session/EditorSceneRendererAdapter.cpp
+  Session/EditorSceneStateManager.cpp
+  Session/EditorSceneStateManagerAssets.cpp
   Session/EditorSession.cpp
-  Session/EditorSessionSceneStateModule.cpp
   Session/EditorSessionValidationModule.cpp
   Session/StartupScene.cpp
   Renderer/Camera.cpp

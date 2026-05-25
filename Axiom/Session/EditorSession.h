@@ -20,8 +20,9 @@
 #include <vector>
 
 namespace Axiom {
-class PhysicsWorld;
-class EditorSessionSceneStateModule;
+class EditorCommandDispatcher;
+class EditorPhysicsController;
+class EditorSceneStateManager;
 class EditorSessionValidationModule;
 
 struct EditorSessionConfig {
@@ -57,14 +58,14 @@ struct EditorSceneItem {
 struct EditorLightProperties {
   glm::vec3 Color{1.0f};
   float Intensity{1.0f};
-  glm::vec3 Direction{0.35f, 0.7f, 0.2f}; // world-space (need not be normalized)
+  glm::vec3 Direction{0.35f, 0.7f, 0.2f};
 };
 
 struct EditorMaterialProperties {
   glm::vec4 BaseColorFactor{1.0f};
   float Metallic{0.0f};
   float Roughness{0.5f};
-  std::optional<std::string> TextureAssetPath; // content-relative path, nullopt = embedded
+  std::optional<std::string> TextureAssetPath;
 };
 
 struct EditorObjectDetails {
@@ -75,14 +76,14 @@ struct EditorObjectDetails {
   bool IsGeneratedAssetChild{false};
   bool SupportsTransform{false};
   bool TransformReadOnly{true};
-  std::optional<EditorTransformDetails> Transform;      // local-space
-  std::optional<EditorTransformDetails> WorldTransform; // world-space (computed)
-  std::optional<std::string> ScriptClass;               // C# script class name (Actor objects only)
-  std::optional<EditorLightProperties> Light;           // Light objects only
-  std::optional<EditorMaterialProperties> Material;     // Mesh objects only
+  std::optional<EditorTransformDetails> Transform;
+  std::optional<EditorTransformDetails> WorldTransform;
+  std::optional<std::string> ScriptClass;
+  std::optional<EditorLightProperties> Light;
+  std::optional<EditorMaterialProperties> Material;
   std::optional<EditorPhysicsProperties> Physics;
   std::optional<std::string> GeneratedFromAssetRootId;
-  std::string AssetRelativePath; // content-relative path when assigned directly to this object
+  std::string AssetRelativePath;
 };
 
 enum class EditorUserPresenceState { Connected, Away, Disconnected };
@@ -123,7 +124,7 @@ struct EditorSceneMeshInstance {
   MaterialInstanceRef Material;
   MeshRenderPath RenderPath{MeshRenderPath::Graphics};
   glm::mat4 Transform{1.0f};
-  std::string AssetRelativePath; // content-relative path, empty if using startup default
+  std::string AssetRelativePath;
 };
 
 struct EditorSceneState {
@@ -165,13 +166,12 @@ public:
   void Subscribe(IEditorEventSubscriber *Subscriber);
   void Unsubscribe(IEditorEventSubscriber *Subscriber);
 
-  // Must be called before SetMeshAssetCommand can be processed.
   void SetContentDir(std::filesystem::path ContentDir);
   const std::filesystem::path &GetContentDir() const { return m_ContentDir; }
-
-  // Optional fallback for engine-bundled assets (paths prefixed with "Engine/").
   void SetEngineContentDir(std::filesystem::path EngineContentDir);
-  const std::filesystem::path &GetEngineContentDir() const { return m_EngineContentDir; }
+  const std::filesystem::path &GetEngineContentDir() const {
+    return m_EngineContentDir;
+  }
 
   void EnsureViewportState(SessionUserId User);
   void SetPresenceState(SessionUserId User, EditorUserPresenceState State);
@@ -206,135 +206,37 @@ public:
   void PublishScriptError(const std::string &ObjectId, const std::string &Message);
 
 private:
-  friend class EditorSessionSceneStateModule;
+  friend class EditorCommandDispatcher;
+  friend class EditorPhysicsController;
+  friend class EditorSceneStateManager;
   friend class EditorSessionValidationModule;
 
-  static std::unordered_map<std::string, EditorObjectDetails>
-  BuildObjectDetailsMap(std::vector<EditorObjectDetails> ObjectDetails);
-  static bool IsBlankString(std::string_view Value);
-  std::string BuildUniqueObjectId(std::string_view BaseObjectId) const;
-  std::string BuildUniqueDisplayName(std::string_view BaseDisplayName) const;
-  bool IsSceneObjectIdInUse(std::string_view ObjectId) const;
-  bool IsSceneDisplayNameInUse(std::string_view DisplayName) const;
-  bool UpdateSceneItemDisplayName(std::vector<EditorSceneItem> &Items,
-                                  std::string_view ObjectId,
-                                  std::string_view DisplayName);
-  bool UpdateSceneItemVisibility(std::vector<EditorSceneItem> &Items,
-                                 std::string_view ObjectId, bool Visible);
-  bool RemoveSceneItem(std::vector<EditorSceneItem> &Items,
-                       std::string_view ObjectId);
-  EditorSceneItem *FindSceneItemMutable(std::vector<EditorSceneItem> &Items,
-                                        std::string_view ObjectId);
-  void RemoveSceneObject(std::string_view ObjectId);
-  void ClearSelectionsForObject(std::string_view ObjectId);
-  void PruneInvalidSelections();
-  void RemoveGeneratedAssetChildren(std::string_view RootObjectId);
-  void ExpandMeshAssetIntoScene(std::string_view RootObjectId,
-                                const MeshSceneData &SceneData,
-                                std::string_view AssetPath);
-  // Instance tree management
-  void InitSceneRoot();
-  Instance *FindWorldFolder() const;
-  Instance *EnsureWorldFolder();
-  void RebuildInstanceTree(const std::vector<EditorSceneItem> &Items,
-                           Instance *Parent);
-  void SyncItemsFromTree();
-  EditorSceneItem BuildItemFromInstance(const Instance *Node) const;
-  Instance *CreateInstanceForTemplate(const std::string &TemplateId,
-                                      const std::string &ObjectId);
-  void DeepCloneSubtree(const Instance *Source, Instance *DestParent,
-                        std::vector<EditorObjectDetails> &OutNewDetails);
-  std::vector<std::string> CollectDescendantIds(const Instance *Root) const;
-  EditorSceneItemKind KindForInstance(const Instance *Node) const;
-  bool IsValidTemplateId(const std::string &TemplateId) const;
-  glm::mat4 ComputeWorldTransformMatrix(const Instance *Node) const;
-  EditorTransformDetails DecomposeMatrix(const glm::mat4 &Matrix) const;
-  void RecomputeSubtreeWorldTransforms(const Instance *Node);
-  void RecomputeAllWorldTransforms();
-  void PublishPresenceChangedEvent(SessionUserId User);
-  EditorUserPresence &EnsurePresence(SessionUserId User);
-  EditorViewportState &EnsureViewport(SessionUserId User);
-  const EditorSceneItem *FindSceneItemRecursive(
-      const std::vector<EditorSceneItem> &Items, std::string_view ObjectId) const;
-  void ProcessCommand(const QueuedEditorCommand &QueuedCommand);
-  bool ValidateCommand(const QueuedEditorCommand &QueuedCommand,
-                       std::string &FailureReason);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const UpdateViewportCameraCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const SetViewportCameraPoseCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const SetCameraProjectionCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const SetLookActiveCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const SelectObjectCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const RenameObjectCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const SetObjectVisibilityCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const CreateObjectCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const CreateMeshObjectCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const DuplicateObjectCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const DeleteObjectCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const ReparentObjectCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const SetTransformCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const AttachScriptCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const DetachScriptCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const SetMeshAssetCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const SetLightPropertiesCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const SetMaterialPropertiesCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const SetMaterialTextureCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const SetPhysicsPropertiesCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const PlaySessionCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const PauseSessionCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const ResumeSessionCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const StopSessionCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const SetWorldSettingsCommand &Command);
-  void HandleCommand(const QueuedEditorCommand &QueuedCommand,
-                     const PlaceActorCommand &Command);
-  void ApplyWorldTransform(std::string_view ObjectId,
-                           const EditorTransformDetails &WorldTransform,
-                           SessionUserId User, bool PublishEvent);
-  void EnsurePhysicsWorldStarted();
-  void StopPhysicsWorld();
-  void StepRuntimePhysics(float DeltaTimeSeconds);
-  void PublishEvent(const EditorEvent &Event);
-
-private:
   struct RuntimeSceneSnapshot {
     EditorSceneState Scene;
     std::unordered_map<SessionUserId, std::string, SessionUserIdHash>
         SelectedObjectIds;
   };
 
+  static bool IsBlankString(std::string_view Value);
+
+  void PublishPresenceChangedEvent(SessionUserId User);
+  EditorUserPresence &EnsurePresence(SessionUserId User);
+  EditorViewportState &EnsureViewport(SessionUserId User);
+  Instance *FindInstanceById(std::string_view ObjectId) const;
+  bool IsValidTemplateId(const std::string &TemplateId) const;
+  std::vector<std::string> CollectDescendantIds(const Instance *Root) const;
+  void PublishEvent(const EditorEvent &Event);
+
   EditorSessionConfig m_Config;
   EditorSessionState m_State;
   EditorMessageBus m_MessageBus;
-  std::unique_ptr<EditorSessionSceneStateModule> m_SceneStateModule;
+  std::unique_ptr<EditorCommandDispatcher> m_CommandDispatcher;
+  std::unique_ptr<EditorPhysicsController> m_PhysicsController;
+  std::unique_ptr<EditorSceneStateManager> m_SceneStateManager;
   std::unique_ptr<EditorSessionValidationModule> m_ValidationModule;
   std::unique_ptr<DataModel> m_SceneRoot;
   std::filesystem::path m_ContentDir;
   std::filesystem::path m_EngineContentDir;
   std::optional<RuntimeSceneSnapshot> m_RuntimeSceneSnapshot;
-  std::unique_ptr<PhysicsWorld> m_PhysicsWorld;
 };
 } // namespace Axiom
