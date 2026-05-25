@@ -59,6 +59,9 @@ set(ENGINE_SOURCES
   Renderer/Vulkan/VulkanMesh.cpp
   Renderer/Vulkan/VulkanOcclusionCulling.cpp
   Renderer/Vulkan/VulkanPipeline.cpp
+  Renderer/Vulkan/VulkanPipelineLibrary.cpp
+  Renderer/Vulkan/VulkanDrawSubmissionSystem.cpp
+  Renderer/Vulkan/VulkanResourceManager.cpp
   Renderer/Vulkan/VulkanRendererBackend.cpp
   Renderer/Vulkan/VulkanSceneRenderer.cpp
   Renderer/Vulkan/VulkanSwapchain.cpp

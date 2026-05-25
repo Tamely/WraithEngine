@@ -48,6 +48,16 @@ void VulkanDevice::Init(VulkanContext &Context) {
   GraphicsQueue = VkbDevice.get_queue(vkb::QueueType::graphics).value();
   GraphicsQueueFamily =
       VkbDevice.get_queue_index(vkb::QueueType::graphics).value();
+  auto TransferQueueResult = VkbDevice.get_queue(vkb::QueueType::transfer);
+  auto TransferQueueFamilyResult =
+      VkbDevice.get_queue_index(vkb::QueueType::transfer);
+  if (TransferQueueResult && TransferQueueFamilyResult) {
+    TransferQueue = TransferQueueResult.value();
+    TransferQueueFamily = TransferQueueFamilyResult.value();
+  } else {
+    TransferQueue = GraphicsQueue;
+    TransferQueueFamily = GraphicsQueueFamily;
+  }
 
   VmaVulkanFunctions VulkanFunctions = {};
   VulkanFunctions.vkGetInstanceProcAddr = vkGetInstanceProcAddr;

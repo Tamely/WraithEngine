@@ -17,6 +17,8 @@ public:
   VkDevice Device{VK_NULL_HANDLE};
   VkQueue GraphicsQueue{VK_NULL_HANDLE};
   uint32_t GraphicsQueueFamily{0};
+  VkQueue TransferQueue{VK_NULL_HANDLE};
+  uint32_t TransferQueueFamily{0};
   VmaAllocator Allocator{nullptr};
 
 private:
