@@ -2,7 +2,7 @@
 
 ## Document Status
 - Status: Draft
-- Date: 2026-05-24
+- Date: 2026-05-25
 - Audience: Engine, tools, networking, web, and infrastructure contributors
 - Intended outcome: Establish the target architecture for evolving WraithEngine into a distributed game engine and browser-based collaborative editor
 
@@ -16,9 +16,12 @@
 - Added engine-facing `ISessionTransport` and made `AxiomSessionEndpoint` the first in-process transport implementation
 - Added `AxiomRemoteViewportDevClient` as a transport-subscriber harness that receives authoritative events and writes client-received frames to disk
 - Added `AxiomRemoteViewportServer` as the first real browser-facing remote viewport prototype, evolving from HTTP image polling to WebSocket/JPEG bring-up and now to a native macOS WebRTC plus H.264 browser path
+- Refactored browser-facing transport into a standalone `WraithNetworking` engine module registered through `ModuleManager`
+- Replaced the custom headless HTTP/WebSocket server path with vendored `uWebSockets` while preserving the existing WebRTC communication layer inside the module boundary
 - Added engine-owned encoded-video packet types plus `IVideoEncoder` and extended `AxiomSessionEndpoint` so encoded packets can flow beside raw viewport frames
 - Added a macOS-first `VideoToolbox` H.264 encoder path for headless remote-viewport bring-up
 - `AxiomRemoteViewportServer` now treats WebRTC as the only supported remote viewport media path
+- `WraithNetworking` now exposes initialization state and connection metrics for future CVAR/config integration
 - Removed the largest remote-viewport performance bottlenecks by unthrottling the headless server loop and tuning the encoder/input path for latency
 - The remote viewport now runs at acceptable frame rate, but still has noticeable residual input latency that likely requires deeper WebRTC sender/playout tuning
 - A root-level `EditorFrontend` workspace now serves as the longer-lived browser editor shell using Next.js, React, and Tailwind CSS
@@ -81,6 +84,7 @@
 - Scripts now sit behind the runtime boundary: they instantiate and tick only while playing, freeze while paused, and tear down on stop
 - Jolt physics is now integrated as a runtime-only service that is created on play, stepped only while playing, frozen while paused, and destroyed on stop
 - Physics authoring is now available through authoritative scene details: body type, collider type, box half extents, sphere radius, mass, friction, and restitution persist through save/load
+- `PhysicsWorld` no longer depends on `EditorSceneState`; `EditorSession` now extracts a lightweight `RuntimeSceneState` containing only runtime-facing transforms, collider shapes, masses, and material indices before booting physics
 - Imported mesh assets now default to static box collision that covers the authored mesh bounds; older scenes are migrated to that default on load only when the mesh had no authored physics yet
 - Generated mesh children from multi-mesh imports remain read-only and inherit physics authoring from their imported root mesh object; the browser inspector now surfaces that inheritance instead of hiding physics entirely
 - A configurable sky background is now wired end-to-end: `RenderScene::SkyboxColorTop/Bottom` plus an optional `HDRTextureSourceDataRef SkyboxHDRTexture` feed two `DrawBackground` paths in the Vulkan backend — the existing `gradient_color.comp` produces a vertical blend, and a new `skybox_hdr.comp` unprojects each pixel through `inverse(proj * view)` and equirectangularly samples a `VK_FORMAT_R32G32B32A32_SFLOAT` image so the HDR is preserved at full float precision and rotates with the camera; `SetWorldSettingsCommand` carries both the colors and a content-relative `SkyboxHDRPath`, `EditorSession` loads HDR data on path change (with previous-path caching to avoid redundant disk hits), and `HeadlessSessionLayer` republishes the scene's HDR ref each frame via `RenderCommand::SetSkyboxHDR`; HDR uploads/swaps are deferred onto the per-frame `DeletionQueue` so in-flight command buffers can't reference a freed image
@@ -89,10 +93,15 @@
 - A new `WorldDetailsPanel` (docked alongside the Details inspector) hosts a `Sky Gradient` section with linked color pickers and an `HDR Sky` section that combines a typed content-relative path input, drag-drop from the content browser (consuming the existing `axiom/asset-path` / `axiom/asset-kind` dataTransfer payload), and a folder-icon `AssetPickerButton` popover that lists every `.hdr` in the project searchably; the same `AssetPickerButton` is also wired into the script-class field on the Details panel so script attachment no longer requires typing a fully-qualified class name; the panel reuses the canonical Details-style section/input chrome and forces the shadcn popover surfaces into dark theme so they match the rest of the editor
 - Added a foundational engine module/plugin system: `IModule` defines standardized lifecycle hooks (`GetName`, `Initialize`, `Update`, `Shutdown`), and `ModuleManager` owns registration, initialization order, per-module active state, and query APIs intended for future CVAR/config integration
 - `Application` now owns a `ModuleManager` and drives the frame through module phases instead of hardcoded polling/update/render branches; default runtime responsibilities were extracted into engine modules for window events, layer update, layer render, and renderer frame orchestration
+- Window/presentation ownership has been pushed further out of the renderer: `Window` now exposes minimization state and Vulkan-surface creation hooks, `RenderSurface` forwards them, and the Vulkan backend no longer includes GLFW headers or stores a GLFW window pointer just to manage presentation details
 - Headless runtime hosts now register focused host modules instead of wiring everything inline: transport/session bootstrap moved into `HeadlessSessionTransportModule`, and script-host lifecycle moved into `SessionScriptHostModule`
 - Editor viewport responsibilities were split out of `GlfwEditorLayer` into `EditorViewportInputModule`, `EditorViewportSelectionModule`, and `EditorSceneRenderModule`
 - Headless overlay and gizmo rendering responsibilities were split out of `HeadlessSessionLayer` into `HeadlessOverlayModule`, which now owns light billboards, collider overlays, presence markers, material caches, and per-user gizmo overlay state
-- `EditorSession` refactoring has started in earnest: scene/tree synchronization responsibilities now live in `EditorSessionSceneStateModule`, and command validation now lives in `EditorSessionValidationModule`, leaving `EditorSession` closer to the intended coordinator role
+- `EditorSession` refactoring has advanced: `EditorSession` is now a coordinator that delegates command routing to `EditorCommandDispatcher`, scene/tree/transform ownership to `EditorSceneStateManager`, physics lifecycle to `EditorPhysicsController`, and command validation to `EditorSessionValidationModule`
+- Vulkan mesh lifetime is now less singleton-coupled: `VulkanMesh` destruction no longer calls back into `VulkanRendererBackend::TryGet()`, and deferred GPU cleanup is routed through a standalone shared `GPUResourceQueue`
+- The old 1,789-line `VulkanRendererBackend` renderer monolith has now been decomposed into `VulkanResourceManager` (swapchain, images, buffers, descriptor-backed lifetime), `VulkanPipelineLibrary` (raw pipeline/layout caching), and `VulkanDrawSubmissionSystem` (command recording, graphics submission, offscreen capture publication, and async transfer-queue synchronization), with `VulkanRendererBackend` reduced to a coordinator
+- Synchronous texture/HDR upload paths no longer stall the main thread through `ImmediateSubmit`; uploads now flow through a transfer queue with semaphore synchronization into graphics work
+- Headless parity validation now includes a clean pre-refactor baseline comparison: the first true captured startup-scene frame from baseline and refactor matched byte-for-byte, while a later mismatch investigation confirmed the remaining difference was stale baseline offscreen readback behavior rather than a rendering regression
 
 ## 1. Executive Summary
 WraithEngine will evolve from a single-process native editor into a distributed platform with one shared C++ engine runtime that supports two execution styles:
@@ -102,7 +111,7 @@ WraithEngine will evolve from a single-process native editor into a distributed 
 
 The first major milestone is a `remote browser editor`. The browser will own most editor UI using React, Next.js, and Tailwind CSS, while a native engine session remains authoritative for rendering, world state, asset loading, and validation of edits. The viewport will be rendered server-side and streamed to the browser via WebRTC using H.264 first.
 
-The current repository has moved beyond the original single-process Vulkan/GLFW/ImGui-only shape: it now includes a headless runtime path, authoritative `EditorSession` state, remote viewport transport/server layers, browser-editor integration, and an engine module runtime seam. That is a good base for the next phase because the rendering and runtime already exist, but the codebase still needs continued decomposition around session dispatch, remote server responsibilities, and packaging/deployment boundaries.
+The current repository has moved beyond the original single-process Vulkan/GLFW/ImGui-only shape: it now includes a headless runtime path, authoritative `EditorSession` state, remote viewport transport/server layers, browser-editor integration, and an engine module runtime seam. That module seam now includes a concrete `WraithNetworking` implementation that owns browser-facing HTTP/WebSocket transport while preserving the existing WebRTC session logic. That is a good base for the next phase because the rendering and runtime already exist, but the codebase still needs continued decomposition around session dispatch, remote server responsibilities, and packaging/deployment boundaries.
 
 This document describes the target architecture, public concepts, service boundaries, trust model, rollout order, and acceptance criteria for that transition.
 
@@ -165,6 +174,7 @@ The active architecture is roughly:
 5. `RenderCommand` writes authoritative frame data into a frame-local `RenderScene`.
 6. `Renderer` passes that scene into a Vulkan backend.
 7. The backend renders to either a window-presented swapchain image or an offscreen headless target.
+8. Runtime-only services such as physics now boot from stripped scene snapshots instead of reading editor-state types directly.
 
 This is enough to establish:
 
@@ -172,6 +182,7 @@ This is enough to establish:
 - there is now a first-class runtime module seam for enabling, disabling, and eventually configuring major engine features without re-hardcoding the app loop
 - there is now an initial engine-owned command/event authority seam for editor viewport state
 - the renderer can evolve into windowed and headless targets
+- OS-specific presentation details can continue moving outward because the renderer now queries minimization and surface creation through abstractions instead of hardcoded GLFW calls
 - the current architecture already includes reflection, networking, collaboration, headless runtime, and scripting-host layers, but some of those areas still need cleaner boundaries and further hardening
 - `EditorSession` remains one of the main concentration points for authoritative world-editing logic even after the first extraction steps
 
@@ -212,7 +223,7 @@ Current implementation direction:
 
 - use the existing root-level `EditorFrontend` folder as the home for the browser editor shell
 - keep `EditorFrontend/components/engine/viewport.tsx` as the canonical browser WebRTC client
-- keep `AxiomRemoteViewportServer` focused on session, signaling, command, and diagnostics endpoints
+- keep `AxiomRemoteViewportServer` focused on session ownership and module registration, with `WraithNetworking` owning browser-facing HTTP/WebSocket transport and preserving the existing WebRTC signaling/media path
 
 ### 6.2 Conceptual Topology
 ```text
@@ -228,6 +239,9 @@ Control Service
 
 Engine Session
   ├─ Authoritative editor state
+  ├─ `WraithNetworking` module
+  │   ├─ `uWebSockets` HTTP/WebSocket transport
+  │   └─ protected WebRTC signaling/media bridge
   ├─ Rendering
   ├─ Frame capture + encode
   ├─ Asset system
@@ -438,6 +452,8 @@ Current implementation note:
 
 - the current slice covers per-user viewport camera state, look/cursor-capture state, last cursor position bookkeeping, presence state, startup-scene logical mesh instances, selection state, and object transform authority for the startup scene
 - renderer-owned `RenderMeshSubmission` objects are no longer authoritative session state; they are now rebuilt from logical session scene data through an adapter at render time
+- submission-time mesh resolution now stamps `RenderMeshSubmission` with a typed `VulkanMesh*`, so the Vulkan render loop no longer performs RTTI checks (`dynamic_pointer_cast`) per submitted mesh
+- diagnostic submission names were moved out of `RenderMeshSubmission` and into a separate debug-data registry so the steady-state renderer path does not carry per-submission heap-backed strings
 - all scene objects are now backed by an Instance hierarchy rooted at `DataModel`; `EditorSession` owns a `std::unique_ptr<DataModel>` and keeps `EditorSceneState::Items` synchronized as a projection of the live tree
 - `SetSceneState` and `SetSceneItems` rebuild the Instance tree from the provided snapshot, enabling rehydration and round-trip restore
 - entity/component/object registries, locks, presence, and asset editing state remain future work
@@ -1076,12 +1092,27 @@ Progress update:
 - `InternalCalls` binds C++ `EditorSession` methods to the managed surface via Coral's unmanaged function pointer fields; `RegisterInternalCalls` uploads them to the engine ALC
 - `ScriptHost` implements `IEditorEventSubscriber`; `ObjectCreatedEvent` instantiates scripts, `ObjectDeletedEvent` destroys them, `ScriptClassChangedEvent` handles attach/detach
 - `ScriptHost::Tick(dt)` drives `OnTick` on all live instances; `ScriptHost::ReloadUserAssembly` tears down and recreates the `UserScripts` ALC and re-instantiates all scripts
-- macOS `kqueue`-based file watcher auto-triggers reload when the assembly on disk changes (behind `AXIOM_SCRIPTING_WATCH` flag)
+- HAL-managed file watcher auto-triggers reload when the assembly on disk changes (current macOS backend uses `kqueue`, behind `AXIOM_SCRIPTING_WATCH`)
 - Two trust tiers: `Restricted` (default for hosted — blocks `System.Net.*`, `System.Reflection.Emit`, `System.Diagnostics.Process`; assembly manifest validated via `PEReader` before loading) and `Trusted` (local dev — full BCL)
 - `RestrictedAssemblyLoadContext` and `TrustedAssemblyLoadContext` enforce the policy in managed code; `ScriptSecurity` bridges the `IsRestricted` flag via an internal call
 - Browser: details panel shows a `ScriptClass` text field; toolbar Reload Scripts button sends `reload_scripts`; unhandled script exceptions surface as dismissible toasts
 - Five Google Test cases in `Tests/ScriptingTests.cpp`: `ScriptHostLifecycle`, `InternalCallRoundTrip`, `ScriptLifecycle`, `HotReload`, `RestrictedProfileBlocks`
 - Coral patched: cross-ALC assembly sharing in `AssemblyLoader.ResolveAssembly` (prevents duplicate `WraithEngine.Managed` load with null function pointers) and `ManagedAssembly::RefreshTypeCache` (repopulates `s_CachedTypes` after `UnloadAssemblyLoadContext` clears it globally)
+
+### Platform Foundation Update
+
+- Added a top-level `HAL/` directory as the engine's platform bedrock, built as `AxiomHAL`
+- `AxiomHAL` is now the base dependency beneath `AxiomCore`, `ModuleManager`, and engine plugins/modules that need platform services
+- first-party OS-specific code is now isolated under `HAL/`, including:
+  - platform detection and environment helpers
+  - Vulkan loader fallback and dynamic-library access
+  - socket helpers used by the remote transport stack
+  - file watching used by script hot reload
+  - SVG rasterization
+  - VideoToolbox H.264 encoder creation
+  - macOS WebRTC session creation
+- higher-level modules such as `ScriptHost`, `RemoteViewportServer`, `VideoEncoderFactory`, `SvgTexture`, and `VulkanLoader` now route through HAL interfaces/factories rather than including OS headers directly
+- this keeps the engine-facing call sites platform-agnostic and leaves the architecture prepared for future Windows/Linux implementations inside `HAL/`
 
 ### Phase 7: Asset Pipeline
 
@@ -1133,7 +1164,7 @@ editor-only metadata included.
 
 **Mesh binary (`.wmesh`)**
 - Header: magic `WMSH`, `uint32` version, `AssetId` (8 bytes), vertex count, index count, submesh count, flags
-- Vertex buffer: interleaved `{vec3 position, vec3 normal, vec2 uv, vec4 tangent}` — layout fixed so the Vulkan pipeline never needs to inspect the source format
+- Vertex buffer: interleaved `{vec3 position, vec3 normal, vec2 uv}` in a fixed 32-byte stride. The runtime and compute projection shader both consume that packed layout directly, so no source-format inspection or CPU-side vertex expansion is needed at load time
 - Index buffer: `uint32[]` indices
 - Submesh table: `{uint32 indexOffset, uint32 indexCount, AssetId materialId}[]`
 - Bounding sphere and AABB stored after submesh table for culling; no re-parsing needed at runtime
@@ -1165,11 +1196,14 @@ Progress update:
   - `.wmesh` stores versioned mesh instance payloads plus stable `AssetId`
   - `.wtex` stores versioned raw RGBA texture payloads keyed by `AssetId`
   - `.wmat` stores versioned material factors plus texture asset reference
+- the cooked mesh format is now at version 3 so new cooks can persist the packed `{vec3 position, vec3 normal, vec2 uv}` vertex layout while the loader still accepts older mesh payloads and converts them forward at load time
 - `AssetCookManifest` now lives at `Content/Cooked/AssetCookManifest.json` and is populated for mesh, texture, and material cooks
 - `CookedAssetSource` is implemented parallel to `LocalAssetSource` and resolves cooked payloads by `AssetId` through the manifest
 - runtime load paths now prefer cooked assets for mesh and texture loads, with source-file fallback preserved during the transition
 - startup scene load, scene reload, `SetMeshAsset`, and `SetMaterialTexture` all exercise best-effort cook-first flows so normal editor usage continuously validates the cooked path
 - scene persistence now emits and restores `materialAssetPath` entries backed by cooked `.wmat` files
+- `VulkanMesh` now uploads directly to GPU buffers and drops CPU-side vertex/index storage immediately unless the caller explicitly opts into retention with `MeshCreateOptions::KeepCpuData`
+- `VulkanSceneRenderer::RenderScenePasses()` now reuses persistent scratch buffers for candidate, opaque, translucent, and compute submission lists, eliminating those per-frame vector allocations from the main mesh loop
 - focused regression coverage now exists for:
   - cooked mesh / texture / material binary round-trips
   - manifest-backed cooked lookup resolution
@@ -1232,14 +1266,14 @@ Current progress:
 - Headless host bootstrap responsibilities have already been split into `HostModules`.
 - `GlfwEditorLayer` responsibilities have already been split into `EditorFeatureModules`.
 - `HeadlessSessionLayer` overlay responsibilities have already been split into `HeadlessOverlayModule`.
-- `EditorSession` has begun the same transition via `EditorSessionSceneStateModule` and `EditorSessionValidationModule`, but command handling is still concentrated in `EditorSession.cpp`.
+- `EditorSession` has now completed the first major decomposition step: command handling lives in `EditorCommandDispatcher`, scene/tree/transform logic lives in `EditorSceneStateManager`, physics runtime lifecycle lives in `EditorPhysicsController`, and validation remains in `EditorSessionValidationModule`.
 
 #### 10.1 Candidates for refactoring (audit before Phase 10 begins)
 Likely targets based on current trajectory:
 
 | File | Approximate size | Concerns to extract |
 |------|-----------------|---------------------|
-| `Axiom/Session/EditorSession.cpp` | ~2,500 lines before the current split; still large after it | Remaining command handling, runtime transitions, asset/material mutation, event publication, presence/lock helpers |
+| `Axiom/Session/EditorSession.cpp` | ~2,500 lines before the current split; now reduced to a small coordinator | Presence/lock helpers, subsystem wiring, authoritative state ownership |
 | `Headless/RemoteViewportServer.cpp` | ~1,500 lines | HTTP routing, WebSocket framing, WebRTC signaling, command parsing, client lifecycle |
 | `Headless/HeadlessCommandProtocol.cpp` | ~800 lines | Growing with every new command; serialization/deserialization should be generated or table-driven |
 | viewport interaction / gizmo hit-testing path | multi-file | mode-specific hit testing, drag math, and interaction branching are starting to duplicate patterns and should move toward reusable primitives or strategies |
@@ -1249,8 +1283,9 @@ Likely targets based on current trajectory:
 **`EditorSession`** → split into:
 - `EditorSession` — thin coordinator; owns state, wires subsystems
 - `EditorSessionValidationModule` — validates incoming commands
-- `EditorSessionSceneStateModule` — owns scene snapshots, instance-tree rebuilding, transform recomputation, and selection pruning
-- `CommandDispatcher` — routes incoming commands
+- `EditorSceneStateManager` — owns scene snapshots, instance-tree rebuilding, generated asset expansion, transform recomputation, and selection pruning
+- `EditorCommandDispatcher` — routes incoming commands and executes authoritative edits/runtime transitions
+- `EditorPhysicsController` — owns physics-world startup, shutdown, and runtime stepping
 - `EventBroadcaster` — serializes and fans out authoritative events
 - `LockManager` — manages object/asset lock lifecycle
 - `PresenceTracker` — heartbeat, idle detection, state transitions
