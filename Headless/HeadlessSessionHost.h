@@ -20,7 +20,7 @@ public:
                       uint32_t Height);
   bool Step();
   static std::vector<HeadlessRenderViewState>
-  BuildScheduledRenderPassViews(const HeadlessRenderViewRegistry &RenderViews,
+  BuildScheduledRenderPassViews(HeadlessRenderViewRegistry &RenderViews,
                                 SessionUserId LocalUserId);
 
   bool LoadStartupSceneIntoSession();

@@ -14,6 +14,7 @@
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <cassert>
 #include <cstring>
 #include <filesystem>
 #include <thread>
@@ -557,11 +558,11 @@ uint8_t VulkanDrawSubmissionSystem::LinearToByte(float Value) {
       std::round(std::clamp(Value, 0.0f, 1.0f) * 255.0f));
 }
 
-void VulkanDrawSubmissionSystem::ConvertCapturedFrameToRgba8(
+std::optional<CapturedFrame> VulkanDrawSubmissionSystem::ConvertCapturedFrameToRgba8(
     const AllocatedBuffer &ReadbackBuffer, uint64_t FrameNumber,
     VkExtent2D DrawExtent) {
   if (ReadbackBuffer.Info.pMappedData == nullptr) {
-    return;
+    return std::nullopt;
   }
 
   vmaInvalidateAllocation(m_Device->Allocator, ReadbackBuffer.Allocation, 0,
@@ -589,7 +590,7 @@ void VulkanDrawSubmissionSystem::ConvertCapturedFrameToRgba8(
         LinearToByte(HalfToFloat(Source[SourceIndex + 3]));
   }
 
-  m_CapturedFrame = std::move(Frame);
+  return Frame;
 }
 
 void VulkanDrawSubmissionSystem::PublishCompletedOffscreenFrames(
@@ -597,8 +598,9 @@ void VulkanDrawSubmissionSystem::PublishCompletedOffscreenFrames(
   const VkExtent2D DrawExtent = {m_Resources->GetDrawImage().ImageExtent.width,
                                  m_Resources->GetDrawImage().ImageExtent.height};
   auto &CaptureFrames = m_Resources->GetOffscreenCaptureFrames();
-  for (size_t CaptureIndex = 0; CaptureIndex < CaptureFrames.size(); ++CaptureIndex) {
-    auto &CaptureFrame = CaptureFrames[CaptureIndex];
+  std::vector<VulkanResourceManager::OffscreenCaptureFrame *> ReadyCaptureFrames;
+  ReadyCaptureFrames.reserve(CaptureFrames.size());
+  for (auto &CaptureFrame : CaptureFrames) {
     if (!CaptureFrame.HasPendingReadback) {
       continue;
     }
@@ -610,17 +612,36 @@ void VulkanDrawSubmissionSystem::PublishCompletedOffscreenFrames(
       continue;
     }
 
-    ConvertCapturedFrameToRgba8(CaptureFrame.ReadbackBuffer,
-                                CaptureFrame.SubmittedFrameNumber, DrawExtent);
-    CaptureFrame.HasPendingReadback = false;
+    ReadyCaptureFrames.push_back(&CaptureFrame);
+  }
+
+  std::sort(ReadyCaptureFrames.begin(), ReadyCaptureFrames.end(),
+            [](const VulkanResourceManager::OffscreenCaptureFrame *Left,
+               const VulkanResourceManager::OffscreenCaptureFrame *Right) {
+              return Left->SubmittedFrameNumber < Right->SubmittedFrameNumber;
+            });
+
+  for (auto *CaptureFrame : ReadyCaptureFrames) {
+    const auto CapturedFrameResult = ConvertCapturedFrameToRgba8(
+        CaptureFrame->ReadbackBuffer, CaptureFrame->SubmittedFrameNumber, DrawExtent);
+    CaptureFrame->HasPendingReadback = false;
     HeadlessRuntimeInstrumentation::RecordOffscreenReadbackCompleted(
-        CaptureFrame.SubmittedFrameNumber, CaptureFrame.SubmittedUser,
+        CaptureFrame->SubmittedFrameNumber, CaptureFrame->SubmittedUser,
         CountPendingOffscreenReadbacks());
-    if (FrameOutput == nullptr || !m_CapturedFrame.has_value()) {
+    if (!CapturedFrameResult.has_value()) {
       continue;
     }
 
-    const CapturedFrame &Captured = *m_CapturedFrame;
+    m_CapturedFrames.push_back(std::move(*CapturedFrameResult));
+    while (m_CapturedFrames.size() > FRAME_OVERLAP) {
+      m_CapturedFrames.pop_front();
+    }
+
+    if (FrameOutput == nullptr) {
+      continue;
+    }
+
+    const CapturedFrame &Captured = m_CapturedFrames.back();
     const auto *Bytes =
         reinterpret_cast<const std::byte *>(Captured.Pixels.data());
     FrameOutput->OnViewportFrame({
@@ -629,7 +650,7 @@ void VulkanDrawSubmissionSystem::PublishCompletedOffscreenFrames(
         .Height = Captured.Height,
         .Format = ViewportFrameFormat::R8G8B8A8Unorm,
         .Pixels = std::span<const std::byte>(Bytes, Captured.Pixels.size()),
-        .User = CaptureFrame.SubmittedUser,
+        .User = CaptureFrame->SubmittedUser,
     });
   }
 
@@ -646,11 +667,12 @@ void VulkanDrawSubmissionSystem::DrawFrame(const FrameRequest &Request) {
   auto &CaptureFrame = m_Resources->GetOffscreenCaptureFrame(Request.FrameNumber);
 
   CollectFrameStats(MeshFrame);
-  m_CapturedFrame.reset();
   if (!m_HasPresentationSurface) {
     HeadlessRuntimeInstrumentation::RecordPendingOffscreenReadbacks(
         CountPendingOffscreenReadbacks());
     PublishCompletedOffscreenFrames(Request.FrameOutput);
+    assert(!CaptureFrame.HasPendingReadback &&
+           "Offscreen capture slot must be free before re-recording");
   }
 
   uint32_t SwapchainImageIndex = 0;
@@ -791,9 +813,6 @@ void VulkanDrawSubmissionSystem::DrawFrame(const FrameRequest &Request) {
     HeadlessRuntimeInstrumentation::RecordOffscreenReadbackSubmitted(
         Request.FrameNumber, Request.ViewportFrameUser,
         CountPendingOffscreenReadbacks());
-    VK_CHECK(vkWaitForFences(m_Device->Device, 1, &CurrentFrame.RenderFence,
-                             VK_TRUE, 1000000000));
-    PublishCompletedOffscreenFrames(Request.FrameOutput);
   }
 }
 
@@ -808,8 +827,12 @@ size_t VulkanDrawSubmissionSystem::CountPendingOffscreenReadbacks() const {
 }
 
 std::optional<CapturedFrame> VulkanDrawSubmissionSystem::ConsumeCapturedFrame() {
-  std::optional<CapturedFrame> Result = std::move(m_CapturedFrame);
-  m_CapturedFrame.reset();
+  if (m_CapturedFrames.empty()) {
+    return std::nullopt;
+  }
+
+  CapturedFrame Result = std::move(m_CapturedFrames.front());
+  m_CapturedFrames.pop_front();
   return Result;
 }
 } // namespace Axiom

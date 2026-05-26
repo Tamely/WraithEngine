@@ -81,7 +81,7 @@ TEST(HeadlessScalabilityTests, SingleRemoteClientUsesOneRenderPassPerTick) {
   EXPECT_EQ(Client->MaxTicksBetweenRenders, 1u);
 }
 
-TEST(HeadlessScalabilityTests, MultipleRemoteClientsScaleRenderPassesLinearly) {
+TEST(HeadlessScalabilityTests, MultipleRemoteClientsDoNotForceFullRateRendering) {
   if (!Axiom::HeadlessRuntimeInstrumentation::IsEnabled()) {
     GTEST_SKIP() << "Headless runtime instrumentation is compiled out in this build.";
   }
@@ -91,22 +91,23 @@ TEST(HeadlessScalabilityTests, MultipleRemoteClientsScaleRenderPassesLinearly) {
           {"client-b", Axiom::SessionUserId{8}},
           {"client-c", Axiom::SessionUserId{9}}});
 
-  ASSERT_EQ(Result.LastScheduledViews.size(), 3u);
+  ASSERT_EQ(Result.LastScheduledViews.size(), 1u);
   EXPECT_EQ(Result.Snapshot.EngineTickCount, 4u);
-  EXPECT_EQ(Result.Snapshot.LastTickRenderPassCount, 3u);
-  EXPECT_EQ(Result.Snapshot.TotalRenderPasses, 12u);
+  EXPECT_EQ(Result.Snapshot.LastTickRenderPassCount, 1u);
+  EXPECT_EQ(Result.Snapshot.TotalRenderPasses, 8u);
   EXPECT_EQ(Result.Snapshot.ActiveRemoteClientCount, 3u);
 
   for (const std::string ClientId : {"client-a", "client-b", "client-c"}) {
     const auto *Client = FindClient(Result.Snapshot, ClientId);
     ASSERT_NE(Client, nullptr);
-    EXPECT_EQ(Client->RenderPassCount, 4u);
-    EXPECT_EQ(Client->MaxTicksBetweenRenders, 1u);
+    EXPECT_GE(Client->RenderPassCount, 2u);
+    EXPECT_LE(Client->MaxTicksBetweenRenders,
+              Axiom::HeadlessRenderViewRegistry::IdleRenderIntervalTicks);
   }
 }
 
 TEST(HeadlessScalabilityTests,
-     IdleAndActiveRemoteClientsCurrentlyShareTheSameCadenceBaseline) {
+     DirtyAndRecentlyActiveRemoteClientsRenderMoreOftenThanIdleClients) {
   if (!Axiom::HeadlessRuntimeInstrumentation::IsEnabled()) {
     GTEST_SKIP() << "Headless runtime instrumentation is compiled out in this build.";
   }
@@ -121,18 +122,41 @@ TEST(HeadlessScalabilityTests,
                               : Axiom::RendererViewMode::Lit);
       });
 
-  EXPECT_EQ(Result.Snapshot.LastTickRenderPassCount, 2u);
-  EXPECT_EQ(Result.Snapshot.TotalRenderPasses, 12u);
+  EXPECT_EQ(Result.Snapshot.LastTickRenderPassCount, 1u);
+  EXPECT_EQ(Result.Snapshot.TotalRenderPasses, 9u);
   EXPECT_EQ(Result.Snapshot.ActiveRemoteClientCount, 2u);
 
   const auto *ActiveClient = FindClient(Result.Snapshot, "active-client");
   const auto *IdleClient = FindClient(Result.Snapshot, "idle-client");
   ASSERT_NE(ActiveClient, nullptr);
   ASSERT_NE(IdleClient, nullptr);
-  EXPECT_EQ(ActiveClient->RenderPassCount, 6u);
-  EXPECT_EQ(IdleClient->RenderPassCount, 6u);
-  EXPECT_EQ(ActiveClient->LastTicksSincePreviousRender,
-            IdleClient->LastTicksSincePreviousRender);
+  EXPECT_GT(ActiveClient->RenderPassCount, IdleClient->RenderPassCount);
+  EXPECT_LE(ActiveClient->MaxTicksBetweenRenders, 2u);
+  EXPECT_LE(IdleClient->MaxTicksBetweenRenders,
+            Axiom::HeadlessRenderViewRegistry::IdleRenderIntervalTicks);
+}
+
+TEST(HeadlessScalabilityTests, DirtySharedScenePromotesAllRemoteClients) {
+  if (!Axiom::HeadlessRuntimeInstrumentation::IsEnabled()) {
+    GTEST_SKIP() << "Headless runtime instrumentation is compiled out in this build.";
+  }
+
+  const ScenarioResult Result = RunSchedulingScenario(
+      3, {{"client-a", Axiom::SessionUserId{7}},
+          {"client-b", Axiom::SessionUserId{8}},
+          {"client-c", Axiom::SessionUserId{9}}},
+      [](size_t Tick, Axiom::HeadlessRenderViewRegistry &Registry) {
+        if (Tick == 3u) {
+          Registry.MarkAllRemoteViewsDirty();
+        }
+      });
+
+  EXPECT_EQ(Result.Snapshot.TotalRenderPasses, 9u);
+  for (const std::string ClientId : {"client-a", "client-b", "client-c"}) {
+    const auto *Client = FindClient(Result.Snapshot, ClientId);
+    ASSERT_NE(Client, nullptr);
+    EXPECT_EQ(Client->RenderPassCount, 3u);
+  }
 }
 
 TEST(HeadlessScalabilityTests, ReadbackCountersRoundTripThroughInstrumentation) {

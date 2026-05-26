@@ -46,7 +46,9 @@ bool HeadlessSessionHost::Step() { return Application::Step(); }
 
 std::vector<HeadlessRenderViewState>
 HeadlessSessionHost::BuildScheduledRenderPassViews(
-    const HeadlessRenderViewRegistry &RenderViews, SessionUserId LocalUserId) {
+    HeadlessRenderViewRegistry &RenderViews, SessionUserId LocalUserId) {
+  RenderViews.AdvanceRenderSchedulingTick();
+
   std::vector<HeadlessRenderViewState> RenderPassViews =
       RenderViews.BuildRemoteViewSnapshot();
   std::sort(RenderPassViews.begin(), RenderPassViews.end(),
@@ -61,9 +63,44 @@ HeadlessSessionHost::BuildScheduledRenderPassViews(
         LocalView != nullptr) {
       RenderPassViews.push_back(*LocalView);
     }
+    return RenderPassViews;
   }
 
-  return RenderPassViews;
+  std::vector<HeadlessRenderViewState> ScheduledViews;
+  ScheduledViews.reserve(RenderPassViews.size());
+  std::vector<size_t> IdleCandidateIndices;
+  IdleCandidateIndices.reserve(RenderPassViews.size());
+  for (size_t Index = 0; Index < RenderPassViews.size(); ++Index) {
+    const auto &View = RenderPassViews[Index];
+    if (View.NeedsRender || View.ActiveBurstTicksRemaining > 0u) {
+      ScheduledViews.push_back(View);
+      continue;
+    }
+    IdleCandidateIndices.push_back(Index);
+  }
+
+  if (!IdleCandidateIndices.empty()) {
+    const uint64_t IdleInterval =
+        std::max<uint64_t>(1u, HeadlessRenderViewRegistry::IdleRenderIntervalTicks);
+    const bool ShouldServiceIdleClient =
+        ScheduledViews.empty() ||
+        ((RenderViews.GetSchedulingTick() % IdleInterval) == 0u);
+    if (ShouldServiceIdleClient) {
+      const uint64_t IdleStep =
+          ScheduledViews.empty()
+              ? (RenderViews.GetSchedulingTick() - 1u)
+              : (RenderViews.GetSchedulingTick() / IdleInterval);
+      const size_t CandidateIndex =
+          static_cast<size_t>(IdleStep % IdleCandidateIndices.size());
+      ScheduledViews.push_back(RenderPassViews[IdleCandidateIndices[CandidateIndex]]);
+    }
+  }
+
+  for (const auto &View : ScheduledViews) {
+    RenderViews.MarkViewRendered(View.User);
+  }
+
+  return ScheduledViews;
 }
 
 void HeadlessSessionHost::LoadUserScripts(
@@ -86,15 +123,19 @@ bool HeadlessSessionHost::LoadStartupSceneIntoSession(
 }
 
 void HeadlessSessionHost::SubmitLocalCommand(const EditorCommand &Command) {
+  m_RenderViews.MarkAllRemoteViewsDirty();
   m_Layer->Submit(Command);
 }
 
 void HeadlessSessionHost::SubmitRemoteCommand(const EditorCommand &Command) {
+  m_RenderViews.MarkAllRemoteViewsDirty();
   m_Layer->SubmitToTransport(GetTransport(), Command);
 }
 
 void HeadlessSessionHost::SubmitRemoteCommand(SessionUserId User,
                                               const EditorCommand &Command) {
+  m_RenderViews.MarkAllRemoteViewsDirty();
+  m_RenderViews.MarkViewActive(User);
   m_Layer->SubmitToTransport(GetTransport(), User, Command);
 }
 

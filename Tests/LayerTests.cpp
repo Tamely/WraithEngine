@@ -1012,6 +1012,59 @@ TEST(RemoteViewportTests, HeadlessViewportFrameBridgePreservesTaggedRenderUser) 
   EXPECT_EQ(Output.LastUser.Value, 11u);
 }
 
+TEST(RemoteViewportTests,
+     HeadlessViewportFrameBridgePreservesDistinctTaggedUsersAcrossFrames) {
+  class RecordingFrameOutput final : public Axiom::IViewportFrameOutput {
+  public:
+    void OnViewportFrame(const Axiom::ViewportFrame &Frame) override {
+      FrameIndices.push_back(Frame.FrameIndex);
+      Users.push_back(Frame.User);
+    }
+
+    std::vector<uint64_t> FrameIndices;
+    std::vector<Axiom::SessionUserId> Users;
+  };
+
+  RecordingFrameOutput Output;
+  Axiom::HeadlessViewportFrameBridge Bridge(
+      Output, []() -> std::optional<Axiom::HeadlessRenderViewState> {
+        return Axiom::HeadlessRenderViewState{
+            .ClientId = "resolver-client",
+            .User = Axiom::SessionUserId{99},
+            .ViewMode = Axiom::RendererViewMode::Wireframe,
+            .IsLocal = false,
+        };
+      });
+
+  std::array<std::byte, 8> Bytes{std::byte{0x01}, std::byte{0x02},
+                                 std::byte{0x03}, std::byte{0x04},
+                                 std::byte{0x05}, std::byte{0x06},
+                                 std::byte{0x07}, std::byte{0x08}};
+  Bridge.OnViewportFrame({
+      .FrameIndex = 101,
+      .Width = 1,
+      .Height = 1,
+      .Format = Axiom::ViewportFrameFormat::R8G8B8A8Unorm,
+      .Pixels = std::span<const std::byte>(Bytes.data(), 4u),
+      .User = Axiom::SessionUserId{7},
+  });
+  Bridge.OnViewportFrame({
+      .FrameIndex = 102,
+      .Width = 1,
+      .Height = 1,
+      .Format = Axiom::ViewportFrameFormat::R8G8B8A8Unorm,
+      .Pixels = std::span<const std::byte>(Bytes.data() + 4u, 4u),
+      .User = Axiom::SessionUserId{8},
+  });
+
+  ASSERT_EQ(Output.FrameIndices.size(), 2u);
+  ASSERT_EQ(Output.Users.size(), 2u);
+  EXPECT_EQ(Output.FrameIndices[0], 101u);
+  EXPECT_EQ(Output.Users[0].Value, 7u);
+  EXPECT_EQ(Output.FrameIndices[1], 102u);
+  EXPECT_EQ(Output.Users[1].Value, 8u);
+}
+
 TEST(RemoteViewportTests, AxiomEndpointForwardsEventsAndFrames) {
   Axiom::EditorSession Session(Axiom::SessionId{1});
   Axiom::AxiomSessionEndpoint Endpoint(Session);

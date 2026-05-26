@@ -15,6 +15,7 @@
 #include "Renderer/Vulkan/VulkanSceneRenderer.h"
 
 #include <functional>
+#include <deque>
 #include <optional>
 #include <vector>
 
@@ -84,8 +85,9 @@ private:
   size_t CountPendingOffscreenReadbacks() const;
   static float HalfToFloat(uint16_t Value);
   static uint8_t LinearToByte(float Value);
-  void ConvertCapturedFrameToRgba8(const AllocatedBuffer &ReadbackBuffer,
-                                   uint64_t FrameNumber, VkExtent2D DrawExtent);
+  std::optional<CapturedFrame>
+  ConvertCapturedFrameToRgba8(const AllocatedBuffer &ReadbackBuffer,
+                              uint64_t FrameNumber, VkExtent2D DrawExtent);
 
 private:
   IRenderSurface *m_Surface{nullptr};
@@ -107,7 +109,7 @@ private:
   MaterialInstanceRef m_LightBillboardMaterial;
 
   RendererFrameStats m_FrameStats{};
-  std::optional<CapturedFrame> m_CapturedFrame;
+  std::deque<CapturedFrame> m_CapturedFrames;
   float m_TimestampPeriod{0.0f};
   bool m_HasWarnedMeshSubmissionOverflow{false};
 
