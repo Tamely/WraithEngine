@@ -34,6 +34,9 @@ public:
     VulkanOcclusionCulling &OcclusionCulling;
     bool EnableImGui{false};
     bool HasPresentationSurface{false};
+    std::function<void(VkCommandBuffer, RenderScene &, uint64_t,
+                       RendererViewMode)>
+        RecordPreparedScenePasses;
     std::function<void()> DestroyResourceManagerHDRTexture;
   };
 
@@ -102,6 +105,8 @@ private:
   bool m_EnableImGui{false};
   bool m_HasPresentationSurface{false};
   bool m_IsInitialized{false};
+  std::function<void(VkCommandBuffer, RenderScene &, uint64_t, RendererViewMode)>
+      m_RecordPreparedScenePasses;
 
   VulkanGizmoRenderer m_GizmoRenderer;
   VulkanImGuiRenderer m_ImGuiRenderer;

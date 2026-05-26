@@ -1,5 +1,6 @@
 #include "HeadlessOverlayModule.h"
 
+#include <Core/Application.h>
 #include <Renderer/Camera.h>
 #include <Renderer/Renderer.h>
 
@@ -162,9 +163,10 @@ HeadlessOverlayModule::HeadlessOverlayModule(EditorSession &Session)
     : m_Session(Session) {}
 
 void HeadlessOverlayModule::Initialize() {
-  m_PresenceMarkerMesh = Renderer::Get().CreateMesh(BuildPresenceMarkerMeshData());
-  m_ColliderBoxMesh = Renderer::Get().CreateMesh(BuildUnitBoxMeshData());
-  m_ColliderSphereMesh = Renderer::Get().CreateMesh(BuildUnitSphereMeshData());
+  Renderer &Renderer = Application::Get().GetRenderer();
+  m_PresenceMarkerMesh = Renderer.CreateMesh(BuildPresenceMarkerMeshData());
+  m_ColliderBoxMesh = Renderer.CreateMesh(BuildUnitBoxMeshData());
+  m_ColliderSphereMesh = Renderer.CreateMesh(BuildUnitSphereMeshData());
 }
 
 void HeadlessOverlayModule::SetPresenceMarkerMeshForTesting(MeshRef Mesh) {

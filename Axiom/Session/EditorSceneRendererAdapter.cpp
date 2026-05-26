@@ -1,5 +1,6 @@
 #include "Session/EditorSceneRendererAdapter.h"
 
+#include "Core/Application.h"
 #include "Renderer/Renderer.h"
 
 #include <cassert>
@@ -11,7 +12,7 @@ EditorSceneRendererAdapter::EditorSceneRendererAdapter(
     : m_CreateMeshResource(std::move(CreateMeshResource)) {
   if (!m_CreateMeshResource) {
     m_CreateMeshResource = [](const MeshData &Mesh) {
-      return Renderer::Get().CreateMeshResource(Mesh);
+      return Application::Get().GetRenderer().CreateMeshResource(Mesh);
     };
   }
 }

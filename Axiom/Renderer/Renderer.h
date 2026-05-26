@@ -15,8 +15,6 @@ public:
   Renderer() = default;
   ~Renderer();
 
-  static Renderer &Get();
-
   Renderer(const Renderer &) = delete;
   Renderer &operator=(const Renderer &) = delete;
 
@@ -48,8 +46,6 @@ private:
   void UpdateCpuRenderTime(float CpuRenderMs);
 
 private:
-  static Renderer *s_Instance;
-
   std::unique_ptr<RendererBackend> m_Backend;
   std::unique_ptr<RenderTechnique> m_Technique;
   RenderTechnique::AttachmentRequirements m_AttachmentRequirements{};

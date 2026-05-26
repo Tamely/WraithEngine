@@ -8,7 +8,6 @@
 #include "Renderer/Vulkan/VulkanContext.h"
 #include "Renderer/Vulkan/VulkanImage.h"
 #include "Renderer/Vulkan/VulkanInitializers.h"
-#include "Renderer/Vulkan/VulkanRendererBackend.h"
 
 #include <algorithm>
 #include <array>
@@ -70,6 +69,7 @@ void VulkanDrawSubmissionSystem::Init(const CreateInfo &CreateInfo) {
   m_OcclusionCulling = &CreateInfo.OcclusionCulling;
   m_EnableImGui = CreateInfo.EnableImGui;
   m_HasPresentationSurface = CreateInfo.HasPresentationSurface;
+  m_RecordPreparedScenePasses = CreateInfo.RecordPreparedScenePasses;
 
   VkPhysicalDeviceProperties DeviceProperties{};
   vkGetPhysicalDeviceProperties(m_Device->PhysicalDevice, &DeviceProperties);
@@ -390,11 +390,10 @@ void VulkanDrawSubmissionSystem::DrawMeshes(VkCommandBuffer CommandBuffer,
                                             RenderScene &Scene,
                                             uint64_t FrameNumber,
                                             RendererViewMode ViewMode) {
-  VulkanRendererBackend *Backend = VulkanRendererBackend::TryGet();
-  if (Backend == nullptr) {
+  if (!m_RecordPreparedScenePasses) {
     return;
   }
-  Backend->RecordPreparedScenePasses(CommandBuffer, Scene, FrameNumber, ViewMode);
+  m_RecordPreparedScenePasses(CommandBuffer, Scene, FrameNumber, ViewMode);
 }
 
 void VulkanDrawSubmissionSystem::RecordOffscreenCapture(

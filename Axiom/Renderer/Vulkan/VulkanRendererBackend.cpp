@@ -23,17 +23,9 @@ glm::vec3 TransformPoint(const glm::mat4 &Transform, const glm::vec3 &Point) {
 }
 } // namespace
 
-Axiom::VulkanRendererBackend *g_LoadedEngine = nullptr;
-
 namespace Axiom {
-VulkanRendererBackend &VulkanRendererBackend::Get() { return *g_LoadedEngine; }
-
-VulkanRendererBackend *VulkanRendererBackend::TryGet() { return g_LoadedEngine; }
-
 void VulkanRendererBackend::Init(const RendererCreateInfo &CreateInfo) {
   assert(CreateInfo.TargetSurface != nullptr);
-  assert(g_LoadedEngine == nullptr);
-  g_LoadedEngine = this;
 
   m_Surface = CreateInfo.TargetSurface;
   m_FrameOutput = CreateInfo.FrameOutput;
@@ -92,7 +84,13 @@ void VulkanRendererBackend::Init(const RendererCreateInfo &CreateInfo) {
        .MaterialResources = m_MaterialResources,
        .OcclusionCulling = m_OcclusionCulling,
        .EnableImGui = m_EnableImGui,
-       .HasPresentationSurface = m_HasPresentationSurface});
+       .HasPresentationSurface = m_HasPresentationSurface,
+       .RecordPreparedScenePasses =
+           [this](VkCommandBuffer CommandBuffer, RenderScene &Scene,
+                  uint64_t FrameNumber, RendererViewMode ViewMode) {
+             RecordPreparedScenePasses(CommandBuffer, Scene, FrameNumber,
+                                      ViewMode);
+           }});
 
   m_IsInitialized = true;
   A_CORE_INFO("Vulkan Engine set up was successful: {0}",
@@ -102,7 +100,6 @@ void VulkanRendererBackend::Init(const RendererCreateInfo &CreateInfo) {
 void VulkanRendererBackend::Shutdown() {
   A_CORE_INFO("Running Vulkan renderer cleanup...");
   if (!m_IsInitialized) {
-    g_LoadedEngine = nullptr;
     return;
   }
 
@@ -120,7 +117,6 @@ void VulkanRendererBackend::Shutdown() {
   m_Context.Shutdown();
 
   m_IsInitialized = false;
-  g_LoadedEngine = nullptr;
 }
 
 std::shared_ptr<Mesh>

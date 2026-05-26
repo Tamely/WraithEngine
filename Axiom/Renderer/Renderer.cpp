@@ -10,8 +10,6 @@
 #include <chrono>
 
 namespace Axiom {
-Renderer *Renderer::s_Instance = nullptr;
-
 std::unique_ptr<RenderTechnique>
 Renderer::CreateTechnique(RendererTechniqueType TechniqueType) {
   switch (TechniqueType) {
@@ -23,8 +21,6 @@ Renderer::CreateTechnique(RendererTechniqueType TechniqueType) {
 }
 
 Renderer::~Renderer() { Shutdown(); }
-
-Renderer &Renderer::Get() { return *s_Instance; }
 
 void Renderer::Init(const RendererCreateInfo &CreateInfo) {
   if (m_IsInitialized) {
@@ -45,7 +41,6 @@ void Renderer::Init(const RendererCreateInfo &CreateInfo) {
   BackendCreateInfo.AttachmentRequirements = m_AttachmentRequirements;
   m_Backend->Init(BackendCreateInfo);
   m_Technique->Init(*m_Backend);
-  s_Instance = this;
   m_IsInitialized = true;
 }
 
@@ -63,9 +58,6 @@ void Renderer::Shutdown() {
   m_Backend.reset();
   m_CreateInfo.reset();
   m_AttachmentRequirements = {};
-  if (s_Instance == this) {
-    s_Instance = nullptr;
-  }
   m_IsInitialized = false;
 }
 

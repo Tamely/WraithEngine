@@ -24,9 +24,6 @@ class VulkanMesh;
 
 class VulkanRendererBackend final : public RendererBackend {
 public:
-  static VulkanRendererBackend &Get();
-  static VulkanRendererBackend *TryGet();
-
   void Init(const RendererCreateInfo &CreateInfo) override;
   void Shutdown() override;
   void BeginFrame() override;
