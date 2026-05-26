@@ -81,6 +81,9 @@ private:
   void RecordOffscreenCapture(VkCommandBuffer CommandBuffer,
                               const AllocatedBuffer &ReadbackBuffer,
                               VkExtent2D DrawExtent);
+  void PublishCompletedOffscreenFrame(
+      VulkanResourceManager::OffscreenCaptureFrame &CaptureFrame,
+      VkExtent2D DrawExtent, IViewportFrameOutput *FrameOutput);
   void PublishCompletedOffscreenFrames(IViewportFrameOutput *FrameOutput);
   size_t CountPendingOffscreenReadbacks() const;
   static float HalfToFloat(uint16_t Value);
