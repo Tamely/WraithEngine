@@ -8,6 +8,7 @@
 #include "Renderer/Vulkan/VulkanContext.h"
 #include "Renderer/Vulkan/VulkanImage.h"
 #include "Renderer/Vulkan/VulkanInitializers.h"
+#include "Renderer/Vulkan/VulkanRendererBackend.h"
 
 #include <algorithm>
 #include <array>
@@ -484,6 +485,11 @@ void VulkanDrawSubmissionSystem::DrawMeshes(VkCommandBuffer CommandBuffer,
        .MeshDepthPipelineLayout = m_Pipelines->GetMeshDepthPipelineLayout(),
        .HzbMipExtents = m_Resources->GetHzbMipExtents(),
        .HzbMipOffsets = m_Resources->GetHzbMipOffsets(),
+       .ResolveMeshHandle =
+           [](MeshHandle Handle) -> VulkanMesh * {
+             VulkanRendererBackend *Backend = VulkanRendererBackend::TryGet();
+             return Backend != nullptr ? Backend->ResolveMeshHandle(Handle) : nullptr;
+           },
        .BuildHzb =
            [this](VkCommandBuffer DrawCommandBuffer, MeshFrameResources &Frame) {
              BuildHzb(DrawCommandBuffer, Frame);

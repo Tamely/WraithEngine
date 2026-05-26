@@ -6,6 +6,7 @@ add_executable(AxiomTests
   MeshPickingTests.cpp
   ModuleManagerTests.cpp
   ProjectTests.cpp
+  RenderSubmissionTests.cpp
   SceneLifecycleTests.cpp
   UWebSocketsVendorTests.cpp
   WraithNetworkingModuleTests.cpp

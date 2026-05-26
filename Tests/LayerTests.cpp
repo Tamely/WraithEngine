@@ -78,7 +78,13 @@ public:
   Axiom::CursorMode ModeSet{Axiom::CursorMode::Normal};
 };
 
-class DummyMesh final : public Axiom::Mesh {};
+class DummyMesh final : public Axiom::Mesh {
+public:
+  DummyMesh() { AssignHandle(Axiom::MeshHandle{s_NextHandleValue++}); }
+
+private:
+  inline static uint64_t s_NextHandleValue{1};
+};
 
 class RecordingEndpointSubscriber final
     : public Axiom::ISessionTransportSubscriber {

@@ -435,7 +435,7 @@ void VulkanSceneRenderer::RenderScenePasses(const RenderContext &Context) const 
 
   for (size_t Index = 0; Index < SubmissionCount; ++Index) {
     const auto &Submission = Context.Scene.Submissions[Index];
-    VulkanMesh *VulkanMeshRef = Submission.TypedMesh;
+    VulkanMesh *VulkanMeshRef = Context.ResolveMeshHandle(Submission.MeshHandle);
     if (VulkanMeshRef == nullptr) {
       continue;
     }

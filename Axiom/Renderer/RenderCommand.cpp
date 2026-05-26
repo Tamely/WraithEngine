@@ -16,11 +16,7 @@ void RenderCommand::SetCamera(const Camera &Camera) {
 
 void RenderCommand::Submit(const RenderMeshSubmission &Submission) {
   if (s_ActiveScene) {
-    RenderMeshSubmission Prepared = Submission;
-    if (Prepared.TypedMesh == nullptr && Prepared.Mesh != nullptr) {
-      Prepared.TypedMesh = ResolveVulkanMesh(Prepared.Mesh);
-    }
-    s_ActiveScene->Submissions.push_back(std::move(Prepared));
+    s_ActiveScene->Submissions.push_back(Submission);
   }
 }
 

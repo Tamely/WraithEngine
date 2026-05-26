@@ -1,7 +1,5 @@
 #include "Renderer/Mesh.h"
 
-#include "Renderer/Vulkan/VulkanMesh.h"
-
 #include <deque>
 #include <mutex>
 
@@ -38,7 +36,7 @@ GetRenderMeshSubmissionDebugName(RenderMeshSubmissionDebugDataId Id) {
   return {};
 }
 
-VulkanMesh *ResolveVulkanMesh(const MeshRef &Mesh) {
-  return Mesh != nullptr ? dynamic_cast<VulkanMesh *>(Mesh.get()) : nullptr;
+MeshHandle GetMeshHandle(const MeshRef &Mesh) {
+  return Mesh != nullptr ? Mesh->GetHandle() : MeshHandle{};
 }
 } // namespace Axiom

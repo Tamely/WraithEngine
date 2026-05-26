@@ -2,9 +2,20 @@
 
 #include "Renderer/Renderer.h"
 
+#include <cassert>
 #include <unordered_set>
 
 namespace Axiom {
+EditorSceneRendererAdapter::EditorSceneRendererAdapter(
+    CreateMeshResourceFn CreateMeshResource)
+    : m_CreateMeshResource(std::move(CreateMeshResource)) {
+  if (!m_CreateMeshResource) {
+    m_CreateMeshResource = [](const MeshData &Mesh) {
+      return Renderer::Get().CreateMeshResource(Mesh);
+    };
+  }
+}
+
 std::vector<RenderMeshSubmission>
 EditorSceneRendererAdapter::BuildRenderSubmissions(const EditorSession &Session) {
   const EditorSessionState &State = Session.GetState();
@@ -23,22 +34,27 @@ EditorSceneRendererAdapter::BuildRenderSubmissions(const EditorSession &Session)
     }
 
     auto &Cached = m_MeshesByObjectId[Instance.ObjectId];
-    if (Cached.Mesh == nullptr || Cached.AssetRelativePath != Instance.AssetRelativePath) {
-      Cached.Mesh = Renderer::Get().CreateMesh(Instance.Mesh);
+    if (!Cached.Resource.IsValid() ||
+        Cached.AssetRelativePath != Instance.AssetRelativePath) {
+      Cached.Resource = m_CreateMeshResource(Instance.Mesh);
       Cached.RenderPath = Instance.RenderPath;
       Cached.AssetRelativePath = Instance.AssetRelativePath;
+      assert((Cached.Resource.Mesh == nullptr || Cached.Resource.Handle.IsValid()) &&
+             "Cached mesh resource must retain a valid opaque mesh handle");
+    }
+    if (Cached.DebugDataId == 0) {
+      Cached.DebugDataId =
+          RegisterRenderMeshSubmissionDebugData({.Name = Instance.ObjectId});
     }
 
-    if (Cached.Mesh == nullptr) {
+    if (!Cached.Resource.IsValid()) {
       continue;
     }
 
     Submissions.push_back({
-        .Mesh = Cached.Mesh,
-        .TypedMesh = ResolveVulkanMesh(Cached.Mesh),
+        .MeshHandle = Cached.Resource.Handle,
         .Material = Instance.Material,  // always live — picks up material edits
-        .DebugDataId = RegisterRenderMeshSubmissionDebugData(
-            {.Name = Instance.ObjectId}),
+        .DebugDataId = Cached.DebugDataId,
         .RenderPath = Cached.RenderPath,
         .Transform = Instance.Transform,
     });

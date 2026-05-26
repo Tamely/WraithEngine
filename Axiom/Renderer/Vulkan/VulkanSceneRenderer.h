@@ -44,6 +44,7 @@ public:
     VkPipelineLayout MeshDepthPipelineLayout{VK_NULL_HANDLE};
     const std::vector<VkExtent2D> &HzbMipExtents;
     const std::vector<VkDeviceSize> &HzbMipOffsets;
+    std::function<VulkanMesh *(MeshHandle)> ResolveMeshHandle;
     std::function<void(VkCommandBuffer, MeshFrameResources &)> BuildHzb;
     std::function<void(const char *)> WarnOnce;
   };

@@ -15,8 +15,11 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 
 namespace Axiom {
+class VulkanMesh;
+
 class VulkanRendererBackend final : public RendererBackend {
 public:
   static VulkanRendererBackend &Get();
@@ -38,8 +41,10 @@ public:
   void SetViewportFrameOutput(IViewportFrameOutput *FrameOutput) override;
   std::optional<CapturedFrame> ConsumeCapturedFrame() override;
   bool IsInitialized() const { return m_IsInitialized; }
+  VulkanMesh *ResolveMeshHandle(MeshHandle Handle) const;
 
 private:
+  MeshHandle AllocateMeshHandle();
   void Draw();
 
 private:
@@ -63,6 +68,9 @@ private:
   VulkanMaterialResources m_MaterialResources;
   VulkanOcclusionCulling m_OcclusionCulling;
   std::shared_ptr<GPUResourceQueue> m_GpuResourceQueue;
+  std::unordered_map<MeshHandle, std::weak_ptr<VulkanMesh>, MeshHandleHash>
+      m_MeshesByHandle;
+  uint64_t m_NextMeshHandleValue{1};
   RenderScene *m_ActiveScene{nullptr};
   RendererViewMode m_ViewMode{RendererViewMode::Lit};
   SessionUserId m_ViewportFrameUser{};

@@ -33,7 +33,10 @@ public:
   const RendererFrameStats &GetFrameStats() const;
   std::shared_ptr<Mesh>
   CreateMesh(const MeshData &MeshData, const MeshCreateOptions &Options = {});
-  std::vector<RenderMeshSubmission>
+  RenderMeshResource
+  CreateMeshResource(const MeshData &MeshData,
+                     const MeshCreateOptions &Options = {});
+  LoadedMeshScene
   LoadMeshSceneFromFile(
       const std::filesystem::path &Path,
       const MeshSceneLoadOptions &Options = {});

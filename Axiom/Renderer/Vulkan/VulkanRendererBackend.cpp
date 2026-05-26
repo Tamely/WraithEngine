@@ -3,6 +3,7 @@
 #include "Renderer/RenderScene.h"
 #include "Renderer/Vulkan/VulkanMesh.h"
 
+#include <cassert>
 #include <chrono>
 #include <thread>
 
@@ -93,6 +94,8 @@ void VulkanRendererBackend::Shutdown() {
   m_DrawSubmissionSystem.Shutdown();
   m_MaterialResources.Shutdown();
   m_CommandContext.Shutdown(m_Device.Device);
+  m_MeshesByHandle.clear();
+  m_NextMeshHandleValue = 1;
   m_GpuResourceQueue->Flush();
   m_GpuResourceQueue.reset();
   m_PipelineLibrary.Shutdown();
@@ -107,11 +110,21 @@ void VulkanRendererBackend::Shutdown() {
 std::shared_ptr<Mesh>
 VulkanRendererBackend::CreateMesh(const MeshData &MeshSource,
                                   const MeshCreateOptions &Options) {
-  return VulkanMesh::Create(
+  std::shared_ptr<VulkanMesh> Mesh = VulkanMesh::Create(
       MeshSource, m_Device.Allocator, m_Device.Device, m_Device.GraphicsQueue,
       m_CommandContext.GetFrame(m_FrameNumber).CommandPool,
       m_ResourceManager.GetDescriptorAllocator(), m_GpuResourceQueue, Options,
       m_ResourceManager.GetMeshDescriptorLayout());
+  if (Mesh == nullptr) {
+    return nullptr;
+  }
+
+  const MeshHandle Handle = AllocateMeshHandle();
+  Mesh->AssignHandle(Handle);
+  const auto [It, Inserted] = m_MeshesByHandle.emplace(Handle, Mesh);
+  assert(Inserted && "Allocated duplicate mesh handle");
+  (void)It;
+  return Mesh;
 }
 
 void VulkanRendererBackend::BeginFrame() {
@@ -154,6 +167,31 @@ void VulkanRendererBackend::Draw() {
                                     .ViewportFrameUser = m_ViewportFrameUser,
                                     .FrameOutput = m_FrameOutput});
   ++m_FrameNumber;
+}
+
+MeshHandle VulkanRendererBackend::AllocateMeshHandle() {
+  MeshHandle Handle{m_NextMeshHandleValue++};
+  assert(Handle.IsValid() && "Opaque mesh handle allocation overflowed");
+  return Handle;
+}
+
+VulkanMesh *VulkanRendererBackend::ResolveMeshHandle(MeshHandle Handle) const {
+  assert(Handle.IsValid() && "Render submission contained an invalid mesh handle");
+  if (!Handle.IsValid()) {
+    return nullptr;
+  }
+
+  const auto It = m_MeshesByHandle.find(Handle);
+  assert(It != m_MeshesByHandle.end() &&
+         "Render submission referenced an unknown mesh handle");
+  if (It == m_MeshesByHandle.end()) {
+    return nullptr;
+  }
+
+  std::shared_ptr<VulkanMesh> Mesh = It->second.lock();
+  assert(Mesh != nullptr &&
+         "Render submission referenced a stale mesh handle with no live mesh");
+  return Mesh.get();
 }
 
 void VulkanRendererBackend::EndFrame() {

@@ -249,8 +249,7 @@ HeadlessOverlayModule::BuildColliderOverlaySubmissions() const {
       continue;
     }
     Result.push_back({
-        .Mesh = ColliderMesh,
-        .TypedMesh = ResolveVulkanMesh(ColliderMesh),
+        .MeshHandle = GetMeshHandle(ColliderMesh),
         .Material = GetOrCreateColliderMaterial(Physics.BodyType),
         .DebugDataId = RegisterRenderMeshSubmissionDebugData(
             {.Name = Details.ObjectId + "-collider"}),
@@ -279,8 +278,7 @@ HeadlessOverlayModule::BuildColliderOverlaySubmissions() const {
                                                                    HalfExtents.z)) *
                                                      ColliderCornerScale)));
           Result.push_back({
-              .Mesh = m_ColliderBoxMesh,
-              .TypedMesh = ResolveVulkanMesh(m_ColliderBoxMesh),
+              .MeshHandle = GetMeshHandle(m_ColliderBoxMesh),
               .Material = GetOrCreateColliderMaterial(Physics.BodyType),
               .DebugDataId = RegisterRenderMeshSubmissionDebugData(
                   {.Name = Details.ObjectId + "-collider-corner"}),
@@ -310,8 +308,7 @@ HeadlessOverlayModule::BuildPresenceOverlaySubmissions(SessionUserId RenderUser)
       continue;
     }
     Result.push_back({
-        .Mesh = m_PresenceMarkerMesh,
-        .TypedMesh = ResolveVulkanMesh(m_PresenceMarkerMesh),
+        .MeshHandle = GetMeshHandle(m_PresenceMarkerMesh),
         .Material = GetOrCreatePresenceMaterial(Participant.User),
         .DebugDataId = RegisterRenderMeshSubmissionDebugData(
             {.Name = "participant-camera-" +

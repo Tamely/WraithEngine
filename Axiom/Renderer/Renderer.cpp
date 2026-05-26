@@ -105,11 +105,23 @@ std::shared_ptr<Mesh> Renderer::CreateMesh(const MeshData &MeshData,
                               : nullptr;
 }
 
+RenderMeshResource Renderer::CreateMeshResource(const MeshData &MeshData,
+                                                const MeshCreateOptions &Options) {
+  RenderMeshResource Resource;
+  Resource.Mesh = CreateMesh(MeshData, Options);
+  Resource.Handle = GetMeshHandle(Resource.Mesh);
+  if (Resource.Mesh != nullptr) {
+    assert(Resource.Handle.IsValid() &&
+           "Renderer backend returned a mesh without a valid handle");
+  }
+  return Resource;
+}
+
 void Renderer::UpdateCpuRenderTime(float CpuRenderMs) {
   m_Backend->AccessFrameStats().CpuRenderMs = CpuRenderMs;
 }
 
-std::vector<RenderMeshSubmission>
+LoadedMeshScene
 Renderer::LoadMeshSceneFromFile(const std::filesystem::path &Path,
                                 const MeshSceneLoadOptions &Options) {
   auto SceneData = Assets::LoadBasicMeshAsset(Path);
@@ -118,11 +130,12 @@ Renderer::LoadMeshSceneFromFile(const std::filesystem::path &Path,
     return {};
   }
 
-  std::vector<RenderMeshSubmission> Result;
-  Result.reserve(SceneData->Instances.size());
+  LoadedMeshScene Result;
+  Result.Resources.reserve(SceneData->Instances.size());
+  Result.Submissions.reserve(SceneData->Instances.size());
   for (const auto &Instance : SceneData->Instances) {
-    auto Mesh = m_Backend->CreateMesh(Instance.Mesh);
-    if (!Mesh) {
+    RenderMeshResource Resource = CreateMeshResource(Instance.Mesh);
+    if (!Resource.IsValid()) {
       continue;
     }
 
@@ -130,9 +143,9 @@ Renderer::LoadMeshSceneFromFile(const std::filesystem::path &Path,
         Options.ComputeMeshNames.contains(Instance.Name)
             ? MeshRenderPath::Compute
             : Options.DefaultRenderPath;
-    Result.push_back(
-        {.Mesh = Mesh,
-         .TypedMesh = ResolveVulkanMesh(Mesh),
+    Result.Resources.push_back(Resource);
+    Result.Submissions.push_back(
+        {.MeshHandle = Result.Resources.back().Handle,
          .Material = Instance.Material,
          .DebugDataId = RegisterRenderMeshSubmissionDebugData(
              {.Name = Instance.Name}),

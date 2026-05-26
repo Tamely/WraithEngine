@@ -7,16 +7,16 @@
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 
+#include <compare>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 namespace Axiom {
-class VulkanMesh;
-
 enum class MeshRenderPath {
   Graphics,
   Compute,
@@ -56,12 +56,43 @@ struct MeshCreateOptions {
   bool KeepCpuData{false};
 };
 
+struct MeshHandle {
+  uint64_t Value{0};
+
+  [[nodiscard]] bool IsValid() const { return Value != 0; }
+  auto operator<=>(const MeshHandle &) const = default;
+};
+
+struct MeshHandleHash {
+  size_t operator()(const MeshHandle &Handle) const noexcept {
+    return std::hash<uint64_t>{}(Handle.Value);
+  }
+};
+
 class Mesh {
 public:
   virtual ~Mesh() = default;
+
+  [[nodiscard]] MeshHandle GetHandle() const { return m_Handle; }
+  [[nodiscard]] bool HasHandle() const { return m_Handle.IsValid(); }
+  void AssignHandle(MeshHandle Handle) { m_Handle = Handle; }
+
+private:
+  MeshHandle m_Handle{};
 };
 
 using MeshRef = std::shared_ptr<Mesh>;
+
+MeshHandle GetMeshHandle(const MeshRef &Mesh);
+
+struct RenderMeshResource {
+  MeshHandle Handle{};
+  MeshRef Mesh;
+
+  [[nodiscard]] bool IsValid() const {
+    return Handle.IsValid() && Mesh != nullptr;
+  }
+};
 
 struct RenderMeshSubmissionDebugData {
   std::string Name;
@@ -76,15 +107,17 @@ TryGetRenderMeshSubmissionDebugData(RenderMeshSubmissionDebugDataId Id);
 std::string_view
 GetRenderMeshSubmissionDebugName(RenderMeshSubmissionDebugDataId Id);
 
-VulkanMesh *ResolveVulkanMesh(const MeshRef &Mesh);
-
 struct RenderMeshSubmission {
-  MeshRef Mesh;
-  VulkanMesh *TypedMesh{nullptr};
+  MeshHandle MeshHandle{};
   MaterialInstanceRef Material;
   RenderMeshSubmissionDebugDataId DebugDataId{0};
   MeshRenderPath RenderPath{MeshRenderPath::Graphics};
   glm::mat4 Transform{1.0f};
   bool Translucent{false};
+};
+
+struct LoadedMeshScene {
+  std::vector<RenderMeshResource> Resources;
+  std::vector<RenderMeshSubmission> Submissions;
 };
 } // namespace Axiom
