@@ -4,13 +4,22 @@
 #include "Renderer/RendererBackend.h"
 
 namespace Axiom {
-void ForwardRenderer::Init(RendererBackend *Backend) { m_Backend = Backend; }
+std::string_view ForwardRenderer::GetName() const { return "Forward"; }
+
+void ForwardRenderer::Init(RendererBackend &Backend) { m_Backend = &Backend; }
 
 void ForwardRenderer::Shutdown() { m_Backend = nullptr; }
 
 void ForwardRenderer::Render(RenderScene &Scene) {
   if (!Scene.Submissions.empty()) {
-    m_Backend->RenderSceneMeshes(Scene);
+    m_Backend->PrepareSceneFrame(Scene);
+    m_Backend->RecordBackground();
+    m_Backend->RecordDepthPrepass();
+    m_Backend->BuildHzb();
+    m_Backend->RecordComputeMeshPath();
+    m_Backend->RecordOpaqueForward();
+    m_Backend->RecordTranslucentForward();
+    m_Backend->FinalizeSceneFrame();
     return;
   }
 

@@ -12,7 +12,6 @@
 #include "Renderer/Vulkan/VulkanOcclusionCulling.h"
 #include "Renderer/Vulkan/VulkanPipelineLibrary.h"
 #include "Renderer/Vulkan/VulkanResourceManager.h"
-#include "Renderer/Vulkan/VulkanSceneRenderer.h"
 
 #include <functional>
 #include <deque>
@@ -54,6 +53,7 @@ public:
   void DrawFrame(const FrameRequest &Request);
   void SubmitTransferUpload(std::function<void(VkCommandBuffer)> &&RecordUpload,
                             std::function<void()> &&Cleanup);
+  void BuildHzb(VkCommandBuffer CommandBuffer, MeshFrameResources &Frame);
 
   bool IsInitialized() const { return m_IsInitialized; }
   bool IsImGuiEnabled() const { return m_EnableImGui; }
@@ -73,8 +73,6 @@ private:
   void ShutdownTransferQueue();
   void CollectCompletedTransfers();
   void CollectFrameStats(MeshFrameResources &Frame);
-  void DrawBackground(VkCommandBuffer CommandBuffer, const FrameRequest &Request);
-  void BuildHzb(VkCommandBuffer CommandBuffer, MeshFrameResources &Frame);
   void ClearDepthImage(VkCommandBuffer CommandBuffer, uint64_t FrameNumber);
   void DrawMeshes(VkCommandBuffer CommandBuffer, RenderScene &Scene,
                   uint64_t FrameNumber, RendererViewMode ViewMode);
@@ -108,13 +106,11 @@ private:
   VulkanGizmoRenderer m_GizmoRenderer;
   VulkanImGuiRenderer m_ImGuiRenderer;
   VulkanLightBillboardRenderer m_LightBillboardRenderer;
-  VulkanSceneRenderer m_SceneRenderer;
   MaterialInstanceRef m_LightBillboardMaterial;
 
   RendererFrameStats m_FrameStats{};
   std::deque<CapturedFrame> m_CapturedFrames;
   float m_TimestampPeriod{0.0f};
-  bool m_HasWarnedMeshSubmissionOverflow{false};
 
   VkQueue m_TransferQueue{VK_NULL_HANDLE};
   uint32_t m_TransferQueueFamily{0};

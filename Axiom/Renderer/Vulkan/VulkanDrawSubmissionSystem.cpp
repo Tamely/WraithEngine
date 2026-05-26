@@ -284,67 +284,6 @@ void VulkanDrawSubmissionSystem::CollectFrameStats(MeshFrameResources &Frame) {
   m_FrameStats.GpuMeshMs = ToMilliseconds(Timestamps[2], Timestamps[3]);
 }
 
-void VulkanDrawSubmissionSystem::DrawBackground(VkCommandBuffer CommandBuffer,
-                                                const FrameRequest &Request) {
-  m_Resources->SyncHDRSkyboxTexture(
-      Request.ActiveScene ? Request.ActiveScene->SkyboxHDRTexture : nullptr,
-      m_CommandContext->GetFrame(Request.FrameNumber));
-
-  const VkExtent2D DrawExtent = {m_Resources->GetDrawImage().ImageExtent.width,
-                                 m_Resources->GetDrawImage().ImageExtent.height};
-  const bool UseHDR = m_Resources->HasHDRSkyboxTexture() &&
-                      m_Resources->GetHDRSkyboxDescriptorSet() != VK_NULL_HANDLE &&
-                      Request.ActiveScene != nullptr &&
-                      Request.ActiveScene->ActiveCamera != nullptr &&
-                      !Request.ActiveScene->ActiveCamera->IsOrthographic();
-
-  if (UseHDR) {
-    vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                      m_Pipelines->GetHDRSkyboxPipeline());
-    const std::array<VkDescriptorSet, 2> Sets = {
-        m_Resources->GetDrawImageDescriptorSet(),
-        m_Resources->GetHDRSkyboxDescriptorSet()};
-    vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            m_Pipelines->GetHDRSkyboxPipelineLayout(), 0,
-                            static_cast<uint32_t>(Sets.size()), Sets.data(), 0,
-                            VK_NULL_HANDLE);
-
-    const glm::mat4 InverseViewProj = glm::inverse(
-        Request.ActiveScene->ActiveCamera->GetViewProjectionMatrix());
-    vkCmdPushConstants(CommandBuffer, m_Pipelines->GetHDRSkyboxPipelineLayout(),
-                       VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(glm::mat4),
-                       glm::value_ptr(InverseViewProj));
-    vkCmdDispatch(CommandBuffer,
-                  static_cast<uint32_t>(std::ceil(DrawExtent.width / 16.0f)),
-                  static_cast<uint32_t>(std::ceil(DrawExtent.height / 16.0f)),
-                  1);
-    return;
-  }
-
-  vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                    m_Pipelines->GetGradientPipeline());
-  const VkDescriptorSet DrawImageDescriptorSet =
-      m_Resources->GetDrawImageDescriptorSet();
-  vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                          m_Pipelines->GetGradientPipelineLayout(), 0, 1,
-                          &DrawImageDescriptorSet, 0, VK_NULL_HANDLE);
-
-  ComputePushConstants PC;
-  if (Request.ActiveScene) {
-    PC.data1 = glm::vec4(Request.ActiveScene->SkyboxColorTop, 1.0f);
-    PC.data2 = glm::vec4(Request.ActiveScene->SkyboxColorBottom, 1.0f);
-  } else {
-    PC.data1 = glm::vec4(0.08f, 0.09f, 0.14f, 1.0f);
-    PC.data2 = glm::vec4(0.14f, 0.24f, 0.38f, 1.0f);
-  }
-
-  vkCmdPushConstants(CommandBuffer, m_Pipelines->GetGradientPipelineLayout(),
-                     VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PC), &PC);
-  vkCmdDispatch(CommandBuffer,
-                static_cast<uint32_t>(std::ceil(DrawExtent.width / 16.0f)),
-                static_cast<uint32_t>(std::ceil(DrawExtent.height / 16.0f)), 1);
-}
-
 void VulkanDrawSubmissionSystem::BuildHzb(VkCommandBuffer CommandBuffer,
                                           MeshFrameResources &Frame) {
   if (m_Resources->GetHzbReduceDescriptorSets().empty()) {
@@ -451,56 +390,11 @@ void VulkanDrawSubmissionSystem::DrawMeshes(VkCommandBuffer CommandBuffer,
                                             RenderScene &Scene,
                                             uint64_t FrameNumber,
                                             RendererViewMode ViewMode) {
-  const VkExtent2D DrawExtent = {m_Resources->GetDrawImage().ImageExtent.width,
-                                 m_Resources->GetDrawImage().ImageExtent.height};
-  m_SceneRenderer.RenderScenePasses(
-      {.CommandBuffer = CommandBuffer,
-       .Scene = Scene,
-       .Frame = m_Resources->GetMeshFrame(FrameNumber),
-       .FrameStats = m_FrameStats,
-       .MeshFrames = m_Resources->GetMeshFrames(),
-       .CommandContext = *m_CommandContext,
-       .MaterialResources = *m_MaterialResources,
-       .OcclusionCulling = *m_OcclusionCulling,
-       .Device = m_Device->Device,
-       .Allocator = m_Device->Allocator,
-       .FrameNumber = FrameNumber,
-       .DrawExtent = DrawExtent,
-       .ViewMode = ViewMode,
-       .DrawImage = m_Resources->GetDrawImage(),
-       .RasterDepthImage = m_Resources->GetRasterDepthImage(),
-       .LinearDepthSampler = m_Resources->GetLinearDepthSampler(),
-       .TextureSampler = m_Resources->GetTextureSampler(),
-       .MeshProjectPipeline = m_Pipelines->GetMeshProjectPipeline(),
-       .MeshProjectPipelineLayout = m_Pipelines->GetMeshProjectPipelineLayout(),
-       .MeshPipeline = m_Pipelines->GetMeshPipeline(),
-       .MeshPipelineLayout = m_Pipelines->GetMeshPipelineLayout(),
-       .MeshGraphicsPipeline = m_Pipelines->GetMeshGraphicsPipeline(),
-       .MeshGraphicsAlphaBlendPipeline =
-           m_Pipelines->GetMeshGraphicsAlphaBlendPipeline(),
-       .MeshGraphicsPipelineLayout =
-           m_Pipelines->GetMeshGraphicsPipelineLayout(),
-       .MeshWireframePipeline = m_Pipelines->GetMeshWireframePipeline(),
-       .MeshDepthPipeline = m_Pipelines->GetMeshDepthPipeline(),
-       .MeshDepthPipelineLayout = m_Pipelines->GetMeshDepthPipelineLayout(),
-       .HzbMipExtents = m_Resources->GetHzbMipExtents(),
-       .HzbMipOffsets = m_Resources->GetHzbMipOffsets(),
-       .ResolveMeshHandle =
-           [](MeshHandle Handle) -> VulkanMesh * {
-             VulkanRendererBackend *Backend = VulkanRendererBackend::TryGet();
-             return Backend != nullptr ? Backend->ResolveMeshHandle(Handle) : nullptr;
-           },
-       .BuildHzb =
-           [this](VkCommandBuffer DrawCommandBuffer, MeshFrameResources &Frame) {
-             BuildHzb(DrawCommandBuffer, Frame);
-           },
-       .WarnOnce =
-           [this](const char *Message) {
-             if (!m_HasWarnedMeshSubmissionOverflow) {
-               A_CORE_WARN("{0}", Message);
-               m_HasWarnedMeshSubmissionOverflow = true;
-             }
-           }});
+  VulkanRendererBackend *Backend = VulkanRendererBackend::TryGet();
+  if (Backend == nullptr) {
+    return;
+  }
+  Backend->RecordPreparedScenePasses(CommandBuffer, Scene, FrameNumber, ViewMode);
 }
 
 void VulkanDrawSubmissionSystem::RecordOffscreenCapture(
@@ -707,11 +601,6 @@ void VulkanDrawSubmissionSystem::DrawFrame(const FrameRequest &Request) {
   const VkExtent2D DrawExtent = {m_Resources->GetDrawImage().ImageExtent.width,
                                  m_Resources->GetDrawImage().ImageExtent.height};
   m_FrameStats.DrawExtent = {DrawExtent.width, DrawExtent.height};
-  m_FrameStats.SubmittedMeshCount = 0;
-  m_FrameStats.FrustumCulledMeshCount = 0;
-  m_FrameStats.OcclusionCulledMeshCount = 0;
-  m_FrameStats.MeshSubmissionCount = 0;
-  m_FrameStats.TriangleCount = 0;
   MeshFrame.HasValidTimestamps = true;
   MeshFrame.HasValidOcclusionData = false;
 
@@ -723,20 +612,14 @@ void VulkanDrawSubmissionSystem::DrawFrame(const FrameRequest &Request) {
                           VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
   vkCmdWriteTimestamp2(CommandBuffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                        MeshFrame.TimestampQueryPool, 0);
-  DrawBackground(CommandBuffer, Request);
   vkCmdWriteTimestamp2(CommandBuffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                        MeshFrame.TimestampQueryPool, 1);
 
   ClearDepthImage(CommandBuffer, Request.FrameNumber);
-  VkUtil::TransitionImage(CommandBuffer, m_Resources->GetDrawImage().Image,
-                          VK_IMAGE_LAYOUT_GENERAL,
-                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
   vkCmdWriteTimestamp2(CommandBuffer,
                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                        MeshFrame.TimestampQueryPool, 2);
-  if (Request.ActiveScene != nullptr &&
-      !Request.ActiveScene->Submissions.empty() &&
-      Request.ActiveScene->ActiveCamera != nullptr) {
+  if (Request.ActiveScene != nullptr) {
     DrawMeshes(CommandBuffer, *Request.ActiveScene, Request.FrameNumber,
                Request.ViewMode);
   }

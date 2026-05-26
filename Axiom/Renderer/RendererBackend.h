@@ -1,7 +1,9 @@
 #pragma once
 
 #include "Renderer/Mesh.h"
+#include "Renderer/RenderScene.h"
 #include "Renderer/RenderSurface.h"
+#include "Renderer/RenderTechnique.h"
 #include "Renderer/ViewportFrameOutput.h"
 
 #include <glm/vec2.hpp>
@@ -14,11 +16,13 @@
 #include <vector>
 
 namespace Axiom {
-class RenderScene;
 class IRenderSurface;
 struct MeshData;
 
 enum class RendererBackendType { Vulkan };
+enum class RendererTechniqueType : uint32_t {
+  Forward = 0,
+};
 enum class RendererViewMode : uint32_t {
   Lit = 0,
   Unlit = 1,
@@ -31,6 +35,8 @@ struct RendererCreateInfo {
   uint32_t Width{0};
   uint32_t Height{0};
   RendererBackendType BackendType{RendererBackendType::Vulkan};
+  RendererTechniqueType Technique{RendererTechniqueType::Forward};
+  RenderTechnique::AttachmentRequirements AttachmentRequirements{};
 };
 
 struct CapturedFrame {
@@ -66,7 +72,15 @@ public:
   virtual void BeginFrame() = 0;
   virtual std::shared_ptr<Mesh>
   CreateMesh(const MeshData &Mesh, const MeshCreateOptions &Options = {}) = 0;
-  virtual void RenderSceneMeshes(RenderScene &Scene) = 0;
+  virtual void PrepareSceneFrame(RenderScene &Scene) = 0;
+  virtual const VisibleSubmissionList &GetVisibleSubmissions() const = 0;
+  virtual void RecordDepthPrepass() = 0;
+  virtual void BuildHzb() = 0;
+  virtual void RecordOpaqueForward() = 0;
+  virtual void RecordTranslucentForward() = 0;
+  virtual void RecordComputeMeshPath() = 0;
+  virtual void RecordBackground() = 0;
+  virtual void FinalizeSceneFrame() = 0;
   virtual void RenderFallbackBackground(RenderScene &Scene) = 0;
   virtual RendererFrameStats &AccessFrameStats() = 0;
   virtual const RendererFrameStats &GetFrameStats() const = 0;

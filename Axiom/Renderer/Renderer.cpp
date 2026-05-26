@@ -12,6 +12,16 @@
 namespace Axiom {
 Renderer *Renderer::s_Instance = nullptr;
 
+std::unique_ptr<RenderTechnique>
+Renderer::CreateTechnique(RendererTechniqueType TechniqueType) {
+  switch (TechniqueType) {
+  case RendererTechniqueType::Forward:
+    return std::make_unique<ForwardRenderer>();
+  }
+
+  return std::make_unique<ForwardRenderer>();
+}
+
 Renderer::~Renderer() { Shutdown(); }
 
 Renderer &Renderer::Get() { return *s_Instance; }
@@ -21,15 +31,20 @@ void Renderer::Init(const RendererCreateInfo &CreateInfo) {
     return;
   }
 
+  m_CreateInfo = CreateInfo;
+  m_Technique = CreateTechnique(CreateInfo.Technique);
+  m_AttachmentRequirements = m_Technique->GetAttachmentRequirements();
+
   switch (CreateInfo.BackendType) {
   case RendererBackendType::Vulkan:
     m_Backend = std::make_unique<VulkanRendererBackend>();
     break;
   }
 
-  m_Backend->Init(CreateInfo);
-  m_Technique = std::make_unique<ForwardRenderer>();
-  m_Technique->Init(m_Backend.get());
+  RendererCreateInfo BackendCreateInfo = CreateInfo;
+  BackendCreateInfo.AttachmentRequirements = m_AttachmentRequirements;
+  m_Backend->Init(BackendCreateInfo);
+  m_Technique->Init(*m_Backend);
   s_Instance = this;
   m_IsInitialized = true;
 }
@@ -40,10 +55,14 @@ void Renderer::Shutdown() {
   }
 
   m_Scene.Reset();
-  m_Technique->Shutdown();
-  m_Technique.reset();
+  if (m_Technique != nullptr) {
+    m_Technique->Shutdown();
+    m_Technique.reset();
+  }
   m_Backend->Shutdown();
   m_Backend.reset();
+  m_CreateInfo.reset();
+  m_AttachmentRequirements = {};
   if (s_Instance == this) {
     s_Instance = nullptr;
   }
@@ -67,6 +86,33 @@ void Renderer::EndFrame() {
   RenderCommand::EndScene();
   m_Backend->RenderImGui();
   m_Backend->EndFrame();
+}
+
+void Renderer::SetTechnique(std::unique_ptr<RenderTechnique> Technique) {
+  assert(Technique != nullptr && "Renderer requires a valid render technique");
+  if (Technique == nullptr) {
+    return;
+  }
+
+  const RenderTechnique::AttachmentRequirements NewRequirements =
+      Technique->GetAttachmentRequirements();
+  if (m_Backend != nullptr && m_Technique != nullptr &&
+      NewRequirements != m_AttachmentRequirements) {
+    A_CORE_WARN(
+        "Switching render techniques with different attachment requirements is "
+        "not supported without renderer reinitialization yet.");
+  }
+
+  if (m_Technique != nullptr) {
+    m_Technique->Shutdown();
+  }
+
+  m_Technique = std::move(Technique);
+  m_AttachmentRequirements = NewRequirements;
+
+  if (m_Backend != nullptr) {
+    m_Technique->Init(*m_Backend);
+  }
 }
 
 void Renderer::SetViewMode(RendererViewMode ViewMode) {

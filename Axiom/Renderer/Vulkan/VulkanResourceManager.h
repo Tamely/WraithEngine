@@ -33,6 +33,7 @@ public:
     VulkanDevice &Device;
     VkExtent2D WindowExtent{};
     bool HasPresentationSurface{false};
+    RenderTechnique::AttachmentRequirements AttachmentRequirements{};
     std::function<void(std::function<void(VkCommandBuffer)> &&,
                        std::function<void()> &&)>
         SubmitTransferUpload;
@@ -139,6 +140,7 @@ private:
   VulkanDevice *m_Device{nullptr};
   VkExtent2D m_WindowExtent{1700, 900};
   bool m_HasPresentationSurface{false};
+  RenderTechnique::AttachmentRequirements m_AttachmentRequirements{};
   std::function<void(std::function<void(VkCommandBuffer)> &&,
                      std::function<void()> &&)>
       m_SubmitTransferUpload;

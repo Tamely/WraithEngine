@@ -25,6 +25,7 @@ public:
   void BeginFrame();
   void Render();
   void EndFrame();
+  void SetTechnique(std::unique_ptr<RenderTechnique> Technique);
   void SetViewMode(RendererViewMode ViewMode);
   void SetViewportFrameUser(SessionUserId User);
   void SetViewportFrameOutput(IViewportFrameOutput *FrameOutput);
@@ -42,6 +43,8 @@ public:
       const MeshSceneLoadOptions &Options = {});
 
 private:
+  static std::unique_ptr<RenderTechnique>
+  CreateTechnique(RendererTechniqueType TechniqueType);
   void UpdateCpuRenderTime(float CpuRenderMs);
 
 private:
@@ -49,6 +52,8 @@ private:
 
   std::unique_ptr<RendererBackend> m_Backend;
   std::unique_ptr<RenderTechnique> m_Technique;
+  RenderTechnique::AttachmentRequirements m_AttachmentRequirements{};
+  std::optional<RendererCreateInfo> m_CreateInfo;
   RenderScene m_Scene;
   bool m_IsInitialized{false};
 };

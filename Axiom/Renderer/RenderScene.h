@@ -7,6 +7,7 @@
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -34,6 +35,28 @@ struct LightBillboardOverlay {
   glm::vec3 WorldPosition{0.0f};
   glm::vec4 Color{1.0f};
   float PixelSize{48.0f};
+};
+
+struct VisibleSubmission {
+  uint32_t SubmissionIndex{0};
+  MeshHandle MeshHandle{};
+  float SortDepth{0.0f};
+};
+
+struct VisibleSubmissionList {
+  std::vector<VisibleSubmission> OpaqueGraphics;
+  std::vector<VisibleSubmission> TranslucentGraphics;
+  std::vector<VisibleSubmission> Compute;
+
+  void Clear() {
+    OpaqueGraphics.clear();
+    TranslucentGraphics.clear();
+    Compute.clear();
+  }
+
+  [[nodiscard]] bool Empty() const {
+    return OpaqueGraphics.empty() && TranslucentGraphics.empty() && Compute.empty();
+  }
 };
 
 class RenderScene {

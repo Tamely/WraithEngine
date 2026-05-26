@@ -5,7 +5,8 @@
 namespace Axiom {
 class ForwardRenderer final : public RenderTechnique {
 public:
-  void Init(RendererBackend *Backend) override;
+  std::string_view GetName() const override;
+  void Init(RendererBackend &Backend) override;
   void Shutdown() override;
   void Render(RenderScene &Scene) override;
 

@@ -11,10 +11,12 @@
 #include "Renderer/Vulkan/VulkanOcclusionCulling.h"
 #include "Renderer/Vulkan/VulkanPipelineLibrary.h"
 #include "Renderer/Vulkan/VulkanResourceManager.h"
+#include "Renderer/Vulkan/VulkanRendererTypes.h"
 
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <vector>
 #include <unordered_map>
 
 namespace Axiom {
@@ -30,7 +32,15 @@ public:
   void BeginFrame() override;
   std::shared_ptr<Mesh>
   CreateMesh(const MeshData &Mesh, const MeshCreateOptions &Options = {}) override;
-  void RenderSceneMeshes(RenderScene &Scene) override;
+  void PrepareSceneFrame(RenderScene &Scene) override;
+  const VisibleSubmissionList &GetVisibleSubmissions() const override;
+  void RecordDepthPrepass() override;
+  void BuildHzb() override;
+  void RecordOpaqueForward() override;
+  void RecordTranslucentForward() override;
+  void RecordComputeMeshPath() override;
+  void RecordBackground() override;
+  void FinalizeSceneFrame() override;
   void RenderFallbackBackground(RenderScene &Scene) override;
   RendererFrameStats &AccessFrameStats() override;
   const RendererFrameStats &GetFrameStats() const override;
@@ -42,10 +52,67 @@ public:
   std::optional<CapturedFrame> ConsumeCapturedFrame() override;
   bool IsInitialized() const { return m_IsInitialized; }
   VulkanMesh *ResolveMeshHandle(MeshHandle Handle) const;
+  void RecordPreparedScenePasses(VkCommandBuffer CommandBuffer, RenderScene &Scene,
+                                 uint64_t FrameNumber,
+                                 RendererViewMode ViewMode);
+  void DrawBackgroundPass(VkCommandBuffer CommandBuffer, RenderScene *Scene);
+  void BuildHzbPass(VkCommandBuffer CommandBuffer, MeshFrameResources &Frame);
 
 private:
+  enum class ScenePassPrimitive {
+    Background,
+    DepthPrepass,
+    Hzb,
+    ComputeMeshPath,
+    OpaqueForward,
+    TranslucentForward,
+  };
+
+  struct CandidateSubmission {
+    uint32_t SubmissionIndex{0};
+    MeshHandle MeshHandle{};
+    VulkanMesh *Mesh{nullptr};
+    float SortDepth{0.0f};
+  };
+
+  struct PreparedSceneState {
+    RenderScene *Scene{nullptr};
+    CameraFrameUniform CameraData{};
+    VisibleSubmissionList VisibleSubmissions;
+    bool ForceWireframe{false};
+    bool HasPreparedCamera{false};
+    bool HasQueuedFinalize{false};
+  };
+
   MeshHandle AllocateMeshHandle();
   void Draw();
+  void QueueScenePass(ScenePassPrimitive Pass);
+  void ResetPreparedSceneState();
+  glm::vec3 ComputeWorldCenter(const RenderMeshSubmission &Submission,
+                               const VulkanMesh &Mesh) const;
+  CameraFrameUniform BuildCameraData(const RenderScene &Scene,
+                                     RendererViewMode ViewMode) const;
+  void UpdateComputeFrameDescriptors(const MeshFrameResources &Frame) const;
+  void UpdateDepthFrameDescriptors(const MeshFrameResources &Frame) const;
+  void UpdateGraphicsFrameDescriptors(
+      VkDescriptorSet GraphicsDescriptorSet, VkImageView TextureView,
+      const VkDescriptorBufferInfo &CameraBufferInfo) const;
+  void RecordDepthPrepassPass(VkCommandBuffer CommandBuffer,
+                              const MeshFrameResources &Frame) const;
+  void RecordComputeMeshPathPass(VkCommandBuffer CommandBuffer,
+                                 const MeshFrameResources &Frame) const;
+  void RecordOpaqueForwardPass(VkCommandBuffer CommandBuffer,
+                               const MeshFrameResources &Frame);
+  void RecordTranslucentForwardPass(VkCommandBuffer CommandBuffer,
+                                    const MeshFrameResources &Frame);
+  void EnsureDrawImageLayout(VkCommandBuffer CommandBuffer,
+                             VkImageLayout DesiredLayout);
+  void EnsureRasterDepthLayout(VkCommandBuffer CommandBuffer,
+                               VkImageLayout DesiredLayout);
+  void BindMeshBuffers(VkCommandBuffer CommandBuffer, const VulkanMesh &Mesh) const;
+  const RenderMeshSubmission &GetSubmission(uint32_t SubmissionIndex) const;
+  VulkanMesh *ResolveVisibleMesh(const VisibleSubmission &Visible) const;
+  VkExtent2D GetDrawExtent2D() const;
 
 private:
   bool m_IsInitialized{false};
@@ -74,5 +141,11 @@ private:
   RenderScene *m_ActiveScene{nullptr};
   RendererViewMode m_ViewMode{RendererViewMode::Lit};
   SessionUserId m_ViewportFrameUser{};
+  PreparedSceneState m_PreparedSceneState{};
+  std::vector<CandidateSubmission> m_CandidateScratch;
+  std::vector<ScenePassPrimitive> m_QueuedScenePasses;
+  bool m_HasWarnedMeshSubmissionOverflow{false};
+  VkImageLayout m_SceneDrawImageLayout{VK_IMAGE_LAYOUT_UNDEFINED};
+  VkImageLayout m_SceneRasterDepthLayout{VK_IMAGE_LAYOUT_UNDEFINED};
 };
 } // namespace Axiom

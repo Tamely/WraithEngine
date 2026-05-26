@@ -55,6 +55,7 @@ void VulkanResourceManager::Init(const CreateInfo &CreateInfo) {
   m_Device = &CreateInfo.Device;
   m_WindowExtent = CreateInfo.WindowExtent;
   m_HasPresentationSurface = CreateInfo.HasPresentationSurface;
+  m_AttachmentRequirements = CreateInfo.AttachmentRequirements;
   m_SubmitTransferUpload = CreateInfo.SubmitTransferUpload;
 
   InitSwapchain();
@@ -149,6 +150,7 @@ void VulkanResourceManager::Shutdown() {
   DestroyManagedImage(m_DrawImage);
 
   m_Swapchain.Shutdown(*m_Device);
+  m_AttachmentRequirements = {};
 }
 
 void VulkanResourceManager::InitSwapchain() {
@@ -162,6 +164,12 @@ void VulkanResourceManager::InitSwapchain() {
 
   const VkExtent3D DrawImageExtent = {
       m_WindowExtent.width, m_WindowExtent.height, 1};
+
+  if (m_AttachmentRequirements.NeedsGBuffer &&
+      m_AttachmentRequirements.GBufferColorTargetCount > 0) {
+    // Deferred attachments are not implemented in this PR; forward continues to
+    // allocate its single HDR target plus depth resources.
+  }
 
   m_DrawImage.ImageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
   m_DrawImage.ImageExtent = DrawImageExtent;
