@@ -48,6 +48,7 @@ struct EditorViewportState {
 enum class EditorSceneItemKind { Folder, Mesh, Light, Camera, Actor };
 
 struct EditorSceneItem {
+  SceneObjectHandle Handle{};
   std::string Id;
   std::string DisplayName;
   EditorSceneItemKind Kind{EditorSceneItemKind::Mesh};
@@ -69,6 +70,7 @@ struct EditorMaterialProperties {
 };
 
 struct EditorObjectDetails {
+  SceneObjectHandle Handle{};
   std::string ObjectId;
   std::string DisplayName;
   EditorSceneItemKind Kind{EditorSceneItemKind::Mesh};
@@ -113,12 +115,14 @@ struct EditorParticipant {
 };
 
 struct EditorObjectCollaborationState {
+  SceneObjectHandle ObjectHandle{};
   std::string ObjectId;
   EditorObjectLockState LockState{EditorObjectLockState::Unlocked};
   std::optional<SessionUserId> LockOwner;
 };
 
 struct EditorSceneMeshInstance {
+  SceneObjectHandle ObjectHandle{};
   std::string ObjectId;
   MeshData Mesh;
   MaterialInstanceRef Material;
@@ -189,8 +193,11 @@ public:
   const DataModel *GetSceneRoot() const { return m_SceneRoot.get(); }
   const EditorViewportState *FindViewport(SessionUserId User) const;
   const EditorSceneItem *FindSceneItem(std::string_view ObjectId) const;
+  const EditorSceneItem *FindSceneItem(SceneObjectHandle Handle) const;
   const std::string *FindSelectedObjectId(SessionUserId User) const;
+  const SceneObjectHandle *FindSelectedObjectHandle(SessionUserId User) const;
   const EditorObjectDetails *FindObjectDetails(std::string_view ObjectId) const;
+  const EditorObjectDetails *FindObjectDetails(SceneObjectHandle Handle) const;
   const EditorObjectDetails *FindSelectedObjectDetails(SessionUserId User) const;
   const EditorUserPresence *FindPresence(SessionUserId User) const;
   EditorParticipant BuildParticipant(SessionUserId User) const;
@@ -198,7 +205,11 @@ public:
   SessionUserId ResolveRuntimeControllerUser() const;
   const EditorObjectCollaborationState *FindCollaborationState(
       std::string_view ObjectId) const;
+  const EditorObjectCollaborationState *FindCollaborationState(
+      SceneObjectHandle Handle) const;
   EditorRuntimeState GetRuntimeState() const { return m_State.RuntimeState; }
+  SceneObjectHandle ResolveObjectHandle(std::string_view ObjectId) const;
+  const std::string *ResolveObjectId(SceneObjectHandle Handle) const;
 
   void AcquireLock(const std::string &ObjectId, SessionUserId User);
   void ReleaseLock(const std::string &ObjectId, SessionUserId User);
@@ -215,6 +226,8 @@ private:
     EditorSceneState Scene;
     std::unordered_map<SessionUserId, std::string, SessionUserIdHash>
         SelectedObjectIds;
+    std::unordered_map<SessionUserId, SceneObjectHandle, SessionUserIdHash>
+        SelectedObjectHandles;
   };
 
   static bool IsBlankString(std::string_view Value);
@@ -222,6 +235,10 @@ private:
   void PublishPresenceChangedEvent(SessionUserId User);
   EditorUserPresence &EnsurePresence(SessionUserId User);
   EditorViewportState &EnsureViewport(SessionUserId User);
+  SceneObjectHandle AllocateSceneObjectHandle();
+  SceneObjectHandle EnsureHandleForObjectId(std::string_view ObjectId,
+                                            SceneObjectHandle PreferredHandle = {});
+  void RebuildSceneHandleState();
   Instance *FindInstanceById(std::string_view ObjectId) const;
   bool IsValidTemplateId(const std::string &TemplateId) const;
   std::vector<std::string> CollectDescendantIds(const Instance *Root) const;
@@ -238,5 +255,14 @@ private:
   std::filesystem::path m_ContentDir;
   std::filesystem::path m_EngineContentDir;
   std::optional<RuntimeSceneSnapshot> m_RuntimeSceneSnapshot;
+  SceneObjectHandle m_NextSceneObjectHandle{1};
+  std::unordered_map<std::string, SceneObjectHandle> m_ObjectHandleById;
+  std::unordered_map<SceneObjectHandle, std::string, SceneObjectHandleHash>
+      m_ObjectIdByHandle;
+  std::unordered_map<SessionUserId, SceneObjectHandle, SessionUserIdHash>
+      m_SelectedObjectHandles;
+  std::unordered_map<SceneObjectHandle, EditorObjectCollaborationState,
+                     SceneObjectHandleHash>
+      m_CollaborationByHandle;
 };
 } // namespace Axiom

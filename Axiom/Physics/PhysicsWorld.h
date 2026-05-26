@@ -9,6 +9,7 @@
 namespace Axiom {
 
 struct PhysicsTransformUpdate {
+  SceneObjectHandle ObjectHandle{};
   std::string ObjectId;
   EditorTransformDetails WorldTransform;
 };

@@ -138,12 +138,12 @@ bool EditorSessionValidationModule::ValidateCommand(
                  &QueuedCommand.Command.Payload))
       SingleId = C->ObjectId;
     if (!SingleId.empty()) {
-      const auto CollabIt =
-          m_Session.m_State.Scene.CollaborationByObjectId.find(SingleId);
-      if (CollabIt != m_Session.m_State.Scene.CollaborationByObjectId.end() &&
-          CollabIt->second.LockState == EditorObjectLockState::Locked &&
-          CollabIt->second.LockOwner.has_value() &&
-          *CollabIt->second.LockOwner != QueuedCommand.Context.User) {
+      const EditorObjectCollaborationState *Collab =
+          m_Session.FindCollaborationState(SingleId);
+      if (Collab != nullptr &&
+          Collab->LockState == EditorObjectLockState::Locked &&
+          Collab->LockOwner.has_value() &&
+          *Collab->LockOwner != QueuedCommand.Context.User) {
         FailureReason = "Object is locked by another user.";
         return false;
       }

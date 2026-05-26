@@ -132,6 +132,7 @@ void SerializeSceneItemsFlat(
       continue;
     }
     rapidjson::Value NodeValue(rapidjson::kObjectType);
+    NodeValue.AddMember("handle", Item.Handle.Value, Allocator);
     NodeValue.AddMember("id", CopyString(Item.Id, Allocator), Allocator);
     if (ParentId.empty()) {
       NodeValue.AddMember("parentId", rapidjson::Value().SetNull(), Allocator);
@@ -334,6 +335,7 @@ void ExpandMeshAssetIntoScene(EditorSceneState &State, std::string_view RootObje
                                      })
                                : std::nullopt;
     State.MeshInstances.push_back({
+        .ObjectHandle = RootDetails.Handle,
         .ObjectId = std::string(RootObjectId),
         .Mesh = First.Mesh,
         .Material = First.Material,
@@ -381,6 +383,7 @@ void ExpandMeshAssetIntoScene(EditorSceneState &State, std::string_view RootObje
         .GeneratedFromAssetRootId = std::string(RootObjectId),
     };
     RootItem->Children.push_back({
+        .Handle = State.ObjectDetailsById[ChildId].Handle,
         .Id = ChildId,
         .DisplayName = ResolveGeneratedAssetChildDisplayName(
             SourceInstance.Name, InstanceIndex),
@@ -388,6 +391,7 @@ void ExpandMeshAssetIntoScene(EditorSceneState &State, std::string_view RootObje
         .Visible = RootDetails.Visible,
     });
     State.MeshInstances.push_back({
+        .ObjectHandle = State.ObjectDetailsById[ChildId].Handle,
         .ObjectId = ChildId,
         .Mesh = SourceInstance.Mesh,
         .Material = SourceInstance.Material,
@@ -451,6 +455,7 @@ std::string SerializeSceneToJsonString(const std::filesystem::path &Path,
       continue;
     }
     rapidjson::Value ObjectValue(rapidjson::kObjectType);
+    ObjectValue.AddMember("handle", Details.Handle.Value, Allocator);
     ObjectValue.AddMember("id", CopyString(Id, Allocator), Allocator);
     ObjectValue.AddMember("displayName", CopyString(Details.DisplayName, Allocator),
                           Allocator);
@@ -678,11 +683,13 @@ DeserializeSceneFromJsonString(const std::filesystem::path &Path,
 
   // --- Stage 1: parse flat data ---
   struct FlatNode {
+    SceneObjectHandle Handle{};
     std::string Id, ParentId, DisplayName;
     EditorSceneItemKind Kind{EditorSceneItemKind::Folder};
     bool Visible{true};
   };
   struct ObjectData {
+    SceneObjectHandle Handle{};
     std::string DisplayName;
     EditorSceneItemKind Kind{EditorSceneItemKind::Folder};
     bool Visible{true};
@@ -717,6 +724,10 @@ DeserializeSceneFromJsonString(const std::filesystem::path &Path,
         continue;
       }
       FlatNode Node;
+      if (const auto HandleIt = NodeValue.FindMember("handle");
+          HandleIt != NodeValue.MemberEnd() && HandleIt->value.IsUint64()) {
+        Node.Handle = SceneObjectHandle{HandleIt->value.GetUint64()};
+      }
       if (const auto Id = GetOptionalString(NodeValue, "id"); Id.has_value()) {
         Node.Id = *Id;
       }
@@ -751,6 +762,10 @@ DeserializeSceneFromJsonString(const std::filesystem::path &Path,
 
       std::string ObjId;
       ObjectData Data;
+      if (const auto HandleIt = ObjectValue.FindMember("handle");
+          HandleIt != ObjectValue.MemberEnd() && HandleIt->value.IsUint64()) {
+        Data.Handle = SceneObjectHandle{HandleIt->value.GetUint64()};
+      }
       if (const auto Id = GetOptionalString(ObjectValue, "id"); Id.has_value()) {
         ObjId = *Id;
       }
@@ -1003,6 +1018,7 @@ DeserializeSceneFromJsonString(const std::filesystem::path &Path,
   std::unordered_map<std::string, EditorSceneItem> AllItems;
   for (const auto &Node : Nodes) {
     EditorSceneItem Item;
+    Item.Handle      = Node.Handle;
     Item.Id          = Node.Id;
     Item.DisplayName = Node.DisplayName;
     Item.Kind        = Node.Kind;
@@ -1036,6 +1052,7 @@ DeserializeSceneFromJsonString(const std::filesystem::path &Path,
   State.WorldSettings = WorldSettings;
   for (auto &[Id, Data] : Objects) {
     EditorObjectDetails Details;
+    Details.Handle          = Data.Handle;
     Details.ObjectId        = Id;
     Details.DisplayName     = Data.DisplayName;
     Details.Kind            = Data.Kind;
@@ -1168,6 +1185,10 @@ DeserializeSceneFromJsonString(const std::filesystem::path &Path,
         }
 
         State.MeshInstances.push_back({
+            .ObjectHandle =
+                DetailsIt != State.ObjectDetailsById.end()
+                    ? DetailsIt->second.Handle
+                    : SceneObjectHandle{},
             .ObjectId    = ObjId,
             .Mesh        = Instance.Mesh,
             .Material    = Instance.Material,

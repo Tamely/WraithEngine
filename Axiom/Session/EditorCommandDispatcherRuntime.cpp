@@ -246,6 +246,7 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
   m_Session.m_RuntimeSceneSnapshot = EditorSession::RuntimeSceneSnapshot{
       .Scene = CloneEditorSceneState(m_Session.m_State.Scene),
       .SelectedObjectIds = m_Session.m_State.SelectedObjectIds,
+      .SelectedObjectHandles = m_Session.m_SelectedObjectHandles,
   };
   m_Session.m_State.RuntimeState = EditorRuntimeState::Playing;
   m_Session.m_PhysicsController->EnsurePhysicsWorldStarted();
@@ -284,6 +285,8 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
         std::move(m_Session.m_RuntimeSceneSnapshot->Scene));
     m_Session.m_State.SelectedObjectIds =
         std::move(m_Session.m_RuntimeSceneSnapshot->SelectedObjectIds);
+    m_Session.m_SelectedObjectHandles =
+        std::move(m_Session.m_RuntimeSceneSnapshot->SelectedObjectHandles);
     m_Session.m_SceneStateManager->PruneInvalidSelections();
     m_Session.m_RuntimeSceneSnapshot.reset();
   }
@@ -312,6 +315,7 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
   const EditorTransformDetails ActorTransform{.Location = Command.Location};
   m_Session.m_State.Scene.ObjectDetailsById.emplace(
       ActorId, EditorObjectDetails{
+                   .Handle = m_Session.EnsureHandleForObjectId(ActorId),
                    .ObjectId = ActorId,
                    .DisplayName = ActorDisplayName,
                    .Kind = EditorSceneItemKind::Actor,
@@ -343,6 +347,7 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
     const bool ChildTransformable = ChildKind != EditorSceneItemKind::Folder;
     m_Session.m_State.Scene.ObjectDetailsById.emplace(
         ChildId, EditorObjectDetails{
+                     .Handle = m_Session.EnsureHandleForObjectId(ChildId),
                      .ObjectId = ChildId,
                      .DisplayName = ChildDisplayName,
                      .Kind = ChildKind,
@@ -363,6 +368,7 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
   }
 
   m_Session.m_SceneStateManager->SyncItemsFromTree();
+  m_Session.RebuildSceneHandleState();
   m_Session.PublishEvent({.Payload = ObjectCreatedEvent{
                               .User = QueuedCommand.Context.User,
                               .ObjectId = ActorId,

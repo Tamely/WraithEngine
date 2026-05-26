@@ -15,6 +15,7 @@ struct RuntimePhysicsMaterial {
 };
 
 struct RuntimeSceneBodyState {
+  SceneObjectHandle ObjectHandle{};
   std::string ObjectId;
   EditorTransformDetails WorldTransform;
   EditorPhysicsBodyType BodyType{EditorPhysicsBodyType::None};

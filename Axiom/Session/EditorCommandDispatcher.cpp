@@ -185,12 +185,17 @@ void EditorCommandDispatcher::HandleCommand(
 void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                             const SelectObjectCommand &Command) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
-  const auto Existing = m_Session.m_State.SelectedObjectIds.find(QueuedCommand.Context.User);
-  if (Existing != m_Session.m_State.SelectedObjectIds.end() &&
-      Existing->second == Command.ObjectId) {
+  const SceneObjectHandle Handle = m_Session.ResolveObjectHandle(Command.ObjectId);
+  if (!Handle) {
+    return;
+  }
+  const auto Existing = m_Session.m_SelectedObjectHandles.find(QueuedCommand.Context.User);
+  if (Existing != m_Session.m_SelectedObjectHandles.end() &&
+      Existing->second == Handle) {
     return;
   }
 
+  m_Session.m_SelectedObjectHandles[QueuedCommand.Context.User] = Handle;
   m_Session.m_State.SelectedObjectIds[QueuedCommand.Context.User] = Command.ObjectId;
   m_Session.PublishEvent({.Payload = SelectionChangedEvent{
                               .User = QueuedCommand.Context.User,
@@ -255,6 +260,7 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
 
   m_Session.m_State.Scene.ObjectDetailsById.emplace(
       ObjectId, EditorObjectDetails{
+                    .Handle = m_Session.EnsureHandleForObjectId(ObjectId),
                     .ObjectId = ObjectId,
                     .DisplayName = DisplayName,
                     .Kind = Kind,
@@ -272,6 +278,7 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
   }
 
   m_Session.m_SceneStateManager->SyncItemsFromTree();
+  m_Session.RebuildSceneHandleState();
   m_Session.PublishEvent({.Payload = ObjectCreatedEvent{
                               .User = QueuedCommand.Context.User,
                               .ObjectId = ObjectId,
@@ -298,6 +305,7 @@ void EditorCommandDispatcher::HandleCommand(
 
   m_Session.m_State.Scene.ObjectDetailsById.emplace(
       ObjectId, EditorObjectDetails{
+                    .Handle = m_Session.EnsureHandleForObjectId(ObjectId),
                     .ObjectId = ObjectId,
                     .DisplayName = DisplayName,
                     .Kind = EditorSceneItemKind::Mesh,
@@ -314,6 +322,7 @@ void EditorCommandDispatcher::HandleCommand(
   }
 
   m_Session.m_SceneStateManager->SyncItemsFromTree();
+  m_Session.RebuildSceneHandleState();
   m_Session.PublishEvent({.Payload = ObjectCreatedEvent{
                               .User = QueuedCommand.Context.User,
                               .ObjectId = ObjectId,
@@ -344,6 +353,7 @@ void EditorCommandDispatcher::HandleCommand(
   std::vector<EditorObjectDetails> NewDetails;
   m_Session.m_SceneStateManager->DeepCloneSubtree(Source, Parent, NewDetails);
   m_Session.m_SceneStateManager->SyncItemsFromTree();
+  m_Session.RebuildSceneHandleState();
   if (!NewDetails.empty()) {
     m_Session.PublishEvent({.Payload = ObjectCreatedEvent{
                                 .User = QueuedCommand.Context.User,
@@ -367,6 +377,7 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
 
   Target->Destroy();
   m_Session.m_SceneStateManager->SyncItemsFromTree();
+  m_Session.RebuildSceneHandleState();
   m_Session.PublishEvent({.Payload = ObjectDeletedEvent{
                               .User = QueuedCommand.Context.User,
                               .ObjectId = Command.ObjectId,
@@ -384,6 +395,7 @@ void EditorCommandDispatcher::HandleCommand(
 
   Target->SetParent(NewParent);
   m_Session.m_SceneStateManager->SyncItemsFromTree();
+  m_Session.RebuildSceneHandleState();
   m_Session.m_SceneStateManager->RecomputeSubtreeWorldTransforms(Target);
   m_Session.PublishEvent({.Payload = ObjectReparentedEvent{
                               .User = QueuedCommand.Context.User,

@@ -36,6 +36,18 @@ struct SessionUserId {
   auto operator<=>(const SessionUserId &) const = default;
 };
 
+struct SceneObjectHandle {
+  uint64_t Value{0};
+  auto operator<=>(const SceneObjectHandle &) const = default;
+  explicit operator bool() const { return Value != 0; }
+};
+
+struct SceneObjectHandleHash {
+  size_t operator()(const SceneObjectHandle &Handle) const noexcept {
+    return static_cast<size_t>(Handle.Value);
+  }
+};
+
 struct SessionUserIdHash {
   size_t operator()(const SessionUserId &Id) const noexcept {
     return static_cast<size_t>(Id.Value);

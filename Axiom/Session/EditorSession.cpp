@@ -5,6 +5,9 @@
 #include "Session/EditorSceneStateManager.h"
 #include "Session/EditorSessionValidationModule.h"
 
+#include <functional>
+#include <unordered_set>
+
 namespace Axiom {
 namespace {
 std::string DefaultUserDisplayName(SessionUserId User) {
@@ -45,6 +48,21 @@ Instance *FindInstanceByIdRecursive(Instance *Root, std::string_view Id) {
   if (Root->GetName() == Id) return Root;
   for (Instance *Child : Root->GetChildren()) {
     if (Instance *Found = FindInstanceByIdRecursive(Child, Id)) {
+      return Found;
+    }
+  }
+  return nullptr;
+}
+
+const EditorSceneItem *FindSceneItemByHandleRecursive(
+    const std::vector<EditorSceneItem> &Items, SceneObjectHandle Handle) {
+  for (const EditorSceneItem &Item : Items) {
+    if (Item.Handle == Handle) {
+      return &Item;
+    }
+    if (const EditorSceneItem *Found =
+            FindSceneItemByHandleRecursive(Item.Children, Handle);
+        Found != nullptr) {
       return Found;
     }
   }
@@ -129,6 +147,7 @@ void EditorSession::SetSceneState(EditorSceneState SceneState) {
 void EditorSession::SetSceneMeshInstances(
     std::vector<EditorSceneMeshInstance> SceneMeshInstances) {
   m_State.Scene.MeshInstances = std::move(SceneMeshInstances);
+  RebuildSceneHandleState();
 }
 
 void EditorSession::SetSceneItems(std::vector<EditorSceneItem> SceneItems) {
@@ -153,6 +172,7 @@ void EditorSession::SetObjectCollaborationStates(
   for (EditorObjectCollaborationState &Entry : CollaborationStates) {
     m_State.Scene.CollaborationByObjectId.emplace(Entry.ObjectId, std::move(Entry));
   }
+  RebuildSceneHandleState();
 }
 
 const EditorViewportState *EditorSession::FindViewport(SessionUserId User) const {
@@ -164,9 +184,22 @@ const EditorSceneItem *EditorSession::FindSceneItem(std::string_view ObjectId) c
   return m_SceneStateManager->FindSceneItem(ObjectId);
 }
 
+const EditorSceneItem *EditorSession::FindSceneItem(SceneObjectHandle Handle) const {
+  if (!Handle) {
+    return nullptr;
+  }
+  return FindSceneItemByHandleRecursive(m_State.Scene.Items, Handle);
+}
+
 const std::string *EditorSession::FindSelectedObjectId(SessionUserId User) const {
   const auto It = m_State.SelectedObjectIds.find(User);
   return It != m_State.SelectedObjectIds.end() ? &It->second : nullptr;
+}
+
+const SceneObjectHandle *EditorSession::FindSelectedObjectHandle(
+    SessionUserId User) const {
+  const auto It = m_SelectedObjectHandles.find(User);
+  return It != m_SelectedObjectHandles.end() ? &It->second : nullptr;
 }
 
 const EditorObjectDetails *EditorSession::FindObjectDetails(
@@ -175,10 +208,23 @@ const EditorObjectDetails *EditorSession::FindObjectDetails(
   return It != m_State.Scene.ObjectDetailsById.end() ? &It->second : nullptr;
 }
 
+const EditorObjectDetails *EditorSession::FindObjectDetails(
+    SceneObjectHandle Handle) const {
+  if (const std::string *ObjectId = ResolveObjectId(Handle); ObjectId != nullptr) {
+    return FindObjectDetails(*ObjectId);
+  }
+  return nullptr;
+}
+
 const EditorObjectDetails *EditorSession::FindSelectedObjectDetails(
     SessionUserId User) const {
+  if (const SceneObjectHandle *SelectedHandle = FindSelectedObjectHandle(User);
+      SelectedHandle != nullptr) {
+    return FindObjectDetails(*SelectedHandle);
+  }
   const std::string *SelectedObjectId = FindSelectedObjectId(User);
-  return SelectedObjectId != nullptr ? FindObjectDetails(*SelectedObjectId) : nullptr;
+  return SelectedObjectId != nullptr ? FindObjectDetails(*SelectedObjectId)
+                                     : nullptr;
 }
 
 const EditorUserPresence *EditorSession::FindPresence(SessionUserId User) const {
@@ -249,18 +295,40 @@ SessionUserId EditorSession::ResolveRuntimeControllerUser() const {
 
 const EditorObjectCollaborationState *EditorSession::FindCollaborationState(
     std::string_view ObjectId) const {
-  const auto It = m_State.Scene.CollaborationByObjectId.find(std::string(ObjectId));
-  return It != m_State.Scene.CollaborationByObjectId.end() ? &It->second : nullptr;
+  return FindCollaborationState(ResolveObjectHandle(ObjectId));
+}
+
+const EditorObjectCollaborationState *EditorSession::FindCollaborationState(
+    SceneObjectHandle Handle) const {
+  const auto It = m_CollaborationByHandle.find(Handle);
+  return It != m_CollaborationByHandle.end() ? &It->second : nullptr;
+}
+
+SceneObjectHandle EditorSession::ResolveObjectHandle(std::string_view ObjectId) const {
+  const auto It = m_ObjectHandleById.find(std::string(ObjectId));
+  return It != m_ObjectHandleById.end() ? It->second : SceneObjectHandle{};
+}
+
+const std::string *EditorSession::ResolveObjectId(SceneObjectHandle Handle) const {
+  const auto It = m_ObjectIdByHandle.find(Handle);
+  return It != m_ObjectIdByHandle.end() ? &It->second : nullptr;
 }
 
 void EditorSession::AcquireLock(const std::string &ObjectId, SessionUserId User) {
-  auto &Collab = m_State.Scene.CollaborationByObjectId[ObjectId];
+  const SceneObjectHandle Handle = ResolveObjectHandle(ObjectId);
+  if (!Handle) {
+    return;
+  }
+
+  auto &Collab = m_CollaborationByHandle[Handle];
   if (Collab.LockState == EditorObjectLockState::Locked && Collab.LockOwner != User) {
     return;
   }
+  Collab.ObjectHandle = Handle;
   Collab.ObjectId = ObjectId;
   Collab.LockState = EditorObjectLockState::Locked;
   Collab.LockOwner = User;
+  m_State.Scene.CollaborationByObjectId[ObjectId] = Collab;
   PublishEvent({.Payload = ObjectLockChangedEvent{
                     .ObjectId = ObjectId,
                     .LockState = EditorObjectLockState::Locked,
@@ -269,12 +337,14 @@ void EditorSession::AcquireLock(const std::string &ObjectId, SessionUserId User)
 }
 
 void EditorSession::ReleaseLock(const std::string &ObjectId, SessionUserId User) {
-  const auto It = m_State.Scene.CollaborationByObjectId.find(ObjectId);
-  if (It == m_State.Scene.CollaborationByObjectId.end()) return;
+  const SceneObjectHandle Handle = ResolveObjectHandle(ObjectId);
+  const auto It = m_CollaborationByHandle.find(Handle);
+  if (It == m_CollaborationByHandle.end()) return;
   if (It->second.LockOwner != User) return;
 
   It->second.LockState = EditorObjectLockState::Unlocked;
   It->second.LockOwner = std::nullopt;
+  m_State.Scene.CollaborationByObjectId[ObjectId] = It->second;
   PublishEvent({.Payload = ObjectLockChangedEvent{
                     .ObjectId = ObjectId,
                     .LockState = EditorObjectLockState::Unlocked,
@@ -283,12 +353,19 @@ void EditorSession::ReleaseLock(const std::string &ObjectId, SessionUserId User)
 }
 
 void EditorSession::ReleaseAllLocksForUser(SessionUserId User) {
-  for (auto &[ObjectId, Collab] : m_State.Scene.CollaborationByObjectId) {
+  for (auto &[Handle, Collab] : m_CollaborationByHandle) {
     if (Collab.LockOwner == User && Collab.LockState == EditorObjectLockState::Locked) {
       Collab.LockState = EditorObjectLockState::Unlocked;
       Collab.LockOwner = std::nullopt;
+      if (const std::string *ObjectId = ResolveObjectId(Handle);
+          ObjectId != nullptr) {
+        m_State.Scene.CollaborationByObjectId[*ObjectId] = Collab;
+      }
       PublishEvent({.Payload = ObjectLockChangedEvent{
-                        .ObjectId = ObjectId,
+                        .ObjectId =
+                            ResolveObjectId(Handle) != nullptr
+                                ? *ResolveObjectId(Handle)
+                                : std::string(),
                         .LockState = EditorObjectLockState::Unlocked,
                         .LockOwner = std::nullopt,
                     }});
@@ -331,6 +408,120 @@ EditorViewportState &EditorSession::EnsureViewport(SessionUserId User) {
         m_Config.CameraNearPlane, m_Config.CameraFarPlane);
   }
   return It->second;
+}
+
+SceneObjectHandle EditorSession::AllocateSceneObjectHandle() {
+  return SceneObjectHandle{m_NextSceneObjectHandle.Value++};
+}
+
+SceneObjectHandle EditorSession::EnsureHandleForObjectId(
+    std::string_view ObjectId, SceneObjectHandle PreferredHandle) {
+  if (ObjectId.empty()) {
+    return {};
+  }
+
+  const std::string Key(ObjectId);
+  if (const auto Existing = m_ObjectHandleById.find(Key);
+      Existing != m_ObjectHandleById.end()) {
+    return Existing->second;
+  }
+
+  SceneObjectHandle Handle = PreferredHandle;
+  if (!Handle || m_ObjectIdByHandle.contains(Handle)) {
+    Handle = AllocateSceneObjectHandle();
+  } else if (Handle.Value >= m_NextSceneObjectHandle.Value) {
+    m_NextSceneObjectHandle.Value = Handle.Value + 1;
+  }
+
+  m_ObjectHandleById.emplace(Key, Handle);
+  m_ObjectIdByHandle.emplace(Handle, Key);
+  return Handle;
+}
+
+void EditorSession::RebuildSceneHandleState() {
+  std::unordered_map<std::string, SceneObjectHandle> PreviousHandleById =
+      m_ObjectHandleById;
+  std::unordered_map<SceneObjectHandle, std::string, SceneObjectHandleHash>
+      NewObjectIdByHandle;
+  std::unordered_map<std::string, SceneObjectHandle> NewHandleById;
+  std::unordered_set<uint64_t> UsedHandles;
+  uint64_t MaxHandle = 0;
+
+  auto ReserveHandle = [&](std::string_view ObjectId,
+                           SceneObjectHandle PreferredHandle) {
+    if (ObjectId.empty()) {
+      return SceneObjectHandle{};
+    }
+
+    const std::string Key(ObjectId);
+    if (const auto Assigned = NewHandleById.find(Key); Assigned != NewHandleById.end()) {
+      return Assigned->second;
+    }
+
+    SceneObjectHandle Handle = PreferredHandle;
+    if (!Handle) {
+      if (const auto Existing = PreviousHandleById.find(Key);
+          Existing != PreviousHandleById.end()) {
+        Handle = Existing->second;
+      }
+    }
+    if (!Handle || UsedHandles.contains(Handle.Value)) {
+      uint64_t Candidate =
+          std::max<uint64_t>(m_NextSceneObjectHandle.Value, MaxHandle + 1);
+      while (UsedHandles.contains(Candidate)) {
+        ++Candidate;
+      }
+      Handle = SceneObjectHandle{Candidate};
+    }
+
+    UsedHandles.insert(Handle.Value);
+    MaxHandle = std::max(MaxHandle, Handle.Value);
+    NewHandleById[Key] = Handle;
+    NewObjectIdByHandle[Handle] = Key;
+    return Handle;
+  };
+
+  std::function<void(std::vector<EditorSceneItem> &)> AssignItemHandles =
+      [&](std::vector<EditorSceneItem> &Items) {
+        for (EditorSceneItem &Item : Items) {
+          Item.Handle = ReserveHandle(Item.Id, Item.Handle);
+          AssignItemHandles(Item.Children);
+        }
+      };
+  AssignItemHandles(m_State.Scene.Items);
+
+  for (auto &[ObjectId, Details] : m_State.Scene.ObjectDetailsById) {
+    Details.Handle = ReserveHandle(ObjectId, Details.Handle);
+  }
+  for (EditorSceneMeshInstance &Instance : m_State.Scene.MeshInstances) {
+    Instance.ObjectHandle = ReserveHandle(Instance.ObjectId, Instance.ObjectHandle);
+  }
+  for (auto &[ObjectId, Collab] : m_State.Scene.CollaborationByObjectId) {
+    Collab.ObjectHandle = ReserveHandle(ObjectId, Collab.ObjectHandle);
+    Collab.ObjectId = ObjectId;
+  }
+
+  m_ObjectHandleById = std::move(NewHandleById);
+  m_ObjectIdByHandle = std::move(NewObjectIdByHandle);
+  m_NextSceneObjectHandle.Value = std::max<uint64_t>(m_NextSceneObjectHandle.Value,
+                                                     MaxHandle + 1);
+
+  m_CollaborationByHandle.clear();
+  for (auto &[ObjectId, Collab] : m_State.Scene.CollaborationByObjectId) {
+    Collab.ObjectHandle = ResolveObjectHandle(ObjectId);
+    m_CollaborationByHandle[Collab.ObjectHandle] = Collab;
+  }
+
+  m_SelectedObjectHandles.clear();
+  for (auto It = m_State.SelectedObjectIds.begin(); It != m_State.SelectedObjectIds.end();) {
+    const SceneObjectHandle Handle = ResolveObjectHandle(It->second);
+    if (!Handle) {
+      It = m_State.SelectedObjectIds.erase(It);
+      continue;
+    }
+    m_SelectedObjectHandles[It->first] = Handle;
+    ++It;
+  }
 }
 
 Instance *EditorSession::FindInstanceById(std::string_view ObjectId) const {

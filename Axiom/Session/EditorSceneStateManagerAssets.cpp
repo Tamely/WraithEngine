@@ -152,7 +152,8 @@ void EditorSceneStateManager::ExpandMeshAssetIntoScene(
       std::remove_if(m_Session.m_State.Scene.MeshInstances.begin(),
                      m_Session.m_State.Scene.MeshInstances.end(),
                      [&](const EditorSceneMeshInstance &Instance) {
-                       return Instance.ObjectId == RootObjectId;
+                       return Instance.ObjectHandle ==
+                              m_Session.ResolveObjectHandle(RootObjectId);
                      }),
       m_Session.m_State.Scene.MeshInstances.end());
 
@@ -169,6 +170,7 @@ void EditorSceneStateManager::ExpandMeshAssetIntoScene(
   if (SceneData.Instances.size() == 1) {
     const auto &First = SceneData.Instances.front();
     m_Session.m_State.Scene.MeshInstances.push_back(EditorSceneMeshInstance{
+        .ObjectHandle = m_Session.ResolveObjectHandle(RootObjectId),
         .ObjectId = std::string(RootObjectId),
         .Mesh = First.Mesh,
         .Material = First.Material,
@@ -203,6 +205,7 @@ void EditorSceneStateManager::ExpandMeshAssetIntoScene(
         DecomposeMatrix(SourceInstance.Transform);
 
     m_Session.m_State.Scene.ObjectDetailsById[ChildId] = EditorObjectDetails{
+        .Handle = m_Session.EnsureHandleForObjectId(ChildId),
         .ObjectId = ChildId,
         .DisplayName = ChildDisplayName,
         .Kind = EditorSceneItemKind::Mesh,
@@ -235,6 +238,7 @@ void EditorSceneStateManager::ExpandMeshAssetIntoScene(
     }
 
     m_Session.m_State.Scene.MeshInstances.push_back(EditorSceneMeshInstance{
+        .ObjectHandle = m_Session.ResolveObjectHandle(ChildId),
         .ObjectId = ChildId,
         .Mesh = SourceInstance.Mesh,
         .Material = SourceInstance.Material,
@@ -243,23 +247,34 @@ void EditorSceneStateManager::ExpandMeshAssetIntoScene(
     });
   }
 
+  m_Session.RebuildSceneHandleState();
   SyncItemsFromTree();
 }
 
 void EditorSceneStateManager::ClearSelectionsForObject(std::string_view ObjectId) {
-  for (auto It = m_Session.m_State.SelectedObjectIds.begin();
-       It != m_Session.m_State.SelectedObjectIds.end();) {
-    It = (It->second == ObjectId) ? m_Session.m_State.SelectedObjectIds.erase(It)
-                                  : std::next(It);
+  const SceneObjectHandle Handle = m_Session.ResolveObjectHandle(ObjectId);
+  for (auto It = m_Session.m_SelectedObjectHandles.begin();
+       It != m_Session.m_SelectedObjectHandles.end();) {
+    if (It->second == Handle) {
+      m_Session.m_State.SelectedObjectIds.erase(It->first);
+      It = m_Session.m_SelectedObjectHandles.erase(It);
+    } else {
+      ++It;
+    }
   }
 }
 
 void EditorSceneStateManager::PruneInvalidSelections() {
-  for (auto It = m_Session.m_State.SelectedObjectIds.begin();
-       It != m_Session.m_State.SelectedObjectIds.end();) {
-    if (FindSceneItem(It->second) == nullptr) {
-      It = m_Session.m_State.SelectedObjectIds.erase(It);
+  for (auto It = m_Session.m_SelectedObjectHandles.begin();
+       It != m_Session.m_SelectedObjectHandles.end();) {
+    if (m_Session.FindSceneItem(It->second) == nullptr) {
+      m_Session.m_State.SelectedObjectIds.erase(It->first);
+      It = m_Session.m_SelectedObjectHandles.erase(It);
     } else {
+      if (const std::string *ObjectId = m_Session.ResolveObjectId(It->second);
+          ObjectId != nullptr) {
+        m_Session.m_State.SelectedObjectIds[It->first] = *ObjectId;
+      }
       ++It;
     }
   }

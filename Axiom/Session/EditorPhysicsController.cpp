@@ -93,6 +93,7 @@ RuntimeSceneState BuildRuntimeSceneState(const EditorSceneState &Scene) {
     }
 
     RuntimeScene.Bodies.push_back({
+        .ObjectHandle = Details.Handle,
         .ObjectId = ObjectId,
         .WorldTransform = WorldTransform,
         .BodyType = Physics.BodyType,
@@ -136,7 +137,8 @@ void EditorPhysicsController::StepRuntimePhysics(float DeltaTimeSeconds) {
 
   for (const PhysicsTransformUpdate &Update : m_PhysicsWorld->Step(DeltaTimeSeconds)) {
     const EditorObjectDetails *Existing =
-        m_Session.FindObjectDetails(Update.ObjectId);
+        Update.ObjectHandle ? m_Session.FindObjectDetails(Update.ObjectHandle)
+                            : m_Session.FindObjectDetails(Update.ObjectId);
     if (Existing == nullptr) {
       continue;
     }
@@ -148,7 +150,7 @@ void EditorPhysicsController::StepRuntimePhysics(float DeltaTimeSeconds) {
       Applied.Scale = Existing->Transform->Scale;
     }
     m_Session.m_SceneStateManager->ApplyWorldTransform(
-        Update.ObjectId, Applied, SessionUserId{1}, true);
+        Existing->ObjectId, Applied, SessionUserId{1}, true);
   }
 }
 } // namespace Axiom

@@ -156,6 +156,7 @@ JoltRuntime &GetJoltRuntime() {
 struct PhysicsWorld::Impl {
 #if AXIOM_ENABLE_PHYSICS
   struct BodyRecord {
+    SceneObjectHandle ObjectHandle{};
     std::string ObjectId;
     EditorPhysicsBodyType BodyType{EditorPhysicsBodyType::None};
     JPH::BodyID BodyId;
@@ -169,7 +170,8 @@ struct PhysicsWorld::Impl {
   std::unique_ptr<JPH::JobSystemSingleThreaded> JobSystem;
   std::unique_ptr<JPH::PhysicsSystem> System;
   std::vector<BodyRecord> Bodies;
-  std::unordered_map<std::string, size_t> BodyIndexByObjectId;
+  std::unordered_map<SceneObjectHandle, size_t, SceneObjectHandleHash>
+      BodyIndexByHandle;
   bool Running{false};
 
   Impl() {
@@ -201,7 +203,7 @@ struct PhysicsWorld::Impl {
   void Reset() {
     if (System == nullptr) {
       Bodies.clear();
-      BodyIndexByObjectId.clear();
+      BodyIndexByHandle.clear();
       Running = false;
       return;
     }
@@ -214,7 +216,7 @@ struct PhysicsWorld::Impl {
       }
     }
     Bodies.clear();
-    BodyIndexByObjectId.clear();
+    BodyIndexByHandle.clear();
     Running = false;
   }
 #endif
@@ -304,10 +306,11 @@ void PhysicsWorld::Start(const RuntimeSceneState &Scene) {
 
     const size_t Index = m_Impl->Bodies.size();
     m_Impl->Bodies.push_back({.ObjectId = Body.ObjectId,
+                              .ObjectHandle = Body.ObjectHandle,
                               .BodyType = Body.BodyType,
                               .BodyId = BodyId,
                               .Scale = Body.WorldTransform.Scale});
-    m_Impl->BodyIndexByObjectId.emplace(Body.ObjectId, Index);
+    m_Impl->BodyIndexByHandle.emplace(Body.ObjectHandle, Index);
   }
 
   m_Impl->Running = true;
@@ -341,6 +344,7 @@ std::vector<PhysicsTransformUpdate> PhysicsWorld::Step(float DeltaTimeSeconds) {
     }
 
     Updates.push_back({
+        .ObjectHandle = Body.ObjectHandle,
         .ObjectId = Body.ObjectId,
         .WorldTransform =
             EditorTransformDetails{

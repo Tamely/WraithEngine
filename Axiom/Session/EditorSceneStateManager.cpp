@@ -172,6 +172,7 @@ EditorSceneStateManager::EditorSceneStateManager(EditorSession &Session)
 
 void EditorSceneStateManager::SetSceneState(EditorSceneState SceneState) {
   m_Session.m_State.Scene = std::move(SceneState);
+  m_Session.RebuildSceneHandleState();
   RefreshWorldSettingsHDR("SetSceneState");
   for (const auto &MeshInst : m_Session.m_State.Scene.MeshInstances) {
     auto DetailsIt =
@@ -192,6 +193,7 @@ void EditorSceneStateManager::SetSceneState(EditorSceneState SceneState) {
 
 void EditorSceneStateManager::SetSceneItems(std::vector<EditorSceneItem> SceneItems) {
   m_Session.m_State.Scene.Items = std::move(SceneItems);
+  m_Session.RebuildSceneHandleState();
   RebuildInstanceTree(m_Session.m_State.Scene.Items, m_Session.m_SceneRoot.get());
   PruneInvalidSelections();
   RecomputeAllWorldTransforms();
@@ -201,6 +203,7 @@ void EditorSceneStateManager::SetObjectDetails(
     std::vector<EditorObjectDetails> ObjectDetails) {
   m_Session.m_State.Scene.ObjectDetailsById =
       BuildObjectDetailsMap(std::move(ObjectDetails));
+  m_Session.RebuildSceneHandleState();
   RecomputeAllWorldTransforms();
 }
 
@@ -269,6 +272,7 @@ Instance *EditorSceneStateManager::EnsureWorldFolder() {
     }
     m_Session.m_State.Scene.ObjectDetailsById.emplace(
         "world", EditorObjectDetails{
+                     .Handle = m_Session.EnsureHandleForObjectId("world"),
                      .ObjectId = "world",
                      .DisplayName = "World",
                      .Kind = EditorSceneItemKind::Folder,
@@ -318,6 +322,7 @@ void EditorSceneStateManager::SyncItemsFromTree() {
 
 EditorSceneItem EditorSceneStateManager::BuildItemFromInstance(const Instance *Node) const {
   EditorSceneItem Item;
+  Item.Handle = m_Session.ResolveObjectHandle(Node->GetName());
   Item.Id = Node->GetName();
   Item.Kind = KindForInstance(Node);
   Item.Visible = true;
@@ -395,6 +400,7 @@ void EditorSceneStateManager::DeepCloneSubtree(
   }
 
   NewDetails.ObjectId = NewId;
+  NewDetails.Handle = m_Session.EnsureHandleForObjectId(NewId);
   NewDetails.DisplayName = BuildUniqueDisplayName(BaseDisplayName);
   m_Session.m_State.Scene.ObjectDetailsById.emplace(NewId, NewDetails);
   OutNewDetails.push_back(NewDetails);
@@ -465,6 +471,7 @@ void EditorSceneStateManager::RemoveSceneObject(std::string_view ObjectId) {
   const std::string Id(ObjectId);
   m_Session.m_State.Scene.ObjectDetailsById.erase(Id);
   m_Session.m_State.Scene.CollaborationByObjectId.erase(Id);
+  m_Session.m_CollaborationByHandle.erase(m_Session.ResolveObjectHandle(Id));
   m_Session.m_State.Scene.MeshInstances.erase(
       std::remove_if(m_Session.m_State.Scene.MeshInstances.begin(),
                      m_Session.m_State.Scene.MeshInstances.end(),
@@ -521,6 +528,7 @@ EditorSceneStateManager::DecomposeMatrix(const glm::mat4 &Matrix) const {
 
 void EditorSceneStateManager::RecomputeSubtreeWorldTransforms(const Instance *Node) {
   if (!Node) return;
+  const SceneObjectHandle Handle = m_Session.ResolveObjectHandle(Node->GetName());
   const std::string &Id = Node->GetName();
   auto DetailsIt = m_Session.m_State.Scene.ObjectDetailsById.find(Id);
   if (DetailsIt != m_Session.m_State.Scene.ObjectDetailsById.end() &&
@@ -528,7 +536,7 @@ void EditorSceneStateManager::RecomputeSubtreeWorldTransforms(const Instance *No
     const glm::mat4 WorldMatrix = ComputeWorldTransformMatrix(Node);
     DetailsIt->second.WorldTransform = DecomposeMatrix(WorldMatrix);
     for (EditorSceneMeshInstance &Instance : m_Session.m_State.Scene.MeshInstances) {
-      if (Instance.ObjectId == Id) {
+      if (Instance.ObjectHandle == Handle) {
         Instance.Transform = WorldMatrix;
         break;
       }
@@ -553,6 +561,7 @@ void EditorSceneStateManager::ApplyWorldTransform(
   auto DetailsIt =
       m_Session.m_State.Scene.ObjectDetailsById.find(std::string(ObjectId));
   if (DetailsIt == m_Session.m_State.Scene.ObjectDetailsById.end()) return;
+  const SceneObjectHandle Handle = m_Session.ResolveObjectHandle(ObjectId);
 
   const glm::mat4 WorldMatrix = BuildTransformMatrix(WorldTransform);
   EditorTransformDetails LocalTransform = WorldTransform;
@@ -565,7 +574,7 @@ void EditorSceneStateManager::ApplyWorldTransform(
   DetailsIt->second.Transform = LocalTransform;
   DetailsIt->second.WorldTransform = WorldTransform;
   for (EditorSceneMeshInstance &Instance : m_Session.m_State.Scene.MeshInstances) {
-    if (Instance.ObjectId == ObjectId) {
+    if (Instance.ObjectHandle == Handle) {
       Instance.Transform = WorldMatrix;
       break;
     }
