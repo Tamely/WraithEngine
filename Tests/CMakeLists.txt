@@ -1,5 +1,6 @@
 add_executable(AxiomTests
   CookedAssetTests.cpp
+  HeadlessScalabilityTests.cpp
   LayerTests.cpp
   HeadlessProtocolTests.cpp
   MeshPickingTests.cpp
@@ -16,7 +17,7 @@ add_executable(AxiomTests
   ../Headless/WebRtcSession.cpp
 )
 
-if(APPLE)
+if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/Headless/MacOSWebRtcSession.mm")
   target_sources(AxiomTests PRIVATE
     ../Headless/MacOSWebRtcSession.mm
   )

@@ -1,6 +1,7 @@
 #include "Renderer/Vulkan/VulkanDrawSubmissionSystem.h"
 
 #include "Assets/SvgTexture.h"
+#include "Core/HeadlessRuntimeInstrumentation.h"
 #include "Core/Log.h"
 #include "Renderer/Camera.h"
 #include "Renderer/RenderSurface.h"
@@ -612,6 +613,9 @@ void VulkanDrawSubmissionSystem::PublishCompletedOffscreenFrames(
     ConvertCapturedFrameToRgba8(CaptureFrame.ReadbackBuffer,
                                 CaptureFrame.SubmittedFrameNumber, DrawExtent);
     CaptureFrame.HasPendingReadback = false;
+    HeadlessRuntimeInstrumentation::RecordOffscreenReadbackCompleted(
+        CaptureFrame.SubmittedFrameNumber, CaptureFrame.SubmittedUser,
+        CountPendingOffscreenReadbacks());
     if (FrameOutput == nullptr || !m_CapturedFrame.has_value()) {
       continue;
     }
@@ -628,6 +632,9 @@ void VulkanDrawSubmissionSystem::PublishCompletedOffscreenFrames(
         .User = CaptureFrame.SubmittedUser,
     });
   }
+
+  HeadlessRuntimeInstrumentation::RecordPendingOffscreenReadbacks(
+      CountPendingOffscreenReadbacks());
 }
 
 void VulkanDrawSubmissionSystem::DrawFrame(const FrameRequest &Request) {
@@ -641,6 +648,8 @@ void VulkanDrawSubmissionSystem::DrawFrame(const FrameRequest &Request) {
   CollectFrameStats(MeshFrame);
   m_CapturedFrame.reset();
   if (!m_HasPresentationSurface) {
+    HeadlessRuntimeInstrumentation::RecordPendingOffscreenReadbacks(
+        CountPendingOffscreenReadbacks());
     PublishCompletedOffscreenFrames(Request.FrameOutput);
   }
 
@@ -779,10 +788,23 @@ void VulkanDrawSubmissionSystem::DrawFrame(const FrameRequest &Request) {
     CaptureFrame.HasPendingReadback = true;
     CaptureFrame.SubmittedFrameNumber = Request.FrameNumber;
     CaptureFrame.SubmittedUser = Request.ViewportFrameUser;
+    HeadlessRuntimeInstrumentation::RecordOffscreenReadbackSubmitted(
+        Request.FrameNumber, Request.ViewportFrameUser,
+        CountPendingOffscreenReadbacks());
     VK_CHECK(vkWaitForFences(m_Device->Device, 1, &CurrentFrame.RenderFence,
                              VK_TRUE, 1000000000));
     PublishCompletedOffscreenFrames(Request.FrameOutput);
   }
+}
+
+size_t VulkanDrawSubmissionSystem::CountPendingOffscreenReadbacks() const {
+  size_t PendingReadbacks = 0;
+  for (const auto &CaptureFrame : m_Resources->GetOffscreenCaptureFrames()) {
+    if (CaptureFrame.HasPendingReadback) {
+      ++PendingReadbacks;
+    }
+  }
+  return PendingReadbacks;
 }
 
 std::optional<CapturedFrame> VulkanDrawSubmissionSystem::ConsumeCapturedFrame() {

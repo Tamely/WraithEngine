@@ -1,5 +1,7 @@
 #include "HeadlessSessionHost.h"
 
+#include <Core/HeadlessRuntimeInstrumentation.h>
+
 #include <algorithm>
 
 namespace Axiom {
@@ -41,6 +43,28 @@ HeadlessSessionHost::HeadlessSessionHost(const ApplicationArgs &Args,
 }
 
 bool HeadlessSessionHost::Step() { return Application::Step(); }
+
+std::vector<HeadlessRenderViewState>
+HeadlessSessionHost::BuildScheduledRenderPassViews(
+    const HeadlessRenderViewRegistry &RenderViews, SessionUserId LocalUserId) {
+  std::vector<HeadlessRenderViewState> RenderPassViews =
+      RenderViews.BuildRemoteViewSnapshot();
+  std::sort(RenderPassViews.begin(), RenderPassViews.end(),
+            [](const HeadlessRenderViewState &Left,
+               const HeadlessRenderViewState &Right) {
+              return Left.User.Value < Right.User.Value;
+            });
+
+  if (RenderPassViews.empty()) {
+    if (const HeadlessRenderViewState *LocalView =
+            RenderViews.FindView(LocalUserId);
+        LocalView != nullptr) {
+      RenderPassViews.push_back(*LocalView);
+    }
+  }
+
+  return RenderPassViews;
+}
 
 void HeadlessSessionHost::LoadUserScripts(
     const std::filesystem::path &AssemblyPath) {
@@ -135,26 +159,21 @@ size_t HeadlessSessionHost::BeginRenderPasses() {
   m_ActiveRenderPassViews.clear();
   m_CurrentRenderPassIndex = 0;
 
-  m_ActiveRenderPassViews = m_RenderViews.BuildRemoteViewSnapshot();
-  std::sort(m_ActiveRenderPassViews.begin(), m_ActiveRenderPassViews.end(),
-            [](const HeadlessRenderViewState &Left,
-               const HeadlessRenderViewState &Right) {
-              return Left.User.Value < Right.User.Value;
-            });
-
-  if (m_ActiveRenderPassViews.empty()) {
-    if (const HeadlessRenderViewState *LocalView = m_RenderViews.FindView(
-            m_Layer->GetLocalUserId());
-        LocalView != nullptr) {
-      m_ActiveRenderPassViews.push_back(*LocalView);
-    }
-  }
-
+  m_ActiveRenderPassViews =
+      BuildScheduledRenderPassViews(m_RenderViews, m_Layer->GetLocalUserId());
+  HeadlessRuntimeInstrumentation::RecordHeadlessTick(
+      GetFrameIndex(), m_ActiveRenderPassViews.size(),
+      m_RenderViews.GetRemoteViewCount());
   return m_ActiveRenderPassViews.size();
 }
 
 void HeadlessSessionHost::PrepareRenderPass(size_t PassIndex) {
   m_CurrentRenderPassIndex = PassIndex;
+  if (PassIndex < m_ActiveRenderPassViews.size()) {
+    const auto &View = m_ActiveRenderPassViews[PassIndex];
+    HeadlessRuntimeInstrumentation::RecordHeadlessRenderPass(
+        GetFrameIndex(), PassIndex, View.ClientId, View.User, View.IsLocal);
+  }
 }
 
 bool HeadlessSessionHost::ShouldRenderImGuiForPass(size_t PassIndex,

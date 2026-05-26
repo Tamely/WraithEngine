@@ -16,6 +16,7 @@ set(ENGINE_SOURCES
   Core/Application.cpp
   Core/ApplicationModules.cpp
   Core/GlfwEditorInputSource.cpp
+  Core/HeadlessRuntimeInstrumentation.cpp
   Core/GlfwWindow.cpp
   Core/HeadlessWindow.cpp
   Core/ModuleManager.cpp

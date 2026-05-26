@@ -19,6 +19,9 @@ public:
   HeadlessSessionHost(const ApplicationArgs &Args, uint32_t Width,
                       uint32_t Height);
   bool Step();
+  static std::vector<HeadlessRenderViewState>
+  BuildScheduledRenderPassViews(const HeadlessRenderViewRegistry &RenderViews,
+                                SessionUserId LocalUserId);
 
   bool LoadStartupSceneIntoSession();
   bool LoadStartupSceneIntoSession(const std::filesystem::path &ContentDir);

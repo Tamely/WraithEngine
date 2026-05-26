@@ -81,6 +81,7 @@ private:
                               const AllocatedBuffer &ReadbackBuffer,
                               VkExtent2D DrawExtent);
   void PublishCompletedOffscreenFrames(IViewportFrameOutput *FrameOutput);
+  size_t CountPendingOffscreenReadbacks() const;
   static float HalfToFloat(uint16_t Value);
   static uint8_t LinearToByte(float Value);
   void ConvertCapturedFrameToRgba8(const AllocatedBuffer &ReadbackBuffer,
