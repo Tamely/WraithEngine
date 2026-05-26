@@ -6,6 +6,7 @@
 #include <Renderer/RenderSurface.h>
 
 #include <algorithm>
+#include <chrono>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -35,7 +36,7 @@ public:
     return CursorMode;
   }
   [[nodiscard]] bool ShouldClose() const override { return Closed; }
-  [[nodiscard]] bool IsMinimized() const override { return false; }
+  [[nodiscard]] bool IsMinimized() const override { return Minimized; }
   void RequestClose() override { Closed = true; }
   [[nodiscard]] void *GetNativeHandle() const override { return nullptr; }
   [[nodiscard]] bool SupportsVulkanPresentation() const override {
@@ -52,6 +53,7 @@ public:
 
   size_t PollCount{0};
   bool Closed{false};
+  bool Minimized{false};
   Axiom::CursorMode CursorMode{Axiom::CursorMode::Normal};
 };
 
@@ -92,12 +94,13 @@ private:
 
 class ModuleTestApplication final : public Axiom::Application {
 public:
-  ModuleTestApplication()
+  explicit ModuleTestApplication(
+      Axiom::RuntimeMode Mode = Axiom::RuntimeMode::HeadlessEditorSession)
       : Application(
             {.Title = "Module Test App",
              .Width = 320,
              .Height = 200,
-             .Mode = Axiom::RuntimeMode::HeadlessEditorSession},
+             .Mode = Mode},
             {.Arguments = nullptr, .ArgumentCount = 0},
             {.Window = std::make_unique<FakeWindow>(),
              .RenderSurface =
@@ -211,5 +214,25 @@ TEST(ModuleManagerTests, ApplicationStepRunsThroughActiveModulesOnly) {
 
   App.RequestTestClose();
   EXPECT_FALSE(App.Step());
+}
+
+TEST(ModuleManagerTests, ApplicationStepSleepsOnlyForMinimizedWindowedMode) {
+  ModuleTestApplication WindowedApp(Axiom::RuntimeMode::LocalWindowedEditor);
+  WindowedApp.GetFakeWindow().Minimized = true;
+
+  const auto WindowedStart = std::chrono::steady_clock::now();
+  EXPECT_TRUE(WindowedApp.Step());
+  const auto WindowedElapsed =
+      std::chrono::steady_clock::now() - WindowedStart;
+  EXPECT_GE(WindowedElapsed, std::chrono::milliseconds(10));
+
+  ModuleTestApplication HeadlessApp;
+  HeadlessApp.GetFakeWindow().Minimized = true;
+
+  const auto HeadlessStart = std::chrono::steady_clock::now();
+  EXPECT_TRUE(HeadlessApp.Step());
+  const auto HeadlessElapsed =
+      std::chrono::steady_clock::now() - HeadlessStart;
+  EXPECT_LT(HeadlessElapsed, std::chrono::milliseconds(10));
 }
 } // namespace

@@ -6,10 +6,15 @@
 #include "Core/Log.h"
 
 #include <algorithm>
+#include <chrono>
 #include <memory>
+#include <thread>
 #include <utility>
 
 namespace Axiom {
+namespace {
+constexpr auto kMinimizedFrameDelay = std::chrono::milliseconds(16);
+}
 
 Application *Application::s_Instance = nullptr;
 
@@ -136,6 +141,11 @@ bool Application::ShouldRenderImGuiForPass(size_t PassIndex,
 bool Application::Step() {
   if (m_Window->ShouldClose()) {
     return false;
+  }
+
+  if (m_Config.Mode != RuntimeMode::HeadlessEditorSession &&
+      m_Window->IsMinimized()) {
+    std::this_thread::sleep_for(kMinimizedFrameDelay);
   }
 
   const auto Now = std::chrono::steady_clock::now();

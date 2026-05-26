@@ -4,9 +4,6 @@
 #include "Renderer/Vulkan/VulkanMesh.h"
 
 #include <cassert>
-#include <chrono>
-#include <thread>
-
 #include "Core/Log.h"
 
 Axiom::VulkanRendererBackend *g_LoadedEngine = nullptr;
@@ -132,7 +129,6 @@ void VulkanRendererBackend::BeginFrame() {
   m_RenderFallbackBackground = false;
   m_ActiveScene = nullptr;
   if (m_StopRendering) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     return;
   }
 
