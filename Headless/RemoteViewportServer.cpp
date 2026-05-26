@@ -750,9 +750,9 @@ public:
       }
     }
 
-    m_Server.m_Host.GetHeadlessLayer().GetSession().EnsureViewportState(
+    m_Server.m_Host.GetSessionModule().GetSession().EnsureViewportState(
         ResolvedSession->User);
-    m_Server.m_Host.GetHeadlessLayer().GetSession().SetPresenceState(
+    m_Server.m_Host.GetSessionModule().GetSession().SetPresenceState(
         ResolvedSession->User, EditorUserPresenceState::Connected);
     m_Server.m_Host.EnsureRemoteRenderView(ResolvedSession->ClientId,
                                            ResolvedSession->User);
@@ -1322,7 +1322,7 @@ void RemoteViewportServer::PresenceLoop() {
                                Now - LastActivity)
                                .count();
         const EditorUserPresence *Presence =
-            m_Host.GetHeadlessLayer().GetSession().FindPresence(User);
+            m_Host.GetSessionModule().GetSession().FindPresence(User);
         if (Presence == nullptr) {
           continue;
         }
@@ -1336,9 +1336,9 @@ void RemoteViewportServer::PresenceLoop() {
     }
 
     for (const auto &[User, State] : Transitions) {
-      m_Host.GetHeadlessLayer().GetSession().SetPresenceState(User, State);
+      m_Host.GetSessionModule().GetSession().SetPresenceState(User, State);
       if (State == EditorUserPresenceState::Disconnected) {
-        m_Host.GetHeadlessLayer().GetSession().ReleaseAllLocksForUser(User);
+        m_Host.GetSessionModule().GetSession().ReleaseAllLocksForUser(User);
       }
     }
   }
@@ -2065,7 +2065,7 @@ bool RemoteViewportServer::HandleSessionConnectRequest(
         return true;
       }();
   const std::string Payload = SerializeSessionConnectResponse(
-      Client.ClientId, m_Host.GetHeadlessLayer().GetSession().GetState(),
+      Client.ClientId, m_Host.GetSessionModule().GetSession().GetState(),
       Client.User, ShowColliders, m_TransportConnected.load(),
       m_TransportConnected.load() ? "connected" : "disconnected",
       Status.ConnectionState);
@@ -2170,7 +2170,7 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
           return true;
         }();
     const std::string Body = SerializeSessionSnapshot(
-        m_Host.GetHeadlessLayer().GetSession().GetState(), *User,
+        m_Host.GetSessionModule().GetSession().GetState(), *User,
         ShowColliders,
         m_TransportConnected.load(),
         m_TransportConnected.load() ? "connected" : "disconnected",
@@ -2409,7 +2409,7 @@ bool RemoteViewportServer::HandleWebRtcCloseRequest(
       DisconnectedUser = Client->User;
     }
     if (DisconnectedUser.has_value()) {
-      EditorSession &DisconnectSession = m_Host.GetHeadlessLayer().GetSession();
+      EditorSession &DisconnectSession = m_Host.GetSessionModule().GetSession();
       DisconnectSession.ReleaseAllLocksForUser(*DisconnectedUser);
       DisconnectSession.SetPresenceState(*DisconnectedUser,
                                          EditorUserPresenceState::Disconnected);
@@ -2697,7 +2697,7 @@ void RemoteViewportServer::HandleTextureDropCommand(
     return;
   }
 
-  const EditorSession &Session = m_Host.GetHeadlessLayer().GetSession();
+  const EditorSession &Session = m_Host.GetSessionModule().GetSession();
   const EditorViewportState *Viewport = Session.FindViewport(User);
   if (Viewport == nullptr) {
     return;
@@ -2722,7 +2722,7 @@ void RemoteViewportServer::HandleMeshDropCommand(SessionUserId User,
     return;
   }
 
-  const EditorSession &Session = m_Host.GetHeadlessLayer().GetSession();
+  const EditorSession &Session = m_Host.GetSessionModule().GetSession();
   const EditorViewportState *Viewport = Session.FindViewport(User);
   if (Viewport == nullptr) {
     return;
@@ -2742,7 +2742,7 @@ void RemoteViewportServer::HandleMeshDropCommand(SessionUserId User,
 
 void RemoteViewportServer::HandlePlaceActorCommand(SessionUserId User,
                                                     const HeadlessCommand &Command) {
-  const EditorSession &Session = m_Host.GetHeadlessLayer().GetSession();
+  const EditorSession &Session = m_Host.GetSessionModule().GetSession();
   const EditorViewportState *Viewport = Session.FindViewport(User);
   if (Viewport == nullptr) {
     return;
@@ -2784,15 +2784,15 @@ bool RemoteViewportServer::BrowserCommandRouter::HandleWebSocketMessage(
     return true;
   case HeadlessCommandType::DropMesh:
     m_Server.HandleMeshDropCommand(
-        m_Server.m_Host.GetHeadlessLayer().GetLocalUserId(), *Command);
+        m_Server.m_Host.GetSessionModule().GetLocalUserId(), *Command);
     return true;
   case HeadlessCommandType::DropTexture:
     m_Server.HandleTextureDropCommand(
-        m_Server.m_Host.GetHeadlessLayer().GetLocalUserId(), *Command);
+        m_Server.m_Host.GetSessionModule().GetLocalUserId(), *Command);
     return true;
   case HeadlessCommandType::PlaceActor:
     m_Server.HandlePlaceActorCommand(
-        m_Server.m_Host.GetHeadlessLayer().GetLocalUserId(), *Command);
+        m_Server.m_Host.GetSessionModule().GetLocalUserId(), *Command);
     return true;
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
@@ -2832,7 +2832,7 @@ bool RemoteViewportServer::BrowserCommandRouter::HandleWebSocketMessage(
         SerializeAssetList(m_Assets.CollectVisibleAssets()));
     return true;
   case HeadlessCommandType::GetSchema: {
-    const auto &DetailsById = m_Server.m_Host.GetHeadlessLayer()
+    const auto &DetailsById = m_Server.m_Host.GetSessionModule()
                                   .GetSession()
                                   .GetState()
                                   .Scene.ObjectDetailsById;
@@ -2848,7 +2848,7 @@ bool RemoteViewportServer::BrowserCommandRouter::HandleWebSocketMessage(
     const Assets::LocalAssetSource ContentDir{m_Workspace.GetActiveContentDir()};
     const auto ScenePath = ContentDir.ResolveRelative("scene.json");
     const bool Ok = Assets::SaveSceneToFile(
-        ScenePath, m_Server.m_Host.GetHeadlessLayer().GetSession().GetState().Scene);
+        ScenePath, m_Server.m_Host.GetSessionModule().GetSession().GetState().Scene);
     m_Server.SendTextMessage(ClientSocketValue, SerializeSaveResult(Ok));
     return true;
   }
@@ -2934,9 +2934,9 @@ bool RemoteViewportServer::BrowserCommandRouter::HandleClientWebRtcMessage(
   }
   case HeadlessCommandType::Heartbeat: {
     const EditorUserPresence *Presence =
-        m_Server.m_Host.GetHeadlessLayer().GetSession().FindPresence(Client->User);
+        m_Server.m_Host.GetSessionModule().GetSession().FindPresence(Client->User);
     if (Presence != nullptr && Presence->State == EditorUserPresenceState::Away) {
-      m_Server.m_Host.GetHeadlessLayer().GetSession().SetPresenceState(
+      m_Server.m_Host.GetSessionModule().GetSession().SetPresenceState(
           Client->User, EditorUserPresenceState::Connected);
     }
     return true;
@@ -2950,7 +2950,7 @@ bool RemoteViewportServer::BrowserCommandRouter::HandleClientWebRtcMessage(
   }
   case HeadlessCommandType::GetSchema: {
     const auto &DetailsById =
-        m_Server.m_Host.GetHeadlessLayer().GetSession().GetState().Scene.ObjectDetailsById;
+        m_Server.m_Host.GetSessionModule().GetSession().GetState().Scene.ObjectDetailsById;
     const auto It = DetailsById.find(Command->ObjectId);
     if (It != DetailsById.end() && Client->WebRtcSession != nullptr) {
       Client->WebRtcSession->SendReliableMessage(
@@ -2963,7 +2963,7 @@ bool RemoteViewportServer::BrowserCommandRouter::HandleClientWebRtcMessage(
     const auto ScenePath = ContentDir.ResolveRelative("scene.json");
     const bool Ok = Assets::SaveSceneToFile(
         ScenePath,
-        m_Server.m_Host.GetHeadlessLayer().GetSession().GetState().Scene);
+        m_Server.m_Host.GetSessionModule().GetSession().GetState().Scene);
     if (Client->WebRtcSession != nullptr) {
       Client->WebRtcSession->SendReliableMessage(SerializeSaveResult(Ok));
     }
@@ -3010,7 +3010,7 @@ bool RemoteViewportServer::BrowserCommandRouter::HandleClientWebRtcMessage(
                Name == "physicsMass" || Name == "physicsFriction" ||
                Name == "physicsRestitution") {
       const auto &DetailsById =
-          m_Server.m_Host.GetHeadlessLayer().GetSession().GetState().Scene.ObjectDetailsById;
+          m_Server.m_Host.GetSessionModule().GetSession().GetState().Scene.ObjectDetailsById;
       const auto It = DetailsById.find(ObjId);
       if (It == DetailsById.end() || !It->second.SupportsTransform) {
         return false;
@@ -3088,7 +3088,7 @@ bool RemoteViewportServer::BrowserCommandRouter::HandleClientWebRtcMessage(
     } else if (Name == "location" || Name == "rotationDegrees" || Name == "scale") {
       if (const auto *V = std::get_if<glm::vec3>(&Val)) {
         const auto &DetailsById =
-            m_Server.m_Host.GetHeadlessLayer().GetSession().GetState().Scene.ObjectDetailsById;
+            m_Server.m_Host.GetSessionModule().GetSession().GetState().Scene.ObjectDetailsById;
         const auto It = DetailsById.find(ObjId);
         if (It == DetailsById.end() || !It->second.Transform.has_value()) {
           return false;
@@ -3111,7 +3111,7 @@ bool RemoteViewportServer::BrowserCommandRouter::HandleClientWebRtcMessage(
   }
   case HeadlessCommandType::SetGizmoMode:
     Client->CurrentGizmoMode = Command->Mode;
-    m_Server.m_Host.GetHeadlessLayer().SetGizmoMode(Client->User, Command->Mode);
+    m_Server.m_Host.GetSessionModule().SetGizmoMode(Client->User, Command->Mode);
     return true;
   case HeadlessCommandType::SetGridSnap: {
     Client->GridSnap.Enabled = Command->Enabled;
@@ -3123,15 +3123,15 @@ bool RemoteViewportServer::BrowserCommandRouter::HandleClientWebRtcMessage(
     return true;
   }
   case HeadlessCommandType::GizmoHover: {
-    if (m_Server.m_Host.GetHeadlessLayer().GetSession().GetRuntimeState() !=
+    if (m_Server.m_Host.GetSessionModule().GetSession().GetRuntimeState() !=
         EditorRuntimeState::Edit) {
-      m_Server.m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
+      m_Server.m_Host.GetSessionModule().SetGizmoHoveredAxis(Client->User, -1);
       return true;
     }
     if (Client->GizmoDrag.has_value()) {
       return true;
     }
-    const EditorSession &Session = m_Server.m_Host.GetHeadlessLayer().GetSession();
+    const EditorSession &Session = m_Server.m_Host.GetSessionModule().GetSession();
     const EditorViewportState *Viewport =
         Session.FindViewport(Client->User);
     const EditorObjectDetails *Selected =
@@ -3152,21 +3152,21 @@ bool RemoteViewportServer::BrowserCommandRouter::HandleClientWebRtcMessage(
               : HitTestGizmoAxes(Viewport->Camera, m_Server.m_Options.Width,
                                  m_Server.m_Options.Height, Command->MousePosition,
                                  HoverTD->Location, GizmoScale);
-          m_Server.m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, Axis);
+          m_Server.m_Host.GetSessionModule().SetGizmoHoveredAxis(Client->User, Axis);
     } else {
-      m_Server.m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
+      m_Server.m_Host.GetSessionModule().SetGizmoHoveredAxis(Client->User, -1);
     }
     return true;
   }
   case HeadlessCommandType::GizmoDragStart: {
-    if (m_Server.m_Host.GetHeadlessLayer().GetSession().GetRuntimeState() !=
+    if (m_Server.m_Host.GetSessionModule().GetSession().GetRuntimeState() !=
         EditorRuntimeState::Edit) {
       return true;
     }
     if (Client->GizmoDrag.has_value()) {
       return true;
     }
-    EditorSession &Session = m_Server.m_Host.GetHeadlessLayer().GetSession();
+    EditorSession &Session = m_Server.m_Host.GetSessionModule().GetSession();
     const EditorViewportState *Viewport =
         Session.FindViewport(Client->User);
     if (Viewport == nullptr) {
@@ -3200,7 +3200,7 @@ bool RemoteViewportServer::BrowserCommandRouter::HandleClientWebRtcMessage(
               .GizmoScaleAtDragStart = GizmoScale,
           };
           Session.AcquireLock(Selected->ObjectId, Client->User);
-          m_Server.m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User,
+          m_Server.m_Host.GetSessionModule().SetGizmoHoveredAxis(Client->User,
                                                                  DragState->Axis);
           return true;
         }
@@ -3218,7 +3218,7 @@ bool RemoteViewportServer::BrowserCommandRouter::HandleClientWebRtcMessage(
               .GizmoScaleAtDragStart = GizmoScale,
           };
           Session.AcquireLock(Selected->ObjectId, Client->User);
-          m_Server.m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User,
+          m_Server.m_Host.GetSessionModule().SetGizmoHoveredAxis(Client->User,
                                                                  DragState->Axis);
           return true;
         }
@@ -3229,7 +3229,7 @@ bool RemoteViewportServer::BrowserCommandRouter::HandleClientWebRtcMessage(
     const auto Hit = ResolveViewportSelectionHit(
         Viewport->Camera, m_Server.m_Options.Width, m_Server.m_Options.Height,
         Command->MousePosition, Session.GetState().Scene.MeshInstances,
-        m_Server.m_Host.GetHeadlessLayer().BuildLightBillboards());
+        m_Server.m_Host.GetSessionModule().BuildLightBillboards());
     if (Hit.has_value() && !Hit->ObjectId.empty()) {
       // Multi-instance mesh assets expand into read-only generated children
       // (one per sub-mesh) that share the parent's transform. Picking one of
@@ -3252,21 +3252,21 @@ bool RemoteViewportServer::BrowserCommandRouter::HandleClientWebRtcMessage(
     return true;
   }
   case HeadlessCommandType::GizmoDragUpdate: {
-    if (m_Server.m_Host.GetHeadlessLayer().GetSession().GetRuntimeState() !=
+    if (m_Server.m_Host.GetSessionModule().GetSession().GetRuntimeState() !=
         EditorRuntimeState::Edit) {
       if (Client->GizmoDrag.has_value()) {
-        EditorSession &Session = m_Server.m_Host.GetHeadlessLayer().GetSession();
+        EditorSession &Session = m_Server.m_Host.GetSessionModule().GetSession();
         const std::string DragObjectId = Client->GizmoDrag->ObjectId;
         Client->GizmoDrag.reset();
         Session.ReleaseLock(DragObjectId, Client->User);
-        m_Server.m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
+        m_Server.m_Host.GetSessionModule().SetGizmoHoveredAxis(Client->User, -1);
       }
       return true;
     }
     if (!Client->GizmoDrag.has_value()) {
       return true;
     }
-    const EditorSession &Session = m_Server.m_Host.GetHeadlessLayer().GetSession();
+    const EditorSession &Session = m_Server.m_Host.GetSessionModule().GetSession();
     const EditorViewportState *Viewport =
         Session.FindViewport(Client->User);
     if (Viewport == nullptr) {
@@ -3314,7 +3314,7 @@ bool RemoteViewportServer::BrowserCommandRouter::HandleClientWebRtcMessage(
     if (!Client->GizmoDrag.has_value()) {
       return true;
     }
-    EditorSession &Session = m_Server.m_Host.GetHeadlessLayer().GetSession();
+    EditorSession &Session = m_Server.m_Host.GetSessionModule().GetSession();
     const EditorViewportState *Viewport =
         Session.FindViewport(Client->User);
     if (Viewport != nullptr) {
@@ -3360,7 +3360,7 @@ bool RemoteViewportServer::BrowserCommandRouter::HandleClientWebRtcMessage(
     const std::string DragObjectId = Client->GizmoDrag->ObjectId;
     Client->GizmoDrag.reset();
     Session.ReleaseLock(DragObjectId, Client->User);
-    m_Server.m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
+    m_Server.m_Host.GetSessionModule().SetGizmoHoveredAxis(Client->User, -1);
     return true;
   }
   case HeadlessCommandType::Quit:

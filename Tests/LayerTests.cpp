@@ -8,7 +8,7 @@
 #include <Renderer/RenderCommand.h>
 #include <Renderer/RenderScene.h>
 #include "../Headless/HeadlessRenderView.h"
-#include "../Headless/HeadlessSessionLayer.h"
+#include "../Headless/HeadlessSessionModule.h"
 #include "../Headless/HeadlessViewportFrameBridge.h"
 #include <Remote/AxiomSessionEndpoint.h>
 #include <Renderer/OffscreenRenderSurface.h>
@@ -1271,9 +1271,9 @@ TEST(RenderSceneTests, RenderCommandSubmitsLightBillboardOverlay) {
   EXPECT_FLOAT_EQ(Scene.LightBillboards.front().PixelSize, 40.0f);
 }
 
-TEST(HeadlessSessionLayerTests, BuildLightBillboardsUsesVisibleLightsOnly) {
-  Axiom::HeadlessSessionLayer Layer;
-  Layer.GetSession().SetObjectDetails({
+TEST(HeadlessSessionModuleTests, BuildLightBillboardsUsesVisibleLightsOnly) {
+  Axiom::HeadlessSessionModule Module;
+  Module.GetSession().SetObjectDetails({
       {
           .ObjectId = "light-a",
           .DisplayName = "Light A",
@@ -1322,7 +1322,7 @@ TEST(HeadlessSessionLayerTests, BuildLightBillboardsUsesVisibleLightsOnly) {
   });
 
   const std::vector<Axiom::LightBillboardOverlay> Billboards =
-      Layer.BuildLightBillboards();
+      Module.BuildLightBillboards();
 
   ASSERT_EQ(Billboards.size(), 2u);
   const auto WorldTransformBillboard = std::find_if(
@@ -1350,11 +1350,11 @@ TEST(HeadlessSessionLayerTests, BuildLightBillboardsUsesVisibleLightsOnly) {
             Billboards.end());
 }
 
-TEST(HeadlessSessionLayerTests, BuildColliderOverlaySubmissionsUsesPhysicsData) {
-  Axiom::HeadlessSessionLayer Layer;
-  Layer.SetColliderMeshesForTesting(std::make_shared<DummyMesh>(),
-                                    std::make_shared<DummyMesh>());
-  Layer.GetSession().SetObjectDetails({
+TEST(HeadlessSessionModuleTests, BuildColliderOverlaySubmissionsUsesPhysicsData) {
+  Axiom::HeadlessSessionModule Module;
+  Module.SetColliderMeshesForTesting(std::make_shared<DummyMesh>(),
+                                     std::make_shared<DummyMesh>());
+  Module.GetSession().SetObjectDetails({
       {
           .ObjectId = "static-box",
           .DisplayName = "Static Box",
@@ -1413,7 +1413,7 @@ TEST(HeadlessSessionLayerTests, BuildColliderOverlaySubmissionsUsesPhysicsData) 
   });
 
   const std::vector<Axiom::RenderMeshSubmission> Submissions =
-      Layer.BuildColliderOverlaySubmissions();
+      Module.BuildColliderOverlaySubmissions();
 
   ASSERT_EQ(Submissions.size(), 18u);
   const size_t TranslucentCount = static_cast<size_t>(std::count_if(

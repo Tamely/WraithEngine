@@ -20,8 +20,6 @@ set(ENGINE_SOURCES
   Core/GlfwWindow.cpp
   Core/HeadlessWindow.cpp
   Core/ModuleManager.cpp
-  Core/Layer.cpp
-  Core/LayerStack.cpp
   Core/Window.cpp
   Core/WindowInputPlatform.cpp
   Core/Log.cpp

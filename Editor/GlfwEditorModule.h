@@ -1,8 +1,6 @@
 #pragma once
 
-#include <Core/Layer.h>
-
-#include <memory>
+#include <Core/IModule.h>
 
 #include "EditorFeatureModules.h"
 
@@ -10,14 +8,14 @@
 #include <Session/EditorSession.h>
 
 namespace Axiom {
-class GlfwEditorLayer final : public Layer {
+class GlfwEditorModule final : public IModule {
 public:
-  GlfwEditorLayer();
+  GlfwEditorModule();
 
-  void OnAttach() override;
-  void OnDetach() override;
-  void OnUpdate() override;
-  void OnRender() override;
+  [[nodiscard]] std::string_view GetName() const override;
+  bool Initialize(Application &App) override;
+  void Update(const ModuleUpdateContext &Context) override;
+  void Shutdown(Application &App) override;
 
 private:
   SessionId m_SessionId{1};

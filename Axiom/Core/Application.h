@@ -1,20 +1,16 @@
 #pragma once
 
+#include "Core/ModuleManager.h"
 #include "Renderer/RenderSurface.h"
 #include "Renderer/ViewportFrameOutput.h"
-#include "Core/ModuleManager.h"
 
 #include <chrono>
 #include <cstdint>
 #include <cstddef>
-#include <functional>
 #include <memory>
 #include <string>
-
-#include "Core/LayerStack.h"
 #include "Core/Window.h"
 #include "Renderer/Renderer.h"
-#include "Renderer/RenderSurface.h"
 
 namespace Axiom {
 struct ApplicationArgs {
@@ -53,7 +49,6 @@ public:
 
   void Run();
   bool Step();
-  void PushLayer(Layer *Layer);
   [[nodiscard]] IRenderSurface &GetRenderSurface() const {
     return *m_RenderSurface;
   }
@@ -70,7 +65,6 @@ public:
   void SetRendererViewMode(RendererViewMode ViewMode);
   void SetViewportFrameUser(SessionUserId User);
   void SetViewportFrameOutput(IViewportFrameOutput *FrameOutput);
-  void ForEachLayer(const std::function<void(Layer *)> &Visitor);
 
 protected:
   Application(const ApplicationConfig &Config, const ApplicationArgs &Args,
@@ -90,7 +84,6 @@ private:
   std::unique_ptr<Window> m_Window;
   RenderSurfacePtr m_RenderSurface;
   std::unique_ptr<Renderer> m_Renderer;
-  LayerStack m_LayerStack;
   ModuleManager m_ModuleManager;
   std::chrono::steady_clock::time_point m_LastFrameTime;
   float m_DeltaTime{0.0f};

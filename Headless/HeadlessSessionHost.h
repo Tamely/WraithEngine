@@ -8,7 +8,7 @@
 
 #include "HostModules.h"
 #include "HeadlessRenderView.h"
-#include "HeadlessSessionLayer.h"
+#include "HeadlessSessionModule.h"
 
 #include <memory>
 #include <vector>
@@ -44,7 +44,10 @@ public:
   void LoadUserScripts(const std::filesystem::path &AssemblyPath);
   void ReloadUserScripts();
   ISessionTransport &GetTransport() { return m_TransportModule->GetTransport(); }
-  HeadlessSessionLayer &GetHeadlessLayer() { return *m_Layer; }
+  HeadlessSessionModule &GetSessionModule() { return *m_SessionModule; }
+  const HeadlessSessionModule &GetSessionModule() const {
+    return *m_SessionModule;
+  }
   ScriptHost &GetScriptHost() { return m_ScriptingModule->GetScriptHost(); }
   const HeadlessRenderViewRegistry &GetRenderViews() const {
     return m_RenderViews;
@@ -60,7 +63,7 @@ private:
     return *m_ScriptingModule;
   }
 
-  HeadlessSessionLayer *m_Layer{nullptr};
+  HeadlessSessionModule *m_SessionModule{nullptr};
   HeadlessSessionTransportModule *m_TransportModule{nullptr};
   SessionScriptHostModule *m_ScriptingModule{nullptr};
   EditorSceneRendererAdapter m_SharedRendererAdapter;

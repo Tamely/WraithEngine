@@ -1,5 +1,6 @@
 #include "HeadlessSessionHost.h"
 
+#include <Core/ApplicationModules.h>
 #include <Core/HeadlessRuntimeInstrumentation.h>
 
 #include <algorithm>
@@ -11,10 +12,14 @@ HeadlessSessionHost::HeadlessSessionHost(const ApplicationArgs &Args,
                    .Width = Width,
                    .Height = Height,
                    .Mode = RuntimeMode::HeadlessEditorSession},
-                  Args) {
-  m_Layer = new HeadlessSessionLayer();
-  m_Layer->SetSharedRendererAdapter(&m_SharedRendererAdapter);
-  m_Layer->SetRenderViewResolver(
+                  Args,
+                  {.RegisterDefaultModules = false}) {
+  GetModuleManager().RegisterModule(std::make_unique<WindowEventsModule>());
+
+  auto SessionModule = std::make_unique<HeadlessSessionModule>();
+  m_SessionModule = SessionModule.get();
+  m_SessionModule->SetSharedRendererAdapter(&m_SharedRendererAdapter);
+  m_SessionModule->SetRenderViewResolver(
       [this]() -> std::optional<HeadlessRenderViewState> {
         if (const HeadlessRenderViewState *View = GetActiveRenderView();
             View != nullptr) {
@@ -22,10 +27,13 @@ HeadlessSessionHost::HeadlessSessionHost(const ApplicationArgs &Args,
         }
         return std::nullopt;
       });
-  PushLayer(m_Layer);
-  m_RenderViews.EnsureLocalView(m_Layer->GetLocalUserId());
+  GetModuleManager().RegisterModule(std::move(SessionModule));
+  GetModuleManager().RegisterModule(std::make_unique<RendererFrameModule>());
+
+  m_RenderViews.EnsureLocalView(m_SessionModule->GetLocalUserId());
   auto TransportModule = std::make_unique<HeadlessSessionTransportModule>(
-      m_Layer->GetSession(), [this]() -> std::optional<HeadlessRenderViewState> {
+      m_SessionModule->GetSession(),
+      [this]() -> std::optional<HeadlessRenderViewState> {
         if (const HeadlessRenderViewState *View = GetActiveRenderView();
             View != nullptr) {
           return *View;
@@ -36,8 +44,8 @@ HeadlessSessionHost::HeadlessSessionHost(const ApplicationArgs &Args,
   GetModuleManager().RegisterModule(std::move(TransportModule));
 
   auto ScriptingModule = std::make_unique<SessionScriptHostModule>(
-      "Headless.SessionScriptHost", m_Layer->GetSession(), SessionId{1},
-      m_Layer->GetLocalUserId());
+      "Headless.SessionScriptHost", m_SessionModule->GetSession(),
+      SessionId{1}, m_SessionModule->GetLocalUserId());
   m_ScriptingModule = ScriptingModule.get();
   GetModuleManager().RegisterModule(std::move(ScriptingModule));
 }
@@ -114,29 +122,29 @@ void HeadlessSessionHost::ReloadUserScripts() {
 }
 
 bool HeadlessSessionHost::LoadStartupSceneIntoSession() {
-  return m_Layer->LoadStartupSceneIntoSession();
+  return m_SessionModule->LoadStartupSceneIntoSession();
 }
 
 bool HeadlessSessionHost::LoadStartupSceneIntoSession(
     const std::filesystem::path &ContentDir) {
-  return m_Layer->LoadStartupSceneIntoSession(ContentDir);
+  return m_SessionModule->LoadStartupSceneIntoSession(ContentDir);
 }
 
 void HeadlessSessionHost::SubmitLocalCommand(const EditorCommand &Command) {
   m_RenderViews.MarkAllRemoteViewsDirty();
-  m_Layer->Submit(Command);
+  m_SessionModule->Submit(Command);
 }
 
 void HeadlessSessionHost::SubmitRemoteCommand(const EditorCommand &Command) {
   m_RenderViews.MarkAllRemoteViewsDirty();
-  m_Layer->SubmitToTransport(GetTransport(), Command);
+  m_SessionModule->SubmitToTransport(GetTransport(), Command);
 }
 
 void HeadlessSessionHost::SubmitRemoteCommand(SessionUserId User,
                                               const EditorCommand &Command) {
   m_RenderViews.MarkAllRemoteViewsDirty();
   m_RenderViews.MarkViewActive(User);
-  m_Layer->SubmitToTransport(GetTransport(), User, Command);
+  m_SessionModule->SubmitToTransport(GetTransport(), User, Command);
 }
 
 void HeadlessSessionHost::SetTransportVideoEncoder(
@@ -145,7 +153,7 @@ void HeadlessSessionHost::SetTransportVideoEncoder(
 }
 
 void HeadlessSessionHost::SetRemoteViewMode(RendererViewMode ViewMode) {
-  m_RenderViews.SetViewMode(m_Layer->GetLocalUserId(), ViewMode);
+  m_RenderViews.SetViewMode(m_SessionModule->GetLocalUserId(), ViewMode);
 }
 
 void HeadlessSessionHost::SetRemoteViewMode(SessionUserId User,
@@ -154,7 +162,8 @@ void HeadlessSessionHost::SetRemoteViewMode(SessionUserId User,
 }
 
 void HeadlessSessionHost::SetRemoteShowColliders(bool ShowColliders) {
-  m_RenderViews.SetShowColliders(m_Layer->GetLocalUserId(), ShowColliders);
+  m_RenderViews.SetShowColliders(m_SessionModule->GetLocalUserId(),
+                                 ShowColliders);
 }
 
 void HeadlessSessionHost::SetRemoteShowColliders(SessionUserId User,
@@ -201,7 +210,8 @@ size_t HeadlessSessionHost::BeginRenderPasses() {
   m_CurrentRenderPassIndex = 0;
 
   m_ActiveRenderPassViews =
-      BuildScheduledRenderPassViews(m_RenderViews, m_Layer->GetLocalUserId());
+      BuildScheduledRenderPassViews(m_RenderViews,
+                                    m_SessionModule->GetLocalUserId());
   HeadlessRuntimeInstrumentation::RecordHeadlessTick(
       GetFrameIndex(), m_ActiveRenderPassViews.size(),
       m_RenderViews.GetRemoteViewCount());

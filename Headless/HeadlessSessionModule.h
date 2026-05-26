@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Core/Layer.h>
+#include <Core/IModule.h>
 
 #include <Remote/SessionTransport.h>
 #include <Renderer/Material.h>
@@ -11,22 +11,24 @@
 
 #include "HeadlessOverlayModule.h"
 
+#include <filesystem>
 #include <functional>
 #include <optional>
 
 namespace Axiom {
 struct HeadlessRenderViewState;
 
-class HeadlessSessionLayer final : public Layer {
+class HeadlessSessionModule final : public IModule {
 public:
   using RenderViewResolver =
       std::function<std::optional<HeadlessRenderViewState>()>;
 
-  HeadlessSessionLayer();
+  HeadlessSessionModule();
 
-  void OnAttach() override;
-  void OnUpdate() override;
-  void OnRender() override;
+  [[nodiscard]] std::string_view GetName() const override;
+  bool Initialize(Application &App) override;
+  void Update(const ModuleUpdateContext &Context) override;
+  void Shutdown(Application &App) override;
 
   bool LoadStartupSceneIntoSession();
   bool LoadStartupSceneIntoSession(const std::filesystem::path &ContentDir);
@@ -49,6 +51,7 @@ public:
                                                 std::move(SphereMesh));
   }
   EditorSession &GetSession() { return m_Session; }
+  const EditorSession &GetSession() const { return m_Session; }
   SessionUserId GetLocalUserId() const { return m_LocalUserId; }
 
   void SetGizmoHoveredAxis(SessionUserId User, int Axis) {

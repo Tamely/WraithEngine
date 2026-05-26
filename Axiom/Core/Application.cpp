@@ -70,7 +70,6 @@ Application::Application(const ApplicationConfig &Config,
 
 Application::~Application() {
   m_ModuleManager.ShutdownModules(*this);
-  m_LayerStack.Clear();
   m_Renderer.reset();
   m_Window.reset();
   if (s_Instance == this) {
@@ -81,14 +80,6 @@ Application::~Application() {
 Application &Application::Get() { return *s_Instance; }
 
 Window *Application::GetWindow() const { return m_Window.get(); }
-
-void Application::PushLayer(Layer *Layer) { m_LayerStack.PushLayer(Layer); }
-
-void Application::ForEachLayer(const std::function<void(Layer *)> &Visitor) {
-  for (Layer *Layer : m_LayerStack) {
-    Visitor(Layer);
-  }
-}
 
 void Application::RequestClose() {
   if (m_Window) {
@@ -122,8 +113,6 @@ void Application::Run() {
 
 void Application::RegisterDefaultModules() {
   m_ModuleManager.RegisterModule(std::make_unique<WindowEventsModule>());
-  m_ModuleManager.RegisterModule(std::make_unique<LayerUpdateModule>());
-  m_ModuleManager.RegisterModule(std::make_unique<LayerRenderModule>());
   if (m_Renderer != nullptr) {
     m_ModuleManager.RegisterModule(std::make_unique<RendererFrameModule>());
   }

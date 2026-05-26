@@ -1,4 +1,4 @@
-#include "HeadlessSessionLayer.h"
+#include "HeadlessSessionModule.h"
 
 #include "HeadlessRenderView.h"
 
@@ -14,21 +14,32 @@ namespace Axiom {
 namespace {
 } // namespace
 
-HeadlessSessionLayer::HeadlessSessionLayer()
-    : Layer("HeadlessSessionLayer"),
-      m_Session(m_SessionId),
+HeadlessSessionModule::HeadlessSessionModule()
+    : m_Session(m_SessionId),
       m_OverlayModule(m_Session) {}
 
-void HeadlessSessionLayer::OnAttach() {
+std::string_view HeadlessSessionModule::GetName() const {
+  return "Headless.Session";
+}
+
+bool HeadlessSessionModule::Initialize(Application &App) {
+  (void)App;
   m_Session.EnsureViewportState(m_LocalUserId);
   m_OverlayModule.Initialize();
+  return true;
 }
 
-void HeadlessSessionLayer::OnUpdate() {
-  m_Session.Tick(Application::Get().GetDeltaTime());
-}
+void HeadlessSessionModule::Update(const ModuleUpdateContext &Context) {
+  if (Context.Phase == ModuleUpdatePhase::FrameStart) {
+    m_Session.Tick(Context.DeltaTimeSeconds);
+    return;
+  }
 
-void HeadlessSessionLayer::OnRender() {
+  if (Context.Phase != ModuleUpdatePhase::Render) {
+    return;
+  }
+
+  Application &App = Context.App;
   HeadlessRenderViewState RenderView{
       .ClientId = "",
       .User = m_LocalUserId,
@@ -48,16 +59,12 @@ void HeadlessSessionLayer::OnRender() {
     RenderUser = m_LocalUserId;
     Viewport = m_Session.FindViewport(RenderUser);
   }
-  if (Viewport == nullptr) {
+  if (Viewport == nullptr || m_RendererAdapter == nullptr) {
     return;
   }
 
-  if (m_RendererAdapter == nullptr) {
-    return;
-  }
-
-  Application::Get().SetRendererViewMode(RenderView.ViewMode);
-  Application::Get().SetViewportFrameUser(RenderUser);
+  App.SetRendererViewMode(RenderView.ViewMode);
+  App.SetViewportFrameUser(RenderUser);
   RenderCommand::SetCamera(Viewport->Camera);
 
   // Pick the first visible Light that has LightProperties configured.
@@ -84,18 +91,22 @@ void HeadlessSessionLayer::OnRender() {
     }
   }
 
-  RenderCommand::SetSkyboxColors(m_Session.GetState().Scene.WorldSettings.SkyboxColorTop,
-                                 m_Session.GetState().Scene.WorldSettings.SkyboxColorBottom);
-  RenderCommand::SetSkyboxHDR(m_Session.GetState().Scene.WorldSettings.SkyboxHDRData);
+  RenderCommand::SetSkyboxColors(
+      m_Session.GetState().Scene.WorldSettings.SkyboxColorTop,
+      m_Session.GetState().Scene.WorldSettings.SkyboxColorBottom);
+  RenderCommand::SetSkyboxHDR(
+      m_Session.GetState().Scene.WorldSettings.SkyboxHDRData);
 
-  for (const auto &Submission : m_RendererAdapter->BuildRenderSubmissions(m_Session)) {
+  for (const auto &Submission :
+       m_RendererAdapter->BuildRenderSubmissions(m_Session)) {
     RenderCommand::Submit(Submission);
   }
   for (const auto &Billboard : m_OverlayModule.BuildLightBillboards()) {
     RenderCommand::SubmitLightBillboard(Billboard);
   }
   if (RenderView.ShowColliders) {
-    for (const auto &Submission : m_OverlayModule.BuildColliderOverlaySubmissions()) {
+    for (const auto &Submission :
+         m_OverlayModule.BuildColliderOverlaySubmissions()) {
       RenderCommand::Submit(Submission);
     }
   }
@@ -106,12 +117,13 @@ void HeadlessSessionLayer::OnRender() {
 
   const EditorObjectDetails *Selected =
       m_Session.FindSelectedObjectDetails(RenderUser);
-  const auto *EffTransform = Selected != nullptr
-      ? (Selected->WorldTransform.has_value() ? &*Selected->WorldTransform
-                                              : (Selected->Transform.has_value()
-                                                     ? &*Selected->Transform
-                                                     : nullptr))
-      : nullptr;
+  const auto *EffTransform =
+      Selected != nullptr
+          ? (Selected->WorldTransform.has_value()
+                 ? &*Selected->WorldTransform
+                 : (Selected->Transform.has_value() ? &*Selected->Transform
+                                                    : nullptr))
+          : nullptr;
   if (EffTransform != nullptr && Selected->SupportsTransform) {
     RenderCommand::SetGizmoOverlay({
         .WorldPosition = EffTransform->Location,
@@ -122,11 +134,15 @@ void HeadlessSessionLayer::OnRender() {
   }
 }
 
-bool HeadlessSessionLayer::LoadStartupSceneIntoSession() {
+void HeadlessSessionModule::Shutdown(Application &App) {
+  (void)App;
+}
+
+bool HeadlessSessionModule::LoadStartupSceneIntoSession() {
   return LoadStartupSceneIntoSession(std::filesystem::path(AXIOM_CONTENT_DIR));
 }
 
-bool HeadlessSessionLayer::LoadStartupSceneIntoSession(
+bool HeadlessSessionModule::LoadStartupSceneIntoSession(
     const std::filesystem::path &ContentDir) {
 #ifndef AXIOM_CONTENT_DIR
 #define AXIOM_CONTENT_DIR "Content"
@@ -136,27 +152,27 @@ bool HeadlessSessionLayer::LoadStartupSceneIntoSession(
   return LoadStartupScene(m_Session);
 }
 
-void HeadlessSessionLayer::Submit(const EditorCommand &Command) {
+void HeadlessSessionModule::Submit(const EditorCommand &Command) {
   m_Session.Submit(MakeContext(), Command);
 }
 
-void HeadlessSessionLayer::SubmitToTransport(ISessionTransport &Transport,
+void HeadlessSessionModule::SubmitToTransport(ISessionTransport &Transport,
                                              const EditorCommand &Command) {
   Transport.Submit(MakeContext(), Command);
 }
 
-void HeadlessSessionLayer::SubmitToTransport(ISessionTransport &Transport,
+void HeadlessSessionModule::SubmitToTransport(ISessionTransport &Transport,
                                              SessionUserId User,
                                              const EditorCommand &Command) {
   Transport.Submit(MakeContext(User), Command);
 }
 
 
-CommandContext HeadlessSessionLayer::MakeContext() const {
+CommandContext HeadlessSessionModule::MakeContext() const {
   return MakeContext(m_LocalUserId);
 }
 
-CommandContext HeadlessSessionLayer::MakeContext(SessionUserId User) const {
+CommandContext HeadlessSessionModule::MakeContext(SessionUserId User) const {
   return {
       .Session = m_SessionId,
       .User = User,

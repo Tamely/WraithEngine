@@ -5,7 +5,7 @@
 #include <Core/Application.h>
 
 #include "HostModules.h"
-#include "HeadlessSessionLayer.h"
+#include "HeadlessSessionModule.h"
 
 namespace Axiom {
 
@@ -18,7 +18,7 @@ public:
                            std::string *FailureReason = nullptr);
 
 private:
-  HeadlessSessionLayer *m_Layer{nullptr};
+  HeadlessSessionModule *m_SessionModule{nullptr};
   SessionScriptHostModule *m_ScriptingModule{nullptr};
   EditorSceneRendererAdapter m_RendererAdapter;
 };

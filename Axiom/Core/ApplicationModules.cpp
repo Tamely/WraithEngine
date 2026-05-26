@@ -24,47 +24,6 @@ void WindowEventsModule::Update(const ModuleUpdateContext &Context) {
 
 void WindowEventsModule::Shutdown(Application &App) { (void)App; }
 
-std::string_view LayerUpdateModule::GetName() const {
-  return "Core.LayerUpdate";
-}
-
-bool LayerUpdateModule::Initialize(Application &App) {
-  (void)App;
-  return true;
-}
-
-void LayerUpdateModule::Update(const ModuleUpdateContext &Context) {
-  if (Context.Phase != ModuleUpdatePhase::FrameStart) {
-    return;
-  }
-
-  Context.App.ForEachLayer([](Layer *Layer) { Layer->OnUpdate(); });
-}
-
-void LayerUpdateModule::Shutdown(Application &App) { (void)App; }
-
-std::string_view LayerRenderModule::GetName() const {
-  return "Core.LayerRender";
-}
-
-bool LayerRenderModule::Initialize(Application &App) {
-  (void)App;
-  return true;
-}
-
-void LayerRenderModule::Update(const ModuleUpdateContext &Context) {
-  if (Context.Phase == ModuleUpdatePhase::Render) {
-    Context.App.ForEachLayer([](Layer *Layer) { Layer->OnRender(); });
-    return;
-  }
-
-  if (Context.Phase == ModuleUpdatePhase::ImGuiRender) {
-    Context.App.ForEachLayer([](Layer *Layer) { Layer->OnImGuiRender(); });
-  }
-}
-
-void LayerRenderModule::Shutdown(Application &App) { (void)App; }
-
 std::string_view RendererFrameModule::GetName() const {
   return "Core.RendererFrame";
 }

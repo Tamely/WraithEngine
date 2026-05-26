@@ -12,7 +12,7 @@ add_executable(AxiomTests
   WraithNetworkingModuleTests.cpp
   ../Headless/HeadlessOverlayModule.cpp
   ../Headless/HeadlessSessionHost.cpp
-  ../Headless/HeadlessSessionLayer.cpp
+  ../Headless/HeadlessSessionModule.cpp
   ../Headless/HeadlessCommandProtocol.cpp
   ../Headless/HostModules.cpp
   ../Headless/WebRtcSession.cpp
