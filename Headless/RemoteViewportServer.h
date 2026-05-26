@@ -118,9 +118,14 @@ private:
   };
 
   struct ClientSessionResolution {
-    RemoteClientSession *Session{nullptr};
+    std::shared_ptr<RemoteClientSession> Session;
     bool ResumedExisting{false};
   };
+
+  class ClientSessionRegistry;
+  class ProjectWorkspaceService;
+  class AssetLibraryService;
+  class BrowserCommandRouter;
 
 private:
   void PresenceLoop();
@@ -183,8 +188,10 @@ private:
                                       const EncodedVideoPacket &Packet);
   std::optional<SessionUserId> ResolveClientUser(
       std::string_view HeaderBlock) const;
-  RemoteClientSession *FindClientSession(std::string_view ClientId);
-  const RemoteClientSession *FindClientSession(std::string_view ClientId) const;
+  std::shared_ptr<RemoteClientSession>
+  FindClientSession(std::string_view ClientId);
+  std::shared_ptr<const RemoteClientSession>
+  FindClientSession(std::string_view ClientId) const;
   WebRtcSessionStatus GetClientWebRtcStatus(std::string_view ClientId) const;
   std::vector<IWebRtcSession *> CollectClientWebRtcSessions() const;
   ClientSessionResolution CreateOrResumeClientSession(
@@ -221,18 +228,17 @@ private:
   std::thread m_ServerThread;
   std::thread m_PresenceThread;
 
-  mutable std::mutex m_ClientMutex;
+  mutable std::mutex m_WebSocketMutex;
   std::vector<WebSocketClient> m_WebSocketClients;
   mutable std::mutex m_HttpResponseMutex;
   std::unordered_map<uintptr_t, PendingHttpResponse> m_PendingHttpResponses;
-  std::unordered_map<std::string, RemoteClientSession> m_RemoteClientsById;
-  uint64_t m_NextRemoteUserId{2};
   mutable std::mutex m_SendMutex;
   std::atomic<uint64_t> m_TotalHttpRequests{0};
   std::atomic<uint64_t> m_TotalWebSocketMessages{0};
-  const std::filesystem::path m_ProjectsRoot;
-  mutable std::mutex m_ProjectMutex;
-  std::optional<Project::ProjectDescriptor> m_ActiveProject;
+  std::unique_ptr<ClientSessionRegistry> m_ClientRegistry;
+  std::unique_ptr<ProjectWorkspaceService> m_ProjectWorkspace;
+  std::unique_ptr<AssetLibraryService> m_AssetLibrary;
+  std::unique_ptr<BrowserCommandRouter> m_CommandRouter;
 };
 
 bool ParseRemoteViewportServerOptions(int argc, char **argv,

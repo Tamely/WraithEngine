@@ -633,11 +633,401 @@ struct RemoteViewportServer::RemoteClientSession::PacketOutput final
   }
 };
 
+class RemoteViewportServer::ClientSessionRegistry {
+public:
+  explicit ClientSessionRegistry(RemoteViewportServer &Server)
+      : m_Server(Server) {}
+
+  size_t GetRemoteClientCount() const {
+    std::scoped_lock Lock(m_RemoteClientMutex);
+    return m_RemoteClientsById.size();
+  }
+
+  size_t GetActiveWebRtcSessionCount() const {
+    std::scoped_lock Lock(m_RemoteClientMutex);
+    size_t Count = 0;
+    for (const auto &[ClientId, Client] : m_RemoteClientsById) {
+      (void)ClientId;
+      if (Client->WebRtcSession != nullptr) {
+        ++Count;
+      }
+    }
+    return Count;
+  }
+
+  std::vector<std::pair<SessionUserId, std::chrono::steady_clock::time_point>>
+  CollectPresenceEntries() const {
+    std::vector<std::pair<SessionUserId, std::chrono::steady_clock::time_point>>
+        Entries;
+    std::scoped_lock Lock(m_RemoteClientMutex);
+    Entries.reserve(m_RemoteClientsById.size());
+    for (const auto &[ClientId, Client] : m_RemoteClientsById) {
+      (void)ClientId;
+      Entries.emplace_back(Client->User, Client->LastActivity);
+    }
+    return Entries;
+  }
+
+  std::optional<SessionUserId> ResolveClientUser(std::string_view ClientId) const {
+    std::scoped_lock Lock(m_RemoteClientMutex);
+    const auto It = m_RemoteClientsById.find(std::string(ClientId));
+    if (It == m_RemoteClientsById.end()) {
+      return std::nullopt;
+    }
+    return It->second->User;
+  }
+
+  std::shared_ptr<RemoteClientSession> Find(std::string_view ClientId) {
+    std::scoped_lock Lock(m_RemoteClientMutex);
+    const auto It = m_RemoteClientsById.find(std::string(ClientId));
+    return It != m_RemoteClientsById.end() ? It->second : nullptr;
+  }
+
+  std::shared_ptr<const RemoteClientSession> Find(std::string_view ClientId) const {
+    std::scoped_lock Lock(m_RemoteClientMutex);
+    const auto It = m_RemoteClientsById.find(std::string(ClientId));
+    return It != m_RemoteClientsById.end() ? It->second : nullptr;
+  }
+
+  WebRtcSessionStatus GetWebRtcStatus(std::string_view ClientId) const {
+    const auto Client = Find(ClientId);
+    if (Client == nullptr || Client->WebRtcSession == nullptr) {
+      return {};
+    }
+    return Client->WebRtcSession->GetStatus();
+  }
+
+  std::vector<IWebRtcSession *> CollectWebRtcSessions() const {
+    std::vector<IWebRtcSession *> Sessions;
+    std::scoped_lock Lock(m_RemoteClientMutex);
+    Sessions.reserve(m_RemoteClientsById.size());
+    for (const auto &[ClientId, Client] : m_RemoteClientsById) {
+      (void)ClientId;
+      if (Client->WebRtcSession != nullptr) {
+        Sessions.push_back(Client->WebRtcSession.get());
+      }
+    }
+    return Sessions;
+  }
+
+  ClientSessionResolution CreateOrResume(
+      const std::optional<std::string> &ClientIdHint) {
+    std::shared_ptr<RemoteClientSession> ResolvedSession;
+    bool ResumedExisting = false;
+    {
+      std::scoped_lock Lock(m_RemoteClientMutex);
+      if (ClientIdHint.has_value()) {
+        const auto Existing = m_RemoteClientsById.find(*ClientIdHint);
+        if (Existing != m_RemoteClientsById.end()) {
+          Existing->second->LastActivity = std::chrono::steady_clock::now();
+          ResolvedSession = Existing->second;
+          ResumedExisting = true;
+        }
+      }
+      if (ResolvedSession == nullptr) {
+        auto Session = std::make_shared<RemoteClientSession>();
+        Session->ClientId = GenerateClientId();
+        Session->User = SessionUserId{m_NextRemoteUserId++};
+        Session->LastActivity = std::chrono::steady_clock::now();
+        Session->WebRtcSession = CreateWebRtcSession();
+        Session->VideoEncoder = CreateDefaultVideoEncoder();
+        Session->VideoPacketOutput =
+            std::make_unique<RemoteClientSession::PacketOutput>(
+                m_Server, Session->ClientId);
+        if (Session->VideoEncoder != nullptr &&
+            Session->VideoPacketOutput != nullptr) {
+          Session->VideoEncoder->SetOutput(Session->VideoPacketOutput.get());
+        }
+        if (Session->WebRtcSession != nullptr) {
+          const std::string ClientId = Session->ClientId;
+          Session->WebRtcSession->SetCommandMessageHandler(
+              [this, ClientId](std::string_view Payload) {
+                m_Server.HandleClientWebRtcMessage(ClientId, Payload);
+              });
+        }
+        m_RemoteClientsById.emplace(Session->ClientId, Session);
+        ResolvedSession = std::move(Session);
+      }
+    }
+
+    m_Server.m_Host.GetHeadlessLayer().GetSession().EnsureViewportState(
+        ResolvedSession->User);
+    m_Server.m_Host.GetHeadlessLayer().GetSession().SetPresenceState(
+        ResolvedSession->User, EditorUserPresenceState::Connected);
+    m_Server.m_Host.EnsureRemoteRenderView(ResolvedSession->ClientId,
+                                           ResolvedSession->User);
+    return {.Session = std::move(ResolvedSession),
+            .ResumedExisting = ResumedExisting};
+  }
+
+  void Touch(const std::string &ClientId) {
+    {
+      std::scoped_lock Lock(m_RemoteClientMutex);
+      const auto It = m_RemoteClientsById.find(ClientId);
+      if (It != m_RemoteClientsById.end()) {
+        It->second->LastActivity = std::chrono::steady_clock::now();
+      }
+    }
+    m_Server.m_Host.FocusRemoteRenderView(ClientId);
+  }
+
+private:
+  RemoteViewportServer &m_Server;
+  mutable std::mutex m_RemoteClientMutex;
+  std::unordered_map<std::string, std::shared_ptr<RemoteClientSession>>
+      m_RemoteClientsById;
+  uint64_t m_NextRemoteUserId{2};
+};
+
+class RemoteViewportServer::ProjectWorkspaceService {
+public:
+  explicit ProjectWorkspaceService(RemoteViewportServer &Server)
+      : m_Server(Server), m_ProjectsRoot(Project::GetDefaultProjectsRoot()) {}
+
+  std::vector<Project::ProjectDescriptor> ListProjects() const {
+    return Project::DiscoverProjects(m_ProjectsRoot);
+  }
+
+  std::optional<Project::ProjectDescriptor> GetActiveProject() const {
+    std::scoped_lock Lock(m_ProjectMutex);
+    return m_ActiveProject;
+  }
+
+  std::optional<Project::ProjectDescriptor>
+  SetActiveProjectBySlug(std::string_view ProjectSlug) {
+    const auto Opened = Project::OpenProjectBySlug(m_ProjectsRoot, ProjectSlug);
+    if (!Opened.has_value()) {
+      return std::nullopt;
+    }
+
+    std::scoped_lock Lock(m_ProjectMutex);
+    m_ActiveProject = *Opened;
+    return Opened;
+  }
+
+  void SetActiveProject(const Project::ProjectDescriptor &Project) {
+    std::scoped_lock Lock(m_ProjectMutex);
+    m_ActiveProject = Project;
+  }
+
+  std::filesystem::path GetActiveContentDir() const {
+    if (const auto ActiveProject = GetActiveProject(); ActiveProject.has_value()) {
+      return ActiveProject->Root.ContentDir;
+    }
+    return std::filesystem::path(AXIOM_CONTENT_DIR);
+  }
+
+  std::filesystem::path GetActiveScriptsDir() const {
+    if (const auto ActiveProject = GetActiveProject(); ActiveProject.has_value()) {
+      return ActiveProject->ScriptWorkspace.ScriptsDir;
+    }
+    return std::filesystem::path(AXIOM_PROJECTS_DIR) / "__default__" / "Scripts";
+  }
+
+  std::filesystem::path GetEngineContentDir() const {
+    return std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine";
+  }
+
+  bool LoadActiveProjectIntoSession(std::string *FailureReason) {
+    if (m_Server.m_Host.LoadStartupSceneIntoSession(GetActiveContentDir())) {
+      return true;
+    }
+
+    if (FailureReason != nullptr) {
+      *FailureReason =
+          "Failed to load the active project's startup scene into the session.";
+    }
+    return false;
+  }
+
+  std::vector<std::string> ListScriptFiles() const {
+    std::vector<std::string> Results;
+    const auto ScriptsDir = GetActiveScriptsDir();
+    if (!std::filesystem::exists(ScriptsDir)) {
+      return Results;
+    }
+
+    for (const auto &Entry :
+         std::filesystem::recursive_directory_iterator(ScriptsDir)) {
+      if (!Entry.is_regular_file() || Entry.path().extension() != ".cs") {
+        continue;
+      }
+
+      std::error_code Error;
+      const auto Relative = std::filesystem::relative(Entry.path(), ScriptsDir, Error);
+      if (!Error) {
+        Results.push_back(Relative.generic_string());
+      }
+    }
+
+    std::sort(Results.begin(), Results.end());
+    return Results;
+  }
+
+  std::vector<std::pair<std::string, std::string>> ListScriptClasses() const {
+    std::vector<std::pair<std::string, std::string>> Results;
+    const auto ScriptFiles = ListScriptFiles();
+    const auto ActiveProject = GetActiveProject();
+    const std::string DefaultNamespace =
+        ActiveProject.has_value() ? ActiveProject->ScriptWorkspace.RootNamespace
+                                  : "Project.Scripts";
+    const std::regex NamespacePattern(
+        R"(namespace\s+([A-Za-z_][A-Za-z0-9_\.]*)\s*[;{])");
+    const std::regex ClassPattern(
+        R"(public\s+class\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*Script\b)");
+
+    for (const auto &RelativePath : ScriptFiles) {
+      const auto AbsolutePath = ResolveActiveScriptPath(RelativePath);
+      if (!AbsolutePath.has_value()) {
+        continue;
+      }
+
+      std::ifstream File(*AbsolutePath);
+      if (!File.is_open()) {
+        continue;
+      }
+
+      const std::string Content((std::istreambuf_iterator<char>(File)),
+                                std::istreambuf_iterator<char>());
+      std::string Namespace = DefaultNamespace;
+      if (std::smatch NamespaceMatch;
+          std::regex_search(Content, NamespaceMatch, NamespacePattern) &&
+          NamespaceMatch.size() > 1) {
+        Namespace = NamespaceMatch[1].str();
+      }
+
+      auto ClassBegin =
+          std::sregex_iterator(Content.begin(), Content.end(), ClassPattern);
+      const auto ClassEnd = std::sregex_iterator();
+      for (auto It = ClassBegin; It != ClassEnd; ++It) {
+        Results.emplace_back(Namespace + "." + (*It)[1].str(), RelativePath);
+      }
+    }
+
+    std::sort(Results.begin(), Results.end(),
+              [](const auto &Left, const auto &Right) {
+                return Left.first < Right.first;
+              });
+    return Results;
+  }
+
+  std::optional<std::filesystem::path>
+  ResolveActiveScriptPath(std::string_view RelativePath,
+                          bool AllowMissingLeaf = false) const {
+    const std::filesystem::path Relative =
+        std::filesystem::path(RelativePath).lexically_normal();
+    if (!IsValidScriptRelativePath(Relative)) {
+      return std::nullopt;
+    }
+
+    const auto ScriptsDir = GetActiveScriptsDir();
+    const auto Candidate = (ScriptsDir / Relative).lexically_normal();
+    const auto ValidationPath = AllowMissingLeaf ? Candidate.parent_path() : Candidate;
+    if (!Project::IsPathWithinRoot(ScriptsDir, ValidationPath)) {
+      return std::nullopt;
+    }
+    return Candidate;
+  }
+
+private:
+  RemoteViewportServer &m_Server;
+  const std::filesystem::path m_ProjectsRoot;
+  mutable std::mutex m_ProjectMutex;
+  std::optional<Project::ProjectDescriptor> m_ActiveProject;
+};
+
+class RemoteViewportServer::AssetLibraryService {
+public:
+  AssetLibraryService(RemoteViewportServer &Server,
+                      ProjectWorkspaceService &Workspace)
+      : m_Server(Server), m_Workspace(Workspace) {}
+
+  std::vector<Assets::AssetDescriptor> CollectVisibleAssets() const {
+    std::vector<Assets::AssetDescriptor> Assets;
+
+    const Assets::LocalAssetSource ProjectSource{m_Workspace.GetActiveContentDir()};
+    Assets = ProjectSource.List();
+
+    const Assets::LocalAssetSource EngineSource{m_Workspace.GetEngineContentDir()};
+    for (auto EngineAsset : EngineSource.List()) {
+      EngineAsset.RelativePath =
+          (std::filesystem::path("Engine") / EngineAsset.RelativePath)
+              .generic_string();
+      EngineAsset.Name =
+          std::filesystem::path(EngineAsset.RelativePath).stem().string();
+      EngineAsset.Id = Assets::AssetIdFromRelativePath(EngineAsset.RelativePath);
+      Assets.push_back(std::move(EngineAsset));
+    }
+
+    std::sort(Assets.begin(), Assets.end(),
+              [](const Assets::AssetDescriptor &Left,
+                 const Assets::AssetDescriptor &Right) {
+                return Left.RelativePath < Right.RelativePath;
+              });
+    return Assets;
+  }
+
+  std::optional<std::filesystem::path>
+  ResolveVisibleAssetPath(std::string_view RelativePath) const {
+    if (RelativePath.empty()) {
+      return std::nullopt;
+    }
+
+    const std::filesystem::path Relative{std::string(RelativePath)};
+    for (const auto &Part : Relative) {
+      if (Part == "..") {
+        return std::nullopt;
+      }
+    }
+
+    if (!Relative.empty() && *Relative.begin() == "Engine") {
+      std::filesystem::path EngineRelative;
+      auto It = Relative.begin();
+      ++It;
+      for (; It != Relative.end(); ++It) {
+        EngineRelative /= *It;
+      }
+      return m_Workspace.GetEngineContentDir() / EngineRelative;
+    }
+
+    return m_Workspace.GetActiveContentDir() / Relative;
+  }
+
+private:
+  RemoteViewportServer &m_Server;
+  ProjectWorkspaceService &m_Workspace;
+};
+
+class RemoteViewportServer::BrowserCommandRouter {
+public:
+  BrowserCommandRouter(RemoteViewportServer &Server, ClientSessionRegistry &Registry,
+                       ProjectWorkspaceService &Workspace,
+                       AssetLibraryService &Assets)
+      : m_Server(Server),
+        m_Registry(Registry),
+        m_Workspace(Workspace),
+        m_Assets(Assets) {}
+
+  bool HandleWebSocketMessage(uintptr_t ClientSocketValue, std::string_view Payload);
+  bool HandleClientWebRtcMessage(std::string_view ClientId,
+                                 std::string_view Payload);
+
+private:
+  RemoteViewportServer &m_Server;
+  ClientSessionRegistry &m_Registry;
+  ProjectWorkspaceService &m_Workspace;
+  AssetLibraryService &m_Assets;
+};
+
 RemoteViewportServer::RemoteViewportServer(
     HeadlessSessionHost &Host, const RemoteViewportServerOptions &Options)
-    : m_Host(Host),
-      m_Options(Options),
-      m_ProjectsRoot(Project::GetDefaultProjectsRoot()) {
+    : m_Host(Host), m_Options(Options) {
+  m_ClientRegistry = std::make_unique<ClientSessionRegistry>(*this);
+  m_ProjectWorkspace = std::make_unique<ProjectWorkspaceService>(*this);
+  m_AssetLibrary =
+      std::make_unique<AssetLibraryService>(*this, *m_ProjectWorkspace);
+  m_CommandRouter = std::make_unique<BrowserCommandRouter>(
+      *this, *m_ClientRegistry, *m_ProjectWorkspace, *m_AssetLibrary);
   m_Host.SetTransportVideoEncoder(nullptr);
 }
 
@@ -649,16 +1039,12 @@ RemoteViewportServerMetrics RemoteViewportServer::GetMetrics() const {
   Metrics.ListenPort = m_Options.Port;
   Metrics.TotalHttpRequests = m_TotalHttpRequests.load();
   Metrics.TotalWebSocketMessages = m_TotalWebSocketMessages.load();
-
-  std::scoped_lock Lock(m_ClientMutex);
-  Metrics.ActiveWebSocketClients = m_WebSocketClients.size();
-  Metrics.ActiveRemoteClients = m_RemoteClientsById.size();
-  for (const auto &[ClientId, Client] : m_RemoteClientsById) {
-    (void)ClientId;
-    if (Client.WebRtcSession != nullptr) {
-      ++Metrics.ActiveWebRtcSessions;
-    }
+  {
+    std::scoped_lock Lock(m_WebSocketMutex);
+    Metrics.ActiveWebSocketClients = m_WebSocketClients.size();
   }
+  Metrics.ActiveRemoteClients = m_ClientRegistry->GetRemoteClientCount();
+  Metrics.ActiveWebRtcSessions = m_ClientRegistry->GetActiveWebRtcSessionCount();
   return Metrics;
 }
 
@@ -755,7 +1141,7 @@ bool RemoteViewportServer::Start(std::string &Error) {
     Behavior.open = [this](UwsWebSocket *Socket) {
       const uintptr_t ConnectionId = Socket->getUserData()->ConnectionId;
       {
-        std::scoped_lock Lock(m_ClientMutex);
+        std::scoped_lock Lock(m_WebSocketMutex);
         m_WebSocketClients.push_back(
             {.ConnectionId = ConnectionId, .Socket = Socket, .IsOpen = true});
       }
@@ -899,8 +1285,7 @@ void RemoteViewportServer::OnSessionTransportViewportFrame(
     if (const HeadlessRenderViewState *RenderView =
             m_Host.FindRenderView(Frame.User);
         RenderView != nullptr && !RenderView->IsLocal) {
-      if (RemoteClientSession *Client = FindClientSession(RenderView->ClientId);
-          Client != nullptr) {
+      if (auto Client = FindClientSession(RenderView->ClientId); Client != nullptr) {
         if (Client->WebRtcSession != nullptr) {
           Client->WebRtcSession->OnViewportFrame(Frame);
         }
@@ -932,25 +1317,22 @@ void RemoteViewportServer::PresenceLoop() {
     const auto Now = std::chrono::steady_clock::now();
     std::vector<std::pair<SessionUserId, EditorUserPresenceState>> Transitions;
 
-    {
-      std::scoped_lock Lock(m_ClientMutex);
-      for (const auto &[ClientId, Client] : m_RemoteClientsById) {
-        const auto Elapsed =
-            std::chrono::duration_cast<std::chrono::seconds>(Now - Client.LastActivity)
-                .count();
+    for (const auto &[User, LastActivity] : m_ClientRegistry->CollectPresenceEntries()) {
+      const auto Elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                               Now - LastActivity)
+                               .count();
         const EditorUserPresence *Presence =
-            m_Host.GetHeadlessLayer().GetSession().FindPresence(Client.User);
+            m_Host.GetHeadlessLayer().GetSession().FindPresence(User);
         if (Presence == nullptr) {
           continue;
         }
         if (Elapsed >= DisconnectThresholdSeconds &&
             Presence->State == EditorUserPresenceState::Away) {
-          Transitions.emplace_back(Client.User, EditorUserPresenceState::Disconnected);
+          Transitions.emplace_back(User, EditorUserPresenceState::Disconnected);
         } else if (Elapsed >= AwayThresholdSeconds &&
                    Presence->State == EditorUserPresenceState::Connected) {
-          Transitions.emplace_back(Client.User, EditorUserPresenceState::Away);
+          Transitions.emplace_back(User, EditorUserPresenceState::Away);
         }
-      }
     }
 
     for (const auto &[User, State] : Transitions) {
@@ -965,7 +1347,7 @@ void RemoteViewportServer::PresenceLoop() {
 void RemoteViewportServer::BroadcastTextMessage(std::string Message) {
   std::vector<uintptr_t> Clients;
   {
-    std::scoped_lock Lock(m_ClientMutex);
+    std::scoped_lock Lock(m_WebSocketMutex);
     for (const auto &Client : m_WebSocketClients) {
       if (Client.IsOpen) {
         Clients.push_back(Client.ConnectionId);
@@ -987,7 +1369,7 @@ void RemoteViewportServer::BroadcastTextMessage(std::string Message) {
 
 void RemoteViewportServer::CloseAllClients() {
   {
-    std::scoped_lock Lock(m_ClientMutex);
+    std::scoped_lock Lock(m_WebSocketMutex);
     for (auto &Client : m_WebSocketClients) {
       Client.IsOpen = false;
     }
@@ -1002,7 +1384,7 @@ void RemoteViewportServer::CloseAllClients() {
 void RemoteViewportServer::RemoveWebSocketClient(uintptr_t ClientSocketValue) {
   bool Removed = false;
   {
-    std::scoped_lock Lock(m_ClientMutex);
+    std::scoped_lock Lock(m_WebSocketMutex);
     auto It = std::find_if(m_WebSocketClients.begin(), m_WebSocketClients.end(),
                            [ClientSocketValue](const WebSocketClient &Client) {
                              return Client.ConnectionId == ClientSocketValue;
@@ -1023,7 +1405,7 @@ bool RemoteViewportServer::SendTextMessage(uintptr_t ClientSocketValue,
                                            std::string_view Message) {
   void *SocketHandle = nullptr;
   {
-    std::scoped_lock Lock(m_ClientMutex);
+    std::scoped_lock Lock(m_WebSocketMutex);
     const auto It = std::find_if(
         m_WebSocketClients.begin(), m_WebSocketClients.end(),
         [ClientSocketValue](const WebSocketClient &Client) {
@@ -1044,7 +1426,7 @@ bool RemoteViewportServer::SendBinaryMessage(uintptr_t ClientSocketValue,
                                              const void *Data, size_t Size) {
   void *SocketHandle = nullptr;
   {
-    std::scoped_lock Lock(m_ClientMutex);
+    std::scoped_lock Lock(m_WebSocketMutex);
     const auto It = std::find_if(
         m_WebSocketClients.begin(), m_WebSocketClients.end(),
         [ClientSocketValue](const WebSocketClient &Client) {
@@ -1276,8 +1658,8 @@ bool RemoteViewportServer::HandleCreateProjectRequest(
   }
 
   std::string FailureReason;
-  const auto Created = Project::CreateProjectScaffold(m_ProjectsRoot, *ProjectName,
-                                                      &FailureReason);
+  const auto Created = Project::CreateProjectScaffold(
+      Project::GetDefaultProjectsRoot(), *ProjectName, &FailureReason);
   if (!Created.has_value()) {
     const std::string Response = JsonResponse(
         "400 Bad Request", SerializeError(FailureReason));
@@ -1285,10 +1667,7 @@ bool RemoteViewportServer::HandleCreateProjectRequest(
     return false;
   }
 
-  {
-    std::scoped_lock Lock(m_ProjectMutex);
-    m_ActiveProject = *Created;
-  }
+  m_ProjectWorkspace->SetActiveProject(*Created);
 
   FailureReason.clear();
   if (!LoadActiveProjectIntoSession(&FailureReason)) {
@@ -1749,7 +2128,7 @@ bool RemoteViewportServer::HandleGetRequest(uintptr_t ClientSocketValue,
     const auto ClientId = FindHeaderValue(HeaderBlock, ClientIdHeaderName);
     std::vector<WebRtcIceCandidate> Candidates;
     if (ClientId.has_value()) {
-      if (RemoteClientSession *Client = FindClientSession(*ClientId);
+      if (auto Client = FindClientSession(*ClientId);
           Client != nullptr && Client->WebRtcSession != nullptr) {
         Candidates = Client->WebRtcSession->TakePendingLocalIceCandidates();
       }
@@ -1883,7 +2262,7 @@ bool RemoteViewportServer::HandleWebRtcOfferRequest(uintptr_t ClientSocketValue,
     SendAll(ClientSocket, Response.data(), Response.size());
     return false;
   }
-  RemoteClientSession *Client = FindClientSession(*ClientId);
+  auto Client = FindClientSession(*ClientId);
   if (Client == nullptr || Client->WebRtcSession == nullptr) {
     const std::string Response = JsonResponse(
         "503 Service Unavailable",
@@ -1947,7 +2326,7 @@ bool RemoteViewportServer::HandleWebRtcIceCandidateRequest(
     SendAll(ClientSocket, Response.data(), Response.size());
     return false;
   }
-  RemoteClientSession *Client = FindClientSession(*ClientId);
+  auto Client = FindClientSession(*ClientId);
   if (Client == nullptr || Client->WebRtcSession == nullptr) {
     const std::string Response = JsonResponse(
         "503 Service Unavailable",
@@ -2004,7 +2383,7 @@ bool RemoteViewportServer::HandleWebRtcCloseRequest(
     SendAll(ClientSocket, Response.data(), Response.size());
     return false;
   }
-  RemoteClientSession *Client = FindClientSession(*ClientId);
+  auto Client = FindClientSession(*ClientId);
   if (Client == nullptr || Client->WebRtcSession == nullptr) {
     const std::string Response = JsonResponse(
         "503 Service Unavailable",
@@ -2026,12 +2405,8 @@ bool RemoteViewportServer::HandleWebRtcCloseRequest(
 
   if (ClientId.has_value()) {
     std::optional<SessionUserId> DisconnectedUser;
-    {
-      std::scoped_lock Lock(m_ClientMutex);
-      const auto It = m_RemoteClientsById.find(*ClientId);
-      if (It != m_RemoteClientsById.end()) {
-        DisconnectedUser = It->second.User;
-      }
+    if (const auto Client = FindClientSession(*ClientId); Client != nullptr) {
+      DisconnectedUser = Client->User;
     }
     if (DisconnectedUser.has_value()) {
       EditorSession &DisconnectSession = m_Host.GetHeadlessLayer().GetSession();
@@ -2219,311 +2594,98 @@ std::optional<SessionUserId> RemoteViewportServer::ResolveClientUser(
   if (!ClientId.has_value()) {
     return std::nullopt;
   }
-
-  std::scoped_lock Lock(m_ClientMutex);
-  const auto It = m_RemoteClientsById.find(*ClientId);
-  if (It == m_RemoteClientsById.end()) {
-    return std::nullopt;
-  }
-  return It->second.User;
+  return m_ClientRegistry->ResolveClientUser(*ClientId);
 }
 
-RemoteViewportServer::RemoteClientSession *
+std::shared_ptr<RemoteViewportServer::RemoteClientSession>
 RemoteViewportServer::FindClientSession(std::string_view ClientId) {
-  std::scoped_lock Lock(m_ClientMutex);
-  const auto It = m_RemoteClientsById.find(std::string(ClientId));
-  return It != m_RemoteClientsById.end() ? &It->second : nullptr;
+  return m_ClientRegistry->Find(ClientId);
 }
 
-const RemoteViewportServer::RemoteClientSession *
+std::shared_ptr<const RemoteViewportServer::RemoteClientSession>
 RemoteViewportServer::FindClientSession(std::string_view ClientId) const {
-  std::scoped_lock Lock(m_ClientMutex);
-  const auto It = m_RemoteClientsById.find(std::string(ClientId));
-  return It != m_RemoteClientsById.end() ? &It->second : nullptr;
+  return m_ClientRegistry->Find(ClientId);
 }
 
 WebRtcSessionStatus
 RemoteViewportServer::GetClientWebRtcStatus(std::string_view ClientId) const {
-  std::scoped_lock Lock(m_ClientMutex);
-  const auto It = m_RemoteClientsById.find(std::string(ClientId));
-  if (It == m_RemoteClientsById.end() || It->second.WebRtcSession == nullptr) {
-    return {};
-  }
-  return It->second.WebRtcSession->GetStatus();
+  return m_ClientRegistry->GetWebRtcStatus(ClientId);
 }
 
 std::vector<IWebRtcSession *> RemoteViewportServer::CollectClientWebRtcSessions() const {
-  std::vector<IWebRtcSession *> Sessions;
-  std::scoped_lock Lock(m_ClientMutex);
-  Sessions.reserve(m_RemoteClientsById.size());
-  for (const auto &[ClientId, Session] : m_RemoteClientsById) {
-    (void)ClientId;
-    if (Session.WebRtcSession != nullptr) {
-      Sessions.push_back(Session.WebRtcSession.get());
-    }
-  }
-  return Sessions;
+  return m_ClientRegistry->CollectWebRtcSessions();
 }
 
 RemoteViewportServer::ClientSessionResolution
 RemoteViewportServer::CreateOrResumeClientSession(
     const std::optional<std::string> &ClientIdHint) {
-  RemoteClientSession *ResolvedSession = nullptr;
-  bool ResumedExisting = false;
-  {
-    std::scoped_lock Lock(m_ClientMutex);
-    if (ClientIdHint.has_value()) {
-      const auto Existing = m_RemoteClientsById.find(*ClientIdHint);
-      if (Existing != m_RemoteClientsById.end()) {
-        Existing->second.LastActivity = std::chrono::steady_clock::now();
-        ResolvedSession = &Existing->second;
-        ResumedExisting = true;
-      }
-    }
-    if (ResolvedSession == nullptr) {
-      RemoteClientSession Session{};
-      Session.ClientId = GenerateClientId();
-      Session.User = SessionUserId{m_NextRemoteUserId++};
-      Session.LastActivity = std::chrono::steady_clock::now();
-      Session.WebRtcSession = CreateWebRtcSession();
-      Session.VideoEncoder = CreateDefaultVideoEncoder();
-      Session.VideoPacketOutput = std::make_unique<RemoteClientSession::PacketOutput>(
-          *this, Session.ClientId);
-      if (Session.VideoEncoder != nullptr && Session.VideoPacketOutput != nullptr) {
-        Session.VideoEncoder->SetOutput(Session.VideoPacketOutput.get());
-      }
-      if (Session.WebRtcSession != nullptr) {
-        const std::string ClientId = Session.ClientId;
-        Session.WebRtcSession->SetCommandMessageHandler(
-            [this, ClientId](std::string_view Payload) {
-              HandleClientWebRtcMessage(ClientId, Payload);
-            });
-      }
-      auto [It, Inserted] =
-          m_RemoteClientsById.emplace(Session.ClientId, std::move(Session));
-      (void)Inserted;
-      ResolvedSession = &It->second;
-    }
-  }
-
-  m_Host.GetHeadlessLayer().GetSession().EnsureViewportState(ResolvedSession->User);
-  m_Host.GetHeadlessLayer().GetSession().SetPresenceState(
-      ResolvedSession->User, EditorUserPresenceState::Connected);
-  m_Host.EnsureRemoteRenderView(ResolvedSession->ClientId, ResolvedSession->User);
-  return {.Session = ResolvedSession, .ResumedExisting = ResumedExisting};
+  return m_ClientRegistry->CreateOrResume(ClientIdHint);
 }
 
 void RemoteViewportServer::TouchClientSession(const std::string &ClientId) {
-  std::scoped_lock Lock(m_ClientMutex);
-  const auto It = m_RemoteClientsById.find(ClientId);
-  if (It != m_RemoteClientsById.end()) {
-    It->second.LastActivity = std::chrono::steady_clock::now();
-  }
-  m_Host.FocusRemoteRenderView(ClientId);
+  m_ClientRegistry->Touch(ClientId);
 }
 
 std::vector<Project::ProjectDescriptor> RemoteViewportServer::ListProjects() const {
-  return Project::DiscoverProjects(m_ProjectsRoot);
+  return m_ProjectWorkspace->ListProjects();
 }
 
 std::optional<Project::ProjectDescriptor>
 RemoteViewportServer::GetActiveProject() const {
-  std::scoped_lock Lock(m_ProjectMutex);
-  return m_ActiveProject;
+  return m_ProjectWorkspace->GetActiveProject();
 }
 
 std::optional<Project::ProjectDescriptor>
 RemoteViewportServer::SetActiveProjectBySlug(std::string_view ProjectSlug) {
-  const auto Opened = Project::OpenProjectBySlug(m_ProjectsRoot, ProjectSlug);
-  if (!Opened.has_value()) {
-    return std::nullopt;
-  }
-
-  {
-    std::scoped_lock Lock(m_ProjectMutex);
-    m_ActiveProject = *Opened;
-  }
-  return Opened;
+  return m_ProjectWorkspace->SetActiveProjectBySlug(ProjectSlug);
 }
 
 std::filesystem::path RemoteViewportServer::GetActiveContentDir() const {
-  if (const auto ActiveProject = GetActiveProject(); ActiveProject.has_value()) {
-    return ActiveProject->Root.ContentDir;
-  }
-  return std::filesystem::path(AXIOM_CONTENT_DIR);
+  return m_ProjectWorkspace->GetActiveContentDir();
 }
 
 std::filesystem::path RemoteViewportServer::GetActiveScriptsDir() const {
-  if (const auto ActiveProject = GetActiveProject(); ActiveProject.has_value()) {
-    return ActiveProject->ScriptWorkspace.ScriptsDir;
-  }
-  return std::filesystem::path(AXIOM_PROJECTS_DIR) / "__default__" / "Scripts";
+  return m_ProjectWorkspace->GetActiveScriptsDir();
 }
 
 std::filesystem::path RemoteViewportServer::GetEngineContentDir() const {
-  return std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine";
+  return m_ProjectWorkspace->GetEngineContentDir();
 }
 
 bool RemoteViewportServer::LoadActiveProjectIntoSession(
     std::string *FailureReason) {
-  if (m_Host.LoadStartupSceneIntoSession(GetActiveContentDir())) {
-    return true;
-  }
-
-  if (FailureReason != nullptr) {
-    *FailureReason =
-        "Failed to load the active project's startup scene into the session.";
-  }
-  return false;
+  return m_ProjectWorkspace->LoadActiveProjectIntoSession(FailureReason);
 }
 
 std::vector<std::string> RemoteViewportServer::ListScriptFiles() const {
-  std::vector<std::string> Results;
-  const auto ScriptsDir = GetActiveScriptsDir();
-  if (!std::filesystem::exists(ScriptsDir)) {
-    return Results;
-  }
-
-  for (const auto &Entry :
-       std::filesystem::recursive_directory_iterator(ScriptsDir)) {
-    if (!Entry.is_regular_file() || Entry.path().extension() != ".cs") {
-      continue;
-    }
-
-    std::error_code Error;
-    const auto Relative =
-        std::filesystem::relative(Entry.path(), ScriptsDir, Error);
-    if (Error) {
-      continue;
-    }
-    Results.push_back(Relative.generic_string());
-  }
-
-  std::sort(Results.begin(), Results.end());
-  return Results;
+  return m_ProjectWorkspace->ListScriptFiles();
 }
 
 std::vector<std::pair<std::string, std::string>>
 RemoteViewportServer::ListScriptClasses() const {
-  std::vector<std::pair<std::string, std::string>> Results;
-  const auto ScriptFiles = ListScriptFiles();
-  const auto ActiveProject = GetActiveProject();
-  const std::string DefaultNamespace =
-      ActiveProject.has_value() ? ActiveProject->ScriptWorkspace.RootNamespace
-                                : "Project.Scripts";
-  const std::regex NamespacePattern(
-      R"(namespace\s+([A-Za-z_][A-Za-z0-9_\.]*)\s*[;{])");
-  const std::regex ClassPattern(
-      R"(public\s+class\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*Script\b)");
-
-  for (const auto &RelativePath : ScriptFiles) {
-    const auto AbsolutePath = ResolveActiveScriptPath(RelativePath);
-    if (!AbsolutePath.has_value()) {
-      continue;
-    }
-
-    std::ifstream File(*AbsolutePath);
-    if (!File.is_open()) {
-      continue;
-    }
-
-    const std::string Content((std::istreambuf_iterator<char>(File)),
-                              std::istreambuf_iterator<char>());
-    std::string Namespace = DefaultNamespace;
-    if (std::smatch NamespaceMatch;
-        std::regex_search(Content, NamespaceMatch, NamespacePattern) &&
-        NamespaceMatch.size() > 1) {
-      Namespace = NamespaceMatch[1].str();
-    }
-
-    auto ClassBegin = std::sregex_iterator(Content.begin(), Content.end(), ClassPattern);
-    const auto ClassEnd = std::sregex_iterator();
-    for (auto It = ClassBegin; It != ClassEnd; ++It) {
-      const std::string ClassName = (*It)[1].str();
-      Results.emplace_back(Namespace + "." + ClassName, RelativePath);
-    }
-  }
-
-  std::sort(Results.begin(), Results.end(),
-            [](const auto &Left, const auto &Right) {
-              return Left.first < Right.first;
-            });
-  return Results;
+  return m_ProjectWorkspace->ListScriptClasses();
 }
 
 std::optional<std::filesystem::path>
 RemoteViewportServer::ResolveActiveScriptPath(std::string_view RelativePath,
                                               bool AllowMissingLeaf) const {
-  const std::filesystem::path Relative =
-      std::filesystem::path(RelativePath).lexically_normal();
-  if (!IsValidScriptRelativePath(Relative)) {
-    return std::nullopt;
-  }
-
-  const auto ScriptsDir = GetActiveScriptsDir();
-  const auto Candidate = (ScriptsDir / Relative).lexically_normal();
-  const auto ValidationPath =
-      AllowMissingLeaf ? Candidate.parent_path() : Candidate;
-  if (!Project::IsPathWithinRoot(ScriptsDir, ValidationPath)) {
-    return std::nullopt;
-  }
-  return Candidate;
+  return m_ProjectWorkspace->ResolveActiveScriptPath(RelativePath,
+                                                     AllowMissingLeaf);
 }
 
 std::vector<Assets::AssetDescriptor>
 RemoteViewportServer::CollectVisibleAssets() const {
-  std::vector<Assets::AssetDescriptor> Assets;
-
-  const Assets::LocalAssetSource ProjectSource{GetActiveContentDir()};
-  Assets = ProjectSource.List();
-
-  const Assets::LocalAssetSource EngineSource{GetEngineContentDir()};
-  for (auto EngineAsset : EngineSource.List()) {
-    EngineAsset.RelativePath =
-        (std::filesystem::path("Engine") / EngineAsset.RelativePath)
-            .generic_string();
-    EngineAsset.Name = std::filesystem::path(EngineAsset.RelativePath).stem().string();
-    EngineAsset.Id = Assets::AssetIdFromRelativePath(EngineAsset.RelativePath);
-    Assets.push_back(std::move(EngineAsset));
-  }
-
-  std::sort(Assets.begin(), Assets.end(),
-            [](const Assets::AssetDescriptor &Left,
-               const Assets::AssetDescriptor &Right) {
-              return Left.RelativePath < Right.RelativePath;
-            });
-  return Assets;
+  return m_AssetLibrary->CollectVisibleAssets();
 }
 
 std::optional<std::filesystem::path>
 RemoteViewportServer::ResolveVisibleAssetPath(std::string_view RelativePath) const {
-  if (RelativePath.empty()) {
-    return std::nullopt;
-  }
-
-  const std::filesystem::path Relative{std::string(RelativePath)};
-  for (const auto &Part : Relative) {
-    if (Part == "..") {
-      return std::nullopt;
-    }
-  }
-
-  if (!Relative.empty() && *Relative.begin() == "Engine") {
-    std::filesystem::path EngineRelative;
-    auto It = Relative.begin();
-    ++It;
-    for (; It != Relative.end(); ++It) {
-      EngineRelative /= *It;
-    }
-    return GetEngineContentDir() / EngineRelative;
-  }
-
-  return GetActiveContentDir() / Relative;
+  return m_AssetLibrary->ResolveVisibleAssetPath(RelativePath);
 }
 
 void RemoteViewportServer::HandleClientEncodedVideoPacket(
     std::string_view ClientId, const EncodedVideoPacket &Packet) {
-  if (RemoteClientSession *Client = FindClientSession(ClientId);
+  if (auto Client = FindClientSession(ClientId);
       Client != nullptr && Client->WebRtcSession != nullptr) {
     Client->WebRtcSession->OnEncodedVideoPacket(Packet);
   }
@@ -2604,9 +2766,9 @@ void RemoteViewportServer::HandlePlaceActorCommand(SessionUserId User,
             }});
 }
 
-bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
-                                                  std::string_view Payload) {
-  m_TotalWebSocketMessages.fetch_add(1);
+bool RemoteViewportServer::BrowserCommandRouter::HandleWebSocketMessage(
+    uintptr_t ClientSocketValue, std::string_view Payload) {
+  m_Server.m_TotalWebSocketMessages.fetch_add(1);
   std::string Error;
   const auto Command = ParseRemoteViewportCommand(Payload, Error);
   if (!Command.has_value()) {
@@ -2615,19 +2777,22 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
 
   switch (Command->Type) {
   case HeadlessCommandType::SetViewMode:
-    m_Host.SetRemoteViewMode(Command->ViewMode);
+    m_Server.m_Host.SetRemoteViewMode(Command->ViewMode);
     return true;
   case HeadlessCommandType::SetShowColliders:
-    m_Host.SetRemoteShowColliders(Command->ShowColliders);
+    m_Server.m_Host.SetRemoteShowColliders(Command->ShowColliders);
     return true;
   case HeadlessCommandType::DropMesh:
-    HandleMeshDropCommand(m_Host.GetHeadlessLayer().GetLocalUserId(), *Command);
+    m_Server.HandleMeshDropCommand(
+        m_Server.m_Host.GetHeadlessLayer().GetLocalUserId(), *Command);
     return true;
   case HeadlessCommandType::DropTexture:
-    HandleTextureDropCommand(m_Host.GetHeadlessLayer().GetLocalUserId(), *Command);
+    m_Server.HandleTextureDropCommand(
+        m_Server.m_Host.GetHeadlessLayer().GetLocalUserId(), *Command);
     return true;
   case HeadlessCommandType::PlaceActor:
-    HandlePlaceActorCommand(m_Host.GetHeadlessLayer().GetLocalUserId(), *Command);
+    m_Server.HandlePlaceActorCommand(
+        m_Server.m_Host.GetHeadlessLayer().GetLocalUserId(), *Command);
     return true;
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
@@ -2661,34 +2826,36 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   case HeadlessCommandType::SetGridSnap:
   case HeadlessCommandType::Heartbeat:
     return false;
-  case HeadlessCommandType::ListAssets: {
-    SendTextMessage(ClientSocketValue, SerializeAssetList(CollectVisibleAssets()));
+  case HeadlessCommandType::ListAssets:
+    m_Server.SendTextMessage(
+        ClientSocketValue,
+        SerializeAssetList(m_Assets.CollectVisibleAssets()));
     return true;
-  }
   case HeadlessCommandType::GetSchema: {
-    const auto &DetailsById =
-        m_Host.GetHeadlessLayer().GetSession().GetState().Scene.ObjectDetailsById;
+    const auto &DetailsById = m_Server.m_Host.GetHeadlessLayer()
+                                  .GetSession()
+                                  .GetState()
+                                  .Scene.ObjectDetailsById;
     const auto It = DetailsById.find(Command->ObjectId);
     if (It != DetailsById.end()) {
-      SendTextMessage(ClientSocketValue, SerializeObjectSchema(It->second));
+      m_Server.SendTextMessage(ClientSocketValue, SerializeObjectSchema(It->second));
     }
     return true;
   }
   case HeadlessCommandType::SetProperty:
     return false;
   case HeadlessCommandType::SaveScene: {
-    const Assets::LocalAssetSource ContentDir{GetActiveContentDir()};
+    const Assets::LocalAssetSource ContentDir{m_Workspace.GetActiveContentDir()};
     const auto ScenePath = ContentDir.ResolveRelative("scene.json");
     const bool Ok = Assets::SaveSceneToFile(
-        ScenePath,
-        m_Host.GetHeadlessLayer().GetSession().GetState().Scene);
-    SendTextMessage(ClientSocketValue, SerializeSaveResult(Ok));
+        ScenePath, m_Server.m_Host.GetHeadlessLayer().GetSession().GetState().Scene);
+    m_Server.SendTextMessage(ClientSocketValue, SerializeSaveResult(Ok));
     return true;
   }
   case HeadlessCommandType::Quit:
-    m_StopRequested.store(true);
-    m_Host.RequestClose();
-    BroadcastTextMessage(SerializeShutdown());
+    m_Server.m_StopRequested.store(true);
+    m_Server.m_Host.RequestClose();
+    m_Server.BroadcastTextMessage(SerializeShutdown());
     return true;
   case HeadlessCommandType::LoadStartupScene:
   case HeadlessCommandType::RenderFrame:
@@ -2698,26 +2865,32 @@ bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
   return false;
 }
 
-bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
-                                                     std::string_view Payload) {
+bool RemoteViewportServer::HandleWebSocketMessage(uintptr_t ClientSocketValue,
+                                                  std::string_view Payload) {
+  return m_CommandRouter->HandleWebSocketMessage(ClientSocketValue, Payload);
+}
+
+bool RemoteViewportServer::BrowserCommandRouter::HandleClientWebRtcMessage(
+    std::string_view ClientId, std::string_view Payload) {
+  m_Server.m_TotalWebSocketMessages.fetch_add(1);
   std::string Error;
   const auto Command = ParseRemoteViewportCommand(Payload, Error);
   if (!Command.has_value()) {
     return false;
   }
 
-  RemoteClientSession *Client = FindClientSession(ClientId);
+  auto Client = m_Registry.Find(ClientId);
   if (Client == nullptr) {
     return false;
   }
-  TouchClientSession(Client->ClientId);
+  m_Registry.Touch(Client->ClientId);
 
   switch (Command->Type) {
   case HeadlessCommandType::SetViewMode:
-    m_Host.SetRemoteViewMode(Client->User, Command->ViewMode);
+    m_Server.m_Host.SetRemoteViewMode(Client->User, Command->ViewMode);
     return true;
   case HeadlessCommandType::SetShowColliders:
-    m_Host.SetRemoteShowColliders(Client->User, Command->ShowColliders);
+    m_Server.m_Host.SetRemoteShowColliders(Client->User, Command->ShowColliders);
     return true;
   case HeadlessCommandType::SetLookActive:
   case HeadlessCommandType::SetViewportCameraPose:
@@ -2742,17 +2915,17 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::SetMaterialProperties:
   case HeadlessCommandType::SetMaterialTexture:
   case HeadlessCommandType::SetWorldSettings:
-    m_Host.SubmitRemoteCommand(Client->User, Command->EditorPayload);
+    m_Server.m_Host.SubmitRemoteCommand(Client->User, Command->EditorPayload);
     return true;
   case HeadlessCommandType::DropMesh:
-    HandleMeshDropCommand(Client->User, *Command);
+    m_Server.HandleMeshDropCommand(Client->User, *Command);
     return true;
   case HeadlessCommandType::PlaceActor:
-    HandlePlaceActorCommand(Client->User, *Command);
+    m_Server.HandlePlaceActorCommand(Client->User, *Command);
     return true;
 
   case HeadlessCommandType::ReloadScripts: {
-    m_Host.ReloadUserScripts();
+    m_Server.m_Host.ReloadUserScripts();
     if (Client->WebRtcSession != nullptr) {
       Client->WebRtcSession->SendReliableMessage(
           SerializeTypeOnlyJson("scripts_reloaded"));
@@ -2761,9 +2934,9 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   }
   case HeadlessCommandType::Heartbeat: {
     const EditorUserPresence *Presence =
-        m_Host.GetHeadlessLayer().GetSession().FindPresence(Client->User);
+        m_Server.m_Host.GetHeadlessLayer().GetSession().FindPresence(Client->User);
     if (Presence != nullptr && Presence->State == EditorUserPresenceState::Away) {
-      m_Host.GetHeadlessLayer().GetSession().SetPresenceState(
+      m_Server.m_Host.GetHeadlessLayer().GetSession().SetPresenceState(
           Client->User, EditorUserPresenceState::Connected);
     }
     return true;
@@ -2771,13 +2944,13 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   case HeadlessCommandType::ListAssets: {
     if (Client->WebRtcSession != nullptr) {
       Client->WebRtcSession->SendReliableMessage(
-          SerializeAssetList(CollectVisibleAssets()));
+          SerializeAssetList(m_Assets.CollectVisibleAssets()));
     }
     return true;
   }
   case HeadlessCommandType::GetSchema: {
     const auto &DetailsById =
-        m_Host.GetHeadlessLayer().GetSession().GetState().Scene.ObjectDetailsById;
+        m_Server.m_Host.GetHeadlessLayer().GetSession().GetState().Scene.ObjectDetailsById;
     const auto It = DetailsById.find(Command->ObjectId);
     if (It != DetailsById.end() && Client->WebRtcSession != nullptr) {
       Client->WebRtcSession->SendReliableMessage(
@@ -2786,11 +2959,11 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     return true;
   }
   case HeadlessCommandType::SaveScene: {
-    const Assets::LocalAssetSource ContentDir{GetActiveContentDir()};
+    const Assets::LocalAssetSource ContentDir{m_Workspace.GetActiveContentDir()};
     const auto ScenePath = ContentDir.ResolveRelative("scene.json");
     const bool Ok = Assets::SaveSceneToFile(
         ScenePath,
-        m_Host.GetHeadlessLayer().GetSession().GetState().Scene);
+        m_Server.m_Host.GetHeadlessLayer().GetSession().GetState().Scene);
     if (Client->WebRtcSession != nullptr) {
       Client->WebRtcSession->SendReliableMessage(SerializeSaveResult(Ok));
     }
@@ -2806,14 +2979,14 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
 
     if (Name == "displayName") {
       if (const auto *S = std::get_if<std::string>(&Val)) {
-        m_Host.SubmitRemoteCommand(
+        m_Server.m_Host.SubmitRemoteCommand(
             Client->User,
             EditorCommand{RenameObjectCommand{.ObjectId = ObjId, .DisplayName = *S}});
         return true;
       }
     } else if (Name == "visible") {
       if (const auto *B = std::get_if<bool>(&Val)) {
-        m_Host.SubmitRemoteCommand(
+        m_Server.m_Host.SubmitRemoteCommand(
             Client->User,
             EditorCommand{SetObjectVisibilityCommand{.ObjectId = ObjId, .Visible = *B}});
         return true;
@@ -2821,11 +2994,11 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     } else if (Name == "scriptClass") {
       if (const auto *S = std::get_if<std::string>(&Val)) {
         if (S->empty()) {
-          m_Host.SubmitRemoteCommand(
+          m_Server.m_Host.SubmitRemoteCommand(
               Client->User,
               EditorCommand{DetachScriptCommand{.ObjectId = ObjId}});
         } else {
-          m_Host.SubmitRemoteCommand(
+          m_Server.m_Host.SubmitRemoteCommand(
               Client->User,
               EditorCommand{AttachScriptCommand{.ObjectId = ObjId,
                                                .ScriptClassName = *S}});
@@ -2837,7 +3010,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
                Name == "physicsMass" || Name == "physicsFriction" ||
                Name == "physicsRestitution") {
       const auto &DetailsById =
-          m_Host.GetHeadlessLayer().GetSession().GetState().Scene.ObjectDetailsById;
+          m_Server.m_Host.GetHeadlessLayer().GetSession().GetState().Scene.ObjectDetailsById;
       const auto It = DetailsById.find(ObjId);
       if (It == DetailsById.end() || !It->second.SupportsTransform) {
         return false;
@@ -2905,7 +3078,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
         Physics.Restitution = *Number;
       }
 
-      m_Host.SubmitRemoteCommand(
+      m_Server.m_Host.SubmitRemoteCommand(
           Client->User,
           EditorCommand{SetPhysicsPropertiesCommand{
               .ObjectId = ObjId,
@@ -2915,7 +3088,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     } else if (Name == "location" || Name == "rotationDegrees" || Name == "scale") {
       if (const auto *V = std::get_if<glm::vec3>(&Val)) {
         const auto &DetailsById =
-            m_Host.GetHeadlessLayer().GetSession().GetState().Scene.ObjectDetailsById;
+            m_Server.m_Host.GetHeadlessLayer().GetSession().GetState().Scene.ObjectDetailsById;
         const auto It = DetailsById.find(ObjId);
         if (It == DetailsById.end() || !It->second.Transform.has_value()) {
           return false;
@@ -2930,7 +3103,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
         if (Name == "location")        Cmd.Location        = *V;
         else if (Name == "rotationDegrees") Cmd.RotationDegrees = *V;
         else                           Cmd.Scale           = *V;
-        m_Host.SubmitRemoteCommand(Client->User, EditorCommand{Cmd});
+        m_Server.m_Host.SubmitRemoteCommand(Client->User, EditorCommand{Cmd});
         return true;
       }
     }
@@ -2938,7 +3111,7 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   }
   case HeadlessCommandType::SetGizmoMode:
     Client->CurrentGizmoMode = Command->Mode;
-    m_Host.GetHeadlessLayer().SetGizmoMode(Client->User, Command->Mode);
+    m_Server.m_Host.GetHeadlessLayer().SetGizmoMode(Client->User, Command->Mode);
     return true;
   case HeadlessCommandType::SetGridSnap: {
     Client->GridSnap.Enabled = Command->Enabled;
@@ -2950,16 +3123,15 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     return true;
   }
   case HeadlessCommandType::GizmoHover: {
-    if (m_Host.GetHeadlessLayer().GetSession().GetRuntimeState() !=
+    if (m_Server.m_Host.GetHeadlessLayer().GetSession().GetRuntimeState() !=
         EditorRuntimeState::Edit) {
-      m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
+      m_Server.m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
       return true;
     }
     if (Client->GizmoDrag.has_value()) {
       return true;
     }
-    const EditorSession &Session =
-        m_Host.GetHeadlessLayer().GetSession();
+    const EditorSession &Session = m_Server.m_Host.GetHeadlessLayer().GetSession();
     const EditorViewportState *Viewport =
         Session.FindViewport(Client->User);
     const EditorObjectDetails *Selected =
@@ -2971,31 +3143,30 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     if (Viewport != nullptr && HoverTD != nullptr) {
       const float GizmoScale = ComputeGizmoScale(
           Viewport->Camera, HoverTD->Location,
-          m_Options.Width, m_Options.Height);
+          m_Server.m_Options.Width, m_Server.m_Options.Height);
       const int Axis =
           (Client->CurrentGizmoMode == GizmoMode::Rotate)
-              ? HitTestGizmoRings(Viewport->Camera, m_Options.Width,
-                                  m_Options.Height, Command->MousePosition,
+              ? HitTestGizmoRings(Viewport->Camera, m_Server.m_Options.Width,
+                                  m_Server.m_Options.Height, Command->MousePosition,
                                   HoverTD->Location, GizmoScale)
-              : HitTestGizmoAxes(Viewport->Camera, m_Options.Width,
-                                 m_Options.Height, Command->MousePosition,
+              : HitTestGizmoAxes(Viewport->Camera, m_Server.m_Options.Width,
+                                 m_Server.m_Options.Height, Command->MousePosition,
                                  HoverTD->Location, GizmoScale);
-      m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, Axis);
+          m_Server.m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, Axis);
     } else {
-      m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
+      m_Server.m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
     }
     return true;
   }
   case HeadlessCommandType::GizmoDragStart: {
-    if (m_Host.GetHeadlessLayer().GetSession().GetRuntimeState() !=
+    if (m_Server.m_Host.GetHeadlessLayer().GetSession().GetRuntimeState() !=
         EditorRuntimeState::Edit) {
       return true;
     }
     if (Client->GizmoDrag.has_value()) {
       return true;
     }
-    EditorSession &Session =
-        m_Host.GetHeadlessLayer().GetSession();
+    EditorSession &Session = m_Server.m_Host.GetHeadlessLayer().GetSession();
     const EditorViewportState *Viewport =
         Session.FindViewport(Client->User);
     if (Viewport == nullptr) {
@@ -3013,10 +3184,11 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     if (DragTD != nullptr) {
       const glm::vec3 &ObjPos = DragTD->Location;
       const float GizmoScale = ComputeGizmoScale(
-          Viewport->Camera, ObjPos, m_Options.Width, m_Options.Height);
+          Viewport->Camera, ObjPos, m_Server.m_Options.Width,
+          m_Server.m_Options.Height);
       if (Client->CurrentGizmoMode == GizmoMode::Rotate) {
         auto DragState = BeginGizmoRotateDrag(
-            Viewport->Camera, m_Options.Width, m_Options.Height,
+            Viewport->Camera, m_Server.m_Options.Width, m_Server.m_Options.Height,
             Command->MousePosition, ObjPos, GizmoScale, ObjPos);
         if (DragState.has_value()) {
           Client->GizmoDrag = ActiveGizmoDrag{
@@ -3028,12 +3200,13 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
               .GizmoScaleAtDragStart = GizmoScale,
           };
           Session.AcquireLock(Selected->ObjectId, Client->User);
-          m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, DragState->Axis);
+          m_Server.m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User,
+                                                                 DragState->Axis);
           return true;
         }
       } else {
         auto DragState = BeginGizmoDrag(
-            Viewport->Camera, m_Options.Width, m_Options.Height,
+            Viewport->Camera, m_Server.m_Options.Width, m_Server.m_Options.Height,
             Command->MousePosition, ObjPos, GizmoScale, ObjPos);
         if (DragState.has_value()) {
           Client->GizmoDrag = ActiveGizmoDrag{
@@ -3045,7 +3218,8 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
               .GizmoScaleAtDragStart = GizmoScale,
           };
           Session.AcquireLock(Selected->ObjectId, Client->User);
-          m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, DragState->Axis);
+          m_Server.m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User,
+                                                                 DragState->Axis);
           return true;
         }
       }
@@ -3053,9 +3227,9 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
 
     // No gizmo hit — fall back to viewport object picking.
     const auto Hit = ResolveViewportSelectionHit(
-        Viewport->Camera, m_Options.Width, m_Options.Height,
+        Viewport->Camera, m_Server.m_Options.Width, m_Server.m_Options.Height,
         Command->MousePosition, Session.GetState().Scene.MeshInstances,
-        m_Host.GetHeadlessLayer().BuildLightBillboards());
+        m_Server.m_Host.GetHeadlessLayer().BuildLightBillboards());
     if (Hit.has_value() && !Hit->ObjectId.empty()) {
       // Multi-instance mesh assets expand into read-only generated children
       // (one per sub-mesh) that share the parent's transform. Picking one of
@@ -3068,32 +3242,31 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
           Picked->GeneratedFromAssetRootId.has_value()) {
         SelectId = *Picked->GeneratedFromAssetRootId;
       }
-      m_Host.SubmitRemoteCommand(Client->User,
+      m_Server.m_Host.SubmitRemoteCommand(Client->User,
           EditorCommand{SelectObjectCommand{.ObjectId = SelectId}});
     }
     return true;
   }
   case HeadlessCommandType::DropTexture: {
-    HandleTextureDropCommand(Client->User, *Command);
+    m_Server.HandleTextureDropCommand(Client->User, *Command);
     return true;
   }
   case HeadlessCommandType::GizmoDragUpdate: {
-    if (m_Host.GetHeadlessLayer().GetSession().GetRuntimeState() !=
+    if (m_Server.m_Host.GetHeadlessLayer().GetSession().GetRuntimeState() !=
         EditorRuntimeState::Edit) {
       if (Client->GizmoDrag.has_value()) {
-        EditorSession &Session = m_Host.GetHeadlessLayer().GetSession();
+        EditorSession &Session = m_Server.m_Host.GetHeadlessLayer().GetSession();
         const std::string DragObjectId = Client->GizmoDrag->ObjectId;
         Client->GizmoDrag.reset();
         Session.ReleaseLock(DragObjectId, Client->User);
-        m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
+        m_Server.m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
       }
       return true;
     }
     if (!Client->GizmoDrag.has_value()) {
       return true;
     }
-    const EditorSession &Session =
-        m_Host.GetHeadlessLayer().GetSession();
+    const EditorSession &Session = m_Server.m_Host.GetHeadlessLayer().GetSession();
     const EditorViewportState *Viewport =
         Session.FindViewport(Client->User);
     if (Viewport == nullptr) {
@@ -3105,12 +3278,12 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
     glm::vec3 Scale = Drag.StartScale;
     if (Drag.Mode == GizmoMode::Translate) {
       Location = UpdateGizmoDrag(Drag.Math, Viewport->Camera,
-                                 m_Options.Width, m_Options.Height,
+                                 m_Server.m_Options.Width, m_Server.m_Options.Height,
                                  Command->MousePosition.x, Command->MousePosition.y);
     } else if (Drag.Mode == GizmoMode::Scale) {
       const glm::vec3 NewPosTmp =
-          UpdateGizmoDrag(Drag.Math, Viewport->Camera, m_Options.Width,
-                          m_Options.Height, Command->MousePosition.x,
+          UpdateGizmoDrag(Drag.Math, Viewport->Camera, m_Server.m_Options.Width,
+                          m_Server.m_Options.Height, Command->MousePosition.x,
                           Command->MousePosition.y);
       const float DeltaT =
           glm::dot(NewPosTmp - Drag.Math.ObjectStartPos, Drag.Math.AxisDir);
@@ -3119,7 +3292,8 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
       Scale[Drag.Math.Axis] = Drag.StartScale[Drag.Math.Axis] * Factor;
     } else {
       const float DeltaDeg = UpdateGizmoRotateDrag(
-          Drag.Math, Viewport->Camera, m_Options.Width, m_Options.Height,
+          Drag.Math, Viewport->Camera, m_Server.m_Options.Width,
+          m_Server.m_Options.Height,
           Command->MousePosition.x, Command->MousePosition.y);
       RotDeg[Drag.Math.Axis] = Drag.StartRotDeg[Drag.Math.Axis] + DeltaDeg;
     }
@@ -3133,15 +3307,14 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
         .RotationDegrees = RotDeg,
         .Scale = Scale,
     };
-    m_Host.SubmitRemoteCommand(Client->User, Cmd);
+    m_Server.m_Host.SubmitRemoteCommand(Client->User, Cmd);
     return true;
   }
   case HeadlessCommandType::GizmoDragEnd: {
     if (!Client->GizmoDrag.has_value()) {
       return true;
     }
-    EditorSession &Session =
-        m_Host.GetHeadlessLayer().GetSession();
+    EditorSession &Session = m_Server.m_Host.GetHeadlessLayer().GetSession();
     const EditorViewportState *Viewport =
         Session.FindViewport(Client->User);
     if (Viewport != nullptr) {
@@ -3151,12 +3324,14 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
       glm::vec3 Scale = Drag.StartScale;
       if (Drag.Mode == GizmoMode::Translate) {
         Location = UpdateGizmoDrag(Drag.Math, Viewport->Camera,
-                                   m_Options.Width, m_Options.Height,
+                                   m_Server.m_Options.Width,
+                                   m_Server.m_Options.Height,
                                    Command->MousePosition.x, Command->MousePosition.y);
       } else if (Drag.Mode == GizmoMode::Scale) {
         const glm::vec3 NewPosTmp =
-            UpdateGizmoDrag(Drag.Math, Viewport->Camera, m_Options.Width,
-                            m_Options.Height, Command->MousePosition.x,
+            UpdateGizmoDrag(Drag.Math, Viewport->Camera,
+                            m_Server.m_Options.Width,
+                            m_Server.m_Options.Height, Command->MousePosition.x,
                             Command->MousePosition.y);
         const float DeltaT =
             glm::dot(NewPosTmp - Drag.Math.ObjectStartPos, Drag.Math.AxisDir);
@@ -3165,7 +3340,8 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
         Scale[Drag.Math.Axis] = Drag.StartScale[Drag.Math.Axis] * Factor;
       } else {
         const float DeltaDeg = UpdateGizmoRotateDrag(
-            Drag.Math, Viewport->Camera, m_Options.Width, m_Options.Height,
+            Drag.Math, Viewport->Camera, m_Server.m_Options.Width,
+            m_Server.m_Options.Height,
             Command->MousePosition.x, Command->MousePosition.y);
         RotDeg[Drag.Math.Axis] = Drag.StartRotDeg[Drag.Math.Axis] + DeltaDeg;
       }
@@ -3179,18 +3355,18 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
           .RotationDegrees = RotDeg,
           .Scale = Scale,
       };
-      m_Host.SubmitRemoteCommand(Client->User, Cmd);
+      m_Server.m_Host.SubmitRemoteCommand(Client->User, Cmd);
     }
     const std::string DragObjectId = Client->GizmoDrag->ObjectId;
     Client->GizmoDrag.reset();
     Session.ReleaseLock(DragObjectId, Client->User);
-    m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
+    m_Server.m_Host.GetHeadlessLayer().SetGizmoHoveredAxis(Client->User, -1);
     return true;
   }
   case HeadlessCommandType::Quit:
-    m_StopRequested.store(true);
-    m_Host.RequestClose();
-    BroadcastTextMessage(SerializeShutdown());
+    m_Server.m_StopRequested.store(true);
+    m_Server.m_Host.RequestClose();
+    m_Server.BroadcastTextMessage(SerializeShutdown());
     return true;
   case HeadlessCommandType::LoadStartupScene:
   case HeadlessCommandType::RenderFrame:
@@ -3198,6 +3374,11 @@ bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
   }
 
   return false;
+}
+
+bool RemoteViewportServer::HandleClientWebRtcMessage(std::string_view ClientId,
+                                                     std::string_view Payload) {
+  return m_CommandRouter->HandleClientWebRtcMessage(ClientId, Payload);
 }
 
 bool ParseRemoteViewportServerOptions(int argc, char **argv,

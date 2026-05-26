@@ -518,6 +518,43 @@ TEST(HeadlessProtocolTests, SerializesSessionConnectResponse) {
   EXPECT_NE(Json.find("\"currentUserId\":7"), std::string::npos);
 }
 
+TEST(HeadlessProtocolTests, SerializesAssetListWithEngineAndProjectAssets) {
+  std::vector<Axiom::Assets::AssetDescriptor> Assets;
+  Assets.push_back(Axiom::Assets::AssetDescriptor{
+      .Id = Axiom::AssetId{1},
+      .Name = "mesh",
+      .Kind = Axiom::Assets::AssetKind::Mesh,
+      .RelativePath = "Meshes/mesh.glb",
+  });
+  Assets.push_back(Axiom::Assets::AssetDescriptor{
+      .Id = Axiom::AssetId{2},
+      .Name = "default",
+      .Kind = Axiom::Assets::AssetKind::Material,
+      .RelativePath = "Engine/Materials/default.mat",
+  });
+
+  const rapidjson::Document Document = ParseJson(Axiom::SerializeAssetList(Assets));
+  EXPECT_EQ(RequireMember(Document, "type").GetString(), std::string("asset_list"));
+  const auto &SerializedAssets = RequireMember(Document, "assets");
+  ASSERT_TRUE(SerializedAssets.IsArray());
+  ASSERT_EQ(SerializedAssets.Size(), 2u);
+  EXPECT_EQ(RequireMember(SerializedAssets[0], "path").GetString(),
+            std::string("Meshes/mesh.glb"));
+  EXPECT_EQ(RequireMember(SerializedAssets[1], "path").GetString(),
+            std::string("Engine/Materials/default.mat"));
+  EXPECT_EQ(RequireMember(SerializedAssets[1], "kind").GetString(),
+            std::string("texture"));
+}
+
+TEST(HeadlessProtocolTests, SerializesSaveResultSuccessAndFailure) {
+  const rapidjson::Document Success = ParseJson(Axiom::SerializeSaveResult(true));
+  EXPECT_EQ(RequireMember(Success, "type").GetString(), std::string("scene_saved"));
+
+  const rapidjson::Document Failure = ParseJson(Axiom::SerializeSaveResult(false));
+  EXPECT_EQ(RequireMember(Failure, "type").GetString(),
+            std::string("scene_save_failed"));
+}
+
 TEST(HeadlessProtocolTests, SerializesEncodedVideoPacketMetadata) {
   const Axiom::EncodedVideoPacket Packet{
       .Codec = Axiom::EncodedVideoCodec::H264,

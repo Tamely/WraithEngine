@@ -165,4 +165,28 @@ TEST(WraithNetworkingModuleTests, SurfacesInitializationFailures) {
             Axiom::WraithNetworkingInitializationState::Failed);
   EXPECT_EQ(State.LastError, "simulated bind failure");
 }
+
+TEST(WraithNetworkingModuleTests, DisabledModuleStaysShutdownWithoutStartingServer) {
+  ModuleTestApplication App;
+
+  bool FactoryCalled = false;
+  auto Module = std::make_unique<Axiom::WraithNetworkingModule>(
+      [&FactoryCalled]() -> std::unique_ptr<Axiom::IRemoteViewportServer> {
+        FactoryCalled = true;
+        return std::make_unique<FakeRemoteViewportServer>();
+      },
+      false);
+  Axiom::WraithNetworkingModule *ModulePtr = Module.get();
+
+  ASSERT_TRUE(App.GetModuleManager().RegisterModule(std::move(Module)));
+  ASSERT_NE(ModulePtr, nullptr);
+  EXPECT_FALSE(FactoryCalled);
+
+  const auto State = ModulePtr->GetStateSnapshot();
+  EXPECT_FALSE(State.Enabled);
+  EXPECT_EQ(State.InitializationState,
+            Axiom::WraithNetworkingInitializationState::Shutdown);
+  EXPECT_EQ(State.Metrics.ActiveRemoteClients, 0u);
+  EXPECT_EQ(State.Metrics.TotalWebSocketMessages, 0u);
+}
 } // namespace
