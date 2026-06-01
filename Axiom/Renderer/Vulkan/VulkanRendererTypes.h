@@ -63,8 +63,7 @@ struct MeshFrameResources {
   AllocatedBuffer CameraBuffer;
   AllocatedBuffer HzbReadbackBuffer;
   VkDescriptorSet DepthFrameDescriptorSet{VK_NULL_HANDLE};
-  std::array<VkDescriptorSet, MaxMeshSubmissionsPerFrame>
-      GraphicsFrameDescriptorSets{};
+  VkDescriptorSet GraphicsFrameDescriptorSet{VK_NULL_HANDLE};
   VkDescriptorSet ComputeFrameDescriptorSet{VK_NULL_HANDLE};
   VkQueryPool TimestampQueryPool{VK_NULL_HANDLE};
   glm::mat4 HzbViewProjection{1.0f};

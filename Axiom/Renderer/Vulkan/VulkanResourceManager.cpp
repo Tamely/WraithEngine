@@ -128,6 +128,12 @@ void VulkanResourceManager::Shutdown() {
                                  VK_NULL_HANDLE);
     m_MeshGraphicsFrameDescriptorLayout = VK_NULL_HANDLE;
   }
+  if (m_MeshGraphicsMaterialDescriptorLayout != VK_NULL_HANDLE) {
+    vkDestroyDescriptorSetLayout(m_Device->Device,
+                                 m_MeshGraphicsMaterialDescriptorLayout,
+                                 VK_NULL_HANDLE);
+    m_MeshGraphicsMaterialDescriptorLayout = VK_NULL_HANDLE;
+  }
   if (m_HzbReduceDescriptorLayout != VK_NULL_HANDLE) {
     vkDestroyDescriptorSetLayout(m_Device->Device, m_HzbReduceDescriptorLayout,
                                  VK_NULL_HANDLE);
@@ -315,9 +321,15 @@ void VulkanResourceManager::InitDescriptors() {
   {
     DescriptorLayoutBuilder Builder;
     Builder.AddBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    m_MeshGraphicsFrameDescriptorLayout =
+        Builder.Build(m_Device->Device,
+                      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+  }
+  {
+    DescriptorLayoutBuilder Builder;
     Builder.AddBinding(1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
     Builder.AddBinding(2, VK_DESCRIPTOR_TYPE_SAMPLER);
-    m_MeshGraphicsFrameDescriptorLayout =
+    m_MeshGraphicsMaterialDescriptorLayout =
         Builder.Build(m_Device->Device,
                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
   }
@@ -436,10 +448,8 @@ void VulkanResourceManager::InitMeshFrameResources() {
 
     Frame.DepthFrameDescriptorSet = m_GlobalDescriptorAllocator.Allocate(
         m_Device->Device, m_MeshGraphicsFrameDescriptorLayout);
-    for (VkDescriptorSet &DescriptorSet : Frame.GraphicsFrameDescriptorSets) {
-      DescriptorSet = m_GlobalDescriptorAllocator.Allocate(
-          m_Device->Device, m_MeshGraphicsFrameDescriptorLayout);
-    }
+    Frame.GraphicsFrameDescriptorSet = m_GlobalDescriptorAllocator.Allocate(
+        m_Device->Device, m_MeshGraphicsFrameDescriptorLayout);
     Frame.ComputeFrameDescriptorSet = m_GlobalDescriptorAllocator.Allocate(
         m_Device->Device, m_MeshComputeFrameDescriptorLayout);
 

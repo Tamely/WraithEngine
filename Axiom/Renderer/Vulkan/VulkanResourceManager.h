@@ -65,6 +65,9 @@ public:
   VkDescriptorSetLayout GetMeshGraphicsFrameDescriptorLayout() const {
     return m_MeshGraphicsFrameDescriptorLayout;
   }
+  VkDescriptorSetLayout GetMeshGraphicsMaterialDescriptorLayout() const {
+    return m_MeshGraphicsMaterialDescriptorLayout;
+  }
   VkDescriptorSetLayout GetMeshComputeFrameDescriptorLayout() const {
     return m_MeshComputeFrameDescriptorLayout;
   }
@@ -151,6 +154,7 @@ private:
   VkDescriptorSetLayout m_DrawImageDescriptorLayout{VK_NULL_HANDLE};
   VkDescriptorSetLayout m_HzbReduceDescriptorLayout{VK_NULL_HANDLE};
   VkDescriptorSetLayout m_MeshGraphicsFrameDescriptorLayout{VK_NULL_HANDLE};
+  VkDescriptorSetLayout m_MeshGraphicsMaterialDescriptorLayout{VK_NULL_HANDLE};
   VkDescriptorSetLayout m_MeshComputeFrameDescriptorLayout{VK_NULL_HANDLE};
   VkDescriptorSetLayout m_MeshDescriptorLayout{VK_NULL_HANDLE};
   VkSampler m_LinearDepthSampler{VK_NULL_HANDLE};

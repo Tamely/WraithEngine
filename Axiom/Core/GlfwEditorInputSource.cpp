@@ -50,7 +50,7 @@ void GlfwEditorInputSource::Tick(const EditorInputFrame &Frame) {
   }
 
   glm::vec3 HorizontalRight = glm::normalize(
-      glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), HorizontalForward));
+      glm::cross(HorizontalForward, glm::vec3(0.0f, 1.0f, 0.0f)));
 
   glm::vec3 Movement{0.0f};
   if (m_Platform.IsKeyPressed(GLFW_KEY_W)) {
@@ -60,10 +60,10 @@ void GlfwEditorInputSource::Tick(const EditorInputFrame &Frame) {
     Movement -= HorizontalForward;
   }
   if (m_Platform.IsKeyPressed(GLFW_KEY_D)) {
-    Movement -= HorizontalRight;
+    Movement += HorizontalRight;
   }
   if (m_Platform.IsKeyPressed(GLFW_KEY_A)) {
-    Movement += HorizontalRight;
+    Movement -= HorizontalRight;
   }
   if (m_Platform.IsKeyPressed(GLFW_KEY_SPACE)) {
     Movement += glm::vec3(0.0f, 1.0f, 0.0f);

@@ -13,6 +13,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <unordered_set>
 
 #include <glm/geometric.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -52,11 +53,15 @@ void VulkanRendererBackend::Init(const RendererCreateInfo &CreateInfo) {
                                     std::move(Record), std::move(Cleanup));
                               }});
 
-  m_MaterialResources.Init({.CreateTextureImage =
-                                [this](const TextureSourceData &TextureData) {
-                                  return m_ResourceManager.CreateManagedTextureImage(
-                                      TextureData);
-                                }});
+  m_MaterialResources.Init(
+      {.Device = m_Device.Device,
+       .DescriptorAllocator = &m_ResourceManager.GetDescriptorAllocator(),
+       .MaterialDescriptorSetLayout =
+           m_ResourceManager.GetMeshGraphicsMaterialDescriptorLayout(),
+       .TextureSampler = m_ResourceManager.GetTextureSampler(),
+       .CreateTextureImage = [this](const TextureSourceData &TextureData) {
+         return m_ResourceManager.CreateManagedTextureImage(TextureData);
+       }});
 
   m_PipelineLibrary.Init(
       {.Device = m_Device.Device,
@@ -68,6 +73,8 @@ void VulkanRendererBackend::Init(const RendererCreateInfo &CreateInfo) {
            m_ResourceManager.GetHzbReduceDescriptorLayout(),
        .MeshGraphicsFrameDescriptorLayout =
            m_ResourceManager.GetMeshGraphicsFrameDescriptorLayout(),
+       .MeshGraphicsMaterialDescriptorLayout =
+           m_ResourceManager.GetMeshGraphicsMaterialDescriptorLayout(),
        .MeshComputeFrameDescriptorLayout =
            m_ResourceManager.GetMeshComputeFrameDescriptorLayout(),
        .MeshDescriptorLayout = m_ResourceManager.GetMeshDescriptorLayout(),
@@ -157,6 +164,14 @@ void VulkanRendererBackend::BeginFrame() {
   FrameStats.OcclusionCulledMeshCount = 0;
   FrameStats.MeshSubmissionCount = 0;
   FrameStats.TriangleCount = 0;
+#if !defined(NDEBUG)
+  FrameStats.DebugGraphicsMaterialDescriptorUpdates = 0;
+  FrameStats.DebugOpaqueMaterialDescriptorBinds = 0;
+  FrameStats.DebugTranslucentMaterialDescriptorBinds = 0;
+  FrameStats.DebugOpaqueUniqueMaterialCount = 0;
+  FrameStats.DebugTranslucentUniqueMaterialCount = 0;
+  m_MaterialResources.ResetDebugCounters();
+#endif
   m_DrawSubmissionSystem.BeginFrame(m_StopRendering);
 }
 
@@ -189,6 +204,7 @@ void VulkanRendererBackend::PrepareSceneFrame(RenderScene &Scene) {
               sizeof(CameraFrameUniform));
   UpdateComputeFrameDescriptors(Frame);
   UpdateDepthFrameDescriptors(Frame);
+  UpdateGraphicsFrameDescriptors(Frame);
 
   FrameStats.SubmittedMeshCount = static_cast<uint32_t>(SubmissionCount);
   FrameStats.FrustumCulledMeshCount = 0;
@@ -278,10 +294,96 @@ void VulkanRendererBackend::PrepareSceneFrame(RenderScene &Scene) {
     ++FrameStats.MeshSubmissionCount;
     FrameStats.TriangleCount += Candidate.Mesh->TriangleCount;
   }
+
+  std::sort(VisibleSubmissions.OpaqueGraphics.begin(),
+            VisibleSubmissions.OpaqueGraphics.end(),
+            [this](const VisibleSubmission &Left, const VisibleSubmission &Right) {
+              const MaterialInstance *LeftMaterial =
+                  GetSubmission(Left.SubmissionIndex).Material.get();
+              const MaterialInstance *RightMaterial =
+                  GetSubmission(Right.SubmissionIndex).Material.get();
+              if (LeftMaterial != RightMaterial) {
+                return LeftMaterial < RightMaterial;
+              }
+              return Left.SubmissionIndex < Right.SubmissionIndex;
+            });
+
+  PrepareGraphicsMaterialDescriptors();
 }
 
 const VisibleSubmissionList &VulkanRendererBackend::GetVisibleSubmissions() const {
   return m_PreparedSceneState.VisibleSubmissions;
+}
+
+void VulkanRendererBackend::PrepareGraphicsMaterialDescriptors() {
+#if !defined(NDEBUG)
+  auto &FrameStats = AccessFrameStats();
+  std::unordered_set<const MaterialInstance *> PreparedMaterials;
+  std::unordered_set<const MaterialInstance *> OpaqueMaterials;
+  std::unordered_set<const MaterialInstance *> TranslucentMaterials;
+  PreparedMaterials.reserve(
+      m_PreparedSceneState.VisibleSubmissions.OpaqueGraphics.size() +
+      m_PreparedSceneState.VisibleSubmissions.TranslucentGraphics.size());
+  OpaqueMaterials.reserve(
+      m_PreparedSceneState.VisibleSubmissions.OpaqueGraphics.size());
+  TranslucentMaterials.reserve(
+      m_PreparedSceneState.VisibleSubmissions.TranslucentGraphics.size());
+
+  auto PrepareSubmissionMaterial = [this, &PreparedMaterials](
+                                       const VisibleSubmission &Visible) {
+    const MaterialInstanceRef &Material =
+        GetSubmission(Visible.SubmissionIndex).Material;
+    if (!PreparedMaterials.insert(Material.get()).second) {
+      return;
+    }
+    m_MaterialResources.ResolveMaterialDescriptorSet(Material);
+  };
+
+  auto CountMaterialRuns = [this](const auto &Submissions) {
+    uint32_t Runs = 0;
+    const MaterialInstance *PreviousMaterial = nullptr;
+    for (const VisibleSubmission &Visible : Submissions) {
+      const MaterialInstance *CurrentMaterial =
+          GetSubmission(Visible.SubmissionIndex).Material.get();
+      if (CurrentMaterial != PreviousMaterial) {
+        ++Runs;
+        PreviousMaterial = CurrentMaterial;
+      }
+    }
+    return Runs;
+  };
+
+  for (const VisibleSubmission &Visible :
+       m_PreparedSceneState.VisibleSubmissions.OpaqueGraphics) {
+    const MaterialInstance *Material =
+        GetSubmission(Visible.SubmissionIndex).Material.get();
+    OpaqueMaterials.insert(Material);
+    PrepareSubmissionMaterial(Visible);
+  }
+
+  auto SortedTranslucentSubmissions =
+      m_PreparedSceneState.VisibleSubmissions.TranslucentGraphics;
+  std::sort(SortedTranslucentSubmissions.begin(),
+            SortedTranslucentSubmissions.end(),
+            [](const VisibleSubmission &Left, const VisibleSubmission &Right) {
+              return Left.SortDepth > Right.SortDepth;
+            });
+  for (const VisibleSubmission &Visible : SortedTranslucentSubmissions) {
+    TranslucentMaterials.insert(GetSubmission(Visible.SubmissionIndex).Material.get());
+    PrepareSubmissionMaterial(Visible);
+  }
+
+  FrameStats.DebugGraphicsMaterialDescriptorUpdates =
+      m_MaterialResources.GetDebugGraphicsMaterialDescriptorUpdates();
+  FrameStats.DebugOpaqueMaterialDescriptorBinds =
+      CountMaterialRuns(m_PreparedSceneState.VisibleSubmissions.OpaqueGraphics);
+  FrameStats.DebugTranslucentMaterialDescriptorBinds =
+      CountMaterialRuns(SortedTranslucentSubmissions);
+  FrameStats.DebugOpaqueUniqueMaterialCount =
+      static_cast<uint32_t>(OpaqueMaterials.size());
+  FrameStats.DebugTranslucentUniqueMaterialCount =
+      static_cast<uint32_t>(TranslucentMaterials.size());
+#endif
 }
 
 void VulkanRendererBackend::RecordDepthPrepass() {
@@ -556,47 +658,24 @@ void VulkanRendererBackend::UpdateDepthFrameDescriptors(
   VkDescriptorBufferInfo CameraBufferInfo =
       VkInit::BufferInfo(Frame.CameraBuffer.Buffer, 0, Frame.CameraBuffer.Size);
   VkDescriptorBufferInfo MutableCameraBufferInfo = CameraBufferInfo;
-  VkDescriptorImageInfo DefaultTextureImageInfo{};
-  DefaultTextureImageInfo.imageView =
-      m_MaterialResources.GetFallbackTextureView();
-  DefaultTextureImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-  VkDescriptorImageInfo DefaultTextureSamplerInfo{};
-  DefaultTextureSamplerInfo.sampler = m_ResourceManager.GetTextureSampler();
-  std::array<VkWriteDescriptorSet, 3> DefaultGraphicsFrameWrites = {
+  std::array<VkWriteDescriptorSet, 1> DepthFrameWrites = {
       VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                                     Frame.DepthFrameDescriptorSet,
-                                    &MutableCameraBufferInfo, 0),
-      VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-                                 Frame.DepthFrameDescriptorSet,
-                                 &DefaultTextureImageInfo, 1),
-      VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_SAMPLER,
-                                 Frame.DepthFrameDescriptorSet,
-                                 &DefaultTextureSamplerInfo, 2)};
+                                    &MutableCameraBufferInfo, 0)};
   vkUpdateDescriptorSets(m_Device.Device,
-                         static_cast<uint32_t>(DefaultGraphicsFrameWrites.size()),
-                         DefaultGraphicsFrameWrites.data(), 0, VK_NULL_HANDLE);
+                         static_cast<uint32_t>(DepthFrameWrites.size()),
+                         DepthFrameWrites.data(), 0, VK_NULL_HANDLE);
 }
 
 void VulkanRendererBackend::UpdateGraphicsFrameDescriptors(
-    VkDescriptorSet GraphicsDescriptorSet, VkImageView TextureView,
-    const VkDescriptorBufferInfo &CameraBufferInfo) const {
+    const MeshFrameResources &Frame) const {
+  VkDescriptorBufferInfo CameraBufferInfo =
+      VkInit::BufferInfo(Frame.CameraBuffer.Buffer, 0, Frame.CameraBuffer.Size);
   VkDescriptorBufferInfo MutableCameraBufferInfo = CameraBufferInfo;
-  VkDescriptorImageInfo GraphicsTextureImageInfo{};
-  GraphicsTextureImageInfo.imageView = TextureView;
-  GraphicsTextureImageInfo.imageLayout =
-      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-  VkDescriptorImageInfo GraphicsTextureSamplerInfo{};
-  GraphicsTextureSamplerInfo.sampler = m_ResourceManager.GetTextureSampler();
-  std::array<VkWriteDescriptorSet, 3> GraphicsFrameWrites = {
+  std::array<VkWriteDescriptorSet, 1> GraphicsFrameWrites = {
       VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                                    GraphicsDescriptorSet,
-                                    &MutableCameraBufferInfo, 0),
-      VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-                                 GraphicsDescriptorSet,
-                                 &GraphicsTextureImageInfo, 1),
-      VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_SAMPLER,
-                                 GraphicsDescriptorSet,
-                                 &GraphicsTextureSamplerInfo, 2)};
+                                    Frame.GraphicsFrameDescriptorSet,
+                                    &MutableCameraBufferInfo, 0)};
   vkUpdateDescriptorSets(m_Device.Device,
                          static_cast<uint32_t>(GraphicsFrameWrites.size()),
                          GraphicsFrameWrites.data(), 0, VK_NULL_HANDLE);
@@ -762,8 +841,6 @@ void VulkanRendererBackend::RecordOpaqueForwardPass(
   VkViewport Viewport{0.0f, 0.0f, static_cast<float>(DrawExtent.width),
                       static_cast<float>(DrawExtent.height), 0.0f, 1.0f};
   VkRect2D Scissor{{0, 0}, DrawExtent};
-  VkDescriptorBufferInfo CameraBufferInfo =
-      VkInit::BufferInfo(Frame.CameraBuffer.Buffer, 0, Frame.CameraBuffer.Size);
 
   VkRenderingAttachmentInfo ColorAttachment = VkInit::AttachmentInfo(
       m_ResourceManager.GetDrawImage().ImageView, VK_NULL_HANDLE,
@@ -785,25 +862,32 @@ void VulkanRendererBackend::RecordOpaqueForwardPass(
                         : m_PipelineLibrary.GetMeshGraphicsPipeline());
   vkCmdSetViewport(CommandBuffer, 0, 1, &Viewport);
   vkCmdSetScissor(CommandBuffer, 0, 1, &Scissor);
+  vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          m_PipelineLibrary.GetMeshGraphicsPipelineLayout(), 0, 1,
+                          &Frame.GraphicsFrameDescriptorSet, 0, VK_NULL_HANDLE);
 
-  for (size_t SubmissionIndex = 0; SubmissionIndex < GraphicsSubmissions.size();
-       ++SubmissionIndex) {
-    const VisibleSubmission &Visible = GraphicsSubmissions[SubmissionIndex];
+  VkDescriptorSet BoundMaterialDescriptorSet = VK_NULL_HANDLE;
+#if !defined(NDEBUG)
+  uint32_t MaterialDescriptorBindCount = 0;
+#endif
+  for (const VisibleSubmission &Visible : GraphicsSubmissions) {
     const RenderMeshSubmission &Submission = GetSubmission(Visible.SubmissionIndex);
     VulkanMesh *Mesh = ResolveVisibleMesh(Visible);
     if (Mesh == nullptr) {
       continue;
     }
 
-    VkDescriptorSet GraphicsDescriptorSet =
-        Frame.GraphicsFrameDescriptorSets[SubmissionIndex];
-    UpdateGraphicsFrameDescriptors(
-        GraphicsDescriptorSet,
-        m_MaterialResources.ResolveMaterialTextureView(Submission.Material),
-        CameraBufferInfo);
-    vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            m_PipelineLibrary.GetMeshGraphicsPipelineLayout(), 0, 1,
-                            &GraphicsDescriptorSet, 0, VK_NULL_HANDLE);
+    const VkDescriptorSet MaterialDescriptorSet =
+        m_MaterialResources.ResolveMaterialDescriptorSet(Submission.Material);
+    if (MaterialDescriptorSet != BoundMaterialDescriptorSet) {
+      vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              m_PipelineLibrary.GetMeshGraphicsPipelineLayout(), 1, 1,
+                              &MaterialDescriptorSet, 0, VK_NULL_HANDLE);
+      BoundMaterialDescriptorSet = MaterialDescriptorSet;
+#if !defined(NDEBUG)
+      ++MaterialDescriptorBindCount;
+#endif
+    }
     MeshGraphicsPushConstants PushConstants{};
     PushConstants.Model = Submission.Transform;
     if (Submission.Material) {
@@ -819,6 +903,13 @@ void VulkanRendererBackend::RecordOpaqueForwardPass(
   }
 
   vkCmdEndRendering(CommandBuffer);
+
+#if !defined(NDEBUG)
+  AccessFrameStats().DebugGraphicsMaterialDescriptorUpdates =
+      m_MaterialResources.GetDebugGraphicsMaterialDescriptorUpdates();
+  AccessFrameStats().DebugOpaqueMaterialDescriptorBinds =
+      MaterialDescriptorBindCount;
+#endif
 }
 
 void VulkanRendererBackend::RecordTranslucentForwardPass(
@@ -838,8 +929,6 @@ void VulkanRendererBackend::RecordTranslucentForwardPass(
   VkViewport Viewport{0.0f, 0.0f, static_cast<float>(DrawExtent.width),
                       static_cast<float>(DrawExtent.height), 0.0f, 1.0f};
   VkRect2D Scissor{{0, 0}, DrawExtent};
-  VkDescriptorBufferInfo CameraBufferInfo =
-      VkInit::BufferInfo(Frame.CameraBuffer.Buffer, 0, Frame.CameraBuffer.Size);
 
   VkRenderingAttachmentInfo ColorAttachment = VkInit::AttachmentInfo(
       m_ResourceManager.GetDrawImage().ImageView, VK_NULL_HANDLE,
@@ -861,25 +950,32 @@ void VulkanRendererBackend::RecordTranslucentForwardPass(
                         : m_PipelineLibrary.GetMeshGraphicsAlphaBlendPipeline());
   vkCmdSetViewport(CommandBuffer, 0, 1, &Viewport);
   vkCmdSetScissor(CommandBuffer, 0, 1, &Scissor);
+  vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          m_PipelineLibrary.GetMeshGraphicsPipelineLayout(), 0, 1,
+                          &Frame.GraphicsFrameDescriptorSet, 0, VK_NULL_HANDLE);
 
-  for (size_t SubmissionIndex = 0; SubmissionIndex < GraphicsSubmissions.size();
-       ++SubmissionIndex) {
-    const VisibleSubmission &Visible = GraphicsSubmissions[SubmissionIndex];
+  VkDescriptorSet BoundMaterialDescriptorSet = VK_NULL_HANDLE;
+#if !defined(NDEBUG)
+  uint32_t MaterialDescriptorBindCount = 0;
+#endif
+  for (const VisibleSubmission &Visible : GraphicsSubmissions) {
     const RenderMeshSubmission &Submission = GetSubmission(Visible.SubmissionIndex);
     VulkanMesh *Mesh = ResolveVisibleMesh(Visible);
     if (Mesh == nullptr) {
       continue;
     }
 
-    VkDescriptorSet GraphicsDescriptorSet =
-        Frame.GraphicsFrameDescriptorSets[SubmissionIndex];
-    UpdateGraphicsFrameDescriptors(
-        GraphicsDescriptorSet,
-        m_MaterialResources.ResolveMaterialTextureView(Submission.Material),
-        CameraBufferInfo);
-    vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            m_PipelineLibrary.GetMeshGraphicsPipelineLayout(), 0, 1,
-                            &GraphicsDescriptorSet, 0, VK_NULL_HANDLE);
+    const VkDescriptorSet MaterialDescriptorSet =
+        m_MaterialResources.ResolveMaterialDescriptorSet(Submission.Material);
+    if (MaterialDescriptorSet != BoundMaterialDescriptorSet) {
+      vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              m_PipelineLibrary.GetMeshGraphicsPipelineLayout(), 1, 1,
+                              &MaterialDescriptorSet, 0, VK_NULL_HANDLE);
+      BoundMaterialDescriptorSet = MaterialDescriptorSet;
+#if !defined(NDEBUG)
+      ++MaterialDescriptorBindCount;
+#endif
+    }
     MeshGraphicsPushConstants PushConstants{};
     PushConstants.Model = Submission.Transform;
     if (Submission.Material) {
@@ -895,6 +991,13 @@ void VulkanRendererBackend::RecordTranslucentForwardPass(
   }
 
   vkCmdEndRendering(CommandBuffer);
+
+#if !defined(NDEBUG)
+  AccessFrameStats().DebugGraphicsMaterialDescriptorUpdates =
+      m_MaterialResources.GetDebugGraphicsMaterialDescriptorUpdates();
+  AccessFrameStats().DebugTranslucentMaterialDescriptorBinds =
+      MaterialDescriptorBindCount;
+#endif
 }
 
 void VulkanRendererBackend::EnsureDrawImageLayout(

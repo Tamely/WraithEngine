@@ -14,6 +14,7 @@ public:
     VkDescriptorSetLayout DrawImageDescriptorLayout{VK_NULL_HANDLE};
     VkDescriptorSetLayout HzbReduceDescriptorLayout{VK_NULL_HANDLE};
     VkDescriptorSetLayout MeshGraphicsFrameDescriptorLayout{VK_NULL_HANDLE};
+    VkDescriptorSetLayout MeshGraphicsMaterialDescriptorLayout{VK_NULL_HANDLE};
     VkDescriptorSetLayout MeshComputeFrameDescriptorLayout{VK_NULL_HANDLE};
     VkDescriptorSetLayout MeshDescriptorLayout{VK_NULL_HANDLE};
     VkDescriptorSetLayout HDRSkyboxDescriptorLayout{VK_NULL_HANDLE};
@@ -64,6 +65,7 @@ private:
   VkDescriptorSetLayout m_DrawImageDescriptorLayout{VK_NULL_HANDLE};
   VkDescriptorSetLayout m_HzbReduceDescriptorLayout{VK_NULL_HANDLE};
   VkDescriptorSetLayout m_MeshGraphicsFrameDescriptorLayout{VK_NULL_HANDLE};
+  VkDescriptorSetLayout m_MeshGraphicsMaterialDescriptorLayout{VK_NULL_HANDLE};
   VkDescriptorSetLayout m_MeshComputeFrameDescriptorLayout{VK_NULL_HANDLE};
   VkDescriptorSetLayout m_MeshDescriptorLayout{VK_NULL_HANDLE};
   VkDescriptorSetLayout m_HDRSkyboxDescriptorLayout{VK_NULL_HANDLE};

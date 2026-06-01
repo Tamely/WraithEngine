@@ -52,7 +52,7 @@ public:
   void Shutdown();
 
   void BeginFrame(bool StopRendering);
-  void RenderImGui(bool StopRendering, RendererViewMode ViewMode);
+  void RenderImGui(bool StopRendering, RendererViewMode &ViewMode);
   void DrawFrame(const FrameRequest &Request);
   void SubmitTransferUpload(std::function<void(VkCommandBuffer)> &&RecordUpload,
                             std::function<void()> &&Cleanup);

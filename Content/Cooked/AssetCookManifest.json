@@ -1655,6 +1655,406 @@
       "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__83.wmat",
       "formatVersion": 1,
       "sourceHash": 987993751301634973
+    },
+    {
+      "assetId": 12095794822955869250,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_0",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_0.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 11463434478890720569,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_0",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_0.wmat",
+      "formatVersion": 1,
+      "sourceHash": 4151507458737491729
+    },
+    {
+      "assetId": 15507219847355056982,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_1",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_1.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 4766821222485132194,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_1",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_1.wmat",
+      "formatVersion": 1,
+      "sourceHash": 851604858293817024
+    },
+    {
+      "assetId": 815853016346939371,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_2",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_2.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 3525531968300511773,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_2",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_2.wmat",
+      "formatVersion": 1,
+      "sourceHash": 16924987618147102985
+    },
+    {
+      "assetId": 18054945187621528064,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_3",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_3.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 8607470849403086088,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_3",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_3.wmat",
+      "formatVersion": 1,
+      "sourceHash": 4859792653537051262
+    },
+    {
+      "assetId": 17475871112495913969,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_4",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_4.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 6566714637266923561,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_4",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_4.wmat",
+      "formatVersion": 1,
+      "sourceHash": 17385784984262903789
+    },
+    {
+      "assetId": 8360206298536381676,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_5",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_5.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 258479273388716458,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_5",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_5.wmat",
+      "formatVersion": 1,
+      "sourceHash": 12369277255082436023
+    },
+    {
+      "assetId": 6061821343567341184,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_6",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_6.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 18357066439617767883,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_6",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_6.wmat",
+      "formatVersion": 1,
+      "sourceHash": 15296315176305413764
+    },
+    {
+      "assetId": 3097236797834889310,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_7",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_7.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 3990839876037181663,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_7",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_7.wmat",
+      "formatVersion": 1,
+      "sourceHash": 4813458475082590939
+    },
+    {
+      "assetId": 18236586418421669034,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_8",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_8.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 1013511930689990028,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_8",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_8.wmat",
+      "formatVersion": 1,
+      "sourceHash": 17552538437644665814
+    },
+    {
+      "assetId": 2355814595322717398,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_9",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_9.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 13719278246398746676,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_9",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_9.wmat",
+      "formatVersion": 1,
+      "sourceHash": 2435843369152962752
+    },
+    {
+      "assetId": 10420483041868897471,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_10",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_10.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 4686620954401484950,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_10",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_10.wmat",
+      "formatVersion": 1,
+      "sourceHash": 13670450735059639575
+    },
+    {
+      "assetId": 3482185794204254174,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_11",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_11.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 3600304580076067718,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_11",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_11.wmat",
+      "formatVersion": 1,
+      "sourceHash": 875959168468682624
+    },
+    {
+      "assetId": 7118742746551308105,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_12",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_12.wtex",
+      "formatVersion": 2,
+      "sourceHash": 13834509895381492195
+    },
+    {
+      "assetId": 5624130574239054390,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_12",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_12.wmat",
+      "formatVersion": 1,
+      "sourceHash": 2087501798860557200
+    },
+    {
+      "assetId": 16639437455641564074,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_13",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_13.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 11652605912420992422,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_13",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_13.wmat",
+      "formatVersion": 1,
+      "sourceHash": 6891810056084308115
+    },
+    {
+      "assetId": 4756632044765826066,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_14",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_14.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 13991375210611018107,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_14",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_14.wmat",
+      "formatVersion": 1,
+      "sourceHash": 2682483665576978034
+    },
+    {
+      "assetId": 8225381685074179513,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_15",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_15.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 13457548976043167027,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_15",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_15.wmat",
+      "formatVersion": 1,
+      "sourceHash": 1166917312362300911
+    },
+    {
+      "assetId": 4048015879855409049,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_16",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_16.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 2358919811855562025,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_16",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_16.wmat",
+      "formatVersion": 1,
+      "sourceHash": 3895798813244501456
+    },
+    {
+      "assetId": 14655125979242647878,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_17",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_17.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 5438110662311396084,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_17",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_17.wmat",
+      "formatVersion": 1,
+      "sourceHash": 7098601986122915318
+    },
+    {
+      "assetId": 16595015124617109697,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_18",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_18.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 2356852059834577069,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_18",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_18.wmat",
+      "formatVersion": 1,
+      "sourceHash": 15211163213654784592
+    },
+    {
+      "assetId": 10116488612668460552,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_19",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_19.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 14066926934971471472,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_19",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_19.wmat",
+      "formatVersion": 1,
+      "sourceHash": 18137511848333088768
+    },
+    {
+      "assetId": 8606755084970727485,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_20",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_20.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 12490383226945625237,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_20",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_20.wmat",
+      "formatVersion": 1,
+      "sourceHash": 16230331080883235507
+    },
+    {
+      "assetId": 12936064864078827244,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_21",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_21.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 13524454951415366529,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_21",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_21.wmat",
+      "formatVersion": 1,
+      "sourceHash": 17139728439266277423
+    },
+    {
+      "assetId": 5874958416375166249,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_22",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_22.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 18368983865493355979,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_22",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_22.wmat",
+      "formatVersion": 1,
+      "sourceHash": 2499649355613197980
+    },
+    {
+      "assetId": 11964435080788203141,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_23",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_23.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 1471271566526309177,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_23",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_23.wmat",
+      "formatVersion": 1,
+      "sourceHash": 14405652211656311485
+    },
+    {
+      "assetId": 15623778468829846945,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/sponza_atrium_3__shared_24",
+      "cookedPath": "Cooked/Generated/MeshTextures/sponza_atrium_3__shared_24.wtex",
+      "formatVersion": 2,
+      "sourceHash": 1136906439044749114
+    },
+    {
+      "assetId": 17364695528653627007,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/sponza_atrium_3__shared_24",
+      "cookedPath": "Cooked/Generated/MeshMaterials/sponza_atrium_3__shared_24.wmat",
+      "formatVersion": 1,
+      "sourceHash": 10201332737404521061
     }
   ]
 }

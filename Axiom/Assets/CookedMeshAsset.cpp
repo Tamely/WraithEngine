@@ -10,6 +10,7 @@
 #include <cstring>
 #include <fstream>
 #include <type_traits>
+#include <unordered_map>
 
 namespace Axiom::Assets {
 namespace {
@@ -297,9 +298,17 @@ MeshSceneData ToRuntimeMeshSceneData(const CookedMeshSceneData &Scene,
                                      const std::filesystem::path &ContentRoot) {
   MeshSceneData Out;
   Out.Instances.reserve(Scene.Instances.size());
+  std::unordered_map<std::string, MaterialInstanceRef> SharedMaterials;
   for (const auto &Instance : Scene.Instances) {
-    auto Material = std::make_shared<MaterialInstance>();
-    if (!Instance.MaterialAssetPath.empty()) {
+    MaterialInstanceRef Material;
+    if (Instance.MaterialAssetPath.empty()) {
+      Material = std::make_shared<MaterialInstance>();
+    } else if (const auto SharedMaterial =
+                   SharedMaterials.find(Instance.MaterialAssetPath);
+               SharedMaterial != SharedMaterials.end()) {
+      Material = SharedMaterial->second;
+    } else {
+      Material = std::make_shared<MaterialInstance>();
       const auto CookedMaterial =
           LoadCookedMaterialAssetIfAvailable(ContentRoot /
                                              Instance.MaterialAssetPath);
@@ -313,6 +322,7 @@ MeshSceneData ToRuntimeMeshSceneData(const CookedMeshSceneData &Scene,
               LoadTextureFromFile(ContentRoot / CookedMaterial->TextureAssetPath);
         }
       }
+      SharedMaterials.emplace(Instance.MaterialAssetPath, Material);
     }
     Out.Instances.push_back({
         .Name = Instance.Name,

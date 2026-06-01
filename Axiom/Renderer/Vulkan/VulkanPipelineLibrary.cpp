@@ -23,6 +23,8 @@ void VulkanPipelineLibrary::Init(const CreateInfo &CreateInfo) {
   m_HzbReduceDescriptorLayout = CreateInfo.HzbReduceDescriptorLayout;
   m_MeshGraphicsFrameDescriptorLayout =
       CreateInfo.MeshGraphicsFrameDescriptorLayout;
+  m_MeshGraphicsMaterialDescriptorLayout =
+      CreateInfo.MeshGraphicsMaterialDescriptorLayout;
   m_MeshComputeFrameDescriptorLayout =
       CreateInfo.MeshComputeFrameDescriptorLayout;
   m_MeshDescriptorLayout = CreateInfo.MeshDescriptorLayout;
@@ -227,10 +229,12 @@ void VulkanPipelineLibrary::InitMeshPipelines() {
   GraphicsPushConstant.stageFlags =
       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
-  VkPipelineLayoutCreateInfo GraphicsLayout =
-      VkInit::PipelineLayoutCreateInfo();
-  GraphicsLayout.pSetLayouts = &m_MeshGraphicsFrameDescriptorLayout;
-  GraphicsLayout.setLayoutCount = 1;
+  const std::array<VkDescriptorSetLayout, 2> GraphicsSetLayouts = {
+      m_MeshGraphicsFrameDescriptorLayout,
+      m_MeshGraphicsMaterialDescriptorLayout};
+  VkPipelineLayoutCreateInfo GraphicsLayout = VkInit::PipelineLayoutCreateInfo();
+  GraphicsLayout.pSetLayouts = GraphicsSetLayouts.data();
+  GraphicsLayout.setLayoutCount = static_cast<uint32_t>(GraphicsSetLayouts.size());
   GraphicsLayout.pPushConstantRanges = &GraphicsPushConstant;
   GraphicsLayout.pushConstantRangeCount = 1;
   VK_CHECK(vkCreatePipelineLayout(m_Device, &GraphicsLayout, VK_NULL_HANDLE,

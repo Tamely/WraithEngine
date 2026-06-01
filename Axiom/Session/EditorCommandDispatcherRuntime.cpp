@@ -160,6 +160,7 @@ void EditorCommandDispatcher::HandleCommand(
     MeshIt->Material->BaseColorFactor = Command.BaseColorFactor;
     MeshIt->Material->Metallic = Command.Metallic;
     MeshIt->Material->Roughness = Command.Roughness;
+    MarkMaterialInstanceDirty(*MeshIt->Material);
   }
 
   m_Session.PublishEvent({.Payload = MaterialPropertiesChangedEvent{
@@ -205,6 +206,7 @@ void EditorCommandDispatcher::HandleCommand(
     MeshIt->Material->BaseColorTexture = std::move(Loaded);
     MeshIt->Material->TextureAssetPath = Command.TextureAssetPath;
   }
+  MarkMaterialInstanceDirty(*MeshIt->Material);
 
   if (!DetailsIt->second.Material.has_value()) {
     DetailsIt->second.Material = EditorMaterialProperties{};

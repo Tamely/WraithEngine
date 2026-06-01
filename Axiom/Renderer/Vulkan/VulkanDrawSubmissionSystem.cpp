@@ -250,7 +250,7 @@ void VulkanDrawSubmissionSystem::BeginFrame(bool StopRendering) {
 }
 
 void VulkanDrawSubmissionSystem::RenderImGui(bool StopRendering,
-                                             RendererViewMode ViewMode) {
+                                             RendererViewMode &ViewMode) {
   if (StopRendering || !m_EnableImGui) {
     return;
   }

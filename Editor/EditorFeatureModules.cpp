@@ -7,6 +7,8 @@
 #include <Renderer/RenderCommand.h>
 #include <Session/MeshPicking.h>
 
+#include <imgui.h>
+
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
@@ -58,7 +60,8 @@ void EditorViewportSelectionModule::Tick(EditorSession &Session,
   LastLeftMouseDown = IsLeftDown;
 
   if (!ClickedNow || Viewport == nullptr || Viewport->IsLooking ||
-      InputPlatform == nullptr || Window == nullptr) {
+      InputPlatform == nullptr || Window == nullptr ||
+      ImGui::GetIO().WantCaptureMouse) {
     return;
   }
 

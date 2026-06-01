@@ -61,6 +61,13 @@ struct RendererFrameStats {
   uint32_t MeshSubmissionCount{0};
   uint32_t TriangleCount{0};
   glm::uvec2 DrawExtent{0u, 0u};
+#if !defined(NDEBUG)
+  uint32_t DebugGraphicsMaterialDescriptorUpdates{0};
+  uint32_t DebugOpaqueMaterialDescriptorBinds{0};
+  uint32_t DebugTranslucentMaterialDescriptorBinds{0};
+  uint32_t DebugOpaqueUniqueMaterialCount{0};
+  uint32_t DebugTranslucentUniqueMaterialCount{0};
+#endif
 };
 
 class RendererBackend {

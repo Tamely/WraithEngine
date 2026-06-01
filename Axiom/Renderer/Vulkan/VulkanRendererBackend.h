@@ -91,9 +91,8 @@ private:
                                      RendererViewMode ViewMode) const;
   void UpdateComputeFrameDescriptors(const MeshFrameResources &Frame) const;
   void UpdateDepthFrameDescriptors(const MeshFrameResources &Frame) const;
-  void UpdateGraphicsFrameDescriptors(
-      VkDescriptorSet GraphicsDescriptorSet, VkImageView TextureView,
-      const VkDescriptorBufferInfo &CameraBufferInfo) const;
+  void UpdateGraphicsFrameDescriptors(const MeshFrameResources &Frame) const;
+  void PrepareGraphicsMaterialDescriptors();
   void RecordDepthPrepassPass(VkCommandBuffer CommandBuffer,
                               const MeshFrameResources &Frame) const;
   void RecordComputeMeshPathPass(VkCommandBuffer CommandBuffer,

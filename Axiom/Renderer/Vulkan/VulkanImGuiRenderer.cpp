@@ -127,6 +127,18 @@ void VulkanImGuiRenderer::BuildStatsUiAndRender(RendererFrameStats &FrameStats,
     ImGui::Text("Triangles: %u", FrameStats.TriangleCount);
     ImGui::Text("Draw extent: %u x %u", FrameStats.DrawExtent.x,
                 FrameStats.DrawExtent.y);
+#if !defined(NDEBUG)
+    ImGui::Text("Material descriptor updates: %u",
+                FrameStats.DebugGraphicsMaterialDescriptorUpdates);
+    ImGui::Text("Opaque material descriptor binds: %u",
+                FrameStats.DebugOpaqueMaterialDescriptorBinds);
+    ImGui::Text("Opaque unique materials: %u",
+                FrameStats.DebugOpaqueUniqueMaterialCount);
+    ImGui::Text("Translucent material descriptor binds: %u",
+                FrameStats.DebugTranslucentMaterialDescriptorBinds);
+    ImGui::Text("Translucent unique materials: %u",
+                FrameStats.DebugTranslucentUniqueMaterialCount);
+#endif
     int SelectedMode = static_cast<int>(ViewMode);
     const char *ModeLabels[] = {"Lit", "Unlit", "Wireframe"};
     if (ImGui::Combo("View Mode", &SelectedMode, ModeLabels,

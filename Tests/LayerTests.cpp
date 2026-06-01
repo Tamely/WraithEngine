@@ -228,7 +228,7 @@ TEST(EditorSessionTests, CameraMovementUpdatesOnlySessionOwnedState) {
   const Axiom::Camera ExpectedBefore =
       Session.FindViewport(Axiom::SessionUserId{7})->Camera;
   Axiom::Camera Expected = ExpectedBefore;
-  Expected.MoveLocal(glm::vec3(1.5f, -0.25f, 0.75f));
+  Expected.MoveWorld(glm::vec3(1.5f, -0.25f, 0.75f));
 
   Session.Submit(MakeContext(),
                  {.Payload = Axiom::UpdateViewportCameraCommand{
@@ -304,8 +304,8 @@ TEST(EditorSessionTests, CommandsDrainInFifoOrder) {
   Session.Subscribe(&Subscriber);
   Session.EnsureViewportState(Axiom::SessionUserId{7});
   Axiom::Camera Expected = Session.FindViewport(Axiom::SessionUserId{7})->Camera;
-  Expected.MoveLocal(glm::vec3(1.0f, 0.0f, 0.0f));
-  Expected.MoveLocal(glm::vec3(0.0f, 2.0f, 0.0f));
+  Expected.MoveWorld(glm::vec3(1.0f, 0.0f, 0.0f));
+  Expected.MoveWorld(glm::vec3(0.0f, 2.0f, 0.0f));
 
   Session.Submit(MakeContext(1),
                  {.Payload = Axiom::UpdateViewportCameraCommand{
@@ -825,6 +825,8 @@ TEST(EditorInputSourceTests, GlfwInputSourceTranslatesPlatformStateIntoCommands)
   const auto &CameraCommand = std::get<Axiom::UpdateViewportCameraCommand>(
       Sink.Commands[1].Command.Payload);
   EXPECT_GT(glm::dot(CameraCommand.WorldMovement, CameraCommand.WorldMovement), 0.0f);
+  EXPECT_GT(CameraCommand.WorldMovement.x, 0.0f);
+  EXPECT_LT(CameraCommand.WorldMovement.z, 0.0f);
   ASSERT_TRUE(CameraCommand.CursorPosition.has_value());
   EXPECT_EQ(*CameraCommand.CursorPosition, glm::dvec2(12.0, 24.0));
 }
