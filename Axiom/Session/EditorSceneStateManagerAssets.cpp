@@ -7,15 +7,17 @@
 
 namespace Axiom {
 namespace {
-Instance *FindInstanceById(Instance *Root, std::string_view Id) {
-  if (!Root) return nullptr;
-  if (Root->GetName() == Id) return Root;
-  for (Instance *Child : Root->GetChildren()) {
-    if (Instance *Found = FindInstanceById(Child, Id)) {
+InstanceHandle FindInstanceById(const InstancePool &Pool, InstanceHandle Root,
+                                std::string_view Id) {
+  const Instance *RootNode = Pool.Resolve(Root);
+  if (!RootNode) return {};
+  if (RootNode->GetName() == Id) return Root;
+  for (const InstanceHandle Child : RootNode->GetChildren()) {
+    if (const InstanceHandle Found = FindInstanceById(Pool, Child, Id)) {
       return Found;
     }
   }
-  return nullptr;
+  return {};
 }
 
 glm::vec3 AbsVec3(const glm::vec3 &Value) {
@@ -110,11 +112,15 @@ std::string ResolveGeneratedAssetChildDisplayName(std::string_view InstanceName,
 
 void EditorSceneStateManager::RemoveGeneratedAssetChildren(
     std::string_view RootObjectId) {
-  Instance *Root = FindInstanceById(m_Session.m_SceneRoot.get(), RootObjectId);
+  const InstanceHandle RootHandle =
+      FindInstanceById(m_Session.m_InstancePool, m_Session.m_SceneRoot, RootObjectId);
+  const Instance *Root = m_Session.m_InstancePool.Resolve(RootHandle);
   if (Root == nullptr) return;
 
   std::vector<std::string> GeneratedChildIds;
-  for (Instance *Child : Root->GetChildren()) {
+  for (const InstanceHandle ChildHandle : Root->GetChildren()) {
+    const Instance *Child = m_Session.m_InstancePool.Resolve(ChildHandle);
+    if (Child == nullptr) continue;
     const auto DetailsIt =
         m_Session.m_State.Scene.ObjectDetailsById.find(Child->GetName());
     if (DetailsIt == m_Session.m_State.Scene.ObjectDetailsById.end()) continue;
@@ -127,13 +133,14 @@ void EditorSceneStateManager::RemoveGeneratedAssetChildren(
   }
 
   for (const std::string &ChildId : GeneratedChildIds) {
-    Instance *Child = FindInstanceById(m_Session.m_SceneRoot.get(), ChildId);
-    if (Child == nullptr) continue;
-    for (const std::string &DescendantId : CollectDescendantIds(Child)) {
+    const InstanceHandle ChildHandle =
+        FindInstanceById(m_Session.m_InstancePool, m_Session.m_SceneRoot, ChildId);
+    if (!ChildHandle) continue;
+    for (const std::string &DescendantId : CollectDescendantIds(ChildHandle)) {
       RemoveSceneObject(DescendantId);
       ClearSelectionsForObject(DescendantId);
     }
-    Child->Destroy();
+    m_Session.m_InstancePool.Destroy(ChildHandle);
   }
 }
 
@@ -144,7 +151,9 @@ void EditorSceneStateManager::ExpandMeshAssetIntoScene(
       m_Session.m_State.Scene.ObjectDetailsById.find(std::string(RootObjectId));
   if (DetailsIt == m_Session.m_State.Scene.ObjectDetailsById.end()) return;
 
-  Instance *Root = FindInstanceById(m_Session.m_SceneRoot.get(), RootObjectId);
+  const InstanceHandle RootHandle =
+      FindInstanceById(m_Session.m_InstancePool, m_Session.m_SceneRoot, RootObjectId);
+  Instance *Root = m_Session.m_InstancePool.Resolve(RootHandle);
   if (Root == nullptr) return;
 
   RemoveGeneratedAssetChildren(RootObjectId);
@@ -232,9 +241,9 @@ void EditorSceneStateManager::ExpandMeshAssetIntoScene(
         .GeneratedFromAssetRootId = std::string(RootObjectId),
     };
 
-    if (Instance *Child = CreateInstanceForTemplate("Mesh", ChildId);
-        Child != nullptr) {
-      Child->SetParent(Root);
+    const InstanceHandle Child = CreateInstanceForTemplate("Mesh", ChildId);
+    if (Instance *ChildNode = m_Session.m_InstancePool.Resolve(Child); ChildNode != nullptr) {
+      ChildNode->SetParent(RootHandle);
     }
 
     m_Session.m_State.Scene.MeshInstances.push_back(EditorSceneMeshInstance{

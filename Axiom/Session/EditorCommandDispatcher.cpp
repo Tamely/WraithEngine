@@ -241,8 +241,8 @@ void EditorCommandDispatcher::HandleCommand(
 void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                             const CreateObjectCommand &Command) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
-  Instance *WorldFolder = m_Session.m_SceneStateManager->EnsureWorldFolder();
-  if (WorldFolder == nullptr) return;
+  const InstanceHandle WorldFolder = m_Session.m_SceneStateManager->EnsureWorldFolder();
+  if (!WorldFolder) return;
 
   const EditorSceneItemKind Kind =
       Command.TemplateId == "Mesh"   ? EditorSceneItemKind::Mesh :
@@ -271,10 +271,13 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
                     .WorldTransform = InitTransform,
                 });
 
-  if (Instance *Node =
+  if (const InstanceHandle Node =
           m_Session.m_SceneStateManager->CreateInstanceForTemplate(Command.TemplateId,
-                                                                   ObjectId)) {
-    Node->SetParent(WorldFolder);
+                                                                   ObjectId);
+      Node) {
+    Instance *NodePtr = m_Session.m_InstancePool.Resolve(Node);
+    if (NodePtr == nullptr) return;
+    NodePtr->SetParent(WorldFolder);
   }
 
   m_Session.m_SceneStateManager->SyncItemsFromTree();
@@ -290,8 +293,8 @@ void EditorCommandDispatcher::HandleCommand(
     const QueuedEditorCommand &QueuedCommand,
     const CreateMeshObjectCommand &Command) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
-  Instance *WorldFolder = m_Session.m_SceneStateManager->EnsureWorldFolder();
-  if (WorldFolder == nullptr) return;
+  const InstanceHandle WorldFolder = m_Session.m_SceneStateManager->EnsureWorldFolder();
+  if (!WorldFolder) return;
 
   const std::string ObjectId =
       m_Session.m_SceneStateManager->BuildUniqueObjectId("Mesh");
@@ -316,9 +319,12 @@ void EditorCommandDispatcher::HandleCommand(
                     .WorldTransform = Transform,
                 });
 
-  if (Instance *Node =
-          m_Session.m_SceneStateManager->CreateInstanceForTemplate("Mesh", ObjectId)) {
-    Node->SetParent(WorldFolder);
+  if (const InstanceHandle Node =
+          m_Session.m_SceneStateManager->CreateInstanceForTemplate("Mesh", ObjectId);
+      Node) {
+    Instance *NodePtr = m_Session.m_InstancePool.Resolve(Node);
+    if (NodePtr == nullptr) return;
+    NodePtr->SetParent(WorldFolder);
   }
 
   m_Session.m_SceneStateManager->SyncItemsFromTree();
@@ -345,10 +351,12 @@ void EditorCommandDispatcher::HandleCommand(
     const QueuedEditorCommand &QueuedCommand,
     const DuplicateObjectCommand &Command) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
-  Instance *Source = m_Session.FindInstanceById(Command.ObjectId);
-  if (Source == nullptr) return;
-  Instance *Parent = Source->GetParent();
-  if (Parent == nullptr) return;
+  const InstanceHandle Source = m_Session.FindInstanceById(Command.ObjectId);
+  if (!Source) return;
+  const Instance *SourceNode = m_Session.m_InstancePool.Resolve(Source);
+  if (SourceNode == nullptr) return;
+  const InstanceHandle Parent = SourceNode->GetParent();
+  if (!Parent) return;
 
   std::vector<EditorObjectDetails> NewDetails;
   m_Session.m_SceneStateManager->DeepCloneSubtree(Source, Parent, NewDetails);
@@ -366,16 +374,16 @@ void EditorCommandDispatcher::HandleCommand(
 void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                             const DeleteObjectCommand &Command) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
-  Instance *Target = m_Session.FindInstanceById(Command.ObjectId);
-  if (Target == nullptr) return;
+  const InstanceHandle Target = m_Session.FindInstanceById(Command.ObjectId);
+  if (!Target) return;
 
   for (const std::string &Id :
-       m_Session.m_SceneStateManager->CollectDescendantIds(Target)) {
+      m_Session.m_SceneStateManager->CollectDescendantIds(Target)) {
     m_Session.m_SceneStateManager->RemoveSceneObject(Id);
     m_Session.m_SceneStateManager->ClearSelectionsForObject(Id);
   }
 
-  Target->Destroy();
+  m_Session.m_InstancePool.Destroy(Target);
   m_Session.m_SceneStateManager->SyncItemsFromTree();
   m_Session.RebuildSceneHandleState();
   m_Session.PublishEvent({.Payload = ObjectDeletedEvent{
@@ -388,12 +396,14 @@ void EditorCommandDispatcher::HandleCommand(
     const QueuedEditorCommand &QueuedCommand,
     const ReparentObjectCommand &Command) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
-  Instance *Target = m_Session.FindInstanceById(Command.ObjectId);
-  Instance *NewParent = m_Session.FindInstanceById(Command.NewParentId);
-  if (Target == nullptr || NewParent == nullptr) return;
-  if (Target->GetParent() == NewParent) return;
+  const InstanceHandle Target = m_Session.FindInstanceById(Command.ObjectId);
+  const InstanceHandle NewParent = m_Session.FindInstanceById(Command.NewParentId);
+  if (!Target || !NewParent) return;
+  Instance *TargetNode = m_Session.m_InstancePool.Resolve(Target);
+  if (TargetNode == nullptr) return;
+  if (TargetNode->GetParent() == NewParent) return;
 
-  Target->SetParent(NewParent);
+  TargetNode->SetParent(NewParent);
   m_Session.m_SceneStateManager->SyncItemsFromTree();
   m_Session.RebuildSceneHandleState();
   m_Session.m_SceneStateManager->RecomputeSubtreeWorldTransforms(Target);

@@ -43,15 +43,18 @@ bool IsWhitespace(char Value) {
          Value == '\f' || Value == '\v';
 }
 
-Instance *FindInstanceByIdRecursive(Instance *Root, std::string_view Id) {
-  if (Root == nullptr) return nullptr;
-  if (Root->GetName() == Id) return Root;
-  for (Instance *Child : Root->GetChildren()) {
-    if (Instance *Found = FindInstanceByIdRecursive(Child, Id)) {
+InstanceHandle FindInstanceByIdRecursive(const InstancePool &Pool,
+                                         InstanceHandle Root,
+                                         std::string_view Id) {
+  const Instance *RootNode = Pool.Resolve(Root);
+  if (RootNode == nullptr) return {};
+  if (RootNode->GetName() == Id) return Root;
+  for (const InstanceHandle Child : RootNode->GetChildren()) {
+    if (const InstanceHandle Found = FindInstanceByIdRecursive(Pool, Child, Id)) {
       return Found;
     }
   }
-  return nullptr;
+  return {};
 }
 
 const EditorSceneItem *FindSceneItemByHandleRecursive(
@@ -524,8 +527,8 @@ void EditorSession::RebuildSceneHandleState() {
   }
 }
 
-Instance *EditorSession::FindInstanceById(std::string_view ObjectId) const {
-  return FindInstanceByIdRecursive(m_SceneRoot.get(), ObjectId);
+InstanceHandle EditorSession::FindInstanceById(std::string_view ObjectId) const {
+  return FindInstanceByIdRecursive(m_InstancePool, m_SceneRoot, ObjectId);
 }
 
 bool EditorSession::IsValidTemplateId(const std::string &TemplateId) const {
@@ -533,7 +536,7 @@ bool EditorSession::IsValidTemplateId(const std::string &TemplateId) const {
 }
 
 std::vector<std::string>
-EditorSession::CollectDescendantIds(const Instance *Root) const {
+EditorSession::CollectDescendantIds(InstanceHandle Root) const {
   return m_SceneStateManager->CollectDescendantIds(Root);
 }
 

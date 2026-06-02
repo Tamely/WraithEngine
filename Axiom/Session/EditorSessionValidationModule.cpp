@@ -7,19 +7,21 @@
 
 namespace Axiom {
 namespace {
-Instance *FindInstanceById(Instance *Root, std::string_view Id) {
-  if (!Root) {
-    return nullptr;
+InstanceHandle FindInstanceById(const InstancePool &Pool, InstanceHandle Root,
+                                std::string_view Id) {
+  const Instance *RootNode = Pool.Resolve(Root);
+  if (RootNode == nullptr) {
+    return {};
   }
-  if (Root->GetName() == Id) {
+  if (RootNode->GetName() == Id) {
     return Root;
   }
-  for (Instance *Child : Root->GetChildren()) {
-    if (Instance *Found = FindInstanceById(Child, Id)) {
+  for (const InstanceHandle Child : RootNode->GetChildren()) {
+    if (const InstanceHandle Found = FindInstanceById(Pool, Child, Id)) {
       return Found;
     }
   }
-  return nullptr;
+  return {};
 }
 
 void CookMeshAssetBestEffort(const std::filesystem::path &ContentDir,
@@ -344,10 +346,12 @@ bool EditorSessionValidationModule::ValidateCommand(
       FailureReason = "The world folder cannot be reparented.";
       return false;
     }
-    const Instance *Target =
-        FindInstanceById(m_Session.m_SceneRoot.get(), ReparentCmd->ObjectId);
-    if (Target != nullptr) {
-      for (const std::string &DescId : m_Session.CollectDescendantIds(Target)) {
+    const InstanceHandle TargetHandle =
+        FindInstanceById(m_Session.m_InstancePool, m_Session.m_SceneRoot,
+                         ReparentCmd->ObjectId);
+    if (TargetHandle) {
+      for (const std::string &DescId :
+           m_Session.CollectDescendantIds(TargetHandle)) {
         if (DescId == ReparentCmd->NewParentId) {
           FailureReason =
               "Cannot reparent an object onto one of its descendants.";

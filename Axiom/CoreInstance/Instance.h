@@ -1,163 +1,84 @@
 #pragma once
 
+#include "CoreInstance/InstanceHandle.h"
+#include "CoreInstance/InstanceType.h"
+
 #include <algorithm>
-#include <sstream>
-#include <stack>
 #include <string>
 #include <type_traits>
 #include <vector>
 
-#define GENERATED_BODY(ClassName)                                              \
-  virtual const char *GetClassName() const override { return #ClassName; }
-
 namespace Axiom {
+class InstancePool;
+
+#define AX_INSTANCE_BODY(TypeName)                                             \
+  static constexpr InstanceType StaticType() { return InstanceType::TypeName; } \
+  InstanceType GetType() const override { return StaticType(); }
+
 class Instance {
 public:
-  Instance() = default;
-  Instance(const std::string &Name) : m_Name(Name) {}
+  static constexpr InstanceType StaticType() { return InstanceType::Instance; }
 
-  virtual ~Instance() {
-    if (!m_IsDestroyed) {
-      Destroy();
-    }
-  }
+  Instance() = default;
+  explicit Instance(const std::string &Name) : m_Name(Name) {}
+  virtual ~Instance() = default;
 
   Instance(const Instance &) = delete;
   void operator=(const Instance &) = delete;
 
-  template <typename T>
-  static inline T *Create(const std::string &Name = "Instance") {
-    static_assert(std::is_base_of<Instance, T>::value,
-                  "T must inherit from Instance");
-
-    T *NewObj = new T(Name);
-    NewObj->OnCreate();
-    return NewObj;
-  }
-
-public:
   void SetName(const std::string &Name) { m_Name = Name; }
   const std::string &GetName() const { return m_Name; }
 
-  void SetParent(Instance *Parent) {
-    if (m_Parent == Parent || IsDestroyed())
-      return;
+  void SetParent(InstanceHandle Parent);
+  InstanceHandle GetParent() const { return m_Parent; }
+  const std::vector<InstanceHandle> &GetChildren() const { return m_Children; }
 
-    Instance *Ancestor = Parent;
-    while (Ancestor) {
-      if (Ancestor == this)
-        return; // Would create a cycle
-      Ancestor = Ancestor->GetParent();
-    }
+  virtual InstanceType GetType() const = 0;
+  std::string GetFullName() const;
 
-    if (m_Parent)
-      m_Parent->RemoveChildInternal(this);
-
-    m_Parent = Parent;
-
-    if (m_Parent)
-      m_Parent->AddChildInternal(this);
-  }
-
-  Instance *GetParent() const { return m_Parent; }
-  const std::vector<Instance *> &GetChildren() const { return m_Children; }
-
-  virtual const char *GetClassName() const { return "Instance"; }
-  const std::string GetFullName() const {
-    std::stack<std::string> NameStack;
-    const Instance *CurrentInstance = this;
-    while (CurrentInstance != nullptr) {
-      NameStack.push(CurrentInstance->GetName());
-      CurrentInstance = CurrentInstance->GetParent();
-    }
-
-    std::stringstream StringStream;
-    while (!NameStack.empty()) {
-      std::string Name = NameStack.top();
-      NameStack.pop();
-
-      StringStream << Name << ".";
-    }
-
-    std::string Output = StringStream.str();
-    Output.pop_back();
-    return Output;
-  }
-
-public:
   bool IsDestroyed() const { return m_IsDestroyed; }
-
-  void Destroy() {
-    if (m_IsDestroyed) {
-      return;
-    }
-
-    m_IsDestroyed = true;
-
-    OnDestroy();
-
-    if (m_Parent) {
-      m_Parent->RemoveChildInternal(this);
-      m_Parent = nullptr;
-    }
-
-    std::vector<Instance *> ChildrenCopy = m_Children;
-    m_Children.clear();
-
-    for (Instance *Child : ChildrenCopy) {
-      Child->m_Parent = nullptr;
-      delete Child;
-    }
-  }
+  InstanceHandle GetHandle() const { return m_Self; }
 
   template <typename T> bool IsA() const {
-    return dynamic_cast<const T *>(this) != nullptr;
+    static_assert(std::is_base_of_v<Instance, T>, "T must inherit from Instance");
+    return GetType() == T::StaticType();
   }
 
-  Instance *FindFirstChild(const std::string &Name) const {
-    for (Instance *Child : m_Children) {
-      if (Child->GetName() == Name) {
-        return Child;
+  InstanceHandle FindFirstChild(const std::string &Name) const;
+
+  template <typename T> InstanceHandle FindFirstChildOfClass() const {
+    static_assert(std::is_base_of_v<Instance, T>, "T must inherit from Instance");
+    for (const InstanceHandle ChildHandle : m_Children) {
+      const Instance *Child = ResolveHandle(ChildHandle);
+      if (Child != nullptr && Child->GetType() == T::StaticType()) {
+        return ChildHandle;
       }
     }
 
-    return nullptr;
+    return {};
   }
 
-  template <typename T> T *FindFirstChildOfClass() const {
-    for (Instance *Child : m_Children) {
-      if (T *CastChild = dynamic_cast<T *>(Child)) {
-        return CastChild;
-      }
-    }
+  virtual void OnCreate() {}
+  virtual void OnDestroy() {}
 
-    return nullptr;
-  }
-
-public:
-  virtual void OnCreate() {};
-  virtual void OnDestroy() {};
-
-  virtual void OnChildAdded(Instance *Child) {}
-  virtual void OnChildRemoved(Instance *Child) {}
-
-private:
-  void AddChildInternal(Instance *Child) {
-    m_Children.push_back(Child);
-    OnChildAdded(Child);
-  }
-  void RemoveChildInternal(Instance *Child) {
-    auto It = std::find(m_Children.begin(), m_Children.end(), Child);
-    if (It != m_Children.end()) {
-      m_Children.erase(It);
-      OnChildRemoved(Child);
-    }
-  }
+  virtual void OnChildAdded(InstanceHandle Child) { (void)Child; }
+  virtual void OnChildRemoved(InstanceHandle Child) { (void)Child; }
 
 protected:
+  friend class InstancePool;
+
+  void BindToPool(InstancePool &Pool, InstanceHandle Self);
+
+private:
+  void AddChildInternal(InstanceHandle Child);
+  void RemoveChildInternal(InstanceHandle Child);
+  const Instance *ResolveHandle(InstanceHandle Handle) const;
+
   std::string m_Name = "Instance";
-  Instance *m_Parent = nullptr;
-  std::vector<Instance *> m_Children;
+  InstancePool *m_Pool = nullptr;
+  InstanceHandle m_Self{};
+  InstanceHandle m_Parent{};
+  std::vector<InstanceHandle> m_Children;
   bool m_IsDestroyed = false;
 };
 } // namespace Axiom

@@ -13,6 +13,8 @@ set(ENGINE_SOURCES
   Assets/MeshAsset.cpp
   Assets/SceneFile.cpp
   Assets/SvgTexture.cpp
+  CoreInstance/Instance.cpp
+  CoreInstance/InstancePool.cpp
   Core/Application.cpp
   Core/ApplicationModules.cpp
   Core/GlfwEditorInputSource.cpp

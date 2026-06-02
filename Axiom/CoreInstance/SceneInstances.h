@@ -6,38 +6,38 @@ namespace Axiom {
 
 class DataModel final : public Instance {
 public:
-  DataModel() : Instance("DataModel") {}
-  GENERATED_BODY(DataModel)
+  explicit DataModel(const std::string &Name = "DataModel") : Instance(Name) {}
+  AX_INSTANCE_BODY(DataModel)
 };
 
 class SceneFolder final : public Instance {
 public:
   explicit SceneFolder(const std::string &Name = "Folder") : Instance(Name) {}
-  GENERATED_BODY(SceneFolder)
+  AX_INSTANCE_BODY(SceneFolder)
 };
 
 class SceneMeshObject final : public Instance {
 public:
   explicit SceneMeshObject(const std::string &Name = "Mesh") : Instance(Name) {}
-  GENERATED_BODY(SceneMeshObject)
+  AX_INSTANCE_BODY(SceneMeshObject)
 };
 
 class SceneLight final : public Instance {
 public:
   explicit SceneLight(const std::string &Name = "Light") : Instance(Name) {}
-  GENERATED_BODY(SceneLight)
+  AX_INSTANCE_BODY(SceneLight)
 };
 
 class SceneCamera final : public Instance {
 public:
   explicit SceneCamera(const std::string &Name = "Camera") : Instance(Name) {}
-  GENERATED_BODY(SceneCamera)
+  AX_INSTANCE_BODY(SceneCamera)
 };
 
 class SceneActor final : public Instance {
 public:
   explicit SceneActor(const std::string &Name = "Actor") : Instance(Name) {}
-  GENERATED_BODY(SceneActor)
+  AX_INSTANCE_BODY(SceneActor)
 };
 
 } // namespace Axiom

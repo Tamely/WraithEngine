@@ -22,18 +22,18 @@ public:
   BuildObjectDetailsMap(std::vector<EditorObjectDetails> ObjectDetails);
 
   void InitSceneRoot();
-  Instance *FindWorldFolder() const;
-  Instance *EnsureWorldFolder();
+  InstanceHandle FindWorldFolder() const;
+  InstanceHandle EnsureWorldFolder();
   void RebuildInstanceTree(const std::vector<EditorSceneItem> &Items,
-                           Instance *Parent);
+                           InstanceHandle Parent);
   void SyncItemsFromTree();
-  EditorSceneItem BuildItemFromInstance(const Instance *Node) const;
-  Instance *CreateInstanceForTemplate(const std::string &TemplateId,
-                                      const std::string &ObjectId) const;
-  EditorSceneItemKind KindForInstance(const Instance *Node) const;
+  EditorSceneItem BuildItemFromInstance(InstanceHandle Node) const;
+  InstanceHandle CreateInstanceForTemplate(const std::string &TemplateId,
+                                           const std::string &ObjectId) const;
+  EditorSceneItemKind KindForInstance(InstanceHandle Node) const;
   bool IsValidTemplateId(const std::string &TemplateId) const;
-  std::vector<std::string> CollectDescendantIds(const Instance *Root) const;
-  void DeepCloneSubtree(const Instance *Source, Instance *DestParent,
+  std::vector<std::string> CollectDescendantIds(InstanceHandle Root) const;
+  void DeepCloneSubtree(InstanceHandle Source, InstanceHandle DestParent,
                         std::vector<EditorObjectDetails> &OutNewDetails);
 
   std::string BuildUniqueObjectId(std::string_view BaseObjectId) const;
@@ -51,9 +51,9 @@ public:
   void ClearSelectionsForObject(std::string_view ObjectId);
   void PruneInvalidSelections();
 
-  glm::mat4 ComputeWorldTransformMatrix(const Instance *Node) const;
+  glm::mat4 ComputeWorldTransformMatrix(InstanceHandle Node) const;
   EditorTransformDetails DecomposeMatrix(const glm::mat4 &Matrix) const;
-  void RecomputeSubtreeWorldTransforms(const Instance *Node);
+  void RecomputeSubtreeWorldTransforms(InstanceHandle Node);
   void RecomputeAllWorldTransforms();
   void ApplyWorldTransform(std::string_view ObjectId,
                            const EditorTransformDetails &WorldTransform,

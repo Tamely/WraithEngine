@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CoreInstance/InstancePool.h"
 #include "CoreInstance/SceneInstances.h"
 #include "Renderer/Camera.h"
 #include "Renderer/Mesh.h"
@@ -190,7 +191,9 @@ public:
 
   const EditorSessionState &GetState() const { return m_State; }
   const EditorSessionConfig &GetConfig() const { return m_Config; }
-  const DataModel *GetSceneRoot() const { return m_SceneRoot.get(); }
+  InstanceHandle GetSceneRoot() const { return m_SceneRoot; }
+  const InstancePool &GetInstancePool() const { return m_InstancePool; }
+  InstancePool &GetInstancePool() { return m_InstancePool; }
   const EditorViewportState *FindViewport(SessionUserId User) const;
   const EditorSceneItem *FindSceneItem(std::string_view ObjectId) const;
   const EditorSceneItem *FindSceneItem(SceneObjectHandle Handle) const;
@@ -239,9 +242,9 @@ private:
   SceneObjectHandle EnsureHandleForObjectId(std::string_view ObjectId,
                                             SceneObjectHandle PreferredHandle = {});
   void RebuildSceneHandleState();
-  Instance *FindInstanceById(std::string_view ObjectId) const;
+  InstanceHandle FindInstanceById(std::string_view ObjectId) const;
   bool IsValidTemplateId(const std::string &TemplateId) const;
-  std::vector<std::string> CollectDescendantIds(const Instance *Root) const;
+  std::vector<std::string> CollectDescendantIds(InstanceHandle Root) const;
   void PublishEvent(const EditorEvent &Event);
 
   EditorSessionConfig m_Config;
@@ -251,7 +254,8 @@ private:
   std::unique_ptr<EditorPhysicsController> m_PhysicsController;
   std::unique_ptr<EditorSceneStateManager> m_SceneStateManager;
   std::unique_ptr<EditorSessionValidationModule> m_ValidationModule;
-  std::unique_ptr<DataModel> m_SceneRoot;
+  InstancePool m_InstancePool;
+  InstanceHandle m_SceneRoot{};
   std::filesystem::path m_ContentDir;
   std::filesystem::path m_EngineContentDir;
   std::optional<RuntimeSceneSnapshot> m_RuntimeSceneSnapshot;

@@ -308,8 +308,8 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &,
 void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                             const PlaceActorCommand &Command) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
-  Instance *WorldFolder = m_Session.m_SceneStateManager->EnsureWorldFolder();
-  if (WorldFolder == nullptr) return;
+  const InstanceHandle WorldFolder = m_Session.m_SceneStateManager->EnsureWorldFolder();
+  if (!WorldFolder) return;
 
   const std::string ActorId =
       m_Session.m_SceneStateManager->BuildUniqueObjectId("Actor");
@@ -328,9 +328,10 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
                    .Transform = ActorTransform,
                    .WorldTransform = ActorTransform,
                });
-  Instance *ActorNode =
+  const InstanceHandle ActorNodeHandle =
       m_Session.m_SceneStateManager->CreateInstanceForTemplate("Actor", ActorId);
-  if (ActorNode != nullptr) {
+  if (Instance *ActorNode = m_Session.m_InstancePool.Resolve(ActorNodeHandle);
+      ActorNode != nullptr) {
     ActorNode->SetParent(WorldFolder);
   }
 
@@ -364,9 +365,12 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
                                            ? std::optional{EditorTransformDetails{}}
                                            : std::nullopt,
                  });
-    if (Instance *ChildNode = m_Session.m_SceneStateManager->CreateInstanceForTemplate(
-            Command.ChildTemplateId, ChildId)) {
-      ChildNode->SetParent(ActorNode != nullptr ? ActorNode : WorldFolder);
+    const InstanceHandle ChildNodeHandle =
+        m_Session.m_SceneStateManager->CreateInstanceForTemplate(
+            Command.ChildTemplateId, ChildId);
+    if (Instance *ChildNode = m_Session.m_InstancePool.Resolve(ChildNodeHandle);
+        ChildNode != nullptr) {
+      ChildNode->SetParent(ActorNodeHandle ? ActorNodeHandle : WorldFolder);
     }
   }
 

@@ -1385,16 +1385,18 @@ TEST(SceneLifecycleTests, SetSceneItemsRebuildsInstanceTree) {
       }},
   }});
 
-  const Axiom::DataModel *Root = Session.GetSceneRoot();
+  const Axiom::InstancePool &Pool = Session.GetInstancePool();
+  const Axiom::InstanceHandle RootHandle = Session.GetSceneRoot();
+  const Axiom::DataModel *Root = Pool.ResolveAs<Axiom::DataModel>(RootHandle);
   ASSERT_NE(Root, nullptr);
   ASSERT_EQ(Root->GetChildren().size(), 1u);
-  EXPECT_EQ(Root->GetChildren().front()->GetName(), "world");
+  EXPECT_EQ(Pool.Resolve(Root->GetChildren().front())->GetName(), "world");
 
-  const Axiom::Instance *World =
-      Root->FindFirstChild("world");
+  const Axiom::InstanceHandle WorldHandle = Root->FindFirstChild("world");
+  const Axiom::Instance *World = Pool.Resolve(WorldHandle);
   ASSERT_NE(World, nullptr);
   ASSERT_EQ(World->GetChildren().size(), 1u);
-  EXPECT_EQ(World->GetChildren().front()->GetName(), "light-1");
+  EXPECT_EQ(Pool.Resolve(World->GetChildren().front())->GetName(), "light-1");
 }
 
 TEST(SceneLifecycleTests, SnapshotRehydrationRestoresTreeAndAllowsCreate) {
@@ -1421,9 +1423,11 @@ TEST(SceneLifecycleTests, SnapshotRehydrationRestoresTreeAndAllowsCreate) {
   Session.SetSceneState(std::move(State));
 
   // Tree reflects snapshot
-  const Axiom::DataModel *Root = Session.GetSceneRoot();
+  const Axiom::InstancePool &Pool = Session.GetInstancePool();
+  const Axiom::DataModel *Root =
+      Pool.ResolveAs<Axiom::DataModel>(Session.GetSceneRoot());
   ASSERT_NE(Root, nullptr);
-  ASSERT_NE(Root->FindFirstChild("world"), nullptr);
+  ASSERT_TRUE(static_cast<bool>(Root->FindFirstChild("world")));
 
   // Create works after rehydration
   RecordingSubscriber Subscriber;
@@ -1437,9 +1441,10 @@ TEST(SceneLifecycleTests, SnapshotRehydrationRestoresTreeAndAllowsCreate) {
   ASSERT_NE(Created, nullptr);
 
   // New object is a child of "world" in the tree
-  const Axiom::Instance *World = Root->FindFirstChild("world");
+  const Axiom::InstanceHandle WorldHandle = Root->FindFirstChild("world");
+  const Axiom::Instance *World = Pool.Resolve(WorldHandle);
   ASSERT_NE(World, nullptr);
-  EXPECT_NE(World->FindFirstChild(Created->ObjectId), nullptr);
+  EXPECT_TRUE(static_cast<bool>(World->FindFirstChild(Created->ObjectId)));
 
   // Reload snapshot — new object should be gone
   Axiom::EditorSceneState State2{};
@@ -1462,7 +1467,13 @@ TEST(SceneLifecycleTests, SnapshotRehydrationRestoresTreeAndAllowsCreate) {
   Session.SetSceneState(std::move(State2));
 
   EXPECT_EQ(Session.FindObjectDetails(Created->ObjectId), nullptr);
-  EXPECT_EQ(World->GetChildren().size(), 0u);
+  const Axiom::DataModel *ReloadedRoot =
+      Pool.ResolveAs<Axiom::DataModel>(Session.GetSceneRoot());
+  ASSERT_NE(ReloadedRoot, nullptr);
+  const Axiom::Instance *ReloadedWorld =
+      Pool.Resolve(ReloadedRoot->FindFirstChild("world"));
+  ASSERT_NE(ReloadedWorld, nullptr);
+  EXPECT_EQ(ReloadedWorld->GetChildren().size(), 0u);
 }
 
 // ---------------------------------------------------------------------------
