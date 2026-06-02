@@ -79,6 +79,9 @@ public:
   virtual void BeginFrame() = 0;
   virtual std::shared_ptr<Mesh>
   CreateMesh(const MeshData &Mesh, const MeshCreateOptions &Options = {}) = 0;
+  virtual MaterialHandle CreateMaterialHandle(const MaterialInstance &Material) = 0;
+  virtual void UpdateMaterialHandle(MaterialHandle Handle,
+                                    const MaterialInstance &Material) = 0;
   virtual void PrepareSceneFrame(RenderScene &Scene) = 0;
   virtual const VisibleSubmissionList &GetVisibleSubmissions() const = 0;
   virtual void RecordDepthPrepass() = 0;

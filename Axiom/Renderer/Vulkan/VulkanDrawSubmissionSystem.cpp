@@ -97,21 +97,23 @@ void VulkanDrawSubmissionSystem::InitSpecializedRenderers() {
   m_MaterialResources->InitFallbackTexture();
   const std::filesystem::path LightIconPath =
       std::filesystem::path(AXIOM_CONTENT_DIR) / "Engine" / "lightbulb.svg";
+  MaterialInstance LightBillboardMaterial{};
   if (const auto IconTexture = Assets::LoadSvgTextureFromFile(LightIconPath)) {
-    m_LightBillboardMaterial = std::make_shared<MaterialInstance>();
-    m_LightBillboardMaterial->BaseColorTexture = IconTexture;
+    LightBillboardMaterial.BaseColorTexture = IconTexture;
   } else {
     A_CORE_WARN(
         "Failed to load light billboard icon from {0}; using fallback texture",
         LightIconPath.string());
-    m_LightBillboardMaterial = std::make_shared<MaterialInstance>();
   }
+  m_LightBillboardMaterialHandle =
+      m_MaterialResources->CreateMaterialHandle(LightBillboardMaterial);
 
   m_GizmoRenderer.Init({.Device = m_Device->Device,
                          .DrawImageFormat = m_Resources->GetDrawImage().ImageFormat},
                         m_RendererDeletionQueue);
   const VkImageView TextureView =
-      m_MaterialResources->ResolveMaterialTextureView(m_LightBillboardMaterial);
+      m_MaterialResources->ResolveMaterialTextureView(
+          m_MaterialResources->ResolveMaterialHandle(m_LightBillboardMaterialHandle));
   m_LightBillboardRenderer.Init(
       {.Device = m_Device->Device,
        .DrawImageFormat = m_Resources->GetDrawImage().ImageFormat,

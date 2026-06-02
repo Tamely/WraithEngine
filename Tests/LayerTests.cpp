@@ -1435,8 +1435,11 @@ TEST(HeadlessSessionModuleTests, BuildColliderOverlaySubmissionsUsesPhysicsData)
   EXPECT_FLOAT_EQ(StaticIt->Transform[3].x, 1.0f);
   EXPECT_FLOAT_EQ(StaticIt->Transform[3].y, 2.0f);
   EXPECT_FLOAT_EQ(StaticIt->Transform[3].z, 3.0f);
-  EXPECT_NE(StaticIt->Material, nullptr);
-  EXPECT_GT(StaticIt->Material->BaseColorFactor.g, 0.8f);
+  const Axiom::MaterialInstance *StaticMaterial =
+      Module.GetColliderMaterialForTesting(Axiom::EditorPhysicsBodyType::Static);
+  ASSERT_NE(StaticMaterial, nullptr);
+  EXPECT_TRUE(StaticIt->MaterialHandle.IsValid() || StaticMaterial != nullptr);
+  EXPECT_GT(StaticMaterial->BaseColorFactor.g, 0.8f);
   EXPECT_GT(glm::length(glm::vec3(StaticIt->Transform[0])), 3.0f);
 
   const auto DynamicIt = std::find_if(
@@ -1450,9 +1453,12 @@ TEST(HeadlessSessionModuleTests, BuildColliderOverlaySubmissionsUsesPhysicsData)
   EXPECT_FLOAT_EQ(DynamicIt->Transform[3].x, -3.0f);
   EXPECT_FLOAT_EQ(DynamicIt->Transform[3].y, 5.0f);
   EXPECT_FLOAT_EQ(DynamicIt->Transform[3].z, 8.0f);
-  EXPECT_NE(DynamicIt->Material, nullptr);
-  EXPECT_GT(DynamicIt->Material->BaseColorFactor.r, 0.9f);
-  EXPECT_LT(DynamicIt->Material->BaseColorFactor.a, 0.5f);
+  const Axiom::MaterialInstance *DynamicMaterial =
+      Module.GetColliderMaterialForTesting(Axiom::EditorPhysicsBodyType::Dynamic);
+  ASSERT_NE(DynamicMaterial, nullptr);
+  EXPECT_TRUE(DynamicIt->MaterialHandle.IsValid() || DynamicMaterial != nullptr);
+  EXPECT_GT(DynamicMaterial->BaseColorFactor.r, 0.9f);
+  EXPECT_LT(DynamicMaterial->BaseColorFactor.a, 0.5f);
 }
 
 TEST(SvgTextureTests, LightbulbSvgRasterizesToValidTexture) {

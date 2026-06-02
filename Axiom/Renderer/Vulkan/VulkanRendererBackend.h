@@ -29,6 +29,9 @@ public:
   void BeginFrame() override;
   std::shared_ptr<Mesh>
   CreateMesh(const MeshData &Mesh, const MeshCreateOptions &Options = {}) override;
+  MaterialHandle CreateMaterialHandle(const MaterialInstance &Material) override;
+  void UpdateMaterialHandle(MaterialHandle Handle,
+                            const MaterialInstance &Material) override;
   void PrepareSceneFrame(RenderScene &Scene) override;
   const VisibleSubmissionList &GetVisibleSubmissions() const override;
   void RecordDepthPrepass() override;
@@ -49,6 +52,7 @@ public:
   std::optional<CapturedFrame> ConsumeCapturedFrame() override;
   bool IsInitialized() const { return m_IsInitialized; }
   VulkanMesh *ResolveMeshHandle(MeshHandle Handle) const;
+  const MaterialInstance *ResolveMaterialHandle(MaterialHandle Handle) const;
   void RecordPreparedScenePasses(VkCommandBuffer CommandBuffer, RenderScene &Scene,
                                  uint64_t FrameNumber,
                                  RendererViewMode ViewMode);

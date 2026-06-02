@@ -46,6 +46,7 @@ public:
   virtual ~Application();
 
   static Application &Get();
+  static Application *TryGet();
 
   void Run();
   bool Step();
@@ -57,6 +58,7 @@ public:
   [[nodiscard]] uint64_t GetFrameIndex() const { return m_FrameIndex; }
   [[nodiscard]] RuntimeMode GetRuntimeMode() const { return m_Config.Mode; }
   [[nodiscard]] Renderer &GetRenderer() const { return *m_Renderer; }
+  [[nodiscard]] Renderer *TryGetRenderer() const { return m_Renderer.get(); }
   [[nodiscard]] ModuleManager &GetModuleManager() { return m_ModuleManager; }
   [[nodiscard]] const ModuleManager &GetModuleManager() const {
     return m_ModuleManager;

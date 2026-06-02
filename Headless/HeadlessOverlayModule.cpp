@@ -163,10 +163,15 @@ HeadlessOverlayModule::HeadlessOverlayModule(EditorSession &Session)
     : m_Session(Session) {}
 
 void HeadlessOverlayModule::Initialize() {
-  Renderer &Renderer = Application::Get().GetRenderer();
-  m_PresenceMarkerMesh = Renderer.CreateMesh(BuildPresenceMarkerMeshData());
-  m_ColliderBoxMesh = Renderer.CreateMesh(BuildUnitBoxMeshData());
-  m_ColliderSphereMesh = Renderer.CreateMesh(BuildUnitSphereMeshData());
+  Application *App = Application::TryGet();
+  Renderer *Renderer = App != nullptr ? App->TryGetRenderer() : nullptr;
+  if (Renderer == nullptr) {
+    return;
+  }
+
+  m_PresenceMarkerMesh = Renderer->CreateMesh(BuildPresenceMarkerMeshData());
+  m_ColliderBoxMesh = Renderer->CreateMesh(BuildUnitBoxMeshData());
+  m_ColliderSphereMesh = Renderer->CreateMesh(BuildUnitSphereMeshData());
 }
 
 void HeadlessOverlayModule::SetPresenceMarkerMeshForTesting(MeshRef Mesh) {
@@ -252,7 +257,7 @@ HeadlessOverlayModule::BuildColliderOverlaySubmissions() const {
     }
     Result.push_back({
         .MeshHandle = GetMeshHandle(ColliderMesh),
-        .Material = GetOrCreateColliderMaterial(Physics.BodyType),
+        .MaterialHandle = GetOrCreateColliderMaterial(Physics.BodyType),
         .DebugDataId = RegisterRenderMeshSubmissionDebugData(
             {.Name = Details.ObjectId + "-collider"}),
         .RenderPath = MeshRenderPath::Graphics,
@@ -281,7 +286,7 @@ HeadlessOverlayModule::BuildColliderOverlaySubmissions() const {
                                                      ColliderCornerScale)));
           Result.push_back({
               .MeshHandle = GetMeshHandle(m_ColliderBoxMesh),
-              .Material = GetOrCreateColliderMaterial(Physics.BodyType),
+              .MaterialHandle = GetOrCreateColliderMaterial(Physics.BodyType),
               .DebugDataId = RegisterRenderMeshSubmissionDebugData(
                   {.Name = Details.ObjectId + "-collider-corner"}),
               .RenderPath = MeshRenderPath::Graphics,
@@ -311,7 +316,7 @@ HeadlessOverlayModule::BuildPresenceOverlaySubmissions(SessionUserId RenderUser)
     }
     Result.push_back({
         .MeshHandle = GetMeshHandle(m_PresenceMarkerMesh),
-        .Material = GetOrCreatePresenceMaterial(Participant.User),
+        .MaterialHandle = GetOrCreatePresenceMaterial(Participant.User),
         .DebugDataId = RegisterRenderMeshSubmissionDebugData(
             {.Name = "participant-camera-" +
                      std::to_string(Participant.User.Value)}),
@@ -322,11 +327,35 @@ HeadlessOverlayModule::BuildPresenceOverlaySubmissions(SessionUserId RenderUser)
   return Result;
 }
 
-MaterialInstanceRef
+const MaterialInstance *
+HeadlessOverlayModule::GetPresenceMaterialForTesting(SessionUserId User) const {
+  const auto It = m_PresenceMaterials.find(User.Value);
+  return It != m_PresenceMaterials.end() ? &It->second.Material : nullptr;
+}
+
+const MaterialInstance *HeadlessOverlayModule::GetColliderMaterialForTesting(
+    EditorPhysicsBodyType BodyType) const {
+  const auto It = m_ColliderMaterials.find(static_cast<int>(BodyType));
+  return It != m_ColliderMaterials.end() ? &It->second.Material : nullptr;
+}
+
+MaterialHandle
+HeadlessOverlayModule::AllocateMaterialHandle(const MaterialInstance &Material) const {
+  Application *App = Application::TryGet();
+  if (App != nullptr) {
+    if (Renderer *Renderer = App->TryGetRenderer(); Renderer != nullptr) {
+      return Renderer->CreateMaterialHandle(Material);
+    }
+  }
+
+  return MaterialHandle{m_NextFallbackMaterialHandleValue++};
+}
+
+MaterialHandle
 HeadlessOverlayModule::GetOrCreatePresenceMaterial(SessionUserId User) const {
   const auto Existing = m_PresenceMaterials.find(User.Value);
   if (Existing != m_PresenceMaterials.end()) {
-    return Existing->second;
+    return Existing->second.Handle;
   }
   const EditorParticipant Participant = m_Session.BuildParticipant(User);
   const glm::vec4 Color = ParseHexColor(Participant.PresentationColor);
@@ -337,30 +366,34 @@ HeadlessOverlayModule::GetOrCreatePresenceMaterial(SessionUserId User) const {
                      static_cast<uint8_t>(Color.g * 255.0f),
                      static_cast<uint8_t>(Color.b * 255.0f),
                      static_cast<uint8_t>(Color.a * 255.0f)};
-  auto Material = std::make_shared<MaterialInstance>();
-  Material->BaseColorTexture = Texture;
-  m_PresenceMaterials.emplace(User.Value, Material);
-  return Material;
+  MaterialInstance Material{};
+  Material.BaseColorTexture = Texture;
+  const MaterialHandle Handle = AllocateMaterialHandle(Material);
+  m_PresenceMaterials.emplace(
+      User.Value, CachedMaterialEntry{.Handle = Handle, .Material = Material});
+  return Handle;
 }
 
-MaterialInstanceRef HeadlessOverlayModule::GetOrCreateColliderMaterial(
+MaterialHandle HeadlessOverlayModule::GetOrCreateColliderMaterial(
     EditorPhysicsBodyType BodyType) const {
   const int Key = static_cast<int>(BodyType);
   const auto Existing = m_ColliderMaterials.find(Key);
   if (Existing != m_ColliderMaterials.end()) {
-    return Existing->second;
+    return Existing->second.Handle;
   }
-  auto Material = std::make_shared<MaterialInstance>();
+  MaterialInstance Material{};
   if (BodyType == EditorPhysicsBodyType::Dynamic) {
-    Material->BaseColorFactor = {1.0f, 0.55f, 0.2f, 0.22f};
+    Material.BaseColorFactor = {1.0f, 0.55f, 0.2f, 0.22f};
   } else if (BodyType == EditorPhysicsBodyType::Static) {
-    Material->BaseColorFactor = {0.2f, 0.9f, 1.0f, 0.18f};
+    Material.BaseColorFactor = {0.2f, 0.9f, 1.0f, 0.18f};
   } else {
-    Material->BaseColorFactor = {0.8f, 0.8f, 0.8f, 0.18f};
+    Material.BaseColorFactor = {0.8f, 0.8f, 0.8f, 0.18f};
   }
-  Material->Metallic = 0.0f;
-  Material->Roughness = 0.15f;
-  m_ColliderMaterials.emplace(Key, Material);
-  return Material;
+  Material.Metallic = 0.0f;
+  Material.Roughness = 0.15f;
+  const MaterialHandle Handle = AllocateMaterialHandle(Material);
+  m_ColliderMaterials.emplace(
+      Key, CachedMaterialEntry{.Handle = Handle, .Material = Material});
+  return Handle;
 }
 } // namespace Axiom

@@ -111,7 +111,7 @@ private:
   VulkanGizmoRenderer m_GizmoRenderer;
   VulkanImGuiRenderer m_ImGuiRenderer;
   VulkanLightBillboardRenderer m_LightBillboardRenderer;
-  MaterialInstanceRef m_LightBillboardMaterial;
+  MaterialHandle m_LightBillboardMaterialHandle{};
 
   RendererFrameStats m_FrameStats{};
   std::deque<CapturedFrame> m_CapturedFrames;

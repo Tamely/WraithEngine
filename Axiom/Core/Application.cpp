@@ -79,6 +79,8 @@ Application::~Application() {
 
 Application &Application::Get() { return *s_Instance; }
 
+Application *Application::TryGet() { return s_Instance; }
+
 Window *Application::GetWindow() const { return m_Window.get(); }
 
 void Application::RequestClose() {

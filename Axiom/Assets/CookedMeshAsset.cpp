@@ -298,9 +298,10 @@ MeshSceneData ToRuntimeMeshSceneData(const CookedMeshSceneData &Scene,
                                      const std::filesystem::path &ContentRoot) {
   MeshSceneData Out;
   Out.Instances.reserve(Scene.Instances.size());
-  std::unordered_map<std::string, MaterialInstanceRef> SharedMaterials;
+  std::unordered_map<std::string, std::shared_ptr<MaterialInstance>>
+      SharedMaterials;
   for (const auto &Instance : Scene.Instances) {
-    MaterialInstanceRef Material;
+    std::shared_ptr<MaterialInstance> Material;
     if (Instance.MaterialAssetPath.empty()) {
       Material = std::make_shared<MaterialInstance>();
     } else if (const auto SharedMaterial =

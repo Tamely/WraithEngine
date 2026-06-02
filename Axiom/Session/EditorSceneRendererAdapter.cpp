@@ -8,11 +8,33 @@
 
 namespace Axiom {
 EditorSceneRendererAdapter::EditorSceneRendererAdapter(
-    CreateMeshResourceFn CreateMeshResource)
-    : m_CreateMeshResource(std::move(CreateMeshResource)) {
+    CreateMeshResourceFn CreateMeshResource,
+    CreateMaterialHandleFn CreateMaterialHandle,
+    UpdateMaterialHandleFn UpdateMaterialHandle)
+    : m_CreateMeshResource(std::move(CreateMeshResource)),
+      m_CreateMaterialHandle(std::move(CreateMaterialHandle)),
+      m_UpdateMaterialHandle(std::move(UpdateMaterialHandle)) {
   if (!m_CreateMeshResource) {
     m_CreateMeshResource = [](const MeshData &Mesh) {
       return Application::Get().GetRenderer().CreateMeshResource(Mesh);
+    };
+  }
+  if (!m_CreateMaterialHandle) {
+    m_CreateMaterialHandle = [](const MaterialInstance &Material) {
+      Application *App = Application::TryGet();
+      Renderer *Renderer = App != nullptr ? App->TryGetRenderer() : nullptr;
+      return Renderer != nullptr ? Renderer->CreateMaterialHandle(Material)
+                                 : MaterialHandle{};
+    };
+  }
+  if (!m_UpdateMaterialHandle) {
+    m_UpdateMaterialHandle = [](MaterialHandle Handle,
+                                const MaterialInstance &Material) {
+      Application *App = Application::TryGet();
+      Renderer *Renderer = App != nullptr ? App->TryGetRenderer() : nullptr;
+      if (Renderer != nullptr) {
+        Renderer->UpdateMaterialHandle(Handle, Material);
+      }
     };
   }
 }
@@ -47,6 +69,15 @@ EditorSceneRendererAdapter::BuildRenderSubmissions(const EditorSession &Session)
       Cached.DebugDataId =
           RegisterRenderMeshSubmissionDebugData({.Name = Instance.ObjectId});
     }
+    if (Instance.Material != nullptr) {
+      if (!Cached.MaterialHandle.IsValid()) {
+        Cached.MaterialHandle = m_CreateMaterialHandle(*Instance.Material);
+      } else {
+        m_UpdateMaterialHandle(Cached.MaterialHandle, *Instance.Material);
+      }
+    } else {
+      Cached.MaterialHandle = {};
+    }
 
     if (!Cached.Resource.IsValid()) {
       continue;
@@ -54,7 +85,7 @@ EditorSceneRendererAdapter::BuildRenderSubmissions(const EditorSession &Session)
 
     Submissions.push_back({
         .MeshHandle = Cached.Resource.Handle,
-        .Material = Instance.Material,  // always live — picks up material edits
+        .MaterialHandle = Cached.MaterialHandle,
         .DebugDataId = Cached.DebugDataId,
         .RenderPath = Cached.RenderPath,
         .Transform = Instance.Transform,

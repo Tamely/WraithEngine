@@ -23,7 +23,8 @@ TextureSourceDataRef CloneTextureSourceData(
   return Copy;
 }
 
-MaterialInstanceRef CloneMaterialInstance(const MaterialInstanceRef &Material) {
+std::shared_ptr<MaterialInstance>
+CloneMaterialInstance(const std::shared_ptr<MaterialInstance> &Material) {
   if (!Material) {
     return nullptr;
   }

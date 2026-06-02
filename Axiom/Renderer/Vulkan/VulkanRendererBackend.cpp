@@ -146,6 +146,16 @@ VulkanRendererBackend::CreateMesh(const MeshData &MeshSource,
   return Mesh;
 }
 
+MaterialHandle
+VulkanRendererBackend::CreateMaterialHandle(const MaterialInstance &Material) {
+  return m_MaterialResources.CreateMaterialHandle(Material);
+}
+
+void VulkanRendererBackend::UpdateMaterialHandle(
+    MaterialHandle Handle, const MaterialInstance &Material) {
+  m_MaterialResources.UpdateMaterialHandle(Handle, Material);
+}
+
 void VulkanRendererBackend::BeginFrame() {
   m_StopRendering = m_HasPresentationSurface && m_Surface->IsMinimized();
   m_RenderFallbackBackground = false;
@@ -292,9 +302,11 @@ void VulkanRendererBackend::PrepareSceneFrame(RenderScene &Scene) {
             VisibleSubmissions.OpaqueGraphics.end(),
             [this](const VisibleSubmission &Left, const VisibleSubmission &Right) {
               const MaterialInstance *LeftMaterial =
-                  GetSubmission(Left.SubmissionIndex).Material.get();
+                  ResolveMaterialHandle(
+                      GetSubmission(Left.SubmissionIndex).MaterialHandle);
               const MaterialInstance *RightMaterial =
-                  GetSubmission(Right.SubmissionIndex).Material.get();
+                  ResolveMaterialHandle(
+                      GetSubmission(Right.SubmissionIndex).MaterialHandle);
               if (LeftMaterial != RightMaterial) {
                 return LeftMaterial < RightMaterial;
               }
@@ -324,9 +336,9 @@ void VulkanRendererBackend::PrepareGraphicsMaterialDescriptors() {
 
   auto PrepareSubmissionMaterial = [this, &PreparedMaterials](
                                        const VisibleSubmission &Visible) {
-    const MaterialInstanceRef &Material =
-        GetSubmission(Visible.SubmissionIndex).Material;
-    if (!PreparedMaterials.insert(Material.get()).second) {
+    const MaterialInstance *Material =
+        ResolveMaterialHandle(GetSubmission(Visible.SubmissionIndex).MaterialHandle);
+    if (!PreparedMaterials.insert(Material).second) {
       return;
     }
     m_MaterialResources.ResolveMaterialDescriptorSet(Material);
@@ -337,7 +349,7 @@ void VulkanRendererBackend::PrepareGraphicsMaterialDescriptors() {
     const MaterialInstance *PreviousMaterial = nullptr;
     for (const VisibleSubmission &Visible : Submissions) {
       const MaterialInstance *CurrentMaterial =
-          GetSubmission(Visible.SubmissionIndex).Material.get();
+          ResolveMaterialHandle(GetSubmission(Visible.SubmissionIndex).MaterialHandle);
       if (CurrentMaterial != PreviousMaterial) {
         ++Runs;
         PreviousMaterial = CurrentMaterial;
@@ -349,7 +361,7 @@ void VulkanRendererBackend::PrepareGraphicsMaterialDescriptors() {
   for (const VisibleSubmission &Visible :
        m_PreparedSceneState.VisibleSubmissions.OpaqueGraphics) {
     const MaterialInstance *Material =
-        GetSubmission(Visible.SubmissionIndex).Material.get();
+        ResolveMaterialHandle(GetSubmission(Visible.SubmissionIndex).MaterialHandle);
     OpaqueMaterials.insert(Material);
     PrepareSubmissionMaterial(Visible);
   }
@@ -362,7 +374,8 @@ void VulkanRendererBackend::PrepareGraphicsMaterialDescriptors() {
               return Left.SortDepth > Right.SortDepth;
             });
   for (const VisibleSubmission &Visible : SortedTranslucentSubmissions) {
-    TranslucentMaterials.insert(GetSubmission(Visible.SubmissionIndex).Material.get());
+    TranslucentMaterials.insert(
+        ResolveMaterialHandle(GetSubmission(Visible.SubmissionIndex).MaterialHandle));
     PrepareSubmissionMaterial(Visible);
   }
 
@@ -871,7 +884,8 @@ void VulkanRendererBackend::RecordOpaqueForwardPass(
     }
 
     const VkDescriptorSet MaterialDescriptorSet =
-        m_MaterialResources.ResolveMaterialDescriptorSet(Submission.Material);
+        m_MaterialResources.ResolveMaterialDescriptorSet(
+            ResolveMaterialHandle(Submission.MaterialHandle));
     if (MaterialDescriptorSet != BoundMaterialDescriptorSet) {
       vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                               m_PipelineLibrary.GetMeshGraphicsPipelineLayout(), 1, 1,
@@ -883,10 +897,12 @@ void VulkanRendererBackend::RecordOpaqueForwardPass(
     }
     MeshGraphicsPushConstants PushConstants{};
     PushConstants.Model = Submission.Transform;
-    if (Submission.Material) {
-      PushConstants.BaseColorFactor = Submission.Material->BaseColorFactor;
-      PushConstants.Metallic = Submission.Material->Metallic;
-      PushConstants.Roughness = Submission.Material->Roughness;
+    if (const MaterialInstance *Material =
+            ResolveMaterialHandle(Submission.MaterialHandle);
+        Material != nullptr) {
+      PushConstants.BaseColorFactor = Material->BaseColorFactor;
+      PushConstants.Metallic = Material->Metallic;
+      PushConstants.Roughness = Material->Roughness;
     }
     vkCmdPushConstants(CommandBuffer, m_PipelineLibrary.GetMeshGraphicsPipelineLayout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
@@ -959,7 +975,8 @@ void VulkanRendererBackend::RecordTranslucentForwardPass(
     }
 
     const VkDescriptorSet MaterialDescriptorSet =
-        m_MaterialResources.ResolveMaterialDescriptorSet(Submission.Material);
+        m_MaterialResources.ResolveMaterialDescriptorSet(
+            ResolveMaterialHandle(Submission.MaterialHandle));
     if (MaterialDescriptorSet != BoundMaterialDescriptorSet) {
       vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                               m_PipelineLibrary.GetMeshGraphicsPipelineLayout(), 1, 1,
@@ -971,10 +988,12 @@ void VulkanRendererBackend::RecordTranslucentForwardPass(
     }
     MeshGraphicsPushConstants PushConstants{};
     PushConstants.Model = Submission.Transform;
-    if (Submission.Material) {
-      PushConstants.BaseColorFactor = Submission.Material->BaseColorFactor;
-      PushConstants.Metallic = Submission.Material->Metallic;
-      PushConstants.Roughness = Submission.Material->Roughness;
+    if (const MaterialInstance *Material =
+            ResolveMaterialHandle(Submission.MaterialHandle);
+        Material != nullptr) {
+      PushConstants.BaseColorFactor = Material->BaseColorFactor;
+      PushConstants.Metallic = Material->Metallic;
+      PushConstants.Roughness = Material->Roughness;
     }
     vkCmdPushConstants(CommandBuffer, m_PipelineLibrary.GetMeshGraphicsPipelineLayout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
@@ -1034,6 +1053,11 @@ VulkanRendererBackend::GetSubmission(uint32_t SubmissionIndex) const {
 VulkanMesh *
 VulkanRendererBackend::ResolveVisibleMesh(const VisibleSubmission &Visible) const {
   return ResolveMeshHandle(Visible.MeshHandle);
+}
+
+const MaterialInstance *
+VulkanRendererBackend::ResolveMaterialHandle(MaterialHandle Handle) const {
+  return m_MaterialResources.ResolveMaterialHandle(Handle);
 }
 
 VkExtent2D VulkanRendererBackend::GetDrawExtent2D() const {

@@ -76,6 +76,13 @@ public:
   BuildPresenceOverlaySubmissions(SessionUserId RenderUser) const {
     return m_OverlayModule.BuildPresenceOverlaySubmissions(RenderUser);
   }
+  const MaterialInstance *GetPresenceMaterialForTesting(SessionUserId User) const {
+    return m_OverlayModule.GetPresenceMaterialForTesting(User);
+  }
+  const MaterialInstance *
+  GetColliderMaterialForTesting(EditorPhysicsBodyType BodyType) const {
+    return m_OverlayModule.GetColliderMaterialForTesting(BodyType);
+  }
 
 private:
   CommandContext MakeContext() const;

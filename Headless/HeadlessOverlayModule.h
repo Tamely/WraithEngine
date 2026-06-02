@@ -26,18 +26,28 @@ public:
   std::vector<RenderMeshSubmission> BuildColliderOverlaySubmissions() const;
   std::vector<RenderMeshSubmission>
   BuildPresenceOverlaySubmissions(SessionUserId RenderUser) const;
+  const MaterialInstance *
+  GetPresenceMaterialForTesting(SessionUserId User) const;
+  const MaterialInstance *
+  GetColliderMaterialForTesting(EditorPhysicsBodyType BodyType) const;
 
 private:
-  MaterialInstanceRef GetOrCreatePresenceMaterial(SessionUserId User) const;
-  MaterialInstanceRef
-  GetOrCreateColliderMaterial(EditorPhysicsBodyType BodyType) const;
+  struct CachedMaterialEntry {
+    MaterialHandle Handle{};
+    MaterialInstance Material;
+  };
+
+  MaterialHandle AllocateMaterialHandle(const MaterialInstance &Material) const;
+  MaterialHandle GetOrCreatePresenceMaterial(SessionUserId User) const;
+  MaterialHandle GetOrCreateColliderMaterial(EditorPhysicsBodyType BodyType) const;
 
   EditorSession &m_Session;
   MeshRef m_PresenceMarkerMesh;
   MeshRef m_ColliderBoxMesh;
   MeshRef m_ColliderSphereMesh;
-  mutable std::unordered_map<uint64_t, MaterialInstanceRef> m_PresenceMaterials;
-  mutable std::unordered_map<int, MaterialInstanceRef> m_ColliderMaterials;
+  mutable std::unordered_map<uint64_t, CachedMaterialEntry> m_PresenceMaterials;
+  mutable std::unordered_map<int, CachedMaterialEntry> m_ColliderMaterials;
+  mutable uint32_t m_NextFallbackMaterialHandleValue{1};
   mutable std::mutex m_GizmoHoverMutex;
   std::unordered_map<uint64_t, int> m_GizmoHoveredAxisByUser;
   mutable std::mutex m_GizmoModeMutex;

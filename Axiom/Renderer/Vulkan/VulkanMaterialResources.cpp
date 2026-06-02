@@ -3,6 +3,7 @@
 #include "Renderer/Vulkan/VulkanInitializers.h"
 
 #include <array>
+#include <cassert>
 
 namespace Axiom {
 void VulkanMaterialResources::Init(const CreateInfo &CreateInfo) {
@@ -14,9 +15,11 @@ void VulkanMaterialResources::Init(const CreateInfo &CreateInfo) {
 }
 
 void VulkanMaterialResources::Shutdown() {
+  m_MaterialsByHandle.clear();
   m_MaterialImageViews.clear();
   m_MaterialDescriptorSets.clear();
   m_FallbackTexture = {};
+  m_NextMaterialHandleValue = 1;
 #if !defined(NDEBUG)
   m_DebugGraphicsMaterialDescriptorUpdates = 0;
 #endif
@@ -49,27 +52,68 @@ void VulkanMaterialResources::InitFallbackTexture() {
   m_FallbackTexture = m_CreateTextureImage(CheckerTexture);
 }
 
+MaterialHandle
+VulkanMaterialResources::CreateMaterialHandle(const MaterialInstance &Material) {
+  MaterialHandle Handle{m_NextMaterialHandleValue++};
+  auto [It, Inserted] = m_MaterialsByHandle.emplace(
+      Handle, std::make_unique<MaterialInstance>(Material));
+  assert(Inserted && "Allocated duplicate material handle");
+  (void)It;
+  return Handle;
+}
+
+void VulkanMaterialResources::UpdateMaterialHandle(
+    MaterialHandle Handle, const MaterialInstance &Material) {
+  if (!Handle.IsValid()) {
+    return;
+  }
+
+  auto It = m_MaterialsByHandle.find(Handle);
+  if (It == m_MaterialsByHandle.end()) {
+    auto [InsertedIt, Inserted] = m_MaterialsByHandle.emplace(
+        Handle, std::make_unique<MaterialInstance>(Material));
+    assert(Inserted && "Failed to insert material for valid handle");
+    (void)InsertedIt;
+    if (Handle.Value >= m_NextMaterialHandleValue) {
+      m_NextMaterialHandleValue = Handle.Value + 1;
+    }
+    return;
+  }
+
+  *It->second = Material;
+}
+
+const MaterialInstance *
+VulkanMaterialResources::ResolveMaterialHandle(MaterialHandle Handle) const {
+  if (!Handle.IsValid()) {
+    return nullptr;
+  }
+
+  const auto It = m_MaterialsByHandle.find(Handle);
+  return It != m_MaterialsByHandle.end() ? It->second.get() : nullptr;
+}
+
 VkImageView
-VulkanMaterialResources::ResolveMaterialTextureView(const MaterialInstanceRef &Material) {
+VulkanMaterialResources::ResolveMaterialTextureView(const MaterialInstance *Material) {
   if (!Material || !Material->BaseColorTexture ||
       !Material->BaseColorTexture->IsValid()) {
     return m_FallbackTexture.ImageView;
   }
 
-  auto It = m_MaterialImageViews.find(Material.get());
+  auto It = m_MaterialImageViews.find(Material);
   if (It != m_MaterialImageViews.end()) {
     return It->second;
   }
 
   const AllocatedImage TextureImage =
       m_CreateTextureImage(*Material->BaseColorTexture);
-  m_MaterialImageViews.emplace(Material.get(), TextureImage.ImageView);
+  m_MaterialImageViews.emplace(Material, TextureImage.ImageView);
   return TextureImage.ImageView;
 }
 
 VkDescriptorSet
-VulkanMaterialResources::ResolveMaterialDescriptorSet(const MaterialInstanceRef &Material) {
-  const MaterialInstance *MaterialKey = Material.get();
+VulkanMaterialResources::ResolveMaterialDescriptorSet(const MaterialInstance *Material) {
+  const MaterialInstance *MaterialKey = Material;
   const uint64_t MaterialRevision = Material ? Material->Revision : 0;
   const TextureSourceData *TextureSource =
       (Material && Material->BaseColorTexture &&

@@ -40,7 +40,7 @@ struct MeshSceneData {
   struct MeshInstanceData {
     std::string Name;
     MeshData Mesh;
-    MaterialInstanceRef Material;
+    std::shared_ptr<MaterialInstance> Material;
     glm::mat4 Transform{1.0f};
   };
 
@@ -109,7 +109,10 @@ GetRenderMeshSubmissionDebugName(RenderMeshSubmissionDebugDataId Id);
 
 struct RenderMeshSubmission {
   MeshHandle MeshHandle{};
-  MaterialInstanceRef Material;
+  // Material handles are resolved through the renderer-owned material registry.
+  // Producers must keep the registered material valid for the frame in which
+  // this submission is consumed.
+  MaterialHandle MaterialHandle{};
   RenderMeshSubmissionDebugDataId DebugDataId{0};
   MeshRenderPath RenderPath{MeshRenderPath::Graphics};
   glm::mat4 Transform{1.0f};

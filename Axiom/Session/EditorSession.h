@@ -125,7 +125,7 @@ struct EditorSceneMeshInstance {
   SceneObjectHandle ObjectHandle{};
   std::string ObjectId;
   MeshData Mesh;
-  MaterialInstanceRef Material;
+  std::shared_ptr<MaterialInstance> Material;
   MeshRenderPath RenderPath{MeshRenderPath::Graphics};
   glm::mat4 Transform{1.0f};
   std::string AssetRelativePath;

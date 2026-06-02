@@ -32,6 +32,9 @@ public:
   const RendererFrameStats &GetFrameStats() const;
   std::shared_ptr<Mesh>
   CreateMesh(const MeshData &MeshData, const MeshCreateOptions &Options = {});
+  MaterialHandle CreateMaterialHandle(const MaterialInstance &Material);
+  void UpdateMaterialHandle(MaterialHandle Handle,
+                            const MaterialInstance &Material);
   RenderMeshResource
   CreateMeshResource(const MeshData &MeshData,
                      const MeshCreateOptions &Options = {});

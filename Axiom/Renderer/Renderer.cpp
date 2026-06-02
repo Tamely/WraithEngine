@@ -143,6 +143,20 @@ std::shared_ptr<Mesh> Renderer::CreateMesh(const MeshData &MeshData,
                               : nullptr;
 }
 
+MaterialHandle Renderer::CreateMaterialHandle(const MaterialInstance &Material) {
+  return m_Backend != nullptr ? m_Backend->CreateMaterialHandle(Material)
+                              : MaterialHandle{};
+}
+
+void Renderer::UpdateMaterialHandle(MaterialHandle Handle,
+                                    const MaterialInstance &Material) {
+  if (m_Backend == nullptr || !Handle.IsValid()) {
+    return;
+  }
+
+  m_Backend->UpdateMaterialHandle(Handle, Material);
+}
+
 RenderMeshResource Renderer::CreateMeshResource(const MeshData &MeshData,
                                                 const MeshCreateOptions &Options) {
   RenderMeshResource Resource;
@@ -184,7 +198,10 @@ Renderer::LoadMeshSceneFromFile(const std::filesystem::path &Path,
     Result.Resources.push_back(Resource);
     Result.Submissions.push_back(
         {.MeshHandle = Result.Resources.back().Handle,
-         .Material = Instance.Material,
+         .MaterialHandle =
+             Instance.Material != nullptr
+                 ? CreateMaterialHandle(*Instance.Material)
+                 : MaterialHandle{},
          .DebugDataId = RegisterRenderMeshSubmissionDebugData(
              {.Name = Instance.Name}),
          .RenderPath = RenderPath,

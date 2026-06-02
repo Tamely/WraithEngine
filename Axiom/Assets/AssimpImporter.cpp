@@ -54,8 +54,9 @@ MeshData ConvertMesh(const aiMesh *AiMesh) {
   return Data;
 }
 
-MaterialInstanceRef ConvertMaterial(const aiScene *Scene, unsigned MatIndex,
-                                    const std::filesystem::path &AssetDir) {
+std::shared_ptr<MaterialInstance>
+ConvertMaterial(const aiScene *Scene, unsigned MatIndex,
+                const std::filesystem::path &AssetDir) {
   auto Mat = std::make_shared<MaterialInstance>();
   if (MatIndex >= Scene->mNumMaterials)
     return Mat;
