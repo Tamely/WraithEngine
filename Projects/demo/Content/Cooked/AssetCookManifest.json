@@ -223,6 +223,38 @@
       "cookedPath": "Cooked/sundowner_overlook_4k.wtex",
       "formatVersion": 2,
       "sourceHash": 7609855777205962748
+    },
+    {
+      "assetId": 8164181851900995658,
+      "kind": "texture",
+      "relativePath": "Generated/MeshTextures/warrior_cats_minecraft_firestar__shared_0",
+      "cookedPath": "Cooked/Generated/MeshTextures/warrior_cats_minecraft_firestar__shared_0.wtex",
+      "formatVersion": 2,
+      "sourceHash": 29466183609606694
+    },
+    {
+      "assetId": 8231817489589773986,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/warrior_cats_minecraft_firestar__shared_0",
+      "cookedPath": "Cooked/Generated/MeshMaterials/warrior_cats_minecraft_firestar__shared_0.wmat",
+      "formatVersion": 1,
+      "sourceHash": 13951828551931422539
+    },
+    {
+      "assetId": 7821889617419735525,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/basicmesh__shared_0",
+      "cookedPath": "Cooked/Generated/MeshMaterials/basicmesh__shared_0.wmat",
+      "formatVersion": 1,
+      "sourceHash": 17385510028530011617
+    },
+    {
+      "assetId": 3310334708335029040,
+      "kind": "material",
+      "relativePath": "Generated/MeshMaterials/basicmesh__shared_1",
+      "cookedPath": "Cooked/Generated/MeshMaterials/basicmesh__shared_1.wmat",
+      "formatVersion": 1,
+      "sourceHash": 5263286426569856486
     }
   ]
 }
