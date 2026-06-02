@@ -185,14 +185,7 @@ void VulkanRendererBackend::PrepareSceneFrame(RenderScene &Scene) {
   }
 
   RendererFrameStats &FrameStats = AccessFrameStats();
-  const size_t SubmissionCount =
-      std::min(Scene.Submissions.size(),
-               static_cast<size_t>(MaxMeshSubmissionsPerFrame));
-  if (Scene.Submissions.size() > MaxMeshSubmissionsPerFrame &&
-      !m_HasWarnedMeshSubmissionOverflow) {
-    A_CORE_WARN("Scene submitted meshes exceeding MaxMeshSubmissionsPerFrame.");
-    m_HasWarnedMeshSubmissionOverflow = true;
-  }
+  const size_t SubmissionCount = Scene.Submissions.size();
 
   m_PreparedSceneState.ForceWireframe =
       m_ViewMode == RendererViewMode::Wireframe;

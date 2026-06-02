@@ -292,10 +292,9 @@ void VulkanResourceManager::InitHzbResources() {
 }
 
 void VulkanResourceManager::InitDescriptors() {
-  const uint32_t MaxSets = 5 +
-                           (FRAME_OVERLAP * (MaxMeshSubmissionsPerFrame + 2)) +
-                           (MaxMeshSubmissionsPerFrame * 2) +
-                           static_cast<uint32_t>(m_HzbMipImageViews.size());
+  const uint32_t InitialSetCount =
+      5 + (FRAME_OVERLAP * 3) +
+      static_cast<uint32_t>(m_HzbMipImageViews.size()) + 64;
   std::vector<DescriptorAllocator::PoolSizeRatio> Sizes = {
       {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 4.0f},
       {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 6.0f},
@@ -303,7 +302,7 @@ void VulkanResourceManager::InitDescriptors() {
       {VK_DESCRIPTOR_TYPE_SAMPLER, 2.0f},
       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4.0f},
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2.0f}};
-  m_GlobalDescriptorAllocator.InitPool(m_Device->Device, MaxSets, Sizes);
+  m_GlobalDescriptorAllocator.InitPool(m_Device->Device, InitialSetCount, Sizes);
 
   {
     DescriptorLayoutBuilder Builder;

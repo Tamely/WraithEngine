@@ -1,9 +1,17 @@
+#include <Core/Log.h>
 #include <Renderer/Mesh.h>
+#include <Renderer/Camera.h>
+#include <Renderer/OffscreenRenderSurface.h>
+#include <Renderer/RenderCommand.h>
+#include <Renderer/Renderer.h>
 #include <Session/EditorSceneRendererAdapter.h>
 #include <Session/EditorSession.h>
 
 #include <gtest/gtest.h>
 
+#include <glm/ext/matrix_transform.hpp>
+
+#include <mutex>
 #include <memory>
 #include <utility>
 
@@ -67,6 +75,37 @@ Axiom::EditorSceneMeshInstance MakeMeshInstance(std::string ObjectId,
       .AssetRelativePath = std::move(AssetRelativePath),
   };
 }
+
+Axiom::Camera MakeRenderCamera() {
+  static std::once_flag Flag;
+  std::call_once(Flag, []() { Axiom::Log::Init(); });
+  Axiom::Camera Camera;
+  Camera.LookAt({0.0f, 0.0f, 6.0f}, {0.0f, 0.0f, 0.0f});
+  Camera.SetPerspective(55.0f, 1280.0f / 720.0f, 0.1f, 100.0f);
+  return Camera;
+}
+
+void EnsureLoggingInitialized() {
+  static std::once_flag Flag;
+  std::call_once(Flag, []() { Axiom::Log::Init(); });
+}
+
+Axiom::MeshData MakeTriangleMesh() {
+  return {
+      .Vertices = {{{-0.25f, -0.25f, 0.0f},
+                    {0.0f, 0.0f, 1.0f},
+                    {0.0f, 0.0f}},
+                   {{0.25f, -0.25f, 0.0f},
+                    {0.0f, 0.0f, 1.0f},
+                    {1.0f, 0.0f}},
+                   {{0.0f, 0.25f, 0.0f},
+                    {0.0f, 0.0f, 1.0f},
+                    {0.5f, 1.0f}}},
+      .Indices = {0, 1, 2},
+      .BoundsMin = {-0.25f, -0.25f, 0.0f},
+      .BoundsMax = {0.25f, 0.25f, 0.0f},
+  };
+}
 } // namespace
 
 TEST(RenderSubmissionTests, EditorSceneRendererAdapterReusesCachedMeshUntilAssetChanges) {
@@ -123,4 +162,64 @@ TEST(RenderSubmissionTests, EditorSceneRendererAdapterDropsDeletedObjectsFromCac
   ASSERT_EQ(Recreated.size(), 1u);
   EXPECT_EQ(Factory->CreateCount, 2);
   EXPECT_NE(Recreated[0].MeshHandle, First[0].MeshHandle);
+}
+
+TEST(RenderSubmissionTests, VulkanRendererRendersAllThousandSubmittedMeshesOffscreen) {
+  constexpr uint32_t Width = 1280;
+  constexpr uint32_t Height = 720;
+  constexpr size_t MeshCount = 1000;
+
+  EnsureLoggingInitialized();
+
+  auto Surface = std::make_shared<Axiom::OffscreenRenderSurface>(Width, Height);
+  Axiom::Renderer Renderer;
+  Renderer.Init({
+      .TargetSurface = Surface,
+      .Width = Width,
+      .Height = Height,
+  });
+  Renderer.SetViewMode(Axiom::RendererViewMode::Wireframe);
+
+  Axiom::RenderMeshResource MeshResource =
+      Renderer.CreateMeshResource(MakeTriangleMesh());
+  ASSERT_TRUE(MeshResource.IsValid());
+  const Axiom::MeshHandle MeshHandle = MeshResource.Handle;
+
+  const Axiom::Camera Camera = MakeRenderCamera();
+  const auto SubmitScene = [&]() {
+    Renderer.BeginFrame();
+    Axiom::RenderCommand::SetCamera(Camera);
+    for (size_t Index = 0; Index < MeshCount; ++Index) {
+      const float X = static_cast<float>(Index % 40u) * 0.12f - 2.34f;
+      const float Y = static_cast<float>(Index / 40u) * 0.10f - 1.20f;
+      Axiom::RenderCommand::Submit({
+          .MeshHandle = MeshHandle,
+          .DebugDataId = Axiom::RegisterRenderMeshSubmissionDebugData(
+              {.Name = "submission-" + std::to_string(Index)}),
+          .Transform =
+              glm::translate(glm::mat4(1.0f), glm::vec3(X, Y, 0.0f)),
+      });
+    }
+    Renderer.Render();
+    Renderer.EndFrame();
+  };
+
+  SubmitScene();
+  const Axiom::RendererFrameStats Stats = Renderer.GetFrameStats();
+  EXPECT_EQ(Stats.SubmittedMeshCount, MeshCount);
+  EXPECT_EQ(Stats.MeshSubmissionCount, MeshCount);
+  EXPECT_EQ(Stats.FrustumCulledMeshCount, 0u);
+  EXPECT_EQ(Stats.OcclusionCulledMeshCount, 0u);
+  EXPECT_EQ(Stats.TriangleCount, MeshCount);
+
+  SubmitScene();
+  SubmitScene();
+  std::optional<Axiom::CapturedFrame> Captured = Renderer.ConsumeCapturedFrame();
+  ASSERT_TRUE(Captured.has_value());
+  EXPECT_EQ(Captured->Width, Width);
+  EXPECT_EQ(Captured->Height, Height);
+  EXPECT_FALSE(Captured->Pixels.empty());
+
+  MeshResource.Mesh.reset();
+  Renderer.Shutdown();
 }

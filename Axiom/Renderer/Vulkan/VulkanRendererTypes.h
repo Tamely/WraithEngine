@@ -2,15 +2,12 @@
 
 #include "Renderer/Vulkan/VulkanTypes.h"
 
-#include <array>
-
 #include <glm/ext/vector_uint4.hpp>
 #include <glm/mat4x4.hpp>
 #include <glm/vec2.hpp>
 #include <glm/vec4.hpp>
 
 namespace Axiom {
-constexpr uint32_t MaxMeshSubmissionsPerFrame = 256;
 constexpr uint32_t TimestampQueryCount = 4;
 
 struct ComputePushConstants {

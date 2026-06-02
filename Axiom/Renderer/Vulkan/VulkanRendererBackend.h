@@ -140,7 +140,6 @@ private:
   PreparedSceneState m_PreparedSceneState{};
   std::vector<CandidateSubmission> m_CandidateScratch;
   std::vector<ScenePassPrimitive> m_QueuedScenePasses;
-  bool m_HasWarnedMeshSubmissionOverflow{false};
   VkImageLayout m_SceneDrawImageLayout{VK_IMAGE_LAYOUT_UNDEFINED};
   VkImageLayout m_SceneRasterDepthLayout{VK_IMAGE_LAYOUT_UNDEFINED};
 };
