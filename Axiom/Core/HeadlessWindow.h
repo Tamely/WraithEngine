@@ -17,9 +17,11 @@ public:
   [[nodiscard]] bool IsMinimized() const override;
   void RequestClose() override;
   [[nodiscard]] void *GetNativeHandle() const override;
-  [[nodiscard]] bool SupportsVulkanPresentation() const override;
-  VkResult CreateVulkanSurface(VkInstance Instance,
-                               VkSurfaceKHR *Surface) const override;
+  [[nodiscard]] bool
+  SupportsPresentationBackend(PresentationBackendType Backend) const override;
+  PresentationSurfaceResult
+  CreatePresentationSurface(PresentationBackendType Backend, void *Instance,
+                            void *Surface) const override;
 
 private:
   CursorMode m_CursorMode{CursorMode::Normal};

@@ -2,8 +2,6 @@
 
 #include "Core/Window.h"
 
-#include <vulkan/vulkan_core.h>
-
 #include <cstdint>
 #include <memory>
 
@@ -20,9 +18,11 @@ public:
   [[nodiscard]] virtual uint32_t GetHeight() const = 0;
   [[nodiscard]] virtual bool IsMinimized() const = 0;
   [[nodiscard]] virtual void *GetNativeWindowHandle() const = 0;
-  [[nodiscard]] virtual bool SupportsVulkanPresentation() const = 0;
-  virtual VkResult CreateVulkanSurface(VkInstance Instance,
-                                       VkSurfaceKHR *Surface) const = 0;
+  [[nodiscard]] virtual bool
+  SupportsPresentationBackend(PresentationBackendType Backend) const = 0;
+  virtual PresentationSurfaceResult
+  CreatePresentationSurface(PresentationBackendType Backend, void *Instance,
+                            void *Surface) const = 0;
 };
 
 class WindowRenderSurface final : public IRenderSurface {
@@ -45,12 +45,14 @@ public:
   [[nodiscard]] void *GetNativeWindowHandle() const override {
     return m_TargetWindow.GetNativeHandle();
   }
-  [[nodiscard]] bool SupportsVulkanPresentation() const override {
-    return m_TargetWindow.SupportsVulkanPresentation();
+  [[nodiscard]] bool
+  SupportsPresentationBackend(PresentationBackendType Backend) const override {
+    return m_TargetWindow.SupportsPresentationBackend(Backend);
   }
-  VkResult CreateVulkanSurface(VkInstance Instance,
-                               VkSurfaceKHR *Surface) const override {
-    return m_TargetWindow.CreateVulkanSurface(Instance, Surface);
+  PresentationSurfaceResult
+  CreatePresentationSurface(PresentationBackendType Backend, void *Instance,
+                            void *Surface) const override {
+    return m_TargetWindow.CreatePresentationSurface(Backend, Instance, Surface);
   }
 
 private:
@@ -70,14 +72,18 @@ public:
   [[nodiscard]] uint32_t GetHeight() const override { return m_Height; }
   [[nodiscard]] bool IsMinimized() const override { return false; }
   [[nodiscard]] void *GetNativeWindowHandle() const override { return nullptr; }
-  [[nodiscard]] bool SupportsVulkanPresentation() const override { return false; }
-  VkResult CreateVulkanSurface(VkInstance Instance,
-                               VkSurfaceKHR *Surface) const override {
+  [[nodiscard]] bool
+  SupportsPresentationBackend(PresentationBackendType Backend) const override {
+    (void)Backend;
+    return false;
+  }
+  PresentationSurfaceResult
+  CreatePresentationSurface(PresentationBackendType Backend, void *Instance,
+                            void *Surface) const override {
+    (void)Backend;
     (void)Instance;
-    if (Surface != nullptr) {
-      *Surface = VK_NULL_HANDLE;
-    }
-    return VK_ERROR_INITIALIZATION_FAILED;
+    (void)Surface;
+    return PresentationSurfaceResult::InitializationFailed;
   }
 
 private:

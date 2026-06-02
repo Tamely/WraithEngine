@@ -34,14 +34,18 @@ void HeadlessWindow::RequestClose() { m_ShouldClose = true; }
 
 void *HeadlessWindow::GetNativeHandle() const { return nullptr; }
 
-bool HeadlessWindow::SupportsVulkanPresentation() const { return false; }
+bool HeadlessWindow::SupportsPresentationBackend(
+    PresentationBackendType Backend) const {
+  (void)Backend;
+  return false;
+}
 
-VkResult HeadlessWindow::CreateVulkanSurface(VkInstance Instance,
-                                             VkSurfaceKHR *Surface) const {
+PresentationSurfaceResult
+HeadlessWindow::CreatePresentationSurface(PresentationBackendType Backend,
+                                          void *Instance, void *Surface) const {
+  (void)Backend;
   (void)Instance;
-  if (Surface != nullptr) {
-    *Surface = VK_NULL_HANDLE;
-  }
-  return VK_ERROR_INITIALIZATION_FAILED;
+  (void)Surface;
+  return PresentationSurfaceResult::InitializationFailed;
 }
 } // namespace Axiom

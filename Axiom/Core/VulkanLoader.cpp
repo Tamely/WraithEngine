@@ -5,7 +5,9 @@
 
 #include "Core/Log.h"
 
+#define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#include <volk.h>
 #include <memory>
 #include <string>
 #include <vector>
@@ -42,9 +44,7 @@ std::unique_ptr<Axiom::HAL::DynamicLibrary> g_CustomVulkanLoader;
       continue;
     }
 
-    PFN_vkGetInstanceProcAddr ProcAddr =
-        reinterpret_cast<PFN_vkGetInstanceProcAddr>(
-            Module->FindSymbol("vkGetInstanceProcAddr"));
+    void *ProcAddr = Module->FindSymbol("vkGetInstanceProcAddr");
     if (ProcAddr == nullptr) {
       A_CORE_WARN(
           "Vulkan loader candidate '{0}' did not export vkGetInstanceProcAddr",
@@ -52,7 +52,8 @@ std::unique_ptr<Axiom::HAL::DynamicLibrary> g_CustomVulkanLoader;
       continue;
     }
 
-    volkInitializeCustom(ProcAddr);
+    volkInitializeCustom(
+        reinterpret_cast<PFN_vkGetInstanceProcAddr>(ProcAddr));
 
     Info.ProcAddr = ProcAddr;
     Info.Source = Candidate;
@@ -86,7 +87,8 @@ const VulkanLoaderInfo &GetVulkanLoaderInfo() {
 void ConfigureGlfwVulkanLoader() {
   const VulkanLoaderInfo &LoaderInfo = GetVulkanLoaderInfo();
   if (LoaderInfo.UsesCustomLoader && LoaderInfo.ProcAddr != nullptr) {
-    glfwInitVulkanLoader(LoaderInfo.ProcAddr);
+    glfwInitVulkanLoader(
+        reinterpret_cast<PFN_vkGetInstanceProcAddr>(LoaderInfo.ProcAddr));
   }
 }
 } // namespace Axiom

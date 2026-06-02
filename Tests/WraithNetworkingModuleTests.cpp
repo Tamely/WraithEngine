@@ -36,16 +36,19 @@ public:
   [[nodiscard]] bool IsMinimized() const override { return false; }
   void RequestClose() override { Closed = true; }
   [[nodiscard]] void *GetNativeHandle() const override { return nullptr; }
-  [[nodiscard]] bool SupportsVulkanPresentation() const override {
+  [[nodiscard]] bool
+  SupportsPresentationBackend(Axiom::PresentationBackendType Backend) const
+      override {
+    (void)Backend;
     return false;
   }
-  VkResult CreateVulkanSurface(VkInstance Instance,
-                               VkSurfaceKHR *Surface) const override {
+  Axiom::PresentationSurfaceResult
+  CreatePresentationSurface(Axiom::PresentationBackendType Backend,
+                            void *Instance, void *Surface) const override {
+    (void)Backend;
     (void)Instance;
-    if (Surface != nullptr) {
-      *Surface = VK_NULL_HANDLE;
-    }
-    return VK_ERROR_INITIALIZATION_FAILED;
+    (void)Surface;
+    return Axiom::PresentationSurfaceResult::InitializationFailed;
   }
 
 private:

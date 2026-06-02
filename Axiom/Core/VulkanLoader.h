@@ -2,11 +2,9 @@
 
 #include <string>
 
-#include <volk.h>
-
 namespace Axiom {
 struct VulkanLoaderInfo {
-  PFN_vkGetInstanceProcAddr ProcAddr{nullptr};
+  void *ProcAddr{nullptr};
   std::string Source;
   bool UsesCustomLoader{false};
   bool IsAvailable{false};

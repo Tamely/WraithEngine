@@ -25,11 +25,14 @@ target_include_directories(AxiomHAL PUBLIC
   "${CMAKE_SOURCE_DIR}/ThirdParty/glm"
   "${CMAKE_SOURCE_DIR}/ThirdParty/spdlog/include"
   "${CMAKE_SOURCE_DIR}/ThirdParty/stb_image"
+  "${rapidjson_SOURCE_DIR}/include"
+  "$<$<BOOL:${AXIOM_ENABLE_PHYSICS}>:${AXIOM_JOLT_SOURCE_DIR}>"
+)
+
+target_include_directories(AxiomHAL PRIVATE
   "${CMAKE_SOURCE_DIR}/ThirdParty/vkbootstrap"
   "${CMAKE_SOURCE_DIR}/ThirdParty/vma"
   "${CMAKE_SOURCE_DIR}/ThirdParty/volk"
-  "${rapidjson_SOURCE_DIR}/include"
-  "$<$<BOOL:${AXIOM_ENABLE_PHYSICS}>:${AXIOM_JOLT_SOURCE_DIR}>"
   "${Vulkan_INCLUDE_DIRS}"
 )
 

@@ -19,13 +19,11 @@ set(ENGINE_SOURCES
   Core/ApplicationModules.cpp
   Core/GlfwEditorInputSource.cpp
   Core/HeadlessRuntimeInstrumentation.cpp
-  Core/GlfwWindow.cpp
   Core/HeadlessWindow.cpp
   Core/ModuleManager.cpp
   Core/Window.cpp
   Core/WindowInputPlatform.cpp
   Core/Log.cpp
-  Core/VulkanLoader.cpp
   Remote/AxiomSessionEndpoint.cpp
   Physics/PhysicsWorld.cpp
   Session/BufferedEditorInputSource.cpp
@@ -46,26 +44,6 @@ set(ENGINE_SOURCES
   Renderer/Renderer.cpp
   Renderer/RenderScene.cpp
   Renderer/VideoEncoderFactory.cpp
-  Renderer/Vulkan/VulkanBuffer.cpp
-  Renderer/Vulkan/VulkanCommandContext.cpp
-  Renderer/Vulkan/VulkanContext.cpp
-  Renderer/Vulkan/VulkanDescriptors.cpp
-  Renderer/Vulkan/VulkanDevice.cpp
-  Renderer/Vulkan/VulkanImage.cpp
-  Renderer/Vulkan/VulkanGizmoRenderer.cpp
-  Renderer/Vulkan/VulkanImGuiRenderer.cpp
-  Renderer/Vulkan/VulkanInitializers.cpp
-  Renderer/Vulkan/VulkanLightBillboardRenderer.cpp
-  Renderer/Vulkan/VulkanMaterialResources.cpp
-  Renderer/Vulkan/VulkanMesh.cpp
-  Renderer/Vulkan/VulkanOcclusionCulling.cpp
-  Renderer/Vulkan/VulkanPipeline.cpp
-  Renderer/Vulkan/VulkanPipelineLibrary.cpp
-  Renderer/Vulkan/VulkanDrawSubmissionSystem.cpp
-  Renderer/Vulkan/VulkanResourceManager.cpp
-  Renderer/Vulkan/VulkanRendererBackend.cpp
-  Renderer/Vulkan/VulkanSceneRenderer.cpp
-  Renderer/Vulkan/VulkanSwapchain.cpp
 )
 
 set(THIRDPARTY_SOURCES
@@ -76,13 +54,42 @@ set(THIRDPARTY_SOURCES
   "${CMAKE_SOURCE_DIR}/ThirdParty/imgui/imgui_draw.cpp"
   "${CMAKE_SOURCE_DIR}/ThirdParty/imgui/imgui_widgets.cpp"
   "${CMAKE_SOURCE_DIR}/ThirdParty/imgui/imgui_tables.cpp"
-  "${CMAKE_SOURCE_DIR}/ThirdParty/imgui/imgui_impl_vulkan.cpp"
   "${CMAKE_SOURCE_DIR}/ThirdParty/imgui/imgui_impl_glfw.cpp"
+)
+
+add_library(AxiomCore STATIC ${ENGINE_SOURCES} ${THIRDPARTY_SOURCES})
+
+set(AXIOM_VULKAN_IMPLEMENTATION_SOURCES
+  Core/GlfwWindow.cpp
+  Core/VulkanLoader.cpp
+  Renderer/RendererBackendFactory.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanBuffer.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanCommandContext.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanContext.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanDescriptors.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanDevice.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanImage.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanGizmoRenderer.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanImGuiRenderer.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanInitializers.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanLightBillboardRenderer.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanMaterialResources.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanMesh.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanOcclusionCulling.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanPipeline.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanPipelineLibrary.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanDrawSubmissionSystem.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanResourceManager.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanRendererBackend.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanSceneRenderer.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanSwapchain.cpp
+  "${CMAKE_SOURCE_DIR}/ThirdParty/imgui/imgui_impl_vulkan.cpp"
   "${CMAKE_SOURCE_DIR}/ThirdParty/volk/volk.c"
   "${CMAKE_SOURCE_DIR}/ThirdParty/vkbootstrap/VkBootstrap.cpp"
 )
 
-add_library(AxiomCore STATIC ${ENGINE_SOURCES} ${THIRDPARTY_SOURCES})
+add_library(AxiomCoreVulkanObjects OBJECT ${AXIOM_VULKAN_IMPLEMENTATION_SOURCES})
+target_sources(AxiomCore PRIVATE $<TARGET_OBJECTS:AxiomCoreVulkanObjects>)
 
 add_dependencies(AxiomCore Shaders)
 
@@ -299,18 +306,44 @@ target_include_directories(AxiomCore PUBLIC
   "${CMAKE_SOURCE_DIR}/ThirdParty/fastgltf/include"
   "${CMAKE_SOURCE_DIR}/ThirdParty/glm"
   "${CMAKE_SOURCE_DIR}/ThirdParty/stb_image"
-  "${CMAKE_SOURCE_DIR}/ThirdParty/vkbootstrap"
-  "${CMAKE_SOURCE_DIR}/ThirdParty/vma"
-  "${CMAKE_SOURCE_DIR}/ThirdParty/volk"
   "${CMAKE_SOURCE_DIR}/ThirdParty/spdlog/include"
   "${rapidjson_SOURCE_DIR}/include"
   "$<$<BOOL:${AXIOM_ENABLE_PHYSICS}>:${AXIOM_JOLT_SOURCE_DIR}>"
-  "${Vulkan_INCLUDE_DIRS}"
 )
 
-target_link_libraries(AxiomCore PUBLIC
-  AxiomHAL glfw Vulkan::Vulkan fastgltf glm
-  spdlog assimp
+target_link_libraries(AxiomCore
+  PUBLIC
+    AxiomHAL glfw fastgltf glm
+    spdlog assimp
+  PRIVATE
+    Vulkan::Vulkan
+)
+
+target_include_directories(AxiomCoreVulkanObjects PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+  "${CMAKE_SOURCE_DIR}/AxiomInternal"
+  "${CMAKE_SOURCE_DIR}/ThirdParty/glfw/include"
+  "${CMAKE_SOURCE_DIR}/ThirdParty/imgui"
+  "${CMAKE_SOURCE_DIR}/ThirdParty/fastgltf/include"
+  "${CMAKE_SOURCE_DIR}/ThirdParty/glm"
+  "${CMAKE_SOURCE_DIR}/ThirdParty/stb_image"
+  "${CMAKE_SOURCE_DIR}/ThirdParty/spdlog/include"
+  "${rapidjson_SOURCE_DIR}/include"
+  "$<$<BOOL:${AXIOM_ENABLE_PHYSICS}>:${AXIOM_JOLT_SOURCE_DIR}>"
+  "${CMAKE_SOURCE_DIR}/ThirdParty/vkbootstrap"
+  "${CMAKE_SOURCE_DIR}/ThirdParty/vma"
+  "${CMAKE_SOURCE_DIR}/ThirdParty/volk"
+  "${Vulkan_INCLUDE_DIRS}"
+)
+target_link_libraries(AxiomCoreVulkanObjects PRIVATE
+  AxiomHAL glfw fastgltf glm spdlog assimp Vulkan::Vulkan
+)
+target_compile_definitions(AxiomCoreVulkanObjects PRIVATE
+  VK_NO_PROTOTYPES
+  AXIOM_CONTENT_DIR="${CMAKE_SOURCE_DIR}/Content"
+  AXIOM_PROJECTS_DIR="${CMAKE_SOURCE_DIR}/Projects"
+  AXIOM_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  AXIOM_ENABLE_WEBRTC=$<IF:$<BOOL:${AXIOM_ENABLE_WEBRTC}>,1,0>
 )
 
 target_compile_definitions(AxiomCore PUBLIC

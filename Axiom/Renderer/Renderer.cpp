@@ -3,7 +3,7 @@
 #include "Assets/MeshAsset.h"
 #include "Renderer/ForwardRenderer.h"
 #include "Renderer/RenderCommand.h"
-#include "Renderer/Vulkan/VulkanRendererBackend.h"
+#include "Renderer/RendererBackendFactory.h"
 
 #include "Core/Log.h"
 
@@ -30,11 +30,10 @@ void Renderer::Init(const RendererCreateInfo &CreateInfo) {
   m_CreateInfo = CreateInfo;
   m_Technique = CreateTechnique(CreateInfo.Technique);
   m_AttachmentRequirements = m_Technique->GetAttachmentRequirements();
-
-  switch (CreateInfo.BackendType) {
-  case RendererBackendType::Vulkan:
-    m_Backend = std::make_unique<VulkanRendererBackend>();
-    break;
+  m_Backend = CreateRendererBackend(CreateInfo.BackendType);
+  assert(m_Backend != nullptr && "Renderer backend factory returned null");
+  if (m_Backend == nullptr) {
+    return;
   }
 
   RendererCreateInfo BackendCreateInfo = CreateInfo;

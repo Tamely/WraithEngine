@@ -86,10 +86,23 @@ void GlfwWindow::RequestClose() { glfwSetWindowShouldClose(m_NativeHandle, 1); }
 
 void *GlfwWindow::GetNativeHandle() const { return m_NativeHandle; }
 
-bool GlfwWindow::SupportsVulkanPresentation() const { return glfwVulkanSupported(); }
+bool GlfwWindow::SupportsPresentationBackend(
+    PresentationBackendType Backend) const {
+  return Backend == PresentationBackendType::Vulkan && glfwVulkanSupported();
+}
 
-VkResult GlfwWindow::CreateVulkanSurface(VkInstance Instance,
-                                         VkSurfaceKHR *Surface) const {
-  return glfwCreateWindowSurface(Instance, m_NativeHandle, nullptr, Surface);
+PresentationSurfaceResult
+GlfwWindow::CreatePresentationSurface(PresentationBackendType Backend,
+                                      void *Instance, void *Surface) const {
+  if (Backend != PresentationBackendType::Vulkan || Surface == nullptr) {
+    return PresentationSurfaceResult::Unsupported;
+  }
+
+  const VkResult Result =
+      glfwCreateWindowSurface(reinterpret_cast<VkInstance>(Instance),
+                              m_NativeHandle, nullptr,
+                              static_cast<VkSurfaceKHR *>(Surface));
+  return Result == VK_SUCCESS ? PresentationSurfaceResult::Success
+                              : PresentationSurfaceResult::InitializationFailed;
 }
 } // namespace Axiom

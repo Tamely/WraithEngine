@@ -9,7 +9,6 @@
 
 #include "Core/Log.h"
 #include "Core/VulkanLoader.h"
-#include "Renderer/Vulkan/VulkanStringUtils.h"
 
 namespace {
 constexpr bool bUseValidationLayers = true;
@@ -26,6 +25,21 @@ VulkanDebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT MessageSeverity,
       "Vulkan Validation: [Severity: {0}]: {1}",
       VkDebugSeverityToString(MessageSeverity), pCallbackData->pMessage);
   return VK_FALSE;
+}
+
+[[nodiscard]] const char *
+PresentationSurfaceResultToString(
+    Axiom::PresentationSurfaceResult Result) {
+  switch (Result) {
+  case Axiom::PresentationSurfaceResult::Success:
+    return "success";
+  case Axiom::PresentationSurfaceResult::Unsupported:
+    return "unsupported";
+  case Axiom::PresentationSurfaceResult::InitializationFailed:
+    return "initialization failed";
+  }
+
+  return "unknown";
 }
 } // namespace
 
@@ -44,15 +58,18 @@ void VulkanContext::Init(const IRenderSurface &Surface) {
   A_CORE_INFO("Volk successfully initialized using {0}",
               LoaderInfo.UsesCustomLoader ? "custom loader" : "default loader");
 
-  if (Surface.SupportsPresentation() && !Surface.SupportsVulkanPresentation()) {
-    A_CORE_CRITICAL("GLFW reports Vulkan is not supported on this machine!");
+  if (Surface.SupportsPresentation() &&
+      !Surface.SupportsPresentationBackend(PresentationBackendType::Vulkan)) {
+    A_CORE_CRITICAL(
+        "The active render surface does not support Vulkan presentation.");
     Axiom::Log::Flush();
     std::abort();
   }
 
   vkb::InstanceBuilder Builder = [&LoaderInfo]() {
     if (LoaderInfo.UsesCustomLoader) {
-      return vkb::InstanceBuilder{LoaderInfo.ProcAddr};
+      return vkb::InstanceBuilder{
+          reinterpret_cast<PFN_vkGetInstanceProcAddr>(LoaderInfo.ProcAddr)};
     }
     return vkb::InstanceBuilder{};
   }();
@@ -63,7 +80,8 @@ void VulkanContext::Init(const IRenderSurface &Surface) {
 
   vkb::Result<vkb::SystemInfo> SystemInfoReturn = LoaderInfo.UsesCustomLoader
                                                       ? vkb::SystemInfo::get_system_info(
-                                                            LoaderInfo.ProcAddr)
+                                                            reinterpret_cast<PFN_vkGetInstanceProcAddr>(
+                                                                LoaderInfo.ProcAddr))
                                                       : vkb::SystemInfo::get_system_info();
   if (!SystemInfoReturn) {
     A_CORE_CRITICAL(
@@ -107,11 +125,12 @@ void VulkanContext::Init(const IRenderSurface &Surface) {
   volkLoadInstance(Instance);
 
   if (Surface.SupportsPresentation()) {
-    const VkResult SurfaceResult =
-        Surface.CreateVulkanSurface(Instance, &this->Surface);
-    if (SurfaceResult != VK_SUCCESS) {
+    const PresentationSurfaceResult SurfaceResult =
+        Surface.CreatePresentationSurface(PresentationBackendType::Vulkan,
+                                          Instance, &this->Surface);
+    if (SurfaceResult != PresentationSurfaceResult::Success) {
       A_CORE_CRITICAL("Failed to create Vulkan window surface: {0}",
-                      VkResultToString(SurfaceResult));
+                      PresentationSurfaceResultToString(SurfaceResult));
       Axiom::Log::Flush();
       std::abort();
     }
