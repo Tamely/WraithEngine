@@ -1,4 +1,5 @@
 #include <Core/Log.h>
+#include <Core/VulkanLoader.h>
 #include <Renderer/Mesh.h>
 #include <Renderer/Camera.h>
 #include <Renderer/OffscreenRenderSurface.h>
@@ -170,6 +171,9 @@ TEST(RenderSubmissionTests, VulkanRendererRendersAllThousandSubmittedMeshesOffsc
   constexpr size_t MeshCount = 1000;
 
   EnsureLoggingInitialized();
+  if (!Axiom::CanInitializeHeadlessVulkan()) {
+    GTEST_SKIP() << "Headless Vulkan is unavailable on this host";
+  }
 
   auto Surface = std::make_shared<Axiom::OffscreenRenderSurface>(Width, Height);
   Axiom::Renderer Renderer;

@@ -7,6 +7,7 @@
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#include <VkBootstrap.h>
 #include <volk.h>
 #include <memory>
 #include <string>
@@ -82,6 +83,33 @@ const char *GetPlatformName() {
 const VulkanLoaderInfo &GetVulkanLoaderInfo() {
   static const VulkanLoaderInfo LoaderInfo = ResolveVulkanLoaderInfo();
   return LoaderInfo;
+}
+
+bool CanInitializeHeadlessVulkan() {
+  const VulkanLoaderInfo &LoaderInfo = GetVulkanLoaderInfo();
+  if (!LoaderInfo.IsAvailable) {
+    return false;
+  }
+
+  vkb::InstanceBuilder Builder = [&LoaderInfo]() {
+    if (LoaderInfo.UsesCustomLoader) {
+      return vkb::InstanceBuilder{
+          reinterpret_cast<PFN_vkGetInstanceProcAddr>(LoaderInfo.ProcAddr)};
+    }
+    return vkb::InstanceBuilder{};
+  }();
+
+  auto InstanceReturn = Builder.set_app_name("Wraith Engine Vulkan Probe")
+                            .set_headless()
+                            .request_validation_layers(true)
+                            .require_api_version(1, 3, 0)
+                            .build();
+  if (!InstanceReturn) {
+    return false;
+  }
+
+  vkb::destroy_instance(InstanceReturn.value());
+  return true;
 }
 
 void ConfigureGlfwVulkanLoader() {
