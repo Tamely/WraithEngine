@@ -50,6 +50,9 @@ public:
 
   void Init(const CreateInfo &CreateInfo);
   void Shutdown();
+  void SetRecordPreparedScenePasses(
+      std::function<void(VkCommandBuffer, RenderScene &, uint64_t,
+                         RendererViewMode)> RecordPreparedScenePasses);
 
   void BeginFrame(bool StopRendering);
   void RenderImGui(bool StopRendering, RendererViewMode &ViewMode);

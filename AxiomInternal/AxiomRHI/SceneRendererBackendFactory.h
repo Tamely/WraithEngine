@@ -16,6 +16,7 @@ public:
 
   virtual void Init(IRHIDevice &Device, const RendererCreateInfo &CreateInfo) = 0;
   virtual void Shutdown() = 0;
+  virtual void BeginFrame() = 0;
   virtual std::shared_ptr<Mesh>
   CreateMesh(const MeshData &Mesh, const MeshCreateOptions &Options) = 0;
   virtual MaterialHandle CreateMaterialHandle(const MaterialInstance &Material) = 0;

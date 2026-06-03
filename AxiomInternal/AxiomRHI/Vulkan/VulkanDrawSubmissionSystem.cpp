@@ -8,6 +8,7 @@
 #include "AxiomRHI/Vulkan/VulkanContext.h"
 #include "AxiomRHI/Vulkan/VulkanImage.h"
 #include "AxiomRHI/Vulkan/VulkanInitializers.h"
+#include "AxiomRHI/Vulkan/VulkanRhiObjects.h"
 
 #include <algorithm>
 #include <array>
@@ -17,6 +18,7 @@
 #include <cassert>
 #include <cstring>
 #include <filesystem>
+#include <optional>
 #include <thread>
 
 #include <glm/gtc/type_ptr.hpp>
@@ -91,6 +93,12 @@ void VulkanDrawSubmissionSystem::Init(const CreateInfo &CreateInfo) {
   }
 
   m_IsInitialized = true;
+}
+
+void VulkanDrawSubmissionSystem::SetRecordPreparedScenePasses(
+    std::function<void(VkCommandBuffer, RenderScene &, uint64_t, RendererViewMode)>
+        RecordPreparedScenePasses) {
+  m_RecordPreparedScenePasses = std::move(RecordPreparedScenePasses);
 }
 
 void VulkanDrawSubmissionSystem::InitSpecializedRenderers() {
@@ -594,10 +602,10 @@ void VulkanDrawSubmissionSystem::DrawFrame(const FrameRequest &Request) {
         m_Device->Device, CurrentFrame.SwapchainSemaphore);
   }
 
-  VkCommandBuffer CommandBuffer = CurrentFrame.MainCommandBuffer;
-  VK_CHECK(vkResetCommandBuffer(CommandBuffer, 0));
-  const VkCommandBufferBeginInfo CommandBufferBeginInfo =
-      VkInit::CommandBufferBeginInfo(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+  VulkanCommandList CommandList(
+      m_Device->Device, CurrentFrame.CommandPool, CurrentFrame.MainCommandBuffer,
+      RHIQueueType::Graphics, false);
+  VkCommandBuffer CommandBuffer = CommandList.GetCommandBuffer();
 
   const VkExtent2D DrawExtent = {m_Resources->GetDrawImage().ImageExtent.width,
                                  m_Resources->GetDrawImage().ImageExtent.height};
@@ -605,7 +613,7 @@ void VulkanDrawSubmissionSystem::DrawFrame(const FrameRequest &Request) {
   MeshFrame.HasValidTimestamps = true;
   MeshFrame.HasValidOcclusionData = false;
 
-  VK_CHECK(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo));
+  CommandList.Begin();
   vkCmdResetQueryPool(CommandBuffer, MeshFrame.TimestampQueryPool, 0,
                       TimestampQueryCount);
 
@@ -664,51 +672,58 @@ void VulkanDrawSubmissionSystem::DrawFrame(const FrameRequest &Request) {
   } else {
     RecordOffscreenCapture(CommandBuffer, CaptureFrame.ReadbackBuffer, DrawExtent);
   }
-  VK_CHECK(vkEndCommandBuffer(CommandBuffer));
+  CommandList.End();
 
-  const VkCommandBufferSubmitInfo CommandBufferSubmitInfo =
-      VkInit::CommandBufferSubmitInfo(CommandBuffer);
-  std::array<VkSemaphoreSubmitInfo, 2> WaitInfos{};
+  std::array<RHIQueueWaitInfo, 2> WaitInfos{};
+  std::array<std::optional<VulkanSemaphore>, 2> WaitSemaphores{};
   uint32_t WaitCount = 0;
   if (m_HasPresentationSurface) {
-    WaitInfos[WaitCount++] = VkInit::SemaphoreSubmitInfo(
-        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR,
-        CurrentFrame.SwapchainSemaphore);
+    const uint32_t WaitIndex = WaitCount++;
+    WaitSemaphores[WaitIndex].emplace(m_Device->Device,
+                                      CurrentFrame.SwapchainSemaphore, false,
+                                      false);
+    WaitInfos[WaitIndex] = {
+        .Semaphore = &*WaitSemaphores[WaitIndex],
+        .Value = 0,
+        .Stage = RHICommandStage::ColorAttachmentOutput,
+    };
   }
   if (m_LastGraphicsWaitValue > 0) {
-    WaitInfos[WaitCount++] = VkSemaphoreSubmitInfo{
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-        .semaphore = m_TransferTimelineSemaphore,
-        .value = m_LastGraphicsWaitValue,
-        .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT};
+    const uint32_t WaitIndex = WaitCount++;
+    WaitSemaphores[WaitIndex].emplace(m_Device->Device,
+                                      m_TransferTimelineSemaphore, true, false);
+    WaitInfos[WaitIndex] = {
+        .Semaphore = &*WaitSemaphores[WaitIndex],
+        .Value = m_LastGraphicsWaitValue,
+        .Stage = RHICommandStage::All,
+    };
   }
 
   if (m_HasPresentationSurface) {
-    const VkSemaphoreSubmitInfo RenderSemaphoreSubmitInfo =
-        VkInit::SemaphoreSubmitInfo(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                                    CurrentFrame.RenderSemaphore);
-    const VkSubmitInfo2 SubmitInfo{
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .waitSemaphoreInfoCount = WaitCount,
-        .pWaitSemaphoreInfos = WaitCount > 0 ? WaitInfos.data() : VK_NULL_HANDLE,
-        .commandBufferInfoCount = 1,
-        .pCommandBufferInfos = &CommandBufferSubmitInfo,
-        .signalSemaphoreInfoCount = 1,
-        .pSignalSemaphoreInfos = &RenderSemaphoreSubmitInfo};
-    VK_CHECK(vkQueueSubmit2(m_Device->GraphicsQueue, 1, &SubmitInfo,
-                            CurrentFrame.RenderFence));
+    VulkanSemaphore RenderSemaphore(m_Device->Device, CurrentFrame.RenderSemaphore,
+                                    false, false);
+    VulkanFence RenderFence(m_Device->Device, CurrentFrame.RenderFence, false);
+    const RHIQueueSignalInfo RenderSignal{
+        .Semaphore = &RenderSemaphore,
+        .Value = 0,
+        .Stage = RHICommandStage::All,
+    };
+    VulkanQueue GraphicsQueue(m_Device->GraphicsQueue, RHIQueueType::Graphics);
+    GraphicsQueue.Submit(CommandList,
+                         std::span<const RHIQueueWaitInfo>(WaitInfos.data(),
+                                                           WaitCount),
+                         std::span<const RHIQueueSignalInfo>(&RenderSignal, 1),
+                         &RenderFence);
     m_Resources->GetSwapchain().Present(m_Device->GraphicsQueue,
                                         SwapchainImageIndex,
                                         CurrentFrame.RenderSemaphore);
   } else {
-    const VkSubmitInfo2 SubmitInfo{
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .waitSemaphoreInfoCount = WaitCount,
-        .pWaitSemaphoreInfos = WaitCount > 0 ? WaitInfos.data() : VK_NULL_HANDLE,
-        .commandBufferInfoCount = 1,
-        .pCommandBufferInfos = &CommandBufferSubmitInfo};
-    VK_CHECK(vkQueueSubmit2(m_Device->GraphicsQueue, 1, &SubmitInfo,
-                            CurrentFrame.RenderFence));
+    VulkanFence RenderFence(m_Device->Device, CurrentFrame.RenderFence, false);
+    VulkanQueue GraphicsQueue(m_Device->GraphicsQueue, RHIQueueType::Graphics);
+    GraphicsQueue.Submit(CommandList,
+                         std::span<const RHIQueueWaitInfo>(WaitInfos.data(),
+                                                           WaitCount),
+                         {}, &RenderFence);
     CaptureFrame.HasPendingReadback = true;
     CaptureFrame.SubmittedFrameNumber = Request.FrameNumber;
     CaptureFrame.SubmittedUser = Request.ViewportFrameUser;

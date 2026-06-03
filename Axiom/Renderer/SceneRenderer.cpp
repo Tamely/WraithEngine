@@ -28,6 +28,12 @@ void SceneRenderer::Shutdown() {
   m_Backend.reset();
 }
 
+void SceneRenderer::BeginFrame() {
+  if (m_Backend != nullptr) {
+    m_Backend->BeginFrame();
+  }
+}
+
 std::shared_ptr<Mesh>
 SceneRenderer::CreateMesh(const MeshData &MeshData,
                           const MeshCreateOptions &Options) {

@@ -97,6 +97,7 @@ set(AXIOM_VULKAN_IMPLEMENTATION_SOURCES
   ../AxiomInternal/AxiomRHI/Vulkan/VulkanPipeline.cpp
   ../AxiomInternal/AxiomRHI/Vulkan/VulkanPipelineLibrary.cpp
   ../AxiomInternal/AxiomRHI/Vulkan/VulkanRhiDevice.cpp
+  ../AxiomInternal/AxiomRHI/Vulkan/VulkanRhiObjects.cpp
   ../AxiomInternal/AxiomRHI/Vulkan/VulkanResourceManager.cpp
   ../AxiomInternal/AxiomRHI/Vulkan/VulkanSceneRenderer.cpp
   ../AxiomInternal/AxiomRHI/Vulkan/VulkanSwapchain.cpp

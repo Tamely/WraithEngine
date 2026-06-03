@@ -22,6 +22,7 @@ public:
 
   void Init(const RendererCreateInfo &CreateInfo);
   void Shutdown();
+  void BeginFrame();
   std::shared_ptr<Mesh>
   CreateMesh(const MeshData &MeshData, const MeshCreateOptions &Options = {});
   MaterialHandle CreateMaterialHandle(const MaterialInstance &Material);

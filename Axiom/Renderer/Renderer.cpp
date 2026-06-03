@@ -53,7 +53,7 @@ void Renderer::Shutdown() {
 }
 
 void Renderer::BeginFrame() {
-  m_RhiDevice->BeginFrame();
+  m_SceneRenderer->BeginFrame();
   RenderCommand::BeginScene(m_Scene);
 }
 

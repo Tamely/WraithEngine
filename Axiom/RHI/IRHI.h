@@ -19,6 +19,14 @@ enum class RHIPipelineType : uint8_t {
   Compute,
 };
 
+enum class RHICommandStage : uint8_t {
+  All = 0,
+  Draw,
+  ColorAttachmentOutput,
+  Compute,
+  Transfer,
+};
+
 enum class RHITextureDimension : uint8_t {
   Texture2D = 0,
   Texture3D,
@@ -110,6 +118,18 @@ class IRHISwapchain;
 class IRHIFence;
 class IRHISemaphore;
 
+struct RHIQueueWaitInfo {
+  IRHISemaphore *Semaphore{nullptr};
+  uint64_t Value{0};
+  RHICommandStage Stage{RHICommandStage::All};
+};
+
+struct RHIQueueSignalInfo {
+  IRHISemaphore *Semaphore{nullptr};
+  uint64_t Value{0};
+  RHICommandStage Stage{RHICommandStage::All};
+};
+
 class IRHICommandList {
 public:
   virtual ~IRHICommandList() = default;
@@ -117,6 +137,7 @@ public:
   virtual void Begin() = 0;
   virtual void End() = 0;
   [[nodiscard]] virtual bool IsRecording() const = 0;
+  [[nodiscard]] virtual RHIQueueType GetQueueType() const = 0;
 };
 
 class IRHIQueue {
@@ -125,8 +146,8 @@ public:
 
   [[nodiscard]] virtual RHIQueueType GetType() const = 0;
   virtual void Submit(IRHICommandList &CommandList,
-                      std::span<IRHISemaphore *const> WaitSemaphores = {},
-                      std::span<IRHISemaphore *const> SignalSemaphores = {},
+                      std::span<const RHIQueueWaitInfo> WaitSemaphores = {},
+                      std::span<const RHIQueueSignalInfo> SignalSemaphores = {},
                       IRHIFence *Fence = nullptr) = 0;
 };
 
