@@ -13,19 +13,19 @@ set(AXIOM_CORE_SOURCES
 )
 
 set(AXIOM_SCENE_SOURCES
-  CoreInstance/Instance.cpp
-  CoreInstance/InstancePool.cpp
-  Project/ProjectSystem.cpp
-  Session/BufferedEditorInputSource.cpp
-  Session/EditorCommandDispatcher.cpp
-  Session/EditorCommandDispatcherRuntime.cpp
-  Session/EditorMessageBus.cpp
-  Session/EditorSceneRendererAdapter.cpp
-  Session/EditorSceneStateManager.cpp
-  Session/EditorSceneStateManagerAssets.cpp
-  Session/EditorSession.cpp
-  Session/EditorSessionValidationModule.cpp
-  Session/StartupScene.cpp
+  Scene/CoreInstance/Instance.cpp
+  Scene/CoreInstance/InstancePool.cpp
+  Scene/Project/ProjectSystem.cpp
+  Scene/Session/BufferedEditorInputSource.cpp
+  Scene/Session/EditorCommandDispatcher.cpp
+  Scene/Session/EditorCommandDispatcherRuntime.cpp
+  Scene/Session/EditorMessageBus.cpp
+  Scene/Session/EditorSceneRendererAdapter.cpp
+  Scene/Session/EditorSceneStateManager.cpp
+  Scene/Session/EditorSceneStateManagerAssets.cpp
+  Scene/Session/EditorSession.cpp
+  Scene/Session/EditorSessionValidationModule.cpp
+  Scene/Session/StartupScene.cpp
 )
 
 set(AXIOM_ASSET_SOURCES
@@ -61,14 +61,14 @@ set(AXIOM_RENDERER_SOURCES
 )
 
 set(AXIOM_PHYSICS_SOURCES
-  Session/EditorPhysicsController.cpp
+  Physics/Session/EditorPhysicsController.cpp
 )
 if(AXIOM_ENABLE_PHYSICS)
   list(APPEND AXIOM_PHYSICS_SOURCES Physics/PhysicsWorldEnabled.cpp)
 endif()
 
 set(AXIOM_NET_SOURCES
-  Remote/AxiomSessionEndpoint.cpp
+  Net/Remote/AxiomSessionEndpoint.cpp
 )
 
 if(AXIOM_ENABLE_SCRIPTING)
@@ -330,6 +330,7 @@ endif()
 function(axiom_configure_module_target target_name)
   target_include_directories(${target_name} PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Scene"
     "${CMAKE_SOURCE_DIR}/AxiomInternal"
     "${CMAKE_SOURCE_DIR}/ThirdParty/glfw/include"
     "${CMAKE_SOURCE_DIR}/ThirdParty/imgui"
@@ -390,6 +391,14 @@ foreach(AXIOM_TARGET IN LISTS AXIOM_MODULE_TARGETS)
   axiom_configure_module_target(${AXIOM_TARGET})
 endforeach()
 
+target_include_directories(AxiomScene PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/Scene"
+)
+
+target_include_directories(AxiomNet PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/Net"
+)
+
 target_include_directories(AxiomCore PRIVATE
   "${CMAKE_SOURCE_DIR}/ThirdParty/vkbootstrap"
   "${CMAKE_SOURCE_DIR}/ThirdParty/vma"
@@ -401,6 +410,9 @@ target_include_directories(AxiomAssets PRIVATE
   "${CMAKE_SOURCE_DIR}/ThirdParty/stb_image"
 )
 if(TARGET AxiomPhysics)
+  target_include_directories(AxiomPhysics PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/Physics"
+  )
   target_include_directories(AxiomPhysics PRIVATE
     "${AXIOM_JOLT_SOURCE_DIR}"
   )
@@ -415,6 +427,7 @@ target_include_directories(AxiomRenderer PRIVATE
 )
 target_include_directories(AxiomRendererVulkanObjects PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Scene"
   "${CMAKE_SOURCE_DIR}/AxiomInternal"
   "${CMAKE_SOURCE_DIR}/ThirdParty/glfw/include"
   "${CMAKE_SOURCE_DIR}/ThirdParty/imgui"

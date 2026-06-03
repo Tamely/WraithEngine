@@ -19,6 +19,7 @@ endif()
 target_include_directories(AxiomHAL PUBLIC
   "${CMAKE_SOURCE_DIR}"
   "${CMAKE_SOURCE_DIR}/Axiom"
+  "${CMAKE_SOURCE_DIR}/Axiom/Scene"
   "${CMAKE_SOURCE_DIR}/Headless"
   "${CMAKE_SOURCE_DIR}/ThirdParty/fastgltf/include"
   "${CMAKE_SOURCE_DIR}/ThirdParty/glfw/include"
