@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Renderer/RendererBackend.h>
+#include <Renderer/RendererTypes.h>
 #include <Session/SessionTypes.h>
 
 #include <optional>

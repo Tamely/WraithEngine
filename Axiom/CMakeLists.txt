@@ -44,13 +44,12 @@ set(AXIOM_ASSET_SOURCES
 
 set(AXIOM_RENDERER_SOURCES
   Renderer/Camera.cpp
-  Renderer/ForwardRenderer.cpp
   Renderer/Mesh.cpp
   Renderer/RenderCommand.cpp
   Renderer/Renderer.cpp
-  Renderer/RendererBackendFactory.cpp
   Renderer/RendererFrameModule.cpp
   Renderer/RenderScene.cpp
+  Renderer/SceneRenderer.cpp
   Renderer/VideoEncoderFactory.cpp
   "${CMAKE_SOURCE_DIR}/ThirdParty/imgui/imgui.cpp"
   "${CMAKE_SOURCE_DIR}/ThirdParty/imgui/imgui_demo.cpp"
@@ -79,26 +78,28 @@ if(AXIOM_ENABLE_SCRIPTING)
 endif()
 
 set(AXIOM_VULKAN_IMPLEMENTATION_SOURCES
-  ../AxiomInternal/Renderer/Vulkan/VulkanBuffer.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanCommandContext.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanContext.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanDescriptors.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanDevice.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanDrawSubmissionSystem.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanGizmoRenderer.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanImage.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanImGuiRenderer.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanInitializers.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanLightBillboardRenderer.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanMaterialResources.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanMesh.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanOcclusionCulling.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanPipeline.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanPipelineLibrary.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanRendererBackend.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanResourceManager.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanSceneRenderer.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanSwapchain.cpp
+  ../AxiomInternal/AxiomRHI/RHIFactory.cpp
+  ../AxiomInternal/AxiomRHI/SceneRendererBackendFactory.cpp
+  ../AxiomInternal/AxiomRHI/Vulkan/VulkanBuffer.cpp
+  ../AxiomInternal/AxiomRHI/Vulkan/VulkanCommandContext.cpp
+  ../AxiomInternal/AxiomRHI/Vulkan/VulkanContext.cpp
+  ../AxiomInternal/AxiomRHI/Vulkan/VulkanDescriptors.cpp
+  ../AxiomInternal/AxiomRHI/Vulkan/VulkanDevice.cpp
+  ../AxiomInternal/AxiomRHI/Vulkan/VulkanDrawSubmissionSystem.cpp
+  ../AxiomInternal/AxiomRHI/Vulkan/VulkanGizmoRenderer.cpp
+  ../AxiomInternal/AxiomRHI/Vulkan/VulkanImage.cpp
+  ../AxiomInternal/AxiomRHI/Vulkan/ImGui/VulkanImGuiRenderer.cpp
+  ../AxiomInternal/AxiomRHI/Vulkan/VulkanInitializers.cpp
+  ../AxiomInternal/AxiomRHI/Vulkan/VulkanLightBillboardRenderer.cpp
+  ../AxiomInternal/AxiomRHI/Vulkan/VulkanMaterialResources.cpp
+  ../AxiomInternal/AxiomRHI/Vulkan/VulkanMesh.cpp
+  ../AxiomInternal/AxiomRHI/Vulkan/VulkanOcclusionCulling.cpp
+  ../AxiomInternal/AxiomRHI/Vulkan/VulkanPipeline.cpp
+  ../AxiomInternal/AxiomRHI/Vulkan/VulkanPipelineLibrary.cpp
+  ../AxiomInternal/AxiomRHI/Vulkan/VulkanRhiDevice.cpp
+  ../AxiomInternal/AxiomRHI/Vulkan/VulkanResourceManager.cpp
+  ../AxiomInternal/AxiomRHI/Vulkan/VulkanSceneRenderer.cpp
+  ../AxiomInternal/AxiomRHI/Vulkan/VulkanSwapchain.cpp
   "${CMAKE_SOURCE_DIR}/ThirdParty/imgui/imgui_impl_vulkan.cpp"
   "${CMAKE_SOURCE_DIR}/ThirdParty/vkbootstrap/VkBootstrap.cpp"
   "${CMAKE_SOURCE_DIR}/ThirdParty/volk/volk.c"

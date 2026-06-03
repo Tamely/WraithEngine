@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Renderer/RendererBackend.h"
 #include "Renderer/RenderScene.h"
-#include "Renderer/RenderSurface.h"
-#include "Renderer/RenderTechnique.h"
+#include "Renderer/RendererTypes.h"
+#include "Renderer/SceneRenderer.h"
+#include "RHI/IRHI.h"
 
 #include <filesystem>
 #include <memory>
@@ -23,7 +23,6 @@ public:
   void BeginFrame();
   void Render();
   void EndFrame();
-  void SetTechnique(std::unique_ptr<RenderTechnique> Technique);
   void SetViewMode(RendererViewMode ViewMode);
   void SetViewportFrameUser(SessionUserId User);
   void SetViewportFrameOutput(IViewportFrameOutput *FrameOutput);
@@ -44,14 +43,12 @@ public:
       const MeshSceneLoadOptions &Options = {});
 
 private:
-  static std::unique_ptr<RenderTechnique>
-  CreateTechnique(RendererTechniqueType TechniqueType);
   void UpdateCpuRenderTime(float CpuRenderMs);
 
 private:
-  std::unique_ptr<RendererBackend> m_Backend;
-  std::unique_ptr<RenderTechnique> m_Technique;
-  RenderTechnique::AttachmentRequirements m_AttachmentRequirements{};
+  std::unique_ptr<IRHIDevice> m_RhiDevice;
+  std::unique_ptr<SceneRenderer> m_SceneRenderer;
+  RendererAttachmentRequirements m_AttachmentRequirements{};
   std::optional<RendererCreateInfo> m_CreateInfo;
   RenderScene m_Scene;
   bool m_IsInitialized{false};

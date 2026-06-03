@@ -2,7 +2,7 @@
 
 #include <Assets/IAssetSource.h>
 #include <Assets/SceneFile.h>
-#include <Renderer/RendererBackend.h>
+#include <Renderer/RendererTypes.h>
 #include <Renderer/RenderScene.h>
 #include <Renderer/VideoEncoding.h>
 #include <Session/EditorCommand.h>

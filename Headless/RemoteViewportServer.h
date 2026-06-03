@@ -7,7 +7,7 @@
 #include <Assets/IAssetSource.h>
 #include <Project/ProjectSystem.h>
 #include <Remote/SessionTransport.h>
-#include <Renderer/RendererBackend.h>
+#include <Renderer/RendererTypes.h>
 #include <Renderer/RenderScene.h>
 #include <Renderer/VideoEncoding.h>
 
