@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#if AXIOM_SCRIPTING_ENABLED
+#if AXIOM_WITH_SCRIPTING
 
 #include <Scripting/ScriptHost.h>
 #include <Session/EditorSession.h>
@@ -321,4 +321,4 @@ TEST_F(ScriptingTest, PauseFreezesScriptTicks) {
     s_Session->Tick();
 }
 
-#endif // AXIOM_SCRIPTING_ENABLED
+#endif // AXIOM_WITH_SCRIPTING

@@ -2,6 +2,7 @@
 
 #include <Core/ApplicationModules.h>
 #include <Core/HeadlessRuntimeInstrumentation.h>
+#include <Renderer/RendererFrameModule.h>
 
 #include <algorithm>
 
@@ -43,11 +44,13 @@ HeadlessSessionHost::HeadlessSessionHost(const ApplicationArgs &Args,
   m_TransportModule = TransportModule.get();
   GetModuleManager().RegisterModule(std::move(TransportModule));
 
+#if AXIOM_WITH_SCRIPTING
   auto ScriptingModule = std::make_unique<SessionScriptHostModule>(
       "Headless.SessionScriptHost", m_SessionModule->GetSession(),
       SessionId{1}, m_SessionModule->GetLocalUserId());
   m_ScriptingModule = ScriptingModule.get();
   GetModuleManager().RegisterModule(std::move(ScriptingModule));
+#endif
 }
 
 bool HeadlessSessionHost::Step() { return Application::Step(); }
@@ -113,12 +116,18 @@ HeadlessSessionHost::BuildScheduledRenderPassViews(
 
 void HeadlessSessionHost::LoadUserScripts(
     const std::filesystem::path &AssemblyPath) {
+#if AXIOM_WITH_SCRIPTING
   GetScriptingModule().GetScriptHost().LoadUserAssembly(AssemblyPath);
   GetScriptingModule().GetScriptHost().StartFileWatcher();
+#else
+  (void)AssemblyPath;
+#endif
 }
 
 void HeadlessSessionHost::ReloadUserScripts() {
+#if AXIOM_WITH_SCRIPTING
   GetScriptingModule().GetScriptHost().ReloadUserAssembly();
+#endif
 }
 
 bool HeadlessSessionHost::LoadStartupSceneIntoSession() {

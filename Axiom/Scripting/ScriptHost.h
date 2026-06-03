@@ -7,13 +7,6 @@
 #include <filesystem>
 #include <memory>
 #include <string>
-#include <unordered_map>
-
-#if AXIOM_SCRIPTING_ENABLED
-#include <Coral/HostInstance.hpp>
-#include <Coral/Assembly.hpp>
-#include <Coral/ManagedObject.hpp>
-#endif
 
 namespace Axiom {
 class EditorSession;
@@ -32,7 +25,7 @@ enum class ScriptTrustProfile { Restricted, Trusted };
 
 class ScriptHost final : public IEditorEventSubscriber {
 public:
-  ScriptHost() = default;
+  ScriptHost();
   ~ScriptHost();
 
   ScriptHost(const ScriptHost &) = delete;
@@ -91,12 +84,6 @@ public:
     return m_UserAssemblyPath;
   }
 
-#if AXIOM_SCRIPTING_ENABLED
-  Coral::HostInstance &GetHost() { return m_Host; }
-  Coral::AssemblyLoadContext &GetEngineALC() { return m_EngineALC; }
-  Coral::ManagedAssembly *GetEngineAssembly() { return m_EngineAssembly; }
-#endif
-
 private:
   bool IsSimulationRunning() const;
   void InstantiateAllEligibleScripts();
@@ -113,14 +100,8 @@ private:
   void DestroyAllScripts();
 
 private:
-#if AXIOM_SCRIPTING_ENABLED
-  Coral::HostInstance m_Host;
-  Coral::AssemblyLoadContext m_EngineALC;
-  Coral::ManagedAssembly *m_EngineAssembly{nullptr};
-  Coral::AssemblyLoadContext m_UserALC;
-  Coral::ManagedAssembly *m_UserAssembly{nullptr};
-  std::unordered_map<std::string, Coral::ManagedObject> m_ScriptInstances;
-#endif
+  struct Impl;
+  std::unique_ptr<Impl> m_Impl;
   EditorSession *m_Session{nullptr};
   std::filesystem::path m_ManagedDir;      // directory of WraithEngine.Managed.dll
   std::filesystem::path m_UserAssemblyPath;

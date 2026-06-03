@@ -5,6 +5,9 @@
 #include <Assets/IAssetSource.h>
 #include <Assets/SceneFile.h>
 #include <Core/Log.h>
+#if AXIOM_WITH_PHYSICS
+#include <Session/EditorPhysicsController.h>
+#endif
 #include <Session/EditorSession.h>
 
 #include <glm/vec3.hpp>
@@ -318,10 +321,11 @@ TEST(SceneLifecycleTests, AuthoringMutationsAreRejectedWhileSimulationIsActive) 
 }
 
 TEST(SceneLifecycleTests, PhysicsStepsDynamicBodiesOnlyWhilePlaying) {
-#if !AXIOM_ENABLE_PHYSICS
+#if !AXIOM_WITH_PHYSICS
   GTEST_SKIP() << "Physics backend disabled for this build.";
 #else
   Axiom::EditorSession Session = MakeWorldSession();
+  Axiom::AttachEditorPhysicsController(Session);
   Session.SetObjectDetails({
       {
           .ObjectId = "world",
@@ -404,10 +408,11 @@ TEST(SceneLifecycleTests, PhysicsStepsDynamicBodiesOnlyWhilePlaying) {
 }
 
 TEST(SceneLifecycleTests, PhysicsPauseFreezesDynamicBodies) {
-#if !AXIOM_ENABLE_PHYSICS
+#if !AXIOM_WITH_PHYSICS
   GTEST_SKIP() << "Physics backend disabled for this build.";
 #else
   Axiom::EditorSession Session = MakeWorldSession();
+  Axiom::AttachEditorPhysicsController(Session);
   Session.SetObjectDetails({
       {
           .ObjectId = "world",
@@ -477,10 +482,11 @@ TEST(SceneLifecycleTests, PhysicsPauseFreezesDynamicBodies) {
 }
 
 TEST(SceneLifecycleTests, PhysicsStopRestoresPrePlayTransformState) {
-#if !AXIOM_ENABLE_PHYSICS
+#if !AXIOM_WITH_PHYSICS
   GTEST_SKIP() << "Physics backend disabled for this build.";
 #else
   Axiom::EditorSession Session = MakeWorldSession();
+  Axiom::AttachEditorPhysicsController(Session);
   Session.SetObjectDetails({
       {
           .ObjectId = "world",

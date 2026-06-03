@@ -1,7 +1,34 @@
-set(ENGINE_SOURCES
+set(AXIOM_CORE_SOURCES
+  Core/Application.cpp
+  Core/ApplicationModules.cpp
+  Core/GlfwEditorInputSource.cpp
+  Core/GlfwWindow.cpp
+  Core/HeadlessRuntimeInstrumentation.cpp
+  Core/HeadlessWindow.cpp
+  Core/Log.cpp
+  Core/ModuleManager.cpp
+  Core/VulkanLoader.cpp
+  Core/Window.cpp
+  Core/WindowInputPlatform.cpp
+)
+
+set(AXIOM_SCENE_SOURCES
+  CoreInstance/Instance.cpp
+  CoreInstance/InstancePool.cpp
   Project/ProjectSystem.cpp
-  Scripting/ScriptHost.cpp
-  Scripting/InternalCalls.cpp
+  Session/BufferedEditorInputSource.cpp
+  Session/EditorCommandDispatcher.cpp
+  Session/EditorCommandDispatcherRuntime.cpp
+  Session/EditorMessageBus.cpp
+  Session/EditorSceneRendererAdapter.cpp
+  Session/EditorSceneStateManager.cpp
+  Session/EditorSceneStateManagerAssets.cpp
+  Session/EditorSession.cpp
+  Session/EditorSessionValidationModule.cpp
+  Session/StartupScene.cpp
+)
+
+set(AXIOM_ASSET_SOURCES
   Assets/AssetCookManifest.cpp
   Assets/AssetCooker.cpp
   Assets/AssimpImporter.cpp
@@ -13,63 +40,53 @@ set(ENGINE_SOURCES
   Assets/MeshAsset.cpp
   Assets/SceneFile.cpp
   Assets/SvgTexture.cpp
-  CoreInstance/Instance.cpp
-  CoreInstance/InstancePool.cpp
-  Core/Application.cpp
-  Core/ApplicationModules.cpp
-  Core/GlfwEditorInputSource.cpp
-  Core/HeadlessRuntimeInstrumentation.cpp
-  Core/HeadlessWindow.cpp
-  Core/ModuleManager.cpp
-  Core/Window.cpp
-  Core/WindowInputPlatform.cpp
-  Core/Log.cpp
-  Remote/AxiomSessionEndpoint.cpp
-  Physics/PhysicsWorld.cpp
-  Session/BufferedEditorInputSource.cpp
-  Session/EditorMessageBus.cpp
-  Session/EditorCommandDispatcher.cpp
-  Session/EditorCommandDispatcherRuntime.cpp
-  Session/EditorPhysicsController.cpp
-  Session/EditorSceneRendererAdapter.cpp
-  Session/EditorSceneStateManager.cpp
-  Session/EditorSceneStateManagerAssets.cpp
-  Session/EditorSession.cpp
-  Session/EditorSessionValidationModule.cpp
-  Session/StartupScene.cpp
+)
+
+set(AXIOM_RENDERER_SOURCES
   Renderer/Camera.cpp
   Renderer/ForwardRenderer.cpp
   Renderer/Mesh.cpp
   Renderer/RenderCommand.cpp
   Renderer/Renderer.cpp
+  Renderer/RendererBackendFactory.cpp
+  Renderer/RendererFrameModule.cpp
   Renderer/RenderScene.cpp
   Renderer/VideoEncoderFactory.cpp
-)
-
-set(THIRDPARTY_SOURCES
-  "${CMAKE_SOURCE_DIR}/ThirdParty/imgui/imgui.h"
   "${CMAKE_SOURCE_DIR}/ThirdParty/imgui/imgui.cpp"
-
   "${CMAKE_SOURCE_DIR}/ThirdParty/imgui/imgui_demo.cpp"
   "${CMAKE_SOURCE_DIR}/ThirdParty/imgui/imgui_draw.cpp"
-  "${CMAKE_SOURCE_DIR}/ThirdParty/imgui/imgui_widgets.cpp"
   "${CMAKE_SOURCE_DIR}/ThirdParty/imgui/imgui_tables.cpp"
+  "${CMAKE_SOURCE_DIR}/ThirdParty/imgui/imgui_widgets.cpp"
   "${CMAKE_SOURCE_DIR}/ThirdParty/imgui/imgui_impl_glfw.cpp"
 )
 
-add_library(AxiomCore STATIC ${ENGINE_SOURCES} ${THIRDPARTY_SOURCES})
+set(AXIOM_PHYSICS_SOURCES
+  Session/EditorPhysicsController.cpp
+)
+if(AXIOM_ENABLE_PHYSICS)
+  list(APPEND AXIOM_PHYSICS_SOURCES Physics/PhysicsWorldEnabled.cpp)
+endif()
+
+set(AXIOM_NET_SOURCES
+  Remote/AxiomSessionEndpoint.cpp
+)
+
+if(AXIOM_ENABLE_SCRIPTING)
+  set(AXIOM_SCRIPTING_SOURCES
+    Scripting/InternalCallsEnabled.cpp
+    Scripting/ScriptHostEnabled.cpp
+  )
+endif()
 
 set(AXIOM_VULKAN_IMPLEMENTATION_SOURCES
-  Core/GlfwWindow.cpp
-  Core/VulkanLoader.cpp
-  Renderer/RendererBackendFactory.cpp
   ../AxiomInternal/Renderer/Vulkan/VulkanBuffer.cpp
   ../AxiomInternal/Renderer/Vulkan/VulkanCommandContext.cpp
   ../AxiomInternal/Renderer/Vulkan/VulkanContext.cpp
   ../AxiomInternal/Renderer/Vulkan/VulkanDescriptors.cpp
   ../AxiomInternal/Renderer/Vulkan/VulkanDevice.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanImage.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanDrawSubmissionSystem.cpp
   ../AxiomInternal/Renderer/Vulkan/VulkanGizmoRenderer.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanImage.cpp
   ../AxiomInternal/Renderer/Vulkan/VulkanImGuiRenderer.cpp
   ../AxiomInternal/Renderer/Vulkan/VulkanInitializers.cpp
   ../AxiomInternal/Renderer/Vulkan/VulkanLightBillboardRenderer.cpp
@@ -78,20 +95,31 @@ set(AXIOM_VULKAN_IMPLEMENTATION_SOURCES
   ../AxiomInternal/Renderer/Vulkan/VulkanOcclusionCulling.cpp
   ../AxiomInternal/Renderer/Vulkan/VulkanPipeline.cpp
   ../AxiomInternal/Renderer/Vulkan/VulkanPipelineLibrary.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanDrawSubmissionSystem.cpp
-  ../AxiomInternal/Renderer/Vulkan/VulkanResourceManager.cpp
   ../AxiomInternal/Renderer/Vulkan/VulkanRendererBackend.cpp
+  ../AxiomInternal/Renderer/Vulkan/VulkanResourceManager.cpp
   ../AxiomInternal/Renderer/Vulkan/VulkanSceneRenderer.cpp
   ../AxiomInternal/Renderer/Vulkan/VulkanSwapchain.cpp
   "${CMAKE_SOURCE_DIR}/ThirdParty/imgui/imgui_impl_vulkan.cpp"
-  "${CMAKE_SOURCE_DIR}/ThirdParty/volk/volk.c"
   "${CMAKE_SOURCE_DIR}/ThirdParty/vkbootstrap/VkBootstrap.cpp"
+  "${CMAKE_SOURCE_DIR}/ThirdParty/volk/volk.c"
 )
 
-add_library(AxiomCoreVulkanObjects OBJECT ${AXIOM_VULKAN_IMPLEMENTATION_SOURCES})
-target_sources(AxiomCore PRIVATE $<TARGET_OBJECTS:AxiomCoreVulkanObjects>)
+add_library(AxiomCore STATIC ${AXIOM_CORE_SOURCES})
+add_library(AxiomScene STATIC ${AXIOM_SCENE_SOURCES})
+add_library(AxiomAssets STATIC ${AXIOM_ASSET_SOURCES})
+add_library(AxiomRenderer STATIC ${AXIOM_RENDERER_SOURCES})
+add_library(AxiomNet STATIC ${AXIOM_NET_SOURCES})
+if(AXIOM_ENABLE_PHYSICS)
+  add_library(AxiomPhysics STATIC ${AXIOM_PHYSICS_SOURCES})
+endif()
+if(AXIOM_ENABLE_SCRIPTING)
+  add_library(AxiomScripting STATIC ${AXIOM_SCRIPTING_SOURCES})
+endif()
+add_library(AxiomRendererVulkanObjects OBJECT
+  ${AXIOM_VULKAN_IMPLEMENTATION_SOURCES})
+target_sources(AxiomRenderer PRIVATE $<TARGET_OBJECTS:AxiomRendererVulkanObjects>)
 
-add_dependencies(AxiomCore Shaders)
+add_dependencies(AxiomRenderer Shaders)
 
 set(AXIOM_WEBRTC_LINKED 0)
 set(AXIOM_WEBRTC_COMPILE_OPTIONS)
@@ -284,10 +312,6 @@ if(AXIOM_ENABLE_WEBRTC)
   endif()
 endif()
 
-if(AXIOM_WEBRTC_REPACKED_TARGETS)
-  add_dependencies(AxiomCore ${AXIOM_WEBRTC_REPACKED_TARGETS})
-endif()
-
 set(AXIOM_VULKAN_LOADER_PATH "" CACHE STRING
     "Optional explicit Vulkan loader path used when platform-default discovery fails")
 
@@ -299,89 +323,198 @@ message(STATUS "Vulkan_VERSION: ${Vulkan_VERSION}")
 
 add_subdirectory("${CMAKE_SOURCE_DIR}/HAL" "${CMAKE_BINARY_DIR}/HAL")
 
-target_include_directories(AxiomCore PUBLIC
-  "${CMAKE_CURRENT_SOURCE_DIR}"
-  "${CMAKE_SOURCE_DIR}/ThirdParty/glfw/include"
-  "${CMAKE_SOURCE_DIR}/ThirdParty/imgui"
+if(AXIOM_WEBRTC_REPACKED_TARGETS)
+  add_dependencies(AxiomHAL ${AXIOM_WEBRTC_REPACKED_TARGETS})
+endif()
+
+function(axiom_configure_module_target target_name)
+  target_include_directories(${target_name} PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_SOURCE_DIR}/AxiomInternal"
+    "${CMAKE_SOURCE_DIR}/ThirdParty/glfw/include"
+    "${CMAKE_SOURCE_DIR}/ThirdParty/imgui"
+    "${CMAKE_SOURCE_DIR}/ThirdParty/glm"
+    "${CMAKE_SOURCE_DIR}/ThirdParty/spdlog/include"
+    "${rapidjson_SOURCE_DIR}/include"
+  )
+
+  target_compile_definitions(${target_name} PUBLIC
+    VK_NO_PROTOTYPES
+    AXIOM_CONTENT_DIR="${CMAKE_SOURCE_DIR}/Content"
+    AXIOM_PROJECTS_DIR="${CMAKE_SOURCE_DIR}/Projects"
+    AXIOM_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    AXIOM_ENABLE_WEBRTC=$<IF:$<BOOL:${AXIOM_ENABLE_WEBRTC}>,1,0>
+    AXIOM_WEBRTC_LINKED=${AXIOM_WEBRTC_LINKED}
+  )
+
+  if(AXIOM_VULKAN_LOADER_PATH)
+    string(REPLACE "\\" "\\\\" AXIOM_VULKAN_LOADER_PATH_ESCAPED
+           "${AXIOM_VULKAN_LOADER_PATH}")
+    target_compile_definitions(${target_name} PUBLIC
+      AXIOM_VULKAN_LOADER_PATH="${AXIOM_VULKAN_LOADER_PATH_ESCAPED}"
+    )
+  endif()
+
+  if(AXIOM_WEBRTC_COMPILE_OPTIONS)
+    target_compile_options(${target_name} PUBLIC ${AXIOM_WEBRTC_COMPILE_OPTIONS})
+  endif()
+
+  if(AXIOM_WEBRTC_LINK_OPTIONS)
+    target_link_options(${target_name} PUBLIC ${AXIOM_WEBRTC_LINK_OPTIONS})
+  endif()
+
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(${target_name} PRIVATE
+      $<$<CONFIG:Release>:-O3 -march=native>
+      $<$<CONFIG:RelWithDebInfo>:-O2 -g -march=native>
+      $<$<CONFIG:MinSizeRel>:-Os>
+    )
+  endif()
+endfunction()
+
+set(AXIOM_MODULE_TARGETS
+  AxiomCore
+  AxiomScene
+  AxiomAssets
+  AxiomRenderer
+  AxiomNet
+)
+if(TARGET AxiomPhysics)
+  list(APPEND AXIOM_MODULE_TARGETS AxiomPhysics)
+endif()
+if(TARGET AxiomScripting)
+  list(APPEND AXIOM_MODULE_TARGETS AxiomScripting)
+endif()
+
+foreach(AXIOM_TARGET IN LISTS AXIOM_MODULE_TARGETS)
+  axiom_configure_module_target(${AXIOM_TARGET})
+endforeach()
+
+target_include_directories(AxiomCore PRIVATE
+  "${CMAKE_SOURCE_DIR}/ThirdParty/vkbootstrap"
+  "${CMAKE_SOURCE_DIR}/ThirdParty/vma"
+  "${CMAKE_SOURCE_DIR}/ThirdParty/volk"
+  "${Vulkan_INCLUDE_DIRS}"
+)
+target_include_directories(AxiomAssets PRIVATE
   "${CMAKE_SOURCE_DIR}/ThirdParty/fastgltf/include"
-  "${CMAKE_SOURCE_DIR}/ThirdParty/glm"
   "${CMAKE_SOURCE_DIR}/ThirdParty/stb_image"
-  "${CMAKE_SOURCE_DIR}/ThirdParty/spdlog/include"
-  "${rapidjson_SOURCE_DIR}/include"
-  "$<$<BOOL:${AXIOM_ENABLE_PHYSICS}>:${AXIOM_JOLT_SOURCE_DIR}>"
 )
-
-target_link_libraries(AxiomCore
-  PUBLIC
-    AxiomHAL glfw fastgltf glm
-    spdlog assimp
-  PRIVATE
-    Vulkan::Vulkan
+if(TARGET AxiomPhysics)
+  target_include_directories(AxiomPhysics PRIVATE
+    "${AXIOM_JOLT_SOURCE_DIR}"
+  )
+endif()
+target_include_directories(AxiomRenderer PRIVATE
+  "${CMAKE_SOURCE_DIR}/ThirdParty/fastgltf/include"
+  "${CMAKE_SOURCE_DIR}/ThirdParty/stb_image"
+  "${CMAKE_SOURCE_DIR}/ThirdParty/vkbootstrap"
+  "${CMAKE_SOURCE_DIR}/ThirdParty/vma"
+  "${CMAKE_SOURCE_DIR}/ThirdParty/volk"
+  "${Vulkan_INCLUDE_DIRS}"
 )
-
-target_include_directories(AxiomCoreVulkanObjects PRIVATE
+target_include_directories(AxiomRendererVulkanObjects PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}"
   "${CMAKE_SOURCE_DIR}/AxiomInternal"
   "${CMAKE_SOURCE_DIR}/ThirdParty/glfw/include"
   "${CMAKE_SOURCE_DIR}/ThirdParty/imgui"
   "${CMAKE_SOURCE_DIR}/ThirdParty/fastgltf/include"
   "${CMAKE_SOURCE_DIR}/ThirdParty/glm"
-  "${CMAKE_SOURCE_DIR}/ThirdParty/stb_image"
   "${CMAKE_SOURCE_DIR}/ThirdParty/spdlog/include"
+  "${CMAKE_SOURCE_DIR}/ThirdParty/stb_image"
   "${rapidjson_SOURCE_DIR}/include"
-  "$<$<BOOL:${AXIOM_ENABLE_PHYSICS}>:${AXIOM_JOLT_SOURCE_DIR}>"
   "${CMAKE_SOURCE_DIR}/ThirdParty/vkbootstrap"
   "${CMAKE_SOURCE_DIR}/ThirdParty/vma"
   "${CMAKE_SOURCE_DIR}/ThirdParty/volk"
   "${Vulkan_INCLUDE_DIRS}"
 )
-target_link_libraries(AxiomCoreVulkanObjects PRIVATE
-  AxiomHAL glfw fastgltf glm spdlog assimp Vulkan::Vulkan
+if(AXIOM_ENABLE_PHYSICS)
+  target_include_directories(AxiomRendererVulkanObjects PRIVATE
+    "${AXIOM_JOLT_SOURCE_DIR}"
+  )
+endif()
+
+target_link_libraries(AxiomCore
+  PUBLIC
+    AxiomHAL
+  PRIVATE
+    glfw
+    spdlog
+    Vulkan::Vulkan
 )
-target_compile_definitions(AxiomCoreVulkanObjects PRIVATE
+
+target_link_libraries(AxiomScene
+  PUBLIC
+    AxiomCore
+)
+
+target_link_libraries(AxiomAssets
+  PRIVATE
+    AxiomHAL
+    fastgltf
+    spdlog
+    assimp
+)
+
+target_link_libraries(AxiomRenderer
+  PUBLIC
+    AxiomCore
+  PRIVATE
+    AxiomHAL
+    glfw
+    spdlog
+    Vulkan::Vulkan
+)
+
+if(TARGET AxiomPhysics)
+  target_link_libraries(AxiomPhysics
+    PUBLIC
+      AxiomCore
+      AxiomScene
+  )
+  target_link_libraries(AxiomPhysics PRIVATE Jolt)
+endif()
+target_link_libraries(AxiomNet
+  PUBLIC
+    AxiomCore
+    AxiomScene
+    AxiomRenderer
+)
+
+if(TARGET AxiomScripting)
+  target_link_libraries(AxiomScripting
+    PUBLIC
+      AxiomCore
+      AxiomScene
+      AxiomHAL
+  )
+  target_link_libraries(AxiomScripting PRIVATE CoralNative)
+endif()
+
+target_link_libraries(AxiomRendererVulkanObjects PRIVATE
+  AxiomHAL
+  glfw
+  fastgltf
+  spdlog
+  assimp
+  Vulkan::Vulkan
+)
+target_compile_definitions(AxiomRendererVulkanObjects PRIVATE
   VK_NO_PROTOTYPES
   AXIOM_CONTENT_DIR="${CMAKE_SOURCE_DIR}/Content"
   AXIOM_PROJECTS_DIR="${CMAKE_SOURCE_DIR}/Projects"
   AXIOM_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
   AXIOM_ENABLE_WEBRTC=$<IF:$<BOOL:${AXIOM_ENABLE_WEBRTC}>,1,0>
+  AXIOM_WEBRTC_LINKED=${AXIOM_WEBRTC_LINKED}
 )
-
-target_compile_definitions(AxiomCore PUBLIC
-  VK_NO_PROTOTYPES
-  AXIOM_CONTENT_DIR="${CMAKE_SOURCE_DIR}/Content"
-  AXIOM_PROJECTS_DIR="${CMAKE_SOURCE_DIR}/Projects"
-  AXIOM_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
-)
-
-if(AXIOM_ENABLE_WEBRTC)
-  target_compile_definitions(AxiomCore PUBLIC AXIOM_ENABLE_WEBRTC=1)
-else()
-  target_compile_definitions(AxiomCore PUBLIC AXIOM_ENABLE_WEBRTC=0)
-endif()
-
-if(AXIOM_ENABLE_PHYSICS)
-  target_link_libraries(AxiomCore PUBLIC Jolt)
-  target_compile_definitions(AxiomCore PUBLIC AXIOM_ENABLE_PHYSICS=1)
-else()
-  target_compile_definitions(AxiomCore PUBLIC AXIOM_ENABLE_PHYSICS=0)
-endif()
 
 if(AXIOM_ENABLE_SCRIPTING)
-  target_link_libraries(AxiomCore PUBLIC CoralNative)
-  target_compile_definitions(AxiomCore PUBLIC AXIOM_SCRIPTING_ENABLED=1)
-  # Default managed dir: Coral.Managed output (needed by HostInstance::Initialize)
   set(AXIOM_CORAL_MANAGED_DIR
       "${CMAKE_SOURCE_DIR}/ThirdParty/Coral/Coral.Managed/bin/Debug/net9.0"
       CACHE PATH "Directory containing Coral.Managed.dll and its runtimeconfig")
-  target_compile_definitions(AxiomCore PUBLIC
-      AXIOM_CORAL_MANAGED_DIR="${AXIOM_CORAL_MANAGED_DIR}")
-
-  # Engine API assembly (WraithEngine.Managed.dll)
   set(AXIOM_MANAGED_DIR
       "${CMAKE_SOURCE_DIR}/Scripting/WraithEngine.Managed/bin/Debug"
       CACHE PATH "Directory containing WraithEngine.Managed.dll")
-  target_compile_definitions(AxiomCore PUBLIC
-      AXIOM_MANAGED_DIR="${AXIOM_MANAGED_DIR}")
 
   set(WRAITH_MANAGED_CSPROJ
       "${CMAKE_SOURCE_DIR}/Scripting/WraithEngine.Managed/WraithEngine.Managed.csproj")
@@ -392,50 +525,25 @@ if(AXIOM_ENABLE_SCRIPTING)
     COMMENT "Building WraithEngine.Managed"
     VERBATIM
   )
-  add_dependencies(AxiomCore WraithEngineManaged)
+  add_dependencies(AxiomScripting WraithEngineManaged)
 
   if(AXIOM_SCRIPTING_WATCH AND APPLE)
-    target_compile_definitions(AxiomCore PUBLIC AXIOM_SCRIPTING_WATCH=1)
+    target_compile_definitions(AxiomScripting PUBLIC AXIOM_SCRIPTING_WATCH=1)
   else()
-    target_compile_definitions(AxiomCore PUBLIC AXIOM_SCRIPTING_WATCH=0)
+    target_compile_definitions(AxiomScripting PUBLIC AXIOM_SCRIPTING_WATCH=0)
   endif()
 
   if(AXIOM_SCRIPTING_TRUST_DEFAULT STREQUAL "Trusted")
-    target_compile_definitions(AxiomCore PUBLIC AXIOM_SCRIPTING_TRUST_RESTRICTED=0)
+    target_compile_definitions(AxiomScripting PUBLIC AXIOM_SCRIPTING_TRUST_RESTRICTED=0)
     message(STATUS "ScriptHost trust profile: Trusted")
   else()
-    target_compile_definitions(AxiomCore PUBLIC AXIOM_SCRIPTING_TRUST_RESTRICTED=1)
+    target_compile_definitions(AxiomScripting PUBLIC AXIOM_SCRIPTING_TRUST_RESTRICTED=1)
     message(STATUS "ScriptHost trust profile: Restricted (default)")
   endif()
-else()
-  target_compile_definitions(AxiomCore PUBLIC AXIOM_SCRIPTING_ENABLED=0)
-  target_compile_definitions(AxiomCore PUBLIC AXIOM_CORAL_MANAGED_DIR="")
-  target_compile_definitions(AxiomCore PUBLIC AXIOM_MANAGED_DIR="")
-  target_compile_definitions(AxiomCore PUBLIC AXIOM_SCRIPTING_WATCH=0)
-  target_compile_definitions(AxiomCore PUBLIC AXIOM_SCRIPTING_TRUST_RESTRICTED=1)
-endif()
 
-if(AXIOM_WEBRTC_COMPILE_OPTIONS)
-  target_compile_options(AxiomCore PUBLIC ${AXIOM_WEBRTC_COMPILE_OPTIONS})
-endif()
-
-if(AXIOM_WEBRTC_LINK_OPTIONS)
-  target_link_options(AxiomCore PUBLIC ${AXIOM_WEBRTC_LINK_OPTIONS})
-endif()
-
-if(AXIOM_WEBRTC_LIBRARIES)
-  target_link_libraries(AxiomCore PUBLIC ${AXIOM_WEBRTC_LIBRARIES})
-endif()
-
-target_compile_definitions(AxiomCore PUBLIC
-  AXIOM_WEBRTC_LINKED=${AXIOM_WEBRTC_LINKED}
-)
-
-if(AXIOM_VULKAN_LOADER_PATH)
-  string(REPLACE "\\" "\\\\" AXIOM_VULKAN_LOADER_PATH_ESCAPED
-         "${AXIOM_VULKAN_LOADER_PATH}")
-  target_compile_definitions(AxiomCore PUBLIC
-    AXIOM_VULKAN_LOADER_PATH="${AXIOM_VULKAN_LOADER_PATH_ESCAPED}"
+  target_compile_definitions(AxiomScripting PUBLIC
+    AXIOM_CORAL_MANAGED_DIR="${AXIOM_CORAL_MANAGED_DIR}"
+    AXIOM_MANAGED_DIR="${AXIOM_MANAGED_DIR}"
   )
 endif()
 
@@ -463,17 +571,5 @@ if(APPLE)
     "-framework IOSurface"
     "-framework ScreenCaptureKit"
     "-framework VideoToolbox"
-  )
-endif()
-
-if(AXIOM_ENABLE_WEBRTC AND TARGET AxiomWebRTC)
-  target_link_libraries(AxiomCore PUBLIC AxiomWebRTC)
-endif()
-
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-  target_compile_options(AxiomCore PRIVATE
-    $<$<CONFIG:Release>:-O3 -march=native>
-    $<$<CONFIG:RelWithDebInfo>:-O2 -g -march=native>
-    $<$<CONFIG:MinSizeRel>:-Os>
   )
 endif()

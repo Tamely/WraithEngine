@@ -2,10 +2,6 @@
 
 #include <Core/Log.h>
 
-#include <glm/gtc/quaternion.hpp>
-#include <glm/trigonometric.hpp>
-
-#if AXIOM_ENABLE_PHYSICS
 #include <Jolt/Jolt.h>
 #include <Jolt/Core/Factory.h>
 #include <Jolt/Core/JobSystemSingleThreaded.h>
@@ -19,15 +15,15 @@
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 
+#include <glm/gtc/quaternion.hpp>
+#include <glm/trigonometric.hpp>
+
 #include <cstdarg>
 #include <cstdio>
 #include <memory>
 #include <unordered_map>
-#endif
 
 namespace Axiom {
-
-#if AXIOM_ENABLE_PHYSICS
 namespace {
 
 constexpr JPH::ObjectLayer kStaticObjectLayer = 0;
@@ -151,10 +147,8 @@ JoltRuntime &GetJoltRuntime() {
 }
 
 } // namespace
-#endif
 
 struct PhysicsWorld::Impl {
-#if AXIOM_ENABLE_PHYSICS
   struct BodyRecord {
     SceneObjectHandle ObjectHandle{};
     std::string ObjectId;
@@ -219,35 +213,19 @@ struct PhysicsWorld::Impl {
     BodyIndexByHandle.clear();
     Running = false;
   }
-#endif
 };
 
-PhysicsWorld::PhysicsWorld() {
-#if AXIOM_ENABLE_PHYSICS
-  m_Impl = std::make_unique<Impl>();
-#endif
-}
+PhysicsWorld::PhysicsWorld() : m_Impl(std::make_unique<Impl>()) {}
 
 PhysicsWorld::~PhysicsWorld() = default;
 
-bool PhysicsWorld::IsAvailable() const {
-#if AXIOM_ENABLE_PHYSICS
-  return m_Impl != nullptr;
-#else
-  return false;
-#endif
-}
+bool PhysicsWorld::IsAvailable() const { return m_Impl != nullptr; }
 
 bool PhysicsWorld::IsRunning() const {
-#if AXIOM_ENABLE_PHYSICS
   return m_Impl != nullptr && m_Impl->Running;
-#else
-  return false;
-#endif
 }
 
 void PhysicsWorld::Start(const RuntimeSceneState &Scene) {
-#if AXIOM_ENABLE_PHYSICS
   if (m_Impl == nullptr) {
     return;
   }
@@ -314,22 +292,16 @@ void PhysicsWorld::Start(const RuntimeSceneState &Scene) {
   }
 
   m_Impl->Running = true;
-#else
-  (void)Scene;
-#endif
 }
 
 void PhysicsWorld::Stop() {
-#if AXIOM_ENABLE_PHYSICS
   if (m_Impl != nullptr) {
     m_Impl->Reset();
   }
-#endif
 }
 
 std::vector<PhysicsTransformUpdate> PhysicsWorld::Step(float DeltaTimeSeconds) {
   std::vector<PhysicsTransformUpdate> Updates;
-#if AXIOM_ENABLE_PHYSICS
   if (m_Impl == nullptr || !m_Impl->Running || DeltaTimeSeconds <= 0.0f) {
     return Updates;
   }
@@ -356,9 +328,6 @@ std::vector<PhysicsTransformUpdate> PhysicsWorld::Step(float DeltaTimeSeconds) {
             },
     });
   }
-#else
-  (void)DeltaTimeSeconds;
-#endif
   return Updates;
 }
 

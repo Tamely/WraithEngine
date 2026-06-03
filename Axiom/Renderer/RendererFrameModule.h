@@ -3,7 +3,7 @@
 #include "Core/IModule.h"
 
 namespace Axiom {
-class WindowEventsModule final : public IModule {
+class RendererFrameModule final : public IModule {
 public:
   [[nodiscard]] std::string_view GetName() const override;
   bool Initialize(Application &App) override;

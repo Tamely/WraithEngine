@@ -121,7 +121,7 @@ void EditorPhysicsController::EnsurePhysicsWorldStarted() {
     A_CORE_WARN("EditorSession: physics requested but backend is unavailable");
     return;
   }
-  m_PhysicsWorld->Start(BuildRuntimeSceneState(m_Session.m_State.Scene));
+  m_PhysicsWorld->Start(BuildRuntimeSceneState(m_Session.GetState().Scene));
 }
 
 void EditorPhysicsController::StopPhysicsWorld() {
@@ -131,7 +131,7 @@ void EditorPhysicsController::StopPhysicsWorld() {
 }
 
 void EditorPhysicsController::StepRuntimePhysics(float DeltaTimeSeconds) {
-  if (m_Session.m_State.RuntimeState != EditorRuntimeState::Playing ||
+  if (m_Session.GetRuntimeState() != EditorRuntimeState::Playing ||
       m_PhysicsWorld == nullptr || !m_PhysicsWorld->IsRunning()) {
     return;
   }
@@ -150,8 +150,12 @@ void EditorPhysicsController::StepRuntimePhysics(float DeltaTimeSeconds) {
     } else if (Existing->Transform.has_value()) {
       Applied.Scale = Existing->Transform->Scale;
     }
-    m_Session.m_SceneStateManager->ApplyWorldTransform(
-        Existing->ObjectId, Applied, SessionUserId{1}, true);
+    m_Session.ApplyRuntimeWorldTransform(Existing->ObjectId, Applied);
   }
+}
+
+void AttachEditorPhysicsController(EditorSession &Session) {
+  Session.SetRuntimePhysicsController(
+      std::make_unique<EditorPhysicsController>(Session));
 }
 } // namespace Axiom

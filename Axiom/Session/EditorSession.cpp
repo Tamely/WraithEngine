@@ -1,7 +1,7 @@
 #include "Session/EditorSession.h"
 
 #include "Session/EditorCommandDispatcher.h"
-#include "Session/EditorPhysicsController.h"
+#include "Session/EditorRuntimePhysicsController.h"
 #include "Session/EditorSceneStateManager.h"
 #include "Session/EditorSessionValidationModule.h"
 
@@ -77,7 +77,6 @@ EditorSession::EditorSession(SessionId Session, EditorSessionConfig Config)
     : m_Config(Config),
       m_State({.Session = Session}),
       m_CommandDispatcher(std::make_unique<EditorCommandDispatcher>(*this)),
-      m_PhysicsController(std::make_unique<EditorPhysicsController>(*this)),
       m_SceneStateManager(std::make_unique<EditorSceneStateManager>(*this)),
       m_ValidationModule(std::make_unique<EditorSessionValidationModule>(*this)) {
   m_SceneStateManager->InitSceneRoot();
@@ -97,7 +96,7 @@ void EditorSession::Tick(float DeltaTimeSeconds) {
       [this](const QueuedEditorCommand &QueuedCommand) {
         m_CommandDispatcher->ProcessCommand(QueuedCommand);
       });
-  m_PhysicsController->StepRuntimePhysics(DeltaTimeSeconds);
+  StepRuntimePhysics(DeltaTimeSeconds);
 }
 
 void EditorSession::Subscribe(IEditorEventSubscriber *Subscriber) {
@@ -552,6 +551,37 @@ bool EditorSession::IsBlankString(std::string_view Value) {
 void EditorSession::PublishScriptError(const std::string &ObjectId,
                                        const std::string &Message) {
   PublishEvent({ScriptErrorEvent{.ObjectId = ObjectId, .Message = Message}});
+}
+
+void EditorSession::ApplyRuntimeWorldTransform(
+    std::string_view ObjectId, const EditorTransformDetails &Transform) {
+  if (m_SceneStateManager != nullptr) {
+    m_SceneStateManager->ApplyWorldTransform(
+        std::string(ObjectId), Transform, SessionUserId{1}, true);
+  }
+}
+
+void EditorSession::SetRuntimePhysicsController(
+    std::unique_ptr<IEditorRuntimePhysicsController> Controller) {
+  m_RuntimePhysicsController = std::move(Controller);
+}
+
+void EditorSession::EnsureRuntimePhysicsWorldStarted() {
+  if (m_RuntimePhysicsController != nullptr) {
+    m_RuntimePhysicsController->EnsurePhysicsWorldStarted();
+  }
+}
+
+void EditorSession::StopRuntimePhysicsWorld() {
+  if (m_RuntimePhysicsController != nullptr) {
+    m_RuntimePhysicsController->StopPhysicsWorld();
+  }
+}
+
+void EditorSession::StepRuntimePhysics(float DeltaTimeSeconds) {
+  if (m_RuntimePhysicsController != nullptr) {
+    m_RuntimePhysicsController->StepRuntimePhysics(DeltaTimeSeconds);
+  }
 }
 
 void EditorSession::PublishEvent(const EditorEvent &Event) {

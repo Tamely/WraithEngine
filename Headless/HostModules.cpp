@@ -45,6 +45,7 @@ void HeadlessSessionTransportModule::SetVideoEncoder(
   }
 }
 
+#if AXIOM_WITH_SCRIPTING
 SessionScriptHostModule::SessionScriptHostModule(std::string_view ModuleName,
                                                  EditorSession &Session,
                                                  SessionId SessionHandle,
@@ -87,4 +88,5 @@ void SessionScriptHostModule::Shutdown(Application &App) {
   }
   m_ScriptHost.Shutdown();
 }
+#endif
 } // namespace Axiom

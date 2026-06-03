@@ -6,6 +6,9 @@
 
 #include <Renderer/Camera.h>
 #include <Renderer/RenderCommand.h>
+#if AXIOM_WITH_PHYSICS
+#include <Session/EditorPhysicsController.h>
+#endif
 #include <Session/StartupScene.h>
 
 #include <algorithm>
@@ -16,7 +19,11 @@ namespace {
 
 HeadlessSessionModule::HeadlessSessionModule()
     : m_Session(m_SessionId),
-      m_OverlayModule(m_Session) {}
+      m_OverlayModule(m_Session) {
+#if AXIOM_WITH_PHYSICS
+  AttachEditorPhysicsController(m_Session);
+#endif
+}
 
 std::string_view HeadlessSessionModule::GetName() const {
   return "Headless.Session";

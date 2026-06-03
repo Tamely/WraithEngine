@@ -2,7 +2,6 @@
 
 #include "Assets/AssetCooker.h"
 #include "Assets/MeshAsset.h"
-#include "Session/EditorPhysicsController.h"
 #include "Session/EditorSceneStateManager.h"
 
 #include <Core/Log.h>
@@ -252,7 +251,7 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
       .SelectedObjectHandles = m_Session.m_SelectedObjectHandles,
   };
   m_Session.m_State.RuntimeState = EditorRuntimeState::Playing;
-  m_Session.m_PhysicsController->EnsurePhysicsWorldStarted();
+  m_Session.EnsureRuntimePhysicsWorldStarted();
   m_Session.PublishEvent({.Payload = RuntimeStateChangedEvent{
                               .User = QueuedCommand.Context.User,
                               .State = m_Session.m_State.RuntimeState,
@@ -282,7 +281,7 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
 void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                             const StopSessionCommand &) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
-  m_Session.m_PhysicsController->StopPhysicsWorld();
+  m_Session.StopRuntimePhysicsWorld();
   if (m_Session.m_RuntimeSceneSnapshot.has_value()) {
     m_Session.m_SceneStateManager->SetSceneState(
         std::move(m_Session.m_RuntimeSceneSnapshot->Scene));

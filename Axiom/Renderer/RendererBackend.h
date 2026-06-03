@@ -1,10 +1,9 @@
 #pragma once
 
+#include "Core/RenderRuntime.h"
 #include "Renderer/Mesh.h"
 #include "Renderer/RenderScene.h"
-#include "Renderer/RenderSurface.h"
 #include "Renderer/RenderTechnique.h"
-#include "Renderer/ViewportFrameOutput.h"
 
 #include <glm/vec2.hpp>
 
@@ -23,12 +22,6 @@ enum class RendererBackendType { Vulkan };
 enum class RendererTechniqueType : uint32_t {
   Forward = 0,
 };
-enum class RendererViewMode : uint32_t {
-  Lit = 0,
-  Unlit = 1,
-  Wireframe = 2,
-};
-
 struct RendererCreateInfo {
   RenderSurfacePtr TargetSurface;
   IViewportFrameOutput *FrameOutput{nullptr};

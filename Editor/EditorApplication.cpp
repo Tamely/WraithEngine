@@ -2,6 +2,7 @@
 #include <Core/ApplicationModules.h>
 #include <Core/GlfwEditorInputSource.h>
 #include <Core/Entry.h>
+#include <Renderer/RendererFrameModule.h>
 
 #include "GlfwEditorModule.h"
 

@@ -22,7 +22,7 @@
 
 namespace Axiom {
 class EditorCommandDispatcher;
-class EditorPhysicsController;
+class IEditorRuntimePhysicsController;
 class EditorSceneStateManager;
 class EditorSessionValidationModule;
 
@@ -218,10 +218,13 @@ public:
   void ReleaseLock(const std::string &ObjectId, SessionUserId User);
   void ReleaseAllLocksForUser(SessionUserId User);
   void PublishScriptError(const std::string &ObjectId, const std::string &Message);
+  void ApplyRuntimeWorldTransform(std::string_view ObjectId,
+                                  const EditorTransformDetails &Transform);
+  void SetRuntimePhysicsController(
+      std::unique_ptr<IEditorRuntimePhysicsController> Controller);
 
 private:
   friend class EditorCommandDispatcher;
-  friend class EditorPhysicsController;
   friend class EditorSceneStateManager;
   friend class EditorSessionValidationModule;
 
@@ -246,12 +249,15 @@ private:
   bool IsValidTemplateId(const std::string &TemplateId) const;
   std::vector<std::string> CollectDescendantIds(InstanceHandle Root) const;
   void PublishEvent(const EditorEvent &Event);
+  void EnsureRuntimePhysicsWorldStarted();
+  void StopRuntimePhysicsWorld();
+  void StepRuntimePhysics(float DeltaTimeSeconds);
 
   EditorSessionConfig m_Config;
   EditorSessionState m_State;
   EditorMessageBus m_MessageBus;
   std::unique_ptr<EditorCommandDispatcher> m_CommandDispatcher;
-  std::unique_ptr<EditorPhysicsController> m_PhysicsController;
+  std::unique_ptr<IEditorRuntimePhysicsController> m_RuntimePhysicsController;
   std::unique_ptr<EditorSceneStateManager> m_SceneStateManager;
   std::unique_ptr<EditorSessionValidationModule> m_ValidationModule;
   InstancePool m_InstancePool;

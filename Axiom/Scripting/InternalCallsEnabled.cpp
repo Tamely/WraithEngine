@@ -3,11 +3,6 @@
 #include <Core/Log.h>
 #include <Session/EditorCommand.h>
 
-#if AXIOM_SCRIPTING_ENABLED
-#include <Coral/String.hpp>
-#include <Coral/Core.hpp>
-#endif
-
 namespace {
 Axiom::EditorSession *s_Session = nullptr;
 Axiom::SessionId s_SessionId{1};
@@ -25,33 +20,26 @@ void Bind(EditorSession &Session, SessionId Id, SessionUserId UserId,
   s_IsRestricted = IsRestricted;
 }
 
-// ---------------------------------------------------------------------------
-// Internal call implementations
-// These are called via Coral's function-pointer dispatch from managed C# code.
-// Naming convention used in AddInternalCall:
-//   "WraithEngine.<Class>+s_<Field>,WraithEngine.Managed"
-// ---------------------------------------------------------------------------
-
-#if AXIOM_SCRIPTING_ENABLED
-
 void GameObject_GetName(Coral::String ObjectId, Coral::String *OutName) {
   if (!s_Session || !OutName) {
-    if (OutName)
+    if (OutName) {
       *OutName = Coral::String{};
+    }
     return;
   }
-  std::string id = ObjectId;
-  const auto *Details = s_Session->FindObjectDetails(id);
+  std::string Id = ObjectId;
+  const auto *Details = s_Session->FindObjectDetails(Id);
   *OutName = Details ? Coral::String::New(Details->DisplayName)
-                     : Coral::String::New(id);
+                     : Coral::String::New(Id);
 }
 
 void GameObject_GetTransform(Coral::String ObjectId,
-                              EditorTransformDetails *OutTransform) {
-  if (!s_Session || !OutTransform)
+                             EditorTransformDetails *OutTransform) {
+  if (!s_Session || !OutTransform) {
     return;
-  std::string id = ObjectId;
-  const auto *Details = s_Session->FindObjectDetails(id);
+  }
+  std::string Id = ObjectId;
+  const auto *Details = s_Session->FindObjectDetails(Id);
   if (Details && Details->Transform.has_value()) {
     *OutTransform = *Details->Transform;
   } else {
@@ -60,12 +48,13 @@ void GameObject_GetTransform(Coral::String ObjectId,
 }
 
 void GameObject_SetTransform(Coral::String ObjectId,
-                              const EditorTransformDetails *InTransform) {
-  if (!s_Session || !InTransform)
+                             const EditorTransformDetails *InTransform) {
+  if (!s_Session || !InTransform) {
     return;
-  std::string id = ObjectId;
+  }
+  std::string Id = ObjectId;
   CommandContext Ctx{s_SessionId, s_UserId, 0, 0.0f, true};
-  SetTransformCommand Cmd{.ObjectId = std::move(id),
+  SetTransformCommand Cmd{.ObjectId = std::move(Id),
                           .Location = InTransform->Location,
                           .RotationDegrees = InTransform->RotationDegrees,
                           .Scale = InTransform->Scale};
@@ -73,17 +62,16 @@ void GameObject_SetTransform(Coral::String ObjectId,
 }
 
 Coral::Bool32 GameObject_GetVisible(Coral::String ObjectId) {
-  if (!s_Session)
+  if (!s_Session) {
     return 1u;
-  std::string id = ObjectId;
-  const auto *Details = s_Session->FindObjectDetails(id);
+  }
+  std::string Id = ObjectId;
+  const auto *Details = s_Session->FindObjectDetails(Id);
   return Details ? static_cast<Coral::Bool32>(Details->Visible ? 1u : 0u) : 1u;
 }
 
 Coral::Bool32 ScriptSecurity_IsRestricted() {
   return static_cast<Coral::Bool32>(s_IsRestricted ? 1u : 0u);
 }
-
-#endif // AXIOM_SCRIPTING_ENABLED
 
 } // namespace Axiom::InternalCalls

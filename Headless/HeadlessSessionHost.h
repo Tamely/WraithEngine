@@ -48,10 +48,12 @@ public:
   const HeadlessSessionModule &GetSessionModule() const {
     return *m_SessionModule;
   }
-  ScriptHost &GetScriptHost() { return m_ScriptingModule->GetScriptHost(); }
   const HeadlessRenderViewRegistry &GetRenderViews() const {
     return m_RenderViews;
   }
+#if AXIOM_WITH_SCRIPTING
+  ScriptHost &GetScriptHost() { return m_ScriptingModule->GetScriptHost(); }
+#endif
 
 private:
   size_t BeginRenderPasses() override;
@@ -59,13 +61,17 @@ private:
   bool ShouldRenderImGuiForPass(size_t PassIndex,
                                 size_t PassCount) const override;
 
+#if AXIOM_WITH_SCRIPTING
   SessionScriptHostModule &GetScriptingModule() const {
     return *m_ScriptingModule;
   }
+#endif
 
   HeadlessSessionModule *m_SessionModule{nullptr};
   HeadlessSessionTransportModule *m_TransportModule{nullptr};
+#if AXIOM_WITH_SCRIPTING
   SessionScriptHostModule *m_ScriptingModule{nullptr};
+#endif
   EditorSceneRendererAdapter m_SharedRendererAdapter;
   HeadlessRenderViewRegistry m_RenderViews;
   std::vector<HeadlessRenderViewState> m_ActiveRenderPassViews;

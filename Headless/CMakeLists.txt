@@ -31,6 +31,20 @@ target_include_directories(WraithNetworking PUBLIC
 )
 
 target_link_libraries(WraithNetworking PUBLIC AxiomCore uWebSocketsVendor)
+target_link_libraries(WraithNetworking PRIVATE AxiomHAL)
+target_link_libraries(WraithNetworking PUBLIC
+  AxiomNet
+  AxiomScene
+  AxiomRenderer
+)
+if(TARGET AxiomScripting)
+  target_link_libraries(WraithNetworking PUBLIC AxiomScripting)
+endif()
+
+target_compile_definitions(WraithNetworking PRIVATE
+  AXIOM_WITH_PHYSICS=$<IF:$<BOOL:${AXIOM_ENABLE_PHYSICS}>,1,0>
+  AXIOM_WITH_SCRIPTING=$<IF:$<BOOL:${AXIOM_ENABLE_SCRIPTING}>,1,0>
+)
 
 if(WIN32)
   target_link_libraries(WraithNetworking PUBLIC ws2_32 advapi32)
@@ -64,8 +78,32 @@ target_include_directories(AxiomRemoteViewportDevClient PRIVATE
   "${CMAKE_SOURCE_DIR}/ThirdParty/glfw/deps"
 )
 
-target_link_libraries(AxiomHeadless PRIVATE AxiomCore)
-target_link_libraries(AxiomRemoteViewportDevClient PRIVATE AxiomCore)
+target_link_libraries(AxiomHeadless PRIVATE
+  AxiomCore
+  AxiomScene
+  AxiomAssets
+  AxiomRenderer
+  AxiomNet
+)
+if(TARGET AxiomPhysics)
+  target_link_libraries(AxiomHeadless PRIVATE AxiomPhysics)
+endif()
+if(TARGET AxiomScripting)
+  target_link_libraries(AxiomHeadless PRIVATE AxiomScripting)
+endif()
+target_link_libraries(AxiomRemoteViewportDevClient PRIVATE
+  AxiomCore
+  AxiomScene
+  AxiomAssets
+  AxiomRenderer
+  AxiomNet
+)
+if(TARGET AxiomPhysics)
+  target_link_libraries(AxiomRemoteViewportDevClient PRIVATE AxiomPhysics)
+endif()
+if(TARGET AxiomScripting)
+  target_link_libraries(AxiomRemoteViewportDevClient PRIVATE AxiomScripting)
+endif()
 
 add_executable(AxiomRemoteViewportServer
   AxiomRemoteViewportServer.cpp
@@ -89,13 +127,49 @@ target_include_directories(AxiomRemoteViewportServer PRIVATE
   "${CMAKE_SOURCE_DIR}/ThirdParty/glfw/deps"
 )
 
-target_link_libraries(AxiomRemoteViewportServer PRIVATE AxiomCore WraithNetworking)
-target_link_libraries(AxiomPackagedRuntime PRIVATE AxiomCore)
+target_link_libraries(AxiomRemoteViewportServer PRIVATE
+  AxiomCore
+  AxiomScene
+  AxiomAssets
+  AxiomRenderer
+  AxiomNet
+  WraithNetworking
+)
+if(TARGET AxiomPhysics)
+  target_link_libraries(AxiomRemoteViewportServer PRIVATE AxiomPhysics)
+endif()
+if(TARGET AxiomScripting)
+  target_link_libraries(AxiomRemoteViewportServer PRIVATE AxiomScripting)
+endif()
+target_link_libraries(AxiomPackagedRuntime PRIVATE
+  AxiomCore
+  AxiomScene
+  AxiomAssets
+  AxiomRenderer
+  AxiomNet
+)
+if(TARGET AxiomPhysics)
+  target_link_libraries(AxiomPackagedRuntime PRIVATE AxiomPhysics)
+endif()
+if(TARGET AxiomScripting)
+  target_link_libraries(AxiomPackagedRuntime PRIVATE AxiomScripting)
+endif()
+
+foreach(AXIOM_HEADLESS_TARGET IN ITEMS
+    AxiomHeadless
+    AxiomRemoteViewportDevClient
+    AxiomRemoteViewportServer
+    AxiomPackagedRuntime)
+  target_compile_definitions(${AXIOM_HEADLESS_TARGET} PRIVATE
+    AXIOM_WITH_PHYSICS=$<IF:$<BOOL:${AXIOM_ENABLE_PHYSICS}>,1,0>
+    AXIOM_WITH_SCRIPTING=$<IF:$<BOOL:${AXIOM_ENABLE_SCRIPTING}>,1,0>
+  )
+endforeach()
 
 set_target_properties(AxiomPackagedRuntime PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/Headless"
 )
 
-target_compile_definitions(AxiomCore PUBLIC
+target_compile_definitions(AxiomScene PUBLIC
   AXIOM_PACKAGED_RUNTIME_BINARY_PATH="$<TARGET_FILE:AxiomPackagedRuntime>"
 )

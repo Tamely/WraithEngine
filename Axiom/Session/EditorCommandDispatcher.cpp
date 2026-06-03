@@ -2,7 +2,6 @@
 
 #include "Assets/AssetCooker.h"
 #include "Assets/MeshAsset.h"
-#include "Session/EditorPhysicsController.h"
 #include "Session/EditorSceneStateManager.h"
 #include "Session/EditorSessionValidationModule.h"
 

@@ -4,6 +4,7 @@
 #include "Core/GlfwWindow.h"
 #include "Core/HeadlessWindow.h"
 #include "Core/Log.h"
+#include "Renderer/Renderer.h"
 
 #include <algorithm>
 #include <chrono>
@@ -17,6 +18,8 @@ constexpr auto kMinimizedFrameDelay = std::chrono::milliseconds(16);
 }
 
 Application *Application::s_Instance = nullptr;
+
+void RendererDeleter::operator()(Renderer *Value) const { delete Value; }
 
 Application::Application(const ApplicationConfig &Config,
                          const ApplicationArgs &Args)
@@ -51,7 +54,7 @@ Application::Application(const ApplicationConfig &Config,
   }
 
   if (m_Renderer == nullptr && Dependencies.InitializeRenderer) {
-    m_Renderer = std::make_unique<Renderer>();
+    m_Renderer.reset(new Renderer());
   }
   if (m_Renderer != nullptr && Dependencies.InitializeRenderer) {
     m_Renderer->Init({
@@ -82,6 +85,10 @@ Application &Application::Get() { return *s_Instance; }
 Application *Application::TryGet() { return s_Instance; }
 
 Window *Application::GetWindow() const { return m_Window.get(); }
+
+Renderer &Application::GetRenderer() const { return *m_Renderer; }
+
+Renderer *Application::TryGetRenderer() const { return m_Renderer.get(); }
 
 void Application::RequestClose() {
   if (m_Window) {
@@ -115,9 +122,6 @@ void Application::Run() {
 
 void Application::RegisterDefaultModules() {
   m_ModuleManager.RegisterModule(std::make_unique<WindowEventsModule>());
-  if (m_Renderer != nullptr) {
-    m_ModuleManager.RegisterModule(std::make_unique<RendererFrameModule>());
-  }
 }
 
 size_t Application::BeginRenderPasses() { return 1u; }

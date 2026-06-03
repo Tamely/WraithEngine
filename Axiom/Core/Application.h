@@ -1,18 +1,23 @@
 #pragma once
 
 #include "Core/ModuleManager.h"
-#include "Renderer/RenderSurface.h"
-#include "Renderer/ViewportFrameOutput.h"
+#include "Core/RenderRuntime.h"
 
 #include <chrono>
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
+
 #include "Core/Window.h"
-#include "Renderer/Renderer.h"
 
 namespace Axiom {
+class Renderer;
+struct RendererDeleter {
+  void operator()(Renderer *Value) const;
+};
+using RendererPtr = std::unique_ptr<Renderer, RendererDeleter>;
+
 struct ApplicationArgs {
   char **Arguments;
   int ArgumentCount;
@@ -37,7 +42,7 @@ public:
   struct RuntimeDependencies {
     std::unique_ptr<Window> Window;
     RenderSurfacePtr RenderSurface;
-    std::unique_ptr<Renderer> Renderer;
+    RendererPtr Renderer;
     bool InitializeRenderer{true};
     bool RegisterDefaultModules{true};
   };
@@ -50,15 +55,13 @@ public:
 
   void Run();
   bool Step();
-  [[nodiscard]] IRenderSurface &GetRenderSurface() const {
-    return *m_RenderSurface;
-  }
+  [[nodiscard]] IRenderSurface &GetRenderSurface() const { return *m_RenderSurface; }
   [[nodiscard]] Window *GetWindow() const;
   [[nodiscard]] float GetDeltaTime() const { return m_DeltaTime; }
   [[nodiscard]] uint64_t GetFrameIndex() const { return m_FrameIndex; }
   [[nodiscard]] RuntimeMode GetRuntimeMode() const { return m_Config.Mode; }
-  [[nodiscard]] Renderer &GetRenderer() const { return *m_Renderer; }
-  [[nodiscard]] Renderer *TryGetRenderer() const { return m_Renderer.get(); }
+  [[nodiscard]] Renderer &GetRenderer() const;
+  [[nodiscard]] Renderer *TryGetRenderer() const;
   [[nodiscard]] ModuleManager &GetModuleManager() { return m_ModuleManager; }
   [[nodiscard]] const ModuleManager &GetModuleManager() const {
     return m_ModuleManager;
@@ -76,7 +79,6 @@ protected:
   virtual void PrepareRenderPass(size_t PassIndex);
   virtual bool ShouldRenderImGuiForPass(size_t PassIndex,
                                         size_t PassCount) const;
-
   void RegisterDefaultModules();
 
 private:
@@ -85,7 +87,7 @@ private:
   ApplicationConfig m_Config;
   std::unique_ptr<Window> m_Window;
   RenderSurfacePtr m_RenderSurface;
-  std::unique_ptr<Renderer> m_Renderer;
+  RendererPtr m_Renderer;
   ModuleManager m_ModuleManager;
   std::chrono::steady_clock::time_point m_LastFrameTime;
   float m_DeltaTime{0.0f};

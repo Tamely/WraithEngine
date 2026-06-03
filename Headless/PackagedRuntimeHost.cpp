@@ -2,6 +2,7 @@
 
 #include <Core/ApplicationModules.h>
 #include <Core/Log.h>
+#include <Renderer/RendererFrameModule.h>
 #include <Session/StartupScene.h>
 
 namespace Axiom {
@@ -22,11 +23,13 @@ PackagedRuntimeHost::PackagedRuntimeHost(const ApplicationArgs &Args,
   GetModuleManager().RegisterModule(std::move(SessionModule));
   GetModuleManager().RegisterModule(std::make_unique<RendererFrameModule>());
 
+#if AXIOM_WITH_SCRIPTING
   auto ScriptingModule = std::make_unique<SessionScriptHostModule>(
       "PackagedRuntime.SessionScriptHost", m_SessionModule->GetSession(),
       SessionId{1}, m_SessionModule->GetLocalUserId());
   m_ScriptingModule = ScriptingModule.get();
   GetModuleManager().RegisterModule(std::move(ScriptingModule));
+#endif
 }
 
 bool PackagedRuntimeHost::LoadPackagedProject(const std::filesystem::path &ContentDir,

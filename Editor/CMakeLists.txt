@@ -5,3 +5,15 @@ add_executable(AxiomEditor
 )
 
 target_link_libraries(AxiomEditor PRIVATE AxiomCore)
+target_link_libraries(AxiomEditor PRIVATE
+  AxiomScene
+  AxiomAssets
+  AxiomRenderer
+  AxiomNet
+)
+if(TARGET AxiomPhysics)
+  target_link_libraries(AxiomEditor PRIVATE AxiomPhysics)
+endif()
+if(TARGET AxiomScripting)
+  target_link_libraries(AxiomEditor PRIVATE AxiomScripting)
+endif()

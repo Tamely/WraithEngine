@@ -1,4 +1,5 @@
 #include "ScriptHost.h"
+
 #include "InternalCalls.h"
 
 #include "HAL/FileWatcher.h"
@@ -6,7 +7,24 @@
 #include <Core/Log.h>
 #include <Session/EditorSession.h>
 
+#include <Coral/Assembly.hpp>
+#include <Coral/HostInstance.hpp>
+#include <Coral/ManagedObject.hpp>
+
+#include <unordered_map>
+
 namespace Axiom {
+
+struct ScriptHost::Impl {
+  Coral::HostInstance Host;
+  Coral::AssemblyLoadContext EngineALC;
+  Coral::ManagedAssembly *EngineAssembly{nullptr};
+  Coral::AssemblyLoadContext UserALC;
+  Coral::ManagedAssembly *UserAssembly{nullptr};
+  std::unordered_map<std::string, Coral::ManagedObject> ScriptInstances;
+};
+
+ScriptHost::ScriptHost() = default;
 
 bool ScriptHost::IsSimulationRunning() const {
   return m_Session != nullptr &&
@@ -14,7 +32,6 @@ bool ScriptHost::IsSimulationRunning() const {
 }
 
 void ScriptHost::InstantiateAllEligibleScripts() {
-#if AXIOM_SCRIPTING_ENABLED
   if (!m_UserAssemblyLoaded || m_Session == nullptr || !IsSimulationRunning()) {
     return;
   }
@@ -25,7 +42,6 @@ void ScriptHost::InstantiateAllEligibleScripts() {
       InstantiateScript(Id, *Details.ScriptClass);
     }
   }
-#endif
 }
 
 ScriptHost::~ScriptHost() {
@@ -37,7 +53,7 @@ ScriptHost::~ScriptHost() {
 void ScriptHost::Initialize(const std::filesystem::path &CoralManagedDir,
                             ScriptTrustProfile TrustProfile) {
   m_TrustProfile = TrustProfile;
-#if AXIOM_SCRIPTING_ENABLED
+
   Coral::HostSettings Settings{
       .CoralDirectory = CoralManagedDir.string(),
       .MessageCallback =
@@ -60,7 +76,8 @@ void ScriptHost::Initialize(const std::filesystem::path &CoralManagedDir,
           },
   };
 
-  auto Status = m_Host.Initialize(std::move(Settings));
+  m_Impl = std::make_unique<Impl>();
+  auto Status = m_Impl->Host.Initialize(std::move(Settings));
 
   switch (Status) {
   case Coral::CoralInitStatus::Success:
@@ -70,27 +87,24 @@ void ScriptHost::Initialize(const std::filesystem::path &CoralManagedDir,
     break;
   case Coral::CoralInitStatus::DotNetNotFound:
     A_CORE_ERROR("ScriptHost: .NET runtime not found — scripting unavailable");
+    m_Impl.reset();
     break;
   case Coral::CoralInitStatus::CoralManagedNotFound:
     A_CORE_WARN("ScriptHost: Coral.Managed.dll not found at '{}' — scripting "
                 "unavailable",
                 CoralManagedDir.string());
+    m_Impl.reset();
     break;
   case Coral::CoralInitStatus::CoralManagedInitError:
     A_CORE_ERROR("ScriptHost: Coral.Managed failed to initialize — scripting "
                  "unavailable");
+    m_Impl.reset();
     break;
   }
-#else
-  (void)CoralManagedDir;
-  A_CORE_WARN("ScriptHost: scripting support was not compiled in "
-              "(AXIOM_SCRIPTING_ENABLED=0)");
-#endif
 }
 
 void ScriptHost::LoadEngineAssembly(const std::filesystem::path &ManagedDir) {
-#if AXIOM_SCRIPTING_ENABLED
-  if (!m_Initialized) {
+  if (!m_Initialized || m_Impl == nullptr) {
     A_CORE_WARN("ScriptHost: cannot load engine assembly — host not initialized");
     return;
   }
@@ -103,8 +117,8 @@ void ScriptHost::LoadEngineAssembly(const std::filesystem::path &ManagedDir) {
   }
 
   m_ManagedDir = ManagedDir;
-  m_EngineALC = m_Host.CreateAssemblyLoadContext("WraithEngine");
-  auto &Assembly = m_EngineALC.LoadAssembly(DllPath.string());
+  m_Impl->EngineALC = m_Impl->Host.CreateAssemblyLoadContext("WraithEngine");
+  auto &Assembly = m_Impl->EngineALC.LoadAssembly(DllPath.string());
 
   if (Assembly.GetLoadStatus() != Coral::AssemblyLoadStatus::Success) {
     A_CORE_ERROR("ScriptHost: failed to load WraithEngine.Managed.dll (status {})",
@@ -112,58 +126,49 @@ void ScriptHost::LoadEngineAssembly(const std::filesystem::path &ManagedDir) {
     return;
   }
 
-  m_EngineAssembly = &Assembly;
+  m_Impl->EngineAssembly = &Assembly;
   m_EngineAssemblyLoaded = true;
   A_CORE_INFO("ScriptHost: engine assembly loaded ({})", Assembly.GetName());
-#else
-  (void)ManagedDir;
-#endif
 }
 
 void ScriptHost::RegisterInternalCalls(EditorSession &Session, SessionId Id,
                                        SessionUserId UserId) {
   m_Session = &Session;
 
-#if AXIOM_SCRIPTING_ENABLED
-  if (!m_EngineAssemblyLoaded) {
+  if (!m_EngineAssemblyLoaded || m_Impl == nullptr ||
+      m_Impl->EngineAssembly == nullptr) {
     A_CORE_WARN("ScriptHost: cannot register internal calls — engine assembly "
                 "not loaded");
     return;
   }
 
-  // Bind the session pointer, credentials, and trust profile
   InternalCalls::Bind(Session, Id, UserId,
                       m_TrustProfile == ScriptTrustProfile::Restricted);
 
-  m_EngineAssembly->AddInternalCall(
+  m_Impl->EngineAssembly->AddInternalCall(
       "WraithEngine.GameObject", "s_GetName",
       reinterpret_cast<void *>(&InternalCalls::GameObject_GetName));
-  m_EngineAssembly->AddInternalCall(
+  m_Impl->EngineAssembly->AddInternalCall(
       "WraithEngine.GameObject", "s_GetTransform",
       reinterpret_cast<void *>(&InternalCalls::GameObject_GetTransform));
-  m_EngineAssembly->AddInternalCall(
+  m_Impl->EngineAssembly->AddInternalCall(
       "WraithEngine.GameObject", "s_SetTransform",
       reinterpret_cast<void *>(&InternalCalls::GameObject_SetTransform));
-  m_EngineAssembly->AddInternalCall(
+  m_Impl->EngineAssembly->AddInternalCall(
       "WraithEngine.GameObject", "s_GetVisible",
       reinterpret_cast<void *>(&InternalCalls::GameObject_GetVisible));
-  m_EngineAssembly->AddInternalCall(
+  m_Impl->EngineAssembly->AddInternalCall(
       "WraithEngine.Internal.ScriptSecurity", "s_IsRestricted",
       reinterpret_cast<void *>(&InternalCalls::ScriptSecurity_IsRestricted));
 
-  m_EngineAssembly->UploadInternalCalls();
+  m_Impl->EngineAssembly->UploadInternalCalls();
   A_CORE_INFO("ScriptHost: internal calls registered (trust={})",
               m_TrustProfile == ScriptTrustProfile::Restricted ? "Restricted"
                                                                 : "Trusted");
-#else
-  (void)Id;
-  (void)UserId;
-#endif
 }
 
 void ScriptHost::LoadUserAssembly(const std::filesystem::path &AssemblyPath) {
-#if AXIOM_SCRIPTING_ENABLED
-  if (!m_Initialized) {
+  if (!m_Initialized || m_Impl == nullptr) {
     A_CORE_WARN("ScriptHost: cannot load user assembly — host not initialized");
     return;
   }
@@ -175,19 +180,11 @@ void ScriptHost::LoadUserAssembly(const std::filesystem::path &AssemblyPath) {
     return;
   }
 
-  // In Restricted mode, validate the assembly FILE before making any changes to
-  // the ALC state.  ValidateUserAssemblyResult uses PEReader to inspect the
-  // manifest references directly from disk — no loading required.  Validating
-  // first keeps s_CachedTypes intact (UnloadAssemblyLoadContext clears it
-  // globally) so the InvokeStaticMethod round-trip works without a
-  // RefreshTypeCache call at this point.  We use the return-value form because
-  // Coral routes managed exceptions through ExceptionCallback rather than
-  // rethrowing them as C++ exceptions, making try/catch unreliable here.
   if (m_TrustProfile == ScriptTrustProfile::Restricted &&
-      m_EngineAssembly != nullptr) {
+      m_Impl->EngineAssembly != nullptr) {
     auto PathStr = Coral::String::New(AssemblyPath.string());
     auto ErrorStr =
-        m_EngineAssembly
+        m_Impl->EngineAssembly
             ->GetLocalType("WraithEngine.Internal.ScriptSecurity")
             .InvokeStaticMethod<Coral::String>("ValidateUserAssemblyResult",
                                                PathStr);
@@ -199,12 +196,11 @@ void ScriptHost::LoadUserAssembly(const std::filesystem::path &AssemblyPath) {
     if (!ErrorMsg.empty()) {
       A_CORE_ERROR("ScriptHost: user assembly REJECTED by security policy — {}",
                    ErrorMsg);
-      // Unload the existing assembly — a failed replace leaves nothing live.
       DestroyAllScripts();
       if (m_UserAssemblyLoaded) {
-        m_Host.UnloadAssemblyLoadContext(m_UserALC);
-        m_EngineAssembly->RefreshTypeCache();
-        m_UserAssembly = nullptr;
+        m_Impl->Host.UnloadAssemblyLoadContext(m_Impl->UserALC);
+        m_Impl->EngineAssembly->RefreshTypeCache();
+        m_Impl->UserAssembly = nullptr;
         m_UserAssemblyLoaded = false;
       }
       return;
@@ -213,27 +209,17 @@ void ScriptHost::LoadUserAssembly(const std::filesystem::path &AssemblyPath) {
         "ScriptHost: user assembly passed Restricted-mode security validation");
   }
 
-  // Tear down existing instances and unload the previous ALC (if any) before
-  // creating a fresh one. Necessary when LoadUserAssembly is called more than once.
   DestroyAllScripts();
   if (m_UserAssemblyLoaded) {
-    m_Host.UnloadAssemblyLoadContext(m_UserALC);
-    // UnloadAssemblyLoadContext clears the managed s_CachedTypes globally.
-    // Repopulate the engine assembly's types so that subsequent CreateObject /
-    // InvokeMethod calls (e.g. during InstantiateScript below) work correctly.
-    m_EngineAssembly->RefreshTypeCache();
-    m_UserAssembly = nullptr;
+    m_Impl->Host.UnloadAssemblyLoadContext(m_Impl->UserALC);
+    m_Impl->EngineAssembly->RefreshTypeCache();
+    m_Impl->UserAssembly = nullptr;
     m_UserAssemblyLoaded = false;
   }
 
-  // Pass the engine managed dir so Coral's ResolveAssembly can find
-  // WraithEngine.Managed.dll.  The cross-ALC sharing patch in AssemblyLoader.cs
-  // ensures the UserScripts ALC reuses the engine ALC's already-loaded copy
-  // (with populated internal-call function pointers) rather than loading a
-  // fresh duplicate.
-  m_UserALC = m_Host.CreateAssemblyLoadContext("UserScripts",
-                                               m_ManagedDir.string());
-  auto &Assembly = m_UserALC.LoadAssembly(AssemblyPath.string());
+  m_Impl->UserALC = m_Impl->Host.CreateAssemblyLoadContext(
+      "UserScripts", m_ManagedDir.string());
+  auto &Assembly = m_Impl->UserALC.LoadAssembly(AssemblyPath.string());
 
   if (Assembly.GetLoadStatus() != Coral::AssemblyLoadStatus::Success) {
     A_CORE_ERROR("ScriptHost: failed to load user assembly '{}' (status {})",
@@ -242,20 +228,16 @@ void ScriptHost::LoadUserAssembly(const std::filesystem::path &AssemblyPath) {
     return;
   }
 
-  m_UserAssembly = &Assembly;
+  m_Impl->UserAssembly = &Assembly;
   m_UserAssemblyPath = AssemblyPath;
   m_UserAssemblyLoaded = true;
   A_CORE_INFO("ScriptHost: user assembly loaded ({})", Assembly.GetName());
 
   InstantiateAllEligibleScripts();
-#else
-  (void)AssemblyPath;
-#endif
 }
 
 void ScriptHost::ReloadUserAssembly() {
-#if AXIOM_SCRIPTING_ENABLED
-  if (!m_UserAssemblyLoaded) {
+  if (!m_UserAssemblyLoaded || m_Impl == nullptr) {
     A_CORE_WARN("ScriptHost: reload requested but no user assembly is loaded");
     return;
   }
@@ -263,8 +245,6 @@ void ScriptHost::ReloadUserAssembly() {
   A_CORE_INFO("ScriptHost: reloading user assembly '{}'",
               m_UserAssemblyPath.string());
 
-  // 1. Snapshot which objects had scripts — we need to re-instantiate them
-  //    after the ALC is gone (m_ScriptInstances will be cleared).
   std::vector<std::pair<std::string, std::string>> ToReinstate;
   if (m_Session != nullptr) {
     for (const auto &[Id, Details] :
@@ -276,15 +256,11 @@ void ScriptHost::ReloadUserAssembly() {
     }
   }
 
-  // 2. Validate BEFORE unloading — s_CachedTypes is still intact at this point.
-  //    PEReader inspects the file directly, so the DLL doesn't need to be loaded
-  //    into any ALC.  We validate here (not after reload) to avoid a second
-  //    TypeCache desync on the failure path.
   if (m_TrustProfile == ScriptTrustProfile::Restricted &&
-      m_EngineAssembly != nullptr) {
+      m_Impl->EngineAssembly != nullptr) {
     auto PathStr = Coral::String::New(m_UserAssemblyPath.string());
     auto ErrorStr =
-        m_EngineAssembly
+        m_Impl->EngineAssembly
             ->GetLocalType("WraithEngine.Internal.ScriptSecurity")
             .InvokeStaticMethod<Coral::String>("ValidateUserAssemblyResult",
                                                PathStr);
@@ -296,24 +272,20 @@ void ScriptHost::ReloadUserAssembly() {
     if (!ErrorMsg.empty()) {
       A_CORE_ERROR(
           "ScriptHost: reload REJECTED by security policy — {}", ErrorMsg);
-      return; // leave existing assembly in place; nothing changed yet
+      return;
     }
   }
 
-  // 3. Call OnDestroy on all live instances and clear them
   DestroyAllScripts();
 
-  // 4. Unload the old ALC.  This clears the managed s_CachedTypes globally;
-  //    repopulate engine assembly types immediately so InstantiateScript works.
-  m_Host.UnloadAssemblyLoadContext(m_UserALC);
-  m_EngineAssembly->RefreshTypeCache();
-  m_UserAssembly = nullptr;
+  m_Impl->Host.UnloadAssemblyLoadContext(m_Impl->UserALC);
+  m_Impl->EngineAssembly->RefreshTypeCache();
+  m_Impl->UserAssembly = nullptr;
   m_UserAssemblyLoaded = false;
 
-  // 5. Create a fresh ALC and reload the assembly from the cached path.
-  m_UserALC = m_Host.CreateAssemblyLoadContext("UserScripts",
-                                               m_ManagedDir.string());
-  auto &Assembly = m_UserALC.LoadAssembly(m_UserAssemblyPath.string());
+  m_Impl->UserALC = m_Impl->Host.CreateAssemblyLoadContext(
+      "UserScripts", m_ManagedDir.string());
+  auto &Assembly = m_Impl->UserALC.LoadAssembly(m_UserAssemblyPath.string());
 
   if (Assembly.GetLoadStatus() != Coral::AssemblyLoadStatus::Success) {
     A_CORE_ERROR("ScriptHost: reload failed — could not load '{}' (status {})",
@@ -322,48 +294,37 @@ void ScriptHost::ReloadUserAssembly() {
     return;
   }
 
-  m_UserAssembly = &Assembly;
+  m_Impl->UserAssembly = &Assembly;
   m_UserAssemblyLoaded = true;
   A_CORE_INFO("ScriptHost: user assembly reloaded ({})", Assembly.GetName());
 
-  // 6. Re-instantiate every script that existed before the reload, but only
-  // while the session is actively simulating.
   if (IsSimulationRunning()) {
     for (const auto &[ObjectId, ClassName] : ToReinstate) {
       InstantiateScript(ObjectId, ClassName);
     }
   }
-#endif
 }
 
 void ScriptHost::Tick(float DeltaTimeSeconds) {
-#if AXIOM_SCRIPTING_ENABLED
-  if (!IsSimulationRunning()) {
+  if (!IsSimulationRunning() || m_Impl == nullptr) {
     return;
   }
 
-  for (auto &[ObjectId, Instance] : m_ScriptInstances) {
+  for (auto &[ObjectId, Instance] : m_Impl->ScriptInstances) {
     try {
       Instance.InvokeMethod("OnTick", DeltaTimeSeconds);
     } catch (const std::exception &Ex) {
       A_CORE_ERROR("ScriptHost: OnTick threw for '{}': {}", ObjectId, Ex.what());
     }
   }
-#else
-  (void)DeltaTimeSeconds;
-#endif
 }
 
 void ScriptHost::OnEditorEvent(const PublishedEditorEvent &Event) {
-#if AXIOM_SCRIPTING_ENABLED
   std::visit(
       [&](const auto &Payload) {
         using T = std::decay_t<decltype(Payload)>;
 
         if constexpr (std::is_same_v<T, ObjectCreatedEvent>) {
-          // A new object just appeared in the scene — if it's an Actor with a
-          // ScriptClass already set (e.g. loaded from scene.json and immediately
-          // re-created), instantiate the script.
           if (m_UserAssemblyLoaded && m_Session != nullptr &&
               IsSimulationRunning()) {
             const auto *Details =
@@ -377,7 +338,6 @@ void ScriptHost::OnEditorEvent(const PublishedEditorEvent &Event) {
         } else if constexpr (std::is_same_v<T, ObjectDeletedEvent>) {
           DestroyScript(Payload.ObjectId);
         } else if constexpr (std::is_same_v<T, ScriptClassChangedEvent>) {
-          // AttachScript / DetachScript acknowledged
           if (m_UserAssemblyLoaded && IsSimulationRunning()) {
             if (Payload.ScriptClass.has_value()) {
               InstantiateScript(Payload.ObjectId, *Payload.ScriptClass);
@@ -394,31 +354,21 @@ void ScriptHost::OnEditorEvent(const PublishedEditorEvent &Event) {
         }
       },
       Event.Event.Payload);
-#else
-  (void)Event;
-#endif
 }
 
 void ScriptHost::Shutdown() {
   StopFileWatcher();
-#if AXIOM_SCRIPTING_ENABLED
-  if (m_Initialized) {
+  if (m_Initialized && m_Impl != nullptr) {
     DestroyAllScripts();
-    m_Host.Shutdown();
+    m_Impl->Host.Shutdown();
     m_Initialized = false;
     m_EngineAssemblyLoaded = false;
     m_UserAssemblyLoaded = false;
-    m_UserAssembly = nullptr;
-    m_EngineAssembly = nullptr;
     m_Session = nullptr;
+    m_Impl.reset();
     A_CORE_INFO("ScriptHost shutdown");
   }
-#endif
 }
-
-// ---------------------------------------------------------------------------
-// File watcher
-// ---------------------------------------------------------------------------
 
 void ScriptHost::StartFileWatcher() {
 #if !AXIOM_SCRIPTING_WATCH
@@ -453,7 +403,7 @@ void ScriptHost::StartFileWatcher() {
     return;
   }
 
-  A_CORE_INFO("ScriptHost watcher: watching '{}' for changes",
+  A_CORE_INFO("ScriptHost watcher: watching '{}'",
               m_UserAssemblyPath.string());
 }
 
@@ -465,23 +415,18 @@ void ScriptHost::StopFileWatcher() {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Private helpers
-// ---------------------------------------------------------------------------
-
 void ScriptHost::InstantiateScript(const std::string &ObjectId,
                                    const std::string &ScriptClassName) {
-#if AXIOM_SCRIPTING_ENABLED
-  if (!m_UserAssemblyLoaded || m_UserAssembly == nullptr) {
+  if (!m_UserAssemblyLoaded || m_Impl == nullptr ||
+      m_Impl->UserAssembly == nullptr) {
     A_CORE_WARN("ScriptHost: cannot instantiate '{}' — no user assembly loaded",
                 ScriptClassName);
     return;
   }
 
-  // Destroy any stale instance first
   DestroyScript(ObjectId);
 
-  auto &Type = m_UserAssembly->GetType(ScriptClassName);
+  auto &Type = m_Impl->UserAssembly->GetType(ScriptClassName);
   if (!Type) {
     A_CORE_ERROR("ScriptHost: type '{}' not found in user assembly",
                  ScriptClassName);
@@ -489,8 +434,6 @@ void ScriptHost::InstantiateScript(const std::string &ObjectId,
   }
 
   Coral::ManagedObject Instance = Type.CreateInstance();
-
-  // Hand the objectId down so Script.GameObject can build a GameObject handle
   Instance.SetFieldValue("_ObjectId", ObjectId);
 
   try {
@@ -503,19 +446,19 @@ void ScriptHost::InstantiateScript(const std::string &ObjectId,
     }
   }
 
-  m_ScriptInstances.emplace(ObjectId, std::move(Instance));
+  m_Impl->ScriptInstances.emplace(ObjectId, std::move(Instance));
   A_CORE_INFO("ScriptHost: instantiated '{}' on '{}'", ScriptClassName, ObjectId);
-#else
-  (void)ObjectId;
-  (void)ScriptClassName;
-#endif
 }
 
 void ScriptHost::DestroyScript(const std::string &ObjectId) {
-#if AXIOM_SCRIPTING_ENABLED
-  auto It = m_ScriptInstances.find(ObjectId);
-  if (It == m_ScriptInstances.end())
+  if (m_Impl == nullptr) {
     return;
+  }
+
+  auto It = m_Impl->ScriptInstances.find(ObjectId);
+  if (It == m_Impl->ScriptInstances.end()) {
+    return;
+  }
 
   try {
     It->second.InvokeMethod("OnDestroy");
@@ -526,16 +469,16 @@ void ScriptHost::DestroyScript(const std::string &ObjectId) {
     }
   }
 
-  m_ScriptInstances.erase(It);
+  m_Impl->ScriptInstances.erase(It);
   A_CORE_INFO("ScriptHost: destroyed script on '{}'", ObjectId);
-#else
-  (void)ObjectId;
-#endif
 }
 
 void ScriptHost::DestroyAllScripts() {
-#if AXIOM_SCRIPTING_ENABLED
-  for (auto &[ObjectId, Instance] : m_ScriptInstances) {
+  if (m_Impl == nullptr) {
+    return;
+  }
+
+  for (auto &[ObjectId, Instance] : m_Impl->ScriptInstances) {
     try {
       Instance.InvokeMethod("OnDestroy");
     } catch (const std::exception &Ex) {
@@ -543,8 +486,7 @@ void ScriptHost::DestroyAllScripts() {
                   ObjectId, Ex.what());
     }
   }
-  m_ScriptInstances.clear();
-#endif
+  m_Impl->ScriptInstances.clear();
 }
 
 } // namespace Axiom

@@ -3,7 +3,9 @@
 #include <Core/IModule.h>
 #include <Remote/AxiomSessionEndpoint.h>
 #include <Renderer/VideoEncoding.h>
+#if AXIOM_WITH_SCRIPTING
 #include <Scripting/ScriptHost.h>
+#endif
 #include <Session/EditorSession.h>
 
 #include "HeadlessRenderView.h"
@@ -37,6 +39,7 @@ private:
   std::unique_ptr<HeadlessViewportFrameBridge> m_FrameBridge;
 };
 
+#if AXIOM_WITH_SCRIPTING
 class SessionScriptHostModule final : public IModule {
 public:
   SessionScriptHostModule(std::string_view ModuleName, EditorSession &Session,
@@ -57,4 +60,5 @@ private:
   ScriptHost m_ScriptHost;
   bool m_IsSubscribed{false};
 };
+#endif
 } // namespace Axiom

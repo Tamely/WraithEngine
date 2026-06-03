@@ -19,7 +19,9 @@ public:
 
 private:
   HeadlessSessionModule *m_SessionModule{nullptr};
+#if AXIOM_WITH_SCRIPTING
   SessionScriptHostModule *m_ScriptingModule{nullptr};
+#endif
   EditorSceneRendererAdapter m_RendererAdapter;
 };
 
