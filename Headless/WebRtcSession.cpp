@@ -1,6 +1,6 @@
 #include "WebRtcSession.h"
 
-#include <Core/Platform.h>
+#include <HAL/PlatformMedia.h>
 
 #include <algorithm>
 #include <optional>
@@ -175,19 +175,7 @@ private:
   }
 
   std::string BuildDetail() const {
-#if AXIOM_PLATFORM_MACOS
-#if defined(AXIOM_ENABLE_WEBRTC) && AXIOM_ENABLE_WEBRTC
-  #if defined(AXIOM_WEBRTC_LINKED) && AXIOM_WEBRTC_LINKED
-    return "This build links an external native WebRTC binary and exposes the sender/signaling seam, but the concrete peer connection backend is not implemented yet.";
-  #else
-    return "This build reserves the WebRTC integration seam, but no external native WebRTC binary was linked.";
-  #endif
-#else
-    return "This build was compiled without WebRTC support. Enable the AXIOM_ENABLE_WEBRTC CMake option for the macOS libwebrtc path.";
-#endif
-#else
-    return "The first WebRTC transport slice is macOS-only. This platform keeps the signaling seam compiled, but no native WebRTC backend is available.";
-#endif
+    return HAL::DescribeWebRtcSupport();
   }
 
 private:
@@ -201,17 +189,10 @@ private:
 };
 } // namespace
 
-#if AXIOM_PLATFORM_MACOS && defined(AXIOM_ENABLE_WEBRTC) && AXIOM_ENABLE_WEBRTC && \
-    defined(AXIOM_WEBRTC_LINKED) && AXIOM_WEBRTC_LINKED
-std::unique_ptr<IWebRtcSession> CreateMacOSWebRtcSession();
-#endif
-
 std::unique_ptr<IWebRtcSession> CreateWebRtcSession() {
-#if AXIOM_PLATFORM_MACOS && defined(AXIOM_ENABLE_WEBRTC) && AXIOM_ENABLE_WEBRTC && \
-    defined(AXIOM_WEBRTC_LINKED) && AXIOM_WEBRTC_LINKED
-  return CreateMacOSWebRtcSession();
-#else
+  if (auto Session = HAL::CreatePlatformWebRtcSession()) {
+    return Session;
+  }
   return std::make_unique<StubWebRtcSession>();
-#endif
 }
 } // namespace Axiom

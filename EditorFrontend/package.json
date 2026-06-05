@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "node --test components/engine/viewport-movement.test.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",

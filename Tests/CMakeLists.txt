@@ -1,16 +1,25 @@
 add_executable(AxiomTests
   CookedAssetTests.cpp
+  HeadlessScalabilityTests.cpp
   LayerTests.cpp
   HeadlessProtocolTests.cpp
   MeshPickingTests.cpp
+  ModuleManagerTests.cpp
   ProjectTests.cpp
+  RenderSubmissionTests.cpp
   SceneLifecycleTests.cpp
-  ../Headless/HeadlessSessionLayer.cpp
+  ThreadingTests.cpp
+  UWebSocketsVendorTests.cpp
+  WraithNetworkingModuleTests.cpp
+  ../Headless/HeadlessOverlayModule.cpp
+  ../Headless/HeadlessSessionHost.cpp
+  ../Headless/HeadlessSessionModule.cpp
   ../Headless/HeadlessCommandProtocol.cpp
+  ../Headless/HostModules.cpp
   ../Headless/WebRtcSession.cpp
 )
 
-if(APPLE)
+if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/Headless/MacOSWebRtcSession.mm")
   target_sources(AxiomTests PRIVATE
     ../Headless/MacOSWebRtcSession.mm
   )
@@ -18,8 +27,19 @@ endif()
 
 target_link_libraries(AxiomTests PRIVATE
   AxiomCore
+  AxiomScene
+  AxiomAssets
+  AxiomRenderer
+  AxiomNet
+  WraithNetworking
   GTest::gtest_main
 )
+if(TARGET AxiomPhysics)
+  target_link_libraries(AxiomTests PRIVATE AxiomPhysics)
+endif()
+if(TARGET AxiomScripting)
+  target_link_libraries(AxiomTests PRIVATE AxiomScripting)
+endif()
 
 target_include_directories(AxiomTests PRIVATE
   "${CMAKE_SOURCE_DIR}/Headless"
@@ -28,7 +48,18 @@ target_include_directories(AxiomTests PRIVATE
 target_compile_definitions(AxiomTests PRIVATE
   AXIOM_CONTENT_DIR="${CMAKE_SOURCE_DIR}/Content"
   AXIOM_PROJECTS_DIR="${CMAKE_SOURCE_DIR}/Projects"
+  AXIOM_WITH_PHYSICS=$<IF:$<BOOL:${AXIOM_ENABLE_PHYSICS}>,1,0>
+  AXIOM_WITH_SCRIPTING=$<IF:$<BOOL:${AXIOM_ENABLE_SCRIPTING}>,1,0>
+  AXIOM_THREAD_SANITIZER=$<IF:$<BOOL:${AXIOM_ENABLE_TSAN}>,1,0>
 )
+
+if(AXIOM_ENABLE_TSAN)
+  target_compile_options(AxiomTests PRIVATE
+    -fsanitize=thread
+    -fno-omit-frame-pointer
+  )
+  target_link_options(AxiomTests PRIVATE -fsanitize=thread)
+endif()
 
 # ---------------------------------------------------------------------------
 # Scripting tests — only compiled when the scripting subsystem is enabled

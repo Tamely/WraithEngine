@@ -10,6 +10,7 @@
 #include <cstring>
 #include <fstream>
 #include <type_traits>
+#include <unordered_map>
 
 namespace Axiom::Assets {
 namespace {
@@ -45,6 +46,14 @@ struct InstanceHeaderV1 {
 static_assert(std::is_trivially_copyable_v<FileHeader>);
 static_assert(std::is_trivially_copyable_v<InstanceHeader>);
 static_assert(std::is_trivially_copyable_v<InstanceHeaderV1>);
+
+struct LegacyMeshVertexV2 {
+  glm::vec4 Position{0.0f, 0.0f, 0.0f, 1.0f};
+  glm::vec4 Normal{0.0f, 0.0f, 1.0f, 0.0f};
+  glm::vec2 TexCoord{0.0f, 0.0f};
+};
+
+static_assert(std::is_trivially_copyable_v<LegacyMeshVertexV2>);
 
 template <typename T>
 bool WriteValue(std::ofstream &Stream, const T &Value) {
@@ -169,7 +178,8 @@ LoadCookedMeshAsset(const std::filesystem::path &Path) {
     return std::nullopt;
   }
 
-  if (Header.Version != 1 && Header.Version != kCookedMeshFormatVersion) {
+  if (Header.Version != 1 && Header.Version != 2 &&
+      Header.Version != kCookedMeshFormatVersion) {
     A_CORE_WARN("CookedMeshAsset: unsupported version {} in '{}'",
                 Header.Version, Path.string());
     return std::nullopt;
@@ -222,11 +232,30 @@ LoadCookedMeshAsset(const std::filesystem::path &Path) {
 
     Instance.Mesh.Vertices.resize(InstanceMeta.VertexCount);
     if (InstanceMeta.VertexCount > 0) {
-      Stream.read(reinterpret_cast<char *>(Instance.Mesh.Vertices.data()),
-                  static_cast<std::streamsize>(Instance.Mesh.Vertices.size() *
-                                               sizeof(MeshVertex)));
-      if (!Stream.good())
-        return std::nullopt;
+      if (Header.Version >= 3) {
+        Stream.read(reinterpret_cast<char *>(Instance.Mesh.Vertices.data()),
+                    static_cast<std::streamsize>(Instance.Mesh.Vertices.size() *
+                                                 sizeof(MeshVertex)));
+        if (!Stream.good()) {
+          return std::nullopt;
+        }
+      } else {
+        std::vector<LegacyMeshVertexV2> LegacyVertices(InstanceMeta.VertexCount);
+        Stream.read(reinterpret_cast<char *>(LegacyVertices.data()),
+                    static_cast<std::streamsize>(LegacyVertices.size() *
+                                                 sizeof(LegacyMeshVertexV2)));
+        if (!Stream.good()) {
+          return std::nullopt;
+        }
+        for (size_t VertexIndex = 0; VertexIndex < LegacyVertices.size();
+             ++VertexIndex) {
+          Instance.Mesh.Vertices[VertexIndex] = {
+              .Position = glm::vec3(LegacyVertices[VertexIndex].Position),
+              .Normal = glm::vec3(LegacyVertices[VertexIndex].Normal),
+              .TexCoord = LegacyVertices[VertexIndex].TexCoord,
+          };
+        }
+      }
     }
 
     Instance.Mesh.Indices.resize(InstanceMeta.IndexCount);
@@ -269,9 +298,18 @@ MeshSceneData ToRuntimeMeshSceneData(const CookedMeshSceneData &Scene,
                                      const std::filesystem::path &ContentRoot) {
   MeshSceneData Out;
   Out.Instances.reserve(Scene.Instances.size());
+  std::unordered_map<std::string, std::shared_ptr<MaterialInstance>>
+      SharedMaterials;
   for (const auto &Instance : Scene.Instances) {
-    auto Material = std::make_shared<MaterialInstance>();
-    if (!Instance.MaterialAssetPath.empty()) {
+    std::shared_ptr<MaterialInstance> Material;
+    if (Instance.MaterialAssetPath.empty()) {
+      Material = std::make_shared<MaterialInstance>();
+    } else if (const auto SharedMaterial =
+                   SharedMaterials.find(Instance.MaterialAssetPath);
+               SharedMaterial != SharedMaterials.end()) {
+      Material = SharedMaterial->second;
+    } else {
+      Material = std::make_shared<MaterialInstance>();
       const auto CookedMaterial =
           LoadCookedMaterialAssetIfAvailable(ContentRoot /
                                              Instance.MaterialAssetPath);
@@ -285,6 +323,7 @@ MeshSceneData ToRuntimeMeshSceneData(const CookedMeshSceneData &Scene,
               LoadTextureFromFile(ContentRoot / CookedMaterial->TextureAssetPath);
         }
       }
+      SharedMaterials.emplace(Instance.MaterialAssetPath, Material);
     }
     Out.Instances.push_back({
         .Name = Instance.Name,

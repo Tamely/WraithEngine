@@ -164,7 +164,7 @@ BuildMeshData(const fastgltf::Asset &Asset, const fastgltf::Primitive &Primitive
 
   fastgltf::iterateAccessorWithIndex<glm::vec3>(
       Asset, PositionAccessor, [&](const glm::vec3 &Position, size_t Index) {
-        Result.Mesh.Vertices[Index].Position = glm::vec4(Position, 1.0f);
+        Result.Mesh.Vertices[Index].Position = Position;
         Result.Mesh.BoundsMin = glm::min(Result.Mesh.BoundsMin, Position);
         Result.Mesh.BoundsMax = glm::max(Result.Mesh.BoundsMax, Position);
       });
@@ -173,12 +173,11 @@ BuildMeshData(const fastgltf::Asset &Asset, const fastgltf::Primitive &Primitive
     const auto &NormalAccessor = Asset.accessors[*NormalAccessorIndex];
     fastgltf::iterateAccessorWithIndex<glm::vec3>(
         Asset, NormalAccessor, [&](const glm::vec3 &Normal, size_t Index) {
-          Result.Mesh.Vertices[Index].Normal =
-              glm::vec4(glm::normalize(Normal), 0.0f);
+          Result.Mesh.Vertices[Index].Normal = glm::normalize(Normal);
         });
   } else {
     for (auto &Vertex : Result.Mesh.Vertices) {
-      Vertex.Normal = glm::vec4(0.0f, 0.0f, 1.0f, 0.0f);
+      Vertex.Normal = glm::vec3(0.0f, 0.0f, 1.0f);
     }
   }
 
@@ -428,12 +427,14 @@ LoadBasicMeshAssetFromSource(const std::filesystem::path &Path) {
   }
 
   std::vector<TextureSourceDataRef> ImageCache(ParsedAsset.images.size());
-  std::vector<MaterialInstanceRef> MaterialCache(ParsedAsset.materials.size());
-  MaterialInstanceRef FallbackMaterial = std::make_shared<MaterialInstance>();
+  std::vector<std::shared_ptr<MaterialInstance>> MaterialCache(
+      ParsedAsset.materials.size());
+  std::shared_ptr<MaterialInstance> FallbackMaterial =
+      std::make_shared<MaterialInstance>();
 
   auto MakeMaterialWithFactors =
       [](const fastgltf::Material &Mat,
-         TextureSourceDataRef Texture) -> MaterialInstanceRef {
+         TextureSourceDataRef Texture) -> std::shared_ptr<MaterialInstance> {
     auto Ref = std::make_shared<MaterialInstance>();
     Ref->BaseColorTexture = std::move(Texture);
     const auto &Pbr = Mat.pbrData;
@@ -448,7 +449,7 @@ LoadBasicMeshAssetFromSource(const std::filesystem::path &Path) {
   };
 
   auto ResolveMaterial = [&](const fastgltf::Primitive &Primitive,
-                             bool HasTexCoord0) -> MaterialInstanceRef {
+                             bool HasTexCoord0) -> std::shared_ptr<MaterialInstance> {
     if (!Primitive.materialIndex.has_value() ||
         *Primitive.materialIndex >= ParsedAsset.materials.size()) {
       return FallbackMaterial;

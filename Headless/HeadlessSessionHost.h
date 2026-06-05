@@ -3,14 +3,12 @@
 #include <filesystem>
 
 #include <Core/Application.h>
-#include <Remote/AxiomSessionEndpoint.h>
 #include <Renderer/VideoEncoding.h>
-#include <Scripting/ScriptHost.h>
 #include <Session/EditorSceneRendererAdapter.h>
 
+#include "HostModules.h"
 #include "HeadlessRenderView.h"
-#include "HeadlessSessionLayer.h"
-#include "HeadlessViewportFrameBridge.h"
+#include "HeadlessSessionModule.h"
 
 #include <memory>
 #include <vector>
@@ -21,6 +19,9 @@ public:
   HeadlessSessionHost(const ApplicationArgs &Args, uint32_t Width,
                       uint32_t Height);
   bool Step();
+  static std::vector<HeadlessRenderViewState>
+  BuildScheduledRenderPassViews(HeadlessRenderViewRegistry &RenderViews,
+                                SessionUserId LocalUserId);
 
   bool LoadStartupSceneIntoSession();
   bool LoadStartupSceneIntoSession(const std::filesystem::path &ContentDir);
@@ -42,12 +43,17 @@ public:
   const HeadlessRenderViewState *FindRenderView(SessionUserId User) const;
   void LoadUserScripts(const std::filesystem::path &AssemblyPath);
   void ReloadUserScripts();
-  ISessionTransport &GetTransport() { return *m_Endpoint; }
-  HeadlessSessionLayer &GetHeadlessLayer() { return *m_Layer; }
-  ScriptHost &GetScriptHost() { return m_ScriptHost; }
+  ISessionTransport &GetTransport() { return m_TransportModule->GetTransport(); }
+  HeadlessSessionModule &GetSessionModule() { return *m_SessionModule; }
+  const HeadlessSessionModule &GetSessionModule() const {
+    return *m_SessionModule;
+  }
   const HeadlessRenderViewRegistry &GetRenderViews() const {
     return m_RenderViews;
   }
+#if AXIOM_WITH_SCRIPTING
+  ScriptHost &GetScriptHost() { return m_ScriptingModule->GetScriptHost(); }
+#endif
 
 private:
   size_t BeginRenderPasses() override;
@@ -55,13 +61,20 @@ private:
   bool ShouldRenderImGuiForPass(size_t PassIndex,
                                 size_t PassCount) const override;
 
-  HeadlessSessionLayer *m_Layer{nullptr};
-  std::unique_ptr<AxiomSessionEndpoint> m_Endpoint;
-  std::unique_ptr<HeadlessViewportFrameBridge> m_FrameBridge;
+#if AXIOM_WITH_SCRIPTING
+  SessionScriptHostModule &GetScriptingModule() const {
+    return *m_ScriptingModule;
+  }
+#endif
+
+  HeadlessSessionModule *m_SessionModule{nullptr};
+  HeadlessSessionTransportModule *m_TransportModule{nullptr};
+#if AXIOM_WITH_SCRIPTING
+  SessionScriptHostModule *m_ScriptingModule{nullptr};
+#endif
   EditorSceneRendererAdapter m_SharedRendererAdapter;
   HeadlessRenderViewRegistry m_RenderViews;
   std::vector<HeadlessRenderViewState> m_ActiveRenderPassViews;
   size_t m_CurrentRenderPassIndex{0};
-  ScriptHost m_ScriptHost;
 };
 } // namespace Axiom

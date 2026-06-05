@@ -28,7 +28,24 @@ CursorMode HeadlessWindow::GetCursorMode() const { return m_CursorMode; }
 
 bool HeadlessWindow::ShouldClose() const { return m_ShouldClose; }
 
+bool HeadlessWindow::IsMinimized() const { return false; }
+
 void HeadlessWindow::RequestClose() { m_ShouldClose = true; }
 
 void *HeadlessWindow::GetNativeHandle() const { return nullptr; }
+
+bool HeadlessWindow::SupportsPresentationBackend(
+    PresentationBackendType Backend) const {
+  (void)Backend;
+  return false;
+}
+
+PresentationSurfaceResult
+HeadlessWindow::CreatePresentationSurface(PresentationBackendType Backend,
+                                          void *Instance, void *Surface) const {
+  (void)Backend;
+  (void)Instance;
+  (void)Surface;
+  return PresentationSurfaceResult::InitializationFailed;
+}
 } // namespace Axiom

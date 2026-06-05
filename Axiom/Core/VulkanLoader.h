@@ -2,11 +2,9 @@
 
 #include <string>
 
-#include <volk.h>
-
 namespace Axiom {
 struct VulkanLoaderInfo {
-  PFN_vkGetInstanceProcAddr ProcAddr{nullptr};
+  void *ProcAddr{nullptr};
   std::string Source;
   bool UsesCustomLoader{false};
   bool IsAvailable{false};
@@ -14,5 +12,6 @@ struct VulkanLoaderInfo {
 
 [[nodiscard]] const char *GetPlatformName();
 [[nodiscard]] const VulkanLoaderInfo &GetVulkanLoaderInfo();
+[[nodiscard]] bool CanInitializeHeadlessVulkan();
 void ConfigureGlfwVulkanLoader();
 } // namespace Axiom

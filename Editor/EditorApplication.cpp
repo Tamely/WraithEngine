@@ -1,8 +1,10 @@
 #include <Core/Application.h>
+#include <Core/ApplicationModules.h>
 #include <Core/GlfwEditorInputSource.h>
 #include <Core/Entry.h>
+#include <Renderer/RendererFrameModule.h>
 
-#include "GlfwEditorLayer.h"
+#include "GlfwEditorModule.h"
 
 class EditorApplication : public Axiom::Application {
 public:
@@ -11,8 +13,11 @@ public:
                             .Width = 1600,
                             .Height = 900,
                             .Mode = Axiom::RuntimeMode::LocalWindowedEditor},
-                           Args) {
-    PushLayer(new Axiom::GlfwEditorLayer());
+                           Args,
+                           {.RegisterDefaultModules = false}) {
+    GetModuleManager().RegisterModule(std::make_unique<Axiom::WindowEventsModule>());
+    GetModuleManager().RegisterModule(std::make_unique<Axiom::GlfwEditorModule>());
+    GetModuleManager().RegisterModule(std::make_unique<Axiom::RendererFrameModule>());
   }
 };
 

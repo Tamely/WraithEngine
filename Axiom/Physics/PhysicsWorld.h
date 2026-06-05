@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Session/EditorSession.h"
+#include "Session/RuntimeSceneState.h"
 
 #include <memory>
 #include <string>
@@ -9,6 +9,7 @@
 namespace Axiom {
 
 struct PhysicsTransformUpdate {
+  SceneObjectHandle ObjectHandle{};
   std::string ObjectId;
   EditorTransformDetails WorldTransform;
 };
@@ -21,7 +22,7 @@ public:
   bool IsAvailable() const;
   bool IsRunning() const;
 
-  void Start(const EditorSceneState &Scene);
+  void Start(const RuntimeSceneState &Scene);
   void Stop();
   std::vector<PhysicsTransformUpdate> Step(float DeltaTimeSeconds);
 

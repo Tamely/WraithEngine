@@ -14,6 +14,10 @@ Wraith Engine is a C++/Vulkan game engine runtime paired with a browser-based ed
 
 Collaborative simulation is session-wide: when the simulation host presses `Play`, `Pause`, or `Stop`, every connected collaborator sees the same runtime state. In the current model, the first connected browser collaborator becomes the simulation host for that session, while the headless renderer keeps its reserved local render user.
 
+The browser-facing transport is now encapsulated behind a dedicated `WraithNetworking` engine module. That module owns HTTP and WebSocket serving through vendored `uWebSockets`, while the existing WebRTC session path remains intact as the protected media/control layer used for streamed viewports.
+
+The engine's platform boundary now lives under a foundational `HAL/` layer. OS, hardware, and compiler-specific functionality routes through `AxiomHAL`, and higher-level engine modules no longer include platform headers or call platform APIs directly.
+
 ## Architecture
 
 ```
@@ -25,6 +29,15 @@ AxiomRemoteViewportServer  (C++)
   └─ EditorSession  (authoritative scene state)
           ├─ Vulkan Renderer  (offscreen, per-client)
           └─ ScriptHost  (Coral .NET 9 / C# scripting)
+
+AxiomCore runtime flow
+  ├─ HAL  (`AxiomHAL`: platform, dylib, sockets, file watch, SVG, media backends)
+  └─ ModuleManager  (register / enable / disable / query modules)
+          ├─ Application modules  (window polling, layer update, layer render, renderer frame)
+          ├─ Host modules  (session transport, script host lifecycle, networking)
+          ├─ Editor feature modules  (viewport input, selection, scene render)
+          ├─ Headless overlay module  (billboards, colliders, presence, gizmo overlay state)
+          └─ EditorSession managers  (command dispatch, scene-state coordination, physics lifecycle, validation)
 ```
 
 ## Features
@@ -32,7 +45,13 @@ AxiomRemoteViewportServer  (C++)
 **Engine**
 - Vulkan rendering backend with MoltenVK on macOS
 - Headless offscreen rendering with H.264 encoding (VideoToolbox on macOS)
+- Vulkan backend split into focused subsystems: `VulkanResourceManager`, `VulkanPipelineLibrary`, and `VulkanDrawSubmissionSystem`, with `VulkanRendererBackend` acting as the coordinator
+- Texture uploads now use an async transfer-queue path with semaphore synchronization instead of stalling the main thread with synchronous immediate-submit work
+- Hot-path mesh submission path avoids per-frame RTTI and reuses persistent scratch buffers in the Vulkan scene renderer
 - Authoritative command/event model for scene mutations
+- Foundational engine module/plugin system with lifecycle-managed runtime modules and queryable active state
+- Foundational `HAL/` platform layer with macOS implementations isolated under `HAL/MacOS/`
+- `WraithNetworking` module for toggleable browser-facing transport, exposing initialization state plus connection metrics for future CVAR/config plumbing
 - DataModel scene hierarchy — folders, meshes, lights, cameras, actors
 - Transform gizmos (translate / scale / rotate) with server-side hit-testing
 - Multi-client rendering: each connected user gets their own viewport
@@ -41,8 +60,10 @@ AxiomRemoteViewportServer  (C++)
 - Scene persistence — `scene.json` save/load across restarts
 - Session-wide Play / Pause / Stop with authoritative edit-snapshot restore
 - Runtime-only Jolt physics stepping with pause / resume support
+- Physics runtime boot now consumes a lightweight `RuntimeSceneState` snapshot instead of depending on editor-only scene headers
 - Default static box collision for imported mesh assets, with load-time migration for older meshes that had no authored physics yet
 - Configurable sky background — a two-color vertical gradient (compute-shader blended) or an equirectangular HDR (`.hdr`) sampled from a world-space ray; HDR data is preserved end-to-end as float pixels through a v2 cooked `.wtex` so future image-based lighting can reuse the same asset
+- Mesh GPU upload now releases CPU-side vertex/index arrays by default; callers can opt back in with `MeshCreateOptions::KeepCpuData` for the rare CPU-readback/debug workflows that still need them
 
 **Browser editor**
 - Dockable panels: outliner, details/property inspector, content browser, toolbar, Place Actors, script editor, remote viewport
@@ -59,6 +80,38 @@ AxiomRemoteViewportServer  (C++)
 - World Details panel for editing the skybox: color pickers for the gradient mode, plus an HDR file slot that accepts drag-drop from the content browser, a searchable folder-icon picker listing every `.hdr` in the project, or a typed content-relative path
 - Perspective / Orthographic viewport projection toggle; HDR skybox automatically falls back to gradient in orthographic mode
 - Place Actors panel: searchable, category-filtered panel with click-to-place and drag-to-viewport placement; shapes (Cube, Sphere, Cylinder, Cone, Plane) place a Mesh child inside an Actor wrapper; lights, cameras, and generic actors each place their appropriate type
+
+**Runtime architecture**
+- `IModule` / `ModuleManager` foundation for engine-owned feature registration, initialization, update, shutdown, active-state toggling, and future CVAR/config integration
+- `AxiomHAL` now acts as the base platform dependency for `AxiomCore`, which then feeds editor and headless modules
+- `Application` loop now executes module phases instead of hardcoding subsystem updates
+- Core app flow, headless host flow, editor viewport flow, and headless overlay rendering are split into focused modules instead of living in monolithic layer/application classes
+- Browser-facing networking is now routed through the standalone `WraithNetworking` module instead of being bootstrapped inline by `AxiomRemoteViewportServer`
+- `WraithNetworking` uses vendored `uWebSockets` for HTTP/WebSocket transport while preserving the existing WebRTC communication layer inside the module boundary
+- First-party OS-specific functionality is now isolated under `HAL/`: platform detection, Vulkan loader fallback/dynamic library access, socket helpers, script file watching, SVG rasterization, VideoToolbox H.264, and macOS WebRTC
+- `EditorSession` is now a lightweight coordinator that delegates command routing to `EditorCommandDispatcher`, scene/tree/transform responsibilities to `EditorSceneStateManager`, physics lifecycle to `EditorPhysicsController`, and validation to `EditorSessionValidationModule`
+- Physics is now isolated behind a runtime-only scene snapshot seam and controller boundary: editor-state extraction stays in the session subsystem, while `PhysicsWorld` consumes only transforms, collider shapes, and material indices
+- Window minimization and Vulkan surface creation now live behind the `Window` / `RenderSurface` abstraction, so the Vulkan backend no longer owns a GLFW window pointer or directly queries GLFW iconification state
+- Vulkan mesh teardown now routes through a standalone `GPUResourceQueue` instead of reaching into the renderer backend singleton during destruction
+- The old 1,700+ line Vulkan renderer monolith is gone: resource lifetime, pipeline/layout caching, and draw/submission responsibilities now live in distinct renderer subsystems with narrower ownership boundaries
+
+## Rendering Data Path Notes
+
+- `MeshVertex` is now a compact 32-byte layout: `vec3 position`, `vec3 normal`, `vec2 uv`. This trims per-vertex CPU and GPU upload footprint from the previous 40-byte layout while still matching the renderer's Vulkan vertex-input stride.
+- `RenderMeshSubmission` no longer stores a per-submission `std::string Name`. Diagnostic names now live in a separate debug-data registry so runtime submissions stay lean.
+- The Vulkan scene renderer reuses persistent scratch vectors for candidate, opaque, translucent, and compute submission lists. `RenderScenePasses()` clears and reuses those buffers each frame instead of allocating fresh vectors in the hot loop.
+- Mesh type resolution now happens when submissions are built or queued, so the per-frame render loop no longer performs `std::dynamic_pointer_cast<VulkanMesh>` for every submitted mesh.
+- `VulkanRendererBackend` is now GLFW-agnostic for frame begin and presentation setup: minimized-state checks and Vulkan surface creation are forwarded through runtime abstractions instead of hardcoded OS-library calls.
+- `VulkanMesh` destruction no longer depends on `VulkanRendererBackend::TryGet()`. GPU buffer teardown is deferred through a shared `GPUResourceQueue`, which keeps resource lifetime independent from the backend singleton.
+- Renderer responsibilities are now partitioned explicitly: `VulkanResourceManager` owns swapchain/images/buffers/descriptor-backed lifetime, `VulkanPipelineLibrary` owns raw Vulkan pipeline and layout caching, and `VulkanDrawSubmissionSystem` owns command recording, queue submission, offscreen capture publication, and async transfer synchronization.
+- Async texture upload now routes through the transfer queue and a timeline-semaphore wait on graphics submission. This preserves the old rendered output while removing the main-thread stall from material and HDR texture uploads.
+- Cooked mesh loading remains backward-compatible with older `.wmesh` payloads, but newly cooked assets use the current packed vertex layout.
+
+## Renderer Validation
+
+- `VulkanRendererBackend.cpp` was reduced from the previous 1,789-line monolith to a thin coordinator layer.
+- A clean pre-refactor headless baseline and the refactored headless build both rendered the startup scene successfully.
+- The first true captured startup-scene frame from baseline and refactor matched byte-for-byte in headless validation, confirming the subsystem split preserved rendered output.
 
 ## Prerequisites
 
@@ -122,7 +175,7 @@ cmake --build build/debug
 
 ### With scripting + automatic hot reload (macOS only)
 
-The file watcher uses `kqueue` to detect `.dll` changes and reload without restarting the server:
+The HAL file watcher uses a macOS `kqueue` backend to detect `.dll` changes and reload without restarting the server:
 
 ```bash
 cmake --preset debug \
@@ -147,6 +200,8 @@ cmake --preset debug \
   -DAXIOM_WEBRTC_LIBRARY_PATH=/path/to/libwebrtc.a \
   -DAXIOM_WEBRTC_INCLUDE_DIR=/path/to/webrtc/include
 ```
+
+Note: the headless browser-facing server now uses vendored `uWebSockets` for HTTP/WebSocket handling and does not require a separate external HTTP/WebSocket library configuration step.
 
 ### With tests
 
@@ -186,7 +241,7 @@ cmake --build build/release
 |--------|------|---------|-------------|
 | `BUILD_TESTING` | `BOOL` | `OFF` | Build the Google Test suite |
 | `AXIOM_ENABLE_SCRIPTING` | `BOOL` | `OFF` | Enable the Coral C# scripting host (.NET 9) |
-| `AXIOM_SCRIPTING_WATCH` | `BOOL` | `OFF` | Auto-reload user scripts on disk change (macOS kqueue). Requires `AXIOM_ENABLE_SCRIPTING=ON` |
+| `AXIOM_SCRIPTING_WATCH` | `BOOL` | `OFF` | Auto-reload user scripts on disk change through the HAL file-watcher layer (current macOS backend uses `kqueue`). Requires `AXIOM_ENABLE_SCRIPTING=ON` |
 | `AXIOM_SCRIPTING_TRUST_DEFAULT` | `STRING` | `Restricted` | Default sandbox tier for user scripts. `Restricted` (hosted — blocks `System.Net.*`, `System.Reflection.Emit`, etc.) or `Trusted` (local dev — full BCL access) |
 | `AXIOM_ENABLE_WEBRTC` | `BOOL` | `OFF` | Enable the macOS WebRTC transport |
 | `AXIOM_ENABLE_PHYSICS` | `BOOL` | `ON` | Enable the JoltPhysics runtime simulation seam |
@@ -211,6 +266,8 @@ cmake --build build/release
 ./build/debug/Headless/AxiomRemoteViewportServer \
   --host 127.0.0.1 --port 8080 --width 1280 --height 720
 ```
+
+At startup, `AxiomRemoteViewportServer` registers the toggleable `WraithNetworking` module with `ModuleManager`. That module owns transport initialization, publishes connection metrics/state snapshots, and keeps the existing WebRTC session logic active behind the same public server API.
 
 ### Browser editor
 
@@ -271,6 +328,7 @@ Open `http://localhost:3000` in your browser.
 | Path | Contents |
 |------|----------|
 | `Axiom/` | Engine library — core, session, renderer, remote transport, scripting host |
+| `HAL/` | Foundational platform abstraction layer plus concrete macOS implementations |
 | `Editor/` | Native GLFW + ImGui editor executable |
 | `Headless/` | Headless runtime and `AxiomRemoteViewportServer` |
 | `Scripting/WraithEngine.Managed/` | C# engine API assembly (`Script`, `GameObject`, `Transform`) |

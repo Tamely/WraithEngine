@@ -6,12 +6,26 @@
 #include "Assets/IAssetSource.h"
 #include "Assets/SceneFile.h"
 
+#include <rapidjson/document.h>
+
+#include <cstdint>
+#include <cstring>
 #include <fstream>
-#include <unordered_set>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace Axiom::Assets {
 namespace {
+constexpr char kCookedSceneMagic[] = {'W', 'S', 'C', 'N'};
+constexpr std::uint32_t kCookedSceneVersion = 1;
+
+struct CookedSceneAssetReferences {
+  std::vector<std::string> MeshAssetPaths;
+  std::vector<std::string> MaterialAssetPaths;
+  std::vector<std::string> TextureAssetPaths;
+};
+
 bool ReadPackageManifestFields(
     const std::filesystem::path &ManifestPath,
     std::unordered_map<std::string, std::string> &Fields) {
@@ -20,81 +34,124 @@ bool ReadPackageManifestFields(
     return false;
   }
 
-  const std::string Text((std::istreambuf_iterator<char>(File)),
-                         std::istreambuf_iterator<char>());
-  std::size_t Position = 0;
-  auto SkipWs = [&]() {
-    while (Position < Text.size() &&
-           (Text[Position] == ' ' || Text[Position] == '\n' ||
-            Text[Position] == '\r' || Text[Position] == '\t')) {
-      ++Position;
-    }
-  };
-  auto ParseString = [&]() -> std::optional<std::string> {
-    SkipWs();
-    if (Position >= Text.size() || Text[Position] != '"') {
-      return std::nullopt;
-    }
-    ++Position;
-    std::string Result;
-    while (Position < Text.size()) {
-      const char Character = Text[Position++];
-      if (Character == '"') {
-        return Result;
-      }
-      if (Character == '\\' && Position < Text.size()) {
-        Result.push_back(Text[Position++]);
-      } else {
-        Result.push_back(Character);
-      }
-    }
-    return std::nullopt;
-  };
-
-  SkipWs();
-  if (Position >= Text.size() || Text[Position] != '{') {
+  std::string Text((std::istreambuf_iterator<char>(File)),
+                   std::istreambuf_iterator<char>());
+  rapidjson::Document Document;
+  Document.ParseInsitu<rapidjson::kParseStopWhenDoneFlag>(Text.data());
+  if (Document.HasParseError() || !Document.IsObject()) {
     return false;
   }
-  ++Position;
-  while (true) {
-    SkipWs();
-    if (Position >= Text.size()) {
-      return false;
-    }
-    if (Text[Position] == '}') {
-      return true;
-    }
 
-    const auto Key = ParseString();
-    if (!Key.has_value()) {
-      return false;
-    }
-    SkipWs();
-    if (Position >= Text.size() || Text[Position] != ':') {
-      return false;
-    }
-    ++Position;
-    const auto Value = ParseString();
-    if (Value.has_value()) {
-      Fields[*Key] = *Value;
-    } else {
-      SkipWs();
-      const std::size_t ValueStart = Position;
-      while (Position < Text.size() && Text[Position] != ',' && Text[Position] != '}') {
-        ++Position;
-      }
-      Fields[*Key] = Text.substr(ValueStart, Position - ValueStart);
-    }
-
-    SkipWs();
-    if (Position < Text.size() && Text[Position] == ',') {
-      ++Position;
+  for (const auto &Member : Document.GetObject()) {
+    if (Member.value.IsString()) {
+      Fields.emplace(
+          Member.name.GetString(),
+          std::string(Member.value.GetString(), Member.value.GetStringLength()));
       continue;
     }
-    if (Position < Text.size() && Text[Position] == '}') {
-      return true;
+
+    if (Member.value.IsBool()) {
+      Fields.emplace(Member.name.GetString(),
+                     Member.value.GetBool() ? "true" : "false");
+      continue;
+    }
+
+    if (Member.value.IsInt64()) {
+      Fields.emplace(Member.name.GetString(),
+                     std::to_string(Member.value.GetInt64()));
+      continue;
+    }
+
+    if (Member.value.IsUint64()) {
+      Fields.emplace(Member.name.GetString(),
+                     std::to_string(Member.value.GetUint64()));
+      continue;
+    }
+
+    if (Member.value.IsDouble()) {
+      Fields.emplace(Member.name.GetString(),
+                     std::to_string(Member.value.GetDouble()));
+      continue;
+    }
+
+    if (Member.value.IsNull()) {
+      Fields.emplace(Member.name.GetString(), "null");
     }
   }
+
+  return true;
+}
+
+bool ReadCookedSceneAssetReferences(const std::filesystem::path &ScenePath,
+                                    CookedSceneAssetReferences &References) {
+  std::ifstream File(ScenePath, std::ios::binary);
+  if (!File.is_open()) {
+    return false;
+  }
+
+  char Magic[sizeof(kCookedSceneMagic)];
+  File.read(Magic, sizeof(Magic));
+  if (!File.good() || std::memcmp(Magic, kCookedSceneMagic, sizeof(Magic)) != 0) {
+    return false;
+  }
+
+  std::uint32_t Version = 0;
+  std::uint64_t PayloadSize = 0;
+  File.read(reinterpret_cast<char *>(&Version), sizeof(Version));
+  File.read(reinterpret_cast<char *>(&PayloadSize), sizeof(PayloadSize));
+  if (!File.good() || Version != kCookedSceneVersion) {
+    return false;
+  }
+
+  std::string Payload(PayloadSize, '\0');
+  File.read(Payload.data(), static_cast<std::streamsize>(PayloadSize));
+  if (!File.good()) {
+    return false;
+  }
+
+  rapidjson::Document Document;
+  Document.ParseInsitu<rapidjson::kParseStopWhenDoneFlag>(Payload.data());
+  if (Document.HasParseError() || !Document.IsObject()) {
+    return false;
+  }
+
+  const auto ObjectsIt = Document.FindMember("objects");
+  if (ObjectsIt == Document.MemberEnd() || !ObjectsIt->value.IsArray()) {
+    return true;
+  }
+
+  for (const auto &ObjectValue : ObjectsIt->value.GetArray()) {
+    if (!ObjectValue.IsObject()) {
+      continue;
+    }
+
+    const auto AssetRelativePathIt = ObjectValue.FindMember("assetRelativePath");
+    if (AssetRelativePathIt != ObjectValue.MemberEnd() &&
+        AssetRelativePathIt->value.IsString()) {
+      References.MeshAssetPaths.emplace_back(
+          AssetRelativePathIt->value.GetString(),
+          AssetRelativePathIt->value.GetStringLength());
+    }
+
+    const auto MaterialAssetPathIt =
+        ObjectValue.FindMember("materialAssetPath");
+    if (MaterialAssetPathIt != ObjectValue.MemberEnd() &&
+        MaterialAssetPathIt->value.IsString()) {
+      References.MaterialAssetPaths.emplace_back(
+          MaterialAssetPathIt->value.GetString(),
+          MaterialAssetPathIt->value.GetStringLength());
+    }
+
+    const auto TextureAssetPathIt = ObjectValue.FindMember("textureAssetPath");
+    if (TextureAssetPathIt != ObjectValue.MemberEnd() &&
+        TextureAssetPathIt->value.IsString()) {
+      References.TextureAssetPaths.emplace_back(
+          TextureAssetPathIt->value.GetString(),
+          TextureAssetPathIt->value.GetStringLength());
+    }
+  }
+
+  return true;
 }
 } // namespace
 
@@ -104,13 +161,14 @@ bool IsCookedOnlyContentPath(const std::filesystem::path &Path) {
     return false;
   }
 
-  const auto PackageManifestPath = ContentRoot->parent_path() / "package.wraith.json";
+  const auto PackageManifestPath =
+      ContentRoot->parent_path() / "package.wraith.json";
   return std::filesystem::exists(PackageManifestPath);
 }
 
 std::optional<PackagedContentDescriptor>
 ResolvePackagedContentDescriptor(const std::filesystem::path &Path,
-                                std::string *FailureReason) {
+                                 std::string *FailureReason) {
   const auto ContentRoot = FindContentRootForPath(Path);
   if (!ContentRoot.has_value()) {
     if (FailureReason != nullptr) {
@@ -143,7 +201,8 @@ ResolvePackagedContentDescriptor(const std::filesystem::path &Path,
   if (ContentModeIt == Fields.end() || SceneAssetIt == Fields.end() ||
       CookManifestIt == Fields.end() || EngineContentIt == Fields.end()) {
     if (FailureReason != nullptr) {
-      *FailureReason = "package.wraith.json is missing required packaged runtime fields.";
+      *FailureReason =
+          "package.wraith.json is missing required packaged runtime fields.";
     }
     return std::nullopt;
   }
@@ -196,8 +255,9 @@ bool ValidatePackagedContentDescriptor(const PackagedContentDescriptor &Descript
     return false;
   }
 
-  const auto LoadedScene = LoadCookedSceneFromFile(Descriptor.SceneAssetPath);
-  if (!LoadedScene.has_value()) {
+  CookedSceneAssetReferences SceneReferences;
+  if (!ReadCookedSceneAssetReferences(Descriptor.SceneAssetPath,
+                                      SceneReferences)) {
     if (FailureReason != nullptr) {
       *FailureReason = "Failed to load packaged scene asset '" +
                        Descriptor.SceneAssetPath.string() + "'.";
@@ -259,47 +319,30 @@ bool ValidatePackagedContentDescriptor(const PackagedContentDescriptor &Descript
       if (FailureReason != nullptr) {
         *FailureReason = std::string(Usage) + " '" +
                          RelativeAssetPath.generic_string() +
-                         "' maps to missing cooked asset '" +
+                         "' resolves to missing cooked asset '" +
                          CookedPath->string() + "'.";
       }
       return false;
     }
+
     return true;
   };
 
-  std::unordered_set<std::string> MeshPaths;
-  std::unordered_set<std::string> TexturePaths;
-  for (const auto &Instance : LoadedScene->MeshInstances) {
-    if (!Instance.AssetRelativePath.empty()) {
-      MeshPaths.insert(Instance.AssetRelativePath);
-    }
-    if (Instance.Material != nullptr &&
-        !Instance.Material->TextureAssetPath.empty()) {
-      TexturePaths.insert(Instance.Material->TextureAssetPath);
-    }
-  }
-  for (const auto &[ObjectId, Details] : LoadedScene->ObjectDetailsById) {
-    static_cast<void>(ObjectId);
-    if (!Details.AssetRelativePath.empty()) {
-      MeshPaths.insert(Details.AssetRelativePath);
-    }
-    if (Details.Material.has_value() &&
-        Details.Material->TextureAssetPath.has_value() &&
-        !Details.Material->TextureAssetPath->empty()) {
-      TexturePaths.insert(*Details.Material->TextureAssetPath);
-    }
-  }
-  if (!LoadedScene->WorldSettings.SkyboxHDRPath.empty()) {
-    TexturePaths.insert(LoadedScene->WorldSettings.SkyboxHDRPath);
-  }
-
-  for (const std::string &MeshPath : MeshPaths) {
-    if (!ValidateResolvedAssetPath(MeshPath, "Mesh asset reference")) {
+  for (const std::string &MeshAssetPath : SceneReferences.MeshAssetPaths) {
+    if (!ValidateResolvedAssetPath(MeshAssetPath, "Mesh asset")) {
       return false;
     }
   }
-  for (const std::string &TexturePath : TexturePaths) {
-    if (!ValidateResolvedAssetPath(TexturePath, "Texture asset reference")) {
+
+  for (const std::string &MaterialAssetPath :
+       SceneReferences.MaterialAssetPaths) {
+    if (!ValidateResolvedAssetPath(MaterialAssetPath, "Material asset")) {
+      return false;
+    }
+  }
+
+  for (const std::string &TextureAssetPath : SceneReferences.TextureAssetPaths) {
+    if (!ValidateResolvedAssetPath(TextureAssetPath, "Texture asset")) {
       return false;
     }
   }

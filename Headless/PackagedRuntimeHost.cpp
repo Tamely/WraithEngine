@@ -1,6 +1,8 @@
 #include "PackagedRuntimeHost.h"
 
+#include <Core/ApplicationModules.h>
 #include <Core/Log.h>
+#include <Renderer/RendererFrameModule.h>
 #include <Session/StartupScene.h>
 
 namespace Axiom {
@@ -11,34 +13,37 @@ PackagedRuntimeHost::PackagedRuntimeHost(const ApplicationArgs &Args,
                    .Width = Width,
                    .Height = Height,
                    .Mode = RuntimeMode::LocalPackagedGame},
-                  Args) {
-  m_Layer = new HeadlessSessionLayer();
-  m_Layer->SetSharedRendererAdapter(&m_RendererAdapter);
-  PushLayer(m_Layer);
+                  Args,
+                  {.RegisterDefaultModules = false}) {
+  GetModuleManager().RegisterModule(std::make_unique<WindowEventsModule>());
 
-  m_ScriptHost.Initialize(
-      AXIOM_CORAL_MANAGED_DIR,
-      AXIOM_SCRIPTING_TRUST_RESTRICTED ? ScriptTrustProfile::Restricted
-                                       : ScriptTrustProfile::Trusted);
-  m_ScriptHost.LoadEngineAssembly(AXIOM_MANAGED_DIR);
-  m_ScriptHost.RegisterInternalCalls(m_Layer->GetSession(), SessionId{1},
-                                     m_Layer->GetLocalUserId());
-  m_Layer->GetSession().Subscribe(&m_ScriptHost);
-  m_Layer->SetScriptHost(&m_ScriptHost);
+  auto SessionModule = std::make_unique<HeadlessSessionModule>();
+  m_SessionModule = SessionModule.get();
+  m_SessionModule->SetSharedRendererAdapter(&m_RendererAdapter);
+  GetModuleManager().RegisterModule(std::move(SessionModule));
+  GetModuleManager().RegisterModule(std::make_unique<RendererFrameModule>());
+
+#if AXIOM_WITH_SCRIPTING
+  auto ScriptingModule = std::make_unique<SessionScriptHostModule>(
+      "PackagedRuntime.SessionScriptHost", m_SessionModule->GetSession(),
+      SessionId{1}, m_SessionModule->GetLocalUserId());
+  m_ScriptingModule = ScriptingModule.get();
+  GetModuleManager().RegisterModule(std::move(ScriptingModule));
+#endif
 }
 
 bool PackagedRuntimeHost::LoadPackagedProject(const std::filesystem::path &ContentDir,
                                               std::string *FailureReason) {
-  m_Layer->GetSession().SetContentDir(ContentDir);
-  m_Layer->GetSession().SetEngineContentDir(ContentDir / "Engine");
-  if (!LoadStartupScene(m_Layer->GetSession())) {
+  m_SessionModule->GetSession().SetContentDir(ContentDir);
+  m_SessionModule->GetSession().SetEngineContentDir(ContentDir / "Engine");
+  if (!LoadStartupScene(m_SessionModule->GetSession())) {
     if (FailureReason != nullptr) {
       *FailureReason = "Failed to load the packaged startup scene.";
     }
     return false;
   }
 
-  m_Layer->Submit({.Payload = PlaySessionCommand{}});
+  m_SessionModule->Submit({.Payload = PlaySessionCommand{}});
   return true;
 }
 

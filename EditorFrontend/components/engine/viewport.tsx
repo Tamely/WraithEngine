@@ -28,6 +28,7 @@ import {
   type SessionSceneItem,
   type SessionSelection,
 } from "./remote-viewport-context"
+import { buildViewportWorldMovement } from "./viewport-movement"
 import { getServerOrigin } from "./server-origin"
 const CLIENT_ID_STORAGE_KEY = "axiom-remote-client-id"
 const CLIENT_ID_CLAIM_CHANNEL = "axiom-remote-client-claims"
@@ -301,6 +302,7 @@ export function Viewport() {
   const sendCommandRef = useRef<
     (command: RemoteViewportCommand, preferredChannel?: ChannelPreference) => Promise<boolean>
   >(async () => false)
+  const currentUserIdRef = useRef<number | null>(null)
   const {
     connectionState,
     statusText,
@@ -337,6 +339,7 @@ export function Viewport() {
     sessionStatusText,
     setSessionStatusText,
     setSessionDetailText,
+    currentUserId,
     setGizmoMode: setGizmoModeCtx,
     setProjectionType: setProjectionTypeCtx,
     runtimeState,
@@ -363,6 +366,10 @@ export function Viewport() {
   useEffect(() => {
     participantsRef.current = participants
   }, [participants])
+
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId
+  }, [currentUserId])
 
   useEffect(() => {
     function syncFullscreenState() {
@@ -1043,13 +1050,18 @@ export function Viewport() {
     sendCommandRef.current = sendCommand
 
     function movementVector(): [number, number, number] {
-      const keys = keysRef.current
-      const forward = (keys.has("KeyW") ? 1 : 0) - (keys.has("KeyS") ? 1 : 0)
-      const strafe = (keys.has("KeyD") ? 1 : 0) - (keys.has("KeyA") ? 1 : 0)
-      const lift =
-        (keys.has("Space") ? 1 : 0) -
-        ((keys.has("ShiftLeft") || keys.has("ShiftRight")) ? 1 : 0)
-      return [strafe * 0.08, lift * 0.08, forward * 0.08]
+      const localParticipant =
+        currentUserIdRef.current !== null
+          ? participantsRef.current.find(
+            (participant) => participant.userId === currentUserIdRef.current
+          )
+          : null
+
+      return buildViewportWorldMovement({
+        pressedKeys: keysRef.current,
+        yawDegrees: localParticipant?.camera?.yawDegrees ?? -90,
+        pitchDegrees: localParticipant?.camera?.pitchDegrees ?? 0,
+      }) as [number, number, number]
     }
 
     function applyPendingLook() {

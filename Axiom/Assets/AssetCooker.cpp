@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <unordered_map>
 #include <fstream>
 #include <iterator>
 #include <vector>
@@ -101,7 +102,11 @@ CookMeshAsset(const std::filesystem::path &ContentRoot,
 
   MeshSceneData CookedScene = *Scene;
   std::vector<std::string> MaterialAssetPaths(CookedScene.Instances.size());
+  std::unordered_map<const MaterialInstance *, std::string> SharedMaterialAssetPaths;
+  std::unordered_map<const TextureSourceData *, std::string> SharedTextureAssetPaths;
   const std::string AssetStem = RelativeAssetPath.stem().generic_string();
+  size_t NextSharedMaterialIndex = 0;
+  size_t NextSharedTextureIndex = 0;
   for (size_t InstanceIndex = 0; InstanceIndex < CookedScene.Instances.size();
        ++InstanceIndex) {
     auto &Instance = CookedScene.Instances[InstanceIndex];
@@ -109,16 +114,31 @@ CookMeshAsset(const std::filesystem::path &ContentRoot,
       continue;
     }
 
+    if (const auto ExistingMaterial =
+            SharedMaterialAssetPaths.find(Instance.Material.get());
+        ExistingMaterial != SharedMaterialAssetPaths.end()) {
+      MaterialAssetPaths[InstanceIndex] = ExistingMaterial->second;
+      continue;
+    }
+
     std::string TextureAssetPath;
     if (Instance.Material->BaseColorTexture &&
         Instance.Material->BaseColorTexture->IsValid()) {
-      const std::filesystem::path RelativeTexturePath =
-          std::filesystem::path("Generated/MeshTextures") /
-          (AssetStem + "__" + std::to_string(InstanceIndex));
-      const auto TextureEntry = CookTextureAsset(
-          ContentRoot, RelativeTexturePath, *Instance.Material->BaseColorTexture);
-      if (TextureEntry.has_value()) {
-        TextureAssetPath = TextureEntry->RelativePath;
+      if (const auto ExistingTexture =
+              SharedTextureAssetPaths.find(Instance.Material->BaseColorTexture.get());
+          ExistingTexture != SharedTextureAssetPaths.end()) {
+        TextureAssetPath = ExistingTexture->second;
+      } else {
+        const std::filesystem::path RelativeTexturePath =
+            std::filesystem::path("Generated/MeshTextures") /
+            (AssetStem + "__shared_" + std::to_string(NextSharedTextureIndex++));
+        const auto TextureEntry = CookTextureAsset(
+            ContentRoot, RelativeTexturePath, *Instance.Material->BaseColorTexture);
+        if (TextureEntry.has_value()) {
+          TextureAssetPath = TextureEntry->RelativePath;
+          SharedTextureAssetPaths.emplace(Instance.Material->BaseColorTexture.get(),
+                                          TextureAssetPath);
+        }
       }
     } else if (!Instance.Material->TextureAssetPath.empty()) {
       const auto TextureEntry =
@@ -130,7 +150,7 @@ CookMeshAsset(const std::filesystem::path &ContentRoot,
 
     const std::filesystem::path RelativeMaterialPath =
         std::filesystem::path("Generated/MeshMaterials") /
-        (AssetStem + "__" + std::to_string(InstanceIndex));
+        (AssetStem + "__shared_" + std::to_string(NextSharedMaterialIndex++));
     const auto MaterialEntry = CookMaterialAsset(
         ContentRoot, RelativeMaterialPath,
         {.BaseColorFactor = Instance.Material->BaseColorFactor,
@@ -139,6 +159,8 @@ CookMeshAsset(const std::filesystem::path &ContentRoot,
          .TextureAssetPath = TextureAssetPath});
     if (MaterialEntry.has_value()) {
       MaterialAssetPaths[InstanceIndex] = MaterialEntry->RelativePath;
+      SharedMaterialAssetPaths.emplace(Instance.Material.get(),
+                                       MaterialEntry->RelativePath);
     }
   }
 

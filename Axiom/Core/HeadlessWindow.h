@@ -14,8 +14,14 @@ public:
   void SetCursorMode(CursorMode Mode) override;
   [[nodiscard]] CursorMode GetCursorMode() const override;
   [[nodiscard]] bool ShouldClose() const override;
+  [[nodiscard]] bool IsMinimized() const override;
   void RequestClose() override;
   [[nodiscard]] void *GetNativeHandle() const override;
+  [[nodiscard]] bool
+  SupportsPresentationBackend(PresentationBackendType Backend) const override;
+  PresentationSurfaceResult
+  CreatePresentationSurface(PresentationBackendType Backend, void *Instance,
+                            void *Surface) const override;
 
 private:
   CursorMode m_CursorMode{CursorMode::Normal};

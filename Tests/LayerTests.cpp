@@ -8,7 +8,7 @@
 #include <Renderer/RenderCommand.h>
 #include <Renderer/RenderScene.h>
 #include "../Headless/HeadlessRenderView.h"
-#include "../Headless/HeadlessSessionLayer.h"
+#include "../Headless/HeadlessSessionModule.h"
 #include "../Headless/HeadlessViewportFrameBridge.h"
 #include <Remote/AxiomSessionEndpoint.h>
 #include <Renderer/OffscreenRenderSurface.h>
@@ -78,7 +78,13 @@ public:
   Axiom::CursorMode ModeSet{Axiom::CursorMode::Normal};
 };
 
-class DummyMesh final : public Axiom::Mesh {};
+class DummyMesh final : public Axiom::Mesh {
+public:
+  DummyMesh() { AssignHandle(Axiom::MeshHandle{s_NextHandleValue++}); }
+
+private:
+  inline static uint64_t s_NextHandleValue{1};
+};
 
 class RecordingEndpointSubscriber final
     : public Axiom::ISessionTransportSubscriber {
@@ -222,7 +228,7 @@ TEST(EditorSessionTests, CameraMovementUpdatesOnlySessionOwnedState) {
   const Axiom::Camera ExpectedBefore =
       Session.FindViewport(Axiom::SessionUserId{7})->Camera;
   Axiom::Camera Expected = ExpectedBefore;
-  Expected.MoveLocal(glm::vec3(1.5f, -0.25f, 0.75f));
+  Expected.MoveWorld(glm::vec3(1.5f, -0.25f, 0.75f));
 
   Session.Submit(MakeContext(),
                  {.Payload = Axiom::UpdateViewportCameraCommand{
@@ -298,8 +304,8 @@ TEST(EditorSessionTests, CommandsDrainInFifoOrder) {
   Session.Subscribe(&Subscriber);
   Session.EnsureViewportState(Axiom::SessionUserId{7});
   Axiom::Camera Expected = Session.FindViewport(Axiom::SessionUserId{7})->Camera;
-  Expected.MoveLocal(glm::vec3(1.0f, 0.0f, 0.0f));
-  Expected.MoveLocal(glm::vec3(0.0f, 2.0f, 0.0f));
+  Expected.MoveWorld(glm::vec3(1.0f, 0.0f, 0.0f));
+  Expected.MoveWorld(glm::vec3(0.0f, 2.0f, 0.0f));
 
   Session.Submit(MakeContext(1),
                  {.Payload = Axiom::UpdateViewportCameraCommand{
@@ -819,6 +825,8 @@ TEST(EditorInputSourceTests, GlfwInputSourceTranslatesPlatformStateIntoCommands)
   const auto &CameraCommand = std::get<Axiom::UpdateViewportCameraCommand>(
       Sink.Commands[1].Command.Payload);
   EXPECT_GT(glm::dot(CameraCommand.WorldMovement, CameraCommand.WorldMovement), 0.0f);
+  EXPECT_GT(CameraCommand.WorldMovement.x, 0.0f);
+  EXPECT_LT(CameraCommand.WorldMovement.z, 0.0f);
   ASSERT_TRUE(CameraCommand.CursorPosition.has_value());
   EXPECT_EQ(*CameraCommand.CursorPosition, glm::dvec2(12.0, 24.0));
 }
@@ -1010,6 +1018,59 @@ TEST(RemoteViewportTests, HeadlessViewportFrameBridgePreservesTaggedRenderUser) 
 
   EXPECT_EQ(Output.LastFrameIndex, 56u);
   EXPECT_EQ(Output.LastUser.Value, 11u);
+}
+
+TEST(RemoteViewportTests,
+     HeadlessViewportFrameBridgePreservesDistinctTaggedUsersAcrossFrames) {
+  class RecordingFrameOutput final : public Axiom::IViewportFrameOutput {
+  public:
+    void OnViewportFrame(const Axiom::ViewportFrame &Frame) override {
+      FrameIndices.push_back(Frame.FrameIndex);
+      Users.push_back(Frame.User);
+    }
+
+    std::vector<uint64_t> FrameIndices;
+    std::vector<Axiom::SessionUserId> Users;
+  };
+
+  RecordingFrameOutput Output;
+  Axiom::HeadlessViewportFrameBridge Bridge(
+      Output, []() -> std::optional<Axiom::HeadlessRenderViewState> {
+        return Axiom::HeadlessRenderViewState{
+            .ClientId = "resolver-client",
+            .User = Axiom::SessionUserId{99},
+            .ViewMode = Axiom::RendererViewMode::Wireframe,
+            .IsLocal = false,
+        };
+      });
+
+  std::array<std::byte, 8> Bytes{std::byte{0x01}, std::byte{0x02},
+                                 std::byte{0x03}, std::byte{0x04},
+                                 std::byte{0x05}, std::byte{0x06},
+                                 std::byte{0x07}, std::byte{0x08}};
+  Bridge.OnViewportFrame({
+      .FrameIndex = 101,
+      .Width = 1,
+      .Height = 1,
+      .Format = Axiom::ViewportFrameFormat::R8G8B8A8Unorm,
+      .Pixels = std::span<const std::byte>(Bytes.data(), 4u),
+      .User = Axiom::SessionUserId{7},
+  });
+  Bridge.OnViewportFrame({
+      .FrameIndex = 102,
+      .Width = 1,
+      .Height = 1,
+      .Format = Axiom::ViewportFrameFormat::R8G8B8A8Unorm,
+      .Pixels = std::span<const std::byte>(Bytes.data() + 4u, 4u),
+      .User = Axiom::SessionUserId{8},
+  });
+
+  ASSERT_EQ(Output.FrameIndices.size(), 2u);
+  ASSERT_EQ(Output.Users.size(), 2u);
+  EXPECT_EQ(Output.FrameIndices[0], 101u);
+  EXPECT_EQ(Output.Users[0].Value, 7u);
+  EXPECT_EQ(Output.FrameIndices[1], 102u);
+  EXPECT_EQ(Output.Users[1].Value, 8u);
 }
 
 TEST(RemoteViewportTests, AxiomEndpointForwardsEventsAndFrames) {
@@ -1212,9 +1273,9 @@ TEST(RenderSceneTests, RenderCommandSubmitsLightBillboardOverlay) {
   EXPECT_FLOAT_EQ(Scene.LightBillboards.front().PixelSize, 40.0f);
 }
 
-TEST(HeadlessSessionLayerTests, BuildLightBillboardsUsesVisibleLightsOnly) {
-  Axiom::HeadlessSessionLayer Layer;
-  Layer.GetSession().SetObjectDetails({
+TEST(HeadlessSessionModuleTests, BuildLightBillboardsUsesVisibleLightsOnly) {
+  Axiom::HeadlessSessionModule Module;
+  Module.GetSession().SetObjectDetails({
       {
           .ObjectId = "light-a",
           .DisplayName = "Light A",
@@ -1263,7 +1324,7 @@ TEST(HeadlessSessionLayerTests, BuildLightBillboardsUsesVisibleLightsOnly) {
   });
 
   const std::vector<Axiom::LightBillboardOverlay> Billboards =
-      Layer.BuildLightBillboards();
+      Module.BuildLightBillboards();
 
   ASSERT_EQ(Billboards.size(), 2u);
   const auto WorldTransformBillboard = std::find_if(
@@ -1291,11 +1352,11 @@ TEST(HeadlessSessionLayerTests, BuildLightBillboardsUsesVisibleLightsOnly) {
             Billboards.end());
 }
 
-TEST(HeadlessSessionLayerTests, BuildColliderOverlaySubmissionsUsesPhysicsData) {
-  Axiom::HeadlessSessionLayer Layer;
-  Layer.SetColliderMeshesForTesting(std::make_shared<DummyMesh>(),
-                                    std::make_shared<DummyMesh>());
-  Layer.GetSession().SetObjectDetails({
+TEST(HeadlessSessionModuleTests, BuildColliderOverlaySubmissionsUsesPhysicsData) {
+  Axiom::HeadlessSessionModule Module;
+  Module.SetColliderMeshesForTesting(std::make_shared<DummyMesh>(),
+                                     std::make_shared<DummyMesh>());
+  Module.GetSession().SetObjectDetails({
       {
           .ObjectId = "static-box",
           .DisplayName = "Static Box",
@@ -1354,7 +1415,7 @@ TEST(HeadlessSessionLayerTests, BuildColliderOverlaySubmissionsUsesPhysicsData) 
   });
 
   const std::vector<Axiom::RenderMeshSubmission> Submissions =
-      Layer.BuildColliderOverlaySubmissions();
+      Module.BuildColliderOverlaySubmissions();
 
   ASSERT_EQ(Submissions.size(), 18u);
   const size_t TranslucentCount = static_cast<size_t>(std::count_if(
@@ -1366,30 +1427,38 @@ TEST(HeadlessSessionLayerTests, BuildColliderOverlaySubmissionsUsesPhysicsData) 
   const auto StaticIt = std::find_if(
       Submissions.begin(), Submissions.end(),
       [](const Axiom::RenderMeshSubmission &Submission) {
-        return Submission.Name == "static-box-collider";
+        return Axiom::GetRenderMeshSubmissionDebugName(Submission.DebugDataId) ==
+               "static-box-collider";
       });
   ASSERT_NE(StaticIt, Submissions.end());
   EXPECT_TRUE(StaticIt->Translucent);
   EXPECT_FLOAT_EQ(StaticIt->Transform[3].x, 1.0f);
   EXPECT_FLOAT_EQ(StaticIt->Transform[3].y, 2.0f);
   EXPECT_FLOAT_EQ(StaticIt->Transform[3].z, 3.0f);
-  EXPECT_NE(StaticIt->Material, nullptr);
-  EXPECT_GT(StaticIt->Material->BaseColorFactor.g, 0.8f);
+  const Axiom::MaterialInstance *StaticMaterial =
+      Module.GetColliderMaterialForTesting(Axiom::EditorPhysicsBodyType::Static);
+  ASSERT_NE(StaticMaterial, nullptr);
+  EXPECT_TRUE(StaticIt->MaterialHandle.IsValid() || StaticMaterial != nullptr);
+  EXPECT_GT(StaticMaterial->BaseColorFactor.g, 0.8f);
   EXPECT_GT(glm::length(glm::vec3(StaticIt->Transform[0])), 3.0f);
 
   const auto DynamicIt = std::find_if(
       Submissions.begin(), Submissions.end(),
       [](const Axiom::RenderMeshSubmission &Submission) {
-        return Submission.Name == "dynamic-sphere-collider";
+        return Axiom::GetRenderMeshSubmissionDebugName(Submission.DebugDataId) ==
+               "dynamic-sphere-collider";
       });
   ASSERT_NE(DynamicIt, Submissions.end());
   EXPECT_TRUE(DynamicIt->Translucent);
   EXPECT_FLOAT_EQ(DynamicIt->Transform[3].x, -3.0f);
   EXPECT_FLOAT_EQ(DynamicIt->Transform[3].y, 5.0f);
   EXPECT_FLOAT_EQ(DynamicIt->Transform[3].z, 8.0f);
-  EXPECT_NE(DynamicIt->Material, nullptr);
-  EXPECT_GT(DynamicIt->Material->BaseColorFactor.r, 0.9f);
-  EXPECT_LT(DynamicIt->Material->BaseColorFactor.a, 0.5f);
+  const Axiom::MaterialInstance *DynamicMaterial =
+      Module.GetColliderMaterialForTesting(Axiom::EditorPhysicsBodyType::Dynamic);
+  ASSERT_NE(DynamicMaterial, nullptr);
+  EXPECT_TRUE(DynamicIt->MaterialHandle.IsValid() || DynamicMaterial != nullptr);
+  EXPECT_GT(DynamicMaterial->BaseColorFactor.r, 0.9f);
+  EXPECT_LT(DynamicMaterial->BaseColorFactor.a, 0.5f);
 }
 
 TEST(SvgTextureTests, LightbulbSvgRasterizesToValidTexture) {

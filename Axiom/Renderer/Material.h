@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <compare>
+#include <functional>
 #include <glm/vec4.hpp>
 #include <memory>
 #include <string>
@@ -36,15 +38,30 @@ struct HDRTextureSourceData {
 
 using HDRTextureSourceDataRef = std::shared_ptr<HDRTextureSourceData>;
 
+struct MaterialHandle {
+  uint32_t Value{0};
+
+  [[nodiscard]] bool IsValid() const { return Value != 0; }
+  auto operator<=>(const MaterialHandle &) const = default;
+};
+
+struct MaterialHandleHash {
+  size_t operator()(const MaterialHandle &Handle) const noexcept {
+    return std::hash<uint32_t>{}(Handle.Value);
+  }
+};
+
 struct MaterialInstance {
   TextureSourceDataRef BaseColorTexture;
   glm::vec4 BaseColorFactor{1.0f};
   float Metallic{0.0f};
   float Roughness{0.5f};
+  uint64_t Revision{0};
   // Content-relative path of the standalone texture assigned via
   // SetMaterialTextureCommand; empty if the texture came from the mesh asset.
   std::string TextureAssetPath;
 };
-
-using MaterialInstanceRef = std::shared_ptr<MaterialInstance>;
+inline void MarkMaterialInstanceDirty(MaterialInstance &Material) {
+  ++Material.Revision;
+}
 } // namespace Axiom

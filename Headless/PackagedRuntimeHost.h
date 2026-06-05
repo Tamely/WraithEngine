@@ -3,9 +3,9 @@
 #include <filesystem>
 
 #include <Core/Application.h>
-#include <Scripting/ScriptHost.h>
 
-#include "HeadlessSessionLayer.h"
+#include "HostModules.h"
+#include "HeadlessSessionModule.h"
 
 namespace Axiom {
 
@@ -18,9 +18,11 @@ public:
                            std::string *FailureReason = nullptr);
 
 private:
-  HeadlessSessionLayer *m_Layer{nullptr};
+  HeadlessSessionModule *m_SessionModule{nullptr};
+#if AXIOM_WITH_SCRIPTING
+  SessionScriptHostModule *m_ScriptingModule{nullptr};
+#endif
   EditorSceneRendererAdapter m_RendererAdapter;
-  ScriptHost m_ScriptHost;
 };
 
 } // namespace Axiom

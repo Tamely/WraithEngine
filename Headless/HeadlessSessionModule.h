@@ -1,0 +1,98 @@
+#pragma once
+
+#include <Core/IModule.h>
+
+#include <Remote/SessionTransport.h>
+#include <Renderer/Material.h>
+#include <Renderer/Mesh.h>
+#include <Renderer/RenderScene.h>
+#include <Session/EditorSceneRendererAdapter.h>
+#include <Session/EditorSession.h>
+
+#include "HeadlessOverlayModule.h"
+
+#include <filesystem>
+#include <functional>
+#include <optional>
+
+namespace Axiom {
+struct HeadlessRenderViewState;
+
+class HeadlessSessionModule final : public IModule {
+public:
+  using RenderViewResolver =
+      std::function<std::optional<HeadlessRenderViewState>()>;
+
+  HeadlessSessionModule();
+
+  [[nodiscard]] std::string_view GetName() const override;
+  bool Initialize(Application &App) override;
+  void Update(const ModuleUpdateContext &Context) override;
+  void Shutdown(Application &App) override;
+
+  bool LoadStartupSceneIntoSession();
+  bool LoadStartupSceneIntoSession(const std::filesystem::path &ContentDir);
+  void Submit(const EditorCommand &Command);
+  void SubmitToTransport(ISessionTransport &Transport,
+                         const EditorCommand &Command);
+  void SubmitToTransport(ISessionTransport &Transport, SessionUserId User,
+                         const EditorCommand &Command);
+  void SetSharedRendererAdapter(EditorSceneRendererAdapter *RendererAdapter) {
+    m_RendererAdapter = RendererAdapter;
+  }
+  void SetRenderViewResolver(RenderViewResolver Resolver) {
+    m_RenderViewResolver = std::move(Resolver);
+  }
+  void SetPresenceMarkerMeshForTesting(MeshRef Mesh) {
+    m_OverlayModule.SetPresenceMarkerMeshForTesting(std::move(Mesh));
+  }
+  void SetColliderMeshesForTesting(MeshRef BoxMesh, MeshRef SphereMesh) {
+    m_OverlayModule.SetColliderMeshesForTesting(std::move(BoxMesh),
+                                                std::move(SphereMesh));
+  }
+  EditorSession &GetSession() { return m_Session; }
+  const EditorSession &GetSession() const { return m_Session; }
+  SessionUserId GetLocalUserId() const { return m_LocalUserId; }
+
+  void SetGizmoHoveredAxis(SessionUserId User, int Axis) {
+    m_OverlayModule.SetGizmoHoveredAxis(User, Axis);
+  }
+  int GetGizmoHoveredAxis(SessionUserId User) const {
+    return m_OverlayModule.GetGizmoHoveredAxis(User);
+  }
+  void SetGizmoMode(SessionUserId User, GizmoMode Mode) {
+    m_OverlayModule.SetGizmoMode(User, Mode);
+  }
+  GizmoMode GetGizmoMode(SessionUserId User) const {
+    return m_OverlayModule.GetGizmoMode(User);
+  }
+  std::vector<LightBillboardOverlay> BuildLightBillboards() const {
+    return m_OverlayModule.BuildLightBillboards();
+  }
+  std::vector<RenderMeshSubmission> BuildColliderOverlaySubmissions() const {
+    return m_OverlayModule.BuildColliderOverlaySubmissions();
+  }
+  std::vector<RenderMeshSubmission>
+  BuildPresenceOverlaySubmissions(SessionUserId RenderUser) const {
+    return m_OverlayModule.BuildPresenceOverlaySubmissions(RenderUser);
+  }
+  const MaterialInstance *GetPresenceMaterialForTesting(SessionUserId User) const {
+    return m_OverlayModule.GetPresenceMaterialForTesting(User);
+  }
+  const MaterialInstance *
+  GetColliderMaterialForTesting(EditorPhysicsBodyType BodyType) const {
+    return m_OverlayModule.GetColliderMaterialForTesting(BodyType);
+  }
+
+private:
+  CommandContext MakeContext() const;
+  CommandContext MakeContext(SessionUserId User) const;
+
+  SessionId m_SessionId{1};
+  SessionUserId m_LocalUserId{1};
+  EditorSession m_Session;
+  HeadlessOverlayModule m_OverlayModule;
+  EditorSceneRendererAdapter *m_RendererAdapter{nullptr};
+  RenderViewResolver m_RenderViewResolver;
+};
+} // namespace Axiom

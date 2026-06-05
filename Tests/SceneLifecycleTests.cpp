@@ -5,6 +5,9 @@
 #include <Assets/IAssetSource.h>
 #include <Assets/SceneFile.h>
 #include <Core/Log.h>
+#if AXIOM_WITH_PHYSICS
+#include <Session/EditorPhysicsController.h>
+#endif
 #include <Session/EditorSession.h>
 
 #include <glm/vec3.hpp>
@@ -318,10 +321,11 @@ TEST(SceneLifecycleTests, AuthoringMutationsAreRejectedWhileSimulationIsActive) 
 }
 
 TEST(SceneLifecycleTests, PhysicsStepsDynamicBodiesOnlyWhilePlaying) {
-#if !AXIOM_ENABLE_PHYSICS
+#if !AXIOM_WITH_PHYSICS
   GTEST_SKIP() << "Physics backend disabled for this build.";
 #else
   Axiom::EditorSession Session = MakeWorldSession();
+  Axiom::AttachEditorPhysicsController(Session);
   Session.SetObjectDetails({
       {
           .ObjectId = "world",
@@ -404,10 +408,11 @@ TEST(SceneLifecycleTests, PhysicsStepsDynamicBodiesOnlyWhilePlaying) {
 }
 
 TEST(SceneLifecycleTests, PhysicsPauseFreezesDynamicBodies) {
-#if !AXIOM_ENABLE_PHYSICS
+#if !AXIOM_WITH_PHYSICS
   GTEST_SKIP() << "Physics backend disabled for this build.";
 #else
   Axiom::EditorSession Session = MakeWorldSession();
+  Axiom::AttachEditorPhysicsController(Session);
   Session.SetObjectDetails({
       {
           .ObjectId = "world",
@@ -477,10 +482,11 @@ TEST(SceneLifecycleTests, PhysicsPauseFreezesDynamicBodies) {
 }
 
 TEST(SceneLifecycleTests, PhysicsStopRestoresPrePlayTransformState) {
-#if !AXIOM_ENABLE_PHYSICS
+#if !AXIOM_WITH_PHYSICS
   GTEST_SKIP() << "Physics backend disabled for this build.";
 #else
   Axiom::EditorSession Session = MakeWorldSession();
+  Axiom::AttachEditorPhysicsController(Session);
   Session.SetObjectDetails({
       {
           .ObjectId = "world",
@@ -1037,6 +1043,42 @@ TEST(SceneLifecycleTests, DuplicateProducesCloneUnderSameParent) {
   EXPECT_EQ(World->Children.size(), 2u);
 }
 
+TEST(SceneLifecycleTests, DuplicateAssignsDistinctStableHandles) {
+  Axiom::EditorSession Session = MakeWorldSession();
+  RecordingSubscriber Subscriber;
+  Session.Subscribe(&Subscriber);
+
+  Session.Submit(
+      MakeContext(1),
+      {.Payload = Axiom::CreateObjectCommand{.TemplateId = "Light"}});
+  Session.Tick();
+
+  const auto *Created = FindEvent<Axiom::ObjectCreatedEvent>(Subscriber.Events);
+  ASSERT_NE(Created, nullptr);
+  const std::string OriginalId = Created->ObjectId;
+  const Axiom::SceneObjectHandle OriginalHandle =
+      Session.ResolveObjectHandle(OriginalId);
+  ASSERT_TRUE(static_cast<bool>(OriginalHandle));
+
+  Subscriber.Events.clear();
+  Session.Submit(MakeContext(2),
+                 {.Payload = Axiom::DuplicateObjectCommand{
+                      .ObjectId = OriginalId,
+                  }});
+  Session.Tick();
+
+  const auto *CloneCreated =
+      FindEvent<Axiom::ObjectCreatedEvent>(Subscriber.Events);
+  ASSERT_NE(CloneCreated, nullptr);
+  const Axiom::SceneObjectHandle CloneHandle =
+      Session.ResolveObjectHandle(CloneCreated->ObjectId);
+  ASSERT_TRUE(static_cast<bool>(CloneHandle));
+  EXPECT_NE(CloneHandle, OriginalHandle);
+  EXPECT_EQ(Session.FindObjectDetails(OriginalHandle)->ObjectId, OriginalId);
+  EXPECT_EQ(Session.FindObjectDetails(CloneHandle)->ObjectId,
+            CloneCreated->ObjectId);
+}
+
 TEST(SceneLifecycleTests, DuplicateWithUnknownIdIsRejected) {
   Axiom::EditorSession Session = MakeWorldSession();
   RecordingSubscriber Subscriber;
@@ -1189,6 +1231,41 @@ TEST(SceneLifecycleTests, DeleteClearsSelectionForRemovedObject) {
   EXPECT_EQ(Session.FindSelectedObjectId(Axiom::SessionUserId{7}), nullptr);
 }
 
+TEST(SceneLifecycleTests, DeleteClearsHandleBackedSelectionAndCollaborationState) {
+  Axiom::EditorSession Session = MakeWorldSession();
+
+  Session.Submit(
+      MakeContext(1),
+      {.Payload = Axiom::CreateObjectCommand{.TemplateId = "Mesh"}});
+  Session.Tick();
+
+  std::string ObjectId;
+  for (const auto &[Id, Details] : Session.GetState().Scene.ObjectDetailsById) {
+    if (Id != "world") {
+      ObjectId = Id;
+      break;
+    }
+  }
+  ASSERT_FALSE(ObjectId.empty());
+
+  const Axiom::SceneObjectHandle Handle = Session.ResolveObjectHandle(ObjectId);
+  ASSERT_TRUE(static_cast<bool>(Handle));
+
+  Session.Submit(MakeContext(2),
+                 {.Payload = Axiom::SelectObjectCommand{.ObjectId = ObjectId}});
+  Session.Tick();
+  Session.AcquireLock(ObjectId, Axiom::SessionUserId{7});
+  ASSERT_NE(Session.FindSelectedObjectHandle(Axiom::SessionUserId{7}), nullptr);
+  ASSERT_NE(Session.FindCollaborationState(Handle), nullptr);
+
+  Session.Submit(MakeContext(3),
+                 {.Payload = Axiom::DeleteObjectCommand{.ObjectId = ObjectId}});
+  Session.Tick();
+
+  EXPECT_EQ(Session.FindSelectedObjectHandle(Axiom::SessionUserId{7}), nullptr);
+  EXPECT_EQ(Session.FindCollaborationState(Handle), nullptr);
+}
+
 TEST(SceneLifecycleTests, DeleteWithUnknownIdIsRejected) {
   Axiom::EditorSession Session = MakeWorldSession();
   RecordingSubscriber Subscriber;
@@ -1314,16 +1391,18 @@ TEST(SceneLifecycleTests, SetSceneItemsRebuildsInstanceTree) {
       }},
   }});
 
-  const Axiom::DataModel *Root = Session.GetSceneRoot();
+  const Axiom::InstancePool &Pool = Session.GetInstancePool();
+  const Axiom::InstanceHandle RootHandle = Session.GetSceneRoot();
+  const Axiom::DataModel *Root = Pool.ResolveAs<Axiom::DataModel>(RootHandle);
   ASSERT_NE(Root, nullptr);
   ASSERT_EQ(Root->GetChildren().size(), 1u);
-  EXPECT_EQ(Root->GetChildren().front()->GetName(), "world");
+  EXPECT_EQ(Pool.Resolve(Root->GetChildren().front())->GetName(), "world");
 
-  const Axiom::Instance *World =
-      Root->FindFirstChild("world");
+  const Axiom::InstanceHandle WorldHandle = Root->FindFirstChild("world");
+  const Axiom::Instance *World = Pool.Resolve(WorldHandle);
   ASSERT_NE(World, nullptr);
   ASSERT_EQ(World->GetChildren().size(), 1u);
-  EXPECT_EQ(World->GetChildren().front()->GetName(), "light-1");
+  EXPECT_EQ(Pool.Resolve(World->GetChildren().front())->GetName(), "light-1");
 }
 
 TEST(SceneLifecycleTests, SnapshotRehydrationRestoresTreeAndAllowsCreate) {
@@ -1350,9 +1429,11 @@ TEST(SceneLifecycleTests, SnapshotRehydrationRestoresTreeAndAllowsCreate) {
   Session.SetSceneState(std::move(State));
 
   // Tree reflects snapshot
-  const Axiom::DataModel *Root = Session.GetSceneRoot();
+  const Axiom::InstancePool &Pool = Session.GetInstancePool();
+  const Axiom::DataModel *Root =
+      Pool.ResolveAs<Axiom::DataModel>(Session.GetSceneRoot());
   ASSERT_NE(Root, nullptr);
-  ASSERT_NE(Root->FindFirstChild("world"), nullptr);
+  ASSERT_TRUE(static_cast<bool>(Root->FindFirstChild("world")));
 
   // Create works after rehydration
   RecordingSubscriber Subscriber;
@@ -1366,9 +1447,10 @@ TEST(SceneLifecycleTests, SnapshotRehydrationRestoresTreeAndAllowsCreate) {
   ASSERT_NE(Created, nullptr);
 
   // New object is a child of "world" in the tree
-  const Axiom::Instance *World = Root->FindFirstChild("world");
+  const Axiom::InstanceHandle WorldHandle = Root->FindFirstChild("world");
+  const Axiom::Instance *World = Pool.Resolve(WorldHandle);
   ASSERT_NE(World, nullptr);
-  EXPECT_NE(World->FindFirstChild(Created->ObjectId), nullptr);
+  EXPECT_TRUE(static_cast<bool>(World->FindFirstChild(Created->ObjectId)));
 
   // Reload snapshot — new object should be gone
   Axiom::EditorSceneState State2{};
@@ -1391,7 +1473,13 @@ TEST(SceneLifecycleTests, SnapshotRehydrationRestoresTreeAndAllowsCreate) {
   Session.SetSceneState(std::move(State2));
 
   EXPECT_EQ(Session.FindObjectDetails(Created->ObjectId), nullptr);
-  EXPECT_EQ(World->GetChildren().size(), 0u);
+  const Axiom::DataModel *ReloadedRoot =
+      Pool.ResolveAs<Axiom::DataModel>(Session.GetSceneRoot());
+  ASSERT_NE(ReloadedRoot, nullptr);
+  const Axiom::Instance *ReloadedWorld =
+      Pool.Resolve(ReloadedRoot->FindFirstChild("world"));
+  ASSERT_NE(ReloadedWorld, nullptr);
+  EXPECT_EQ(ReloadedWorld->GetChildren().size(), 0u);
 }
 
 // ---------------------------------------------------------------------------
@@ -1472,6 +1560,71 @@ TEST(SceneLifecycleTests, ReparentMovesObjectToNewParent) {
   for (const auto &Child : WorldItem->Children) {
     EXPECT_NE(Child.Id, MeshId);
   }
+}
+
+TEST(SceneLifecycleTests, ReparentPreservesHandleAndMeshInstanceOwnership) {
+  Axiom::EditorSession Session = MakeSessionWithFolder();
+  Session.SetSceneItems({{
+      .Id = "world",
+      .DisplayName = "World",
+      .Kind = Axiom::EditorSceneItemKind::Folder,
+      .Visible = true,
+      .Children = {{
+          .Id = "group",
+          .DisplayName = "Group",
+          .Kind = Axiom::EditorSceneItemKind::Folder,
+          .Visible = true,
+      }, {
+          .Id = "crate-1",
+          .DisplayName = "Crate",
+          .Kind = Axiom::EditorSceneItemKind::Mesh,
+          .Visible = true,
+      }},
+  }});
+  Session.SetObjectDetails({
+      {.ObjectId = "world",
+       .DisplayName = "World",
+       .Kind = Axiom::EditorSceneItemKind::Folder,
+       .Visible = true,
+       .SupportsTransform = false,
+       .TransformReadOnly = true},
+      {.ObjectId = "group",
+       .DisplayName = "Group",
+       .Kind = Axiom::EditorSceneItemKind::Folder,
+       .Visible = true,
+       .SupportsTransform = false,
+       .TransformReadOnly = true},
+      {.ObjectId = "crate-1",
+       .DisplayName = "Crate",
+       .Kind = Axiom::EditorSceneItemKind::Mesh,
+       .Visible = true,
+       .SupportsTransform = true,
+       .TransformReadOnly = false,
+       .Transform = Axiom::EditorTransformDetails{}},
+  });
+  Session.SetSceneMeshInstances({{
+      .ObjectId = "crate-1",
+      .Mesh = {},
+      .Material = nullptr,
+      .RenderPath = Axiom::MeshRenderPath::Graphics,
+      .Transform = glm::mat4(1.0f),
+  }});
+
+  const Axiom::SceneObjectHandle Handle = Session.ResolveObjectHandle("crate-1");
+  ASSERT_TRUE(static_cast<bool>(Handle));
+  ASSERT_EQ(Session.GetState().Scene.MeshInstances.size(), 1u);
+  EXPECT_EQ(Session.GetState().Scene.MeshInstances.front().ObjectHandle, Handle);
+
+  Session.Submit(MakeContext(1),
+                 {.Payload = Axiom::ReparentObjectCommand{
+                      .ObjectId = "crate-1",
+                      .NewParentId = "group",
+                  }});
+  Session.Tick();
+
+  EXPECT_EQ(Session.ResolveObjectHandle("crate-1"), Handle);
+  ASSERT_EQ(Session.GetState().Scene.MeshInstances.size(), 1u);
+  EXPECT_EQ(Session.GetState().Scene.MeshInstances.front().ObjectHandle, Handle);
 }
 
 TEST(SceneLifecycleTests, ReparentToDescendantIsRejected) {
@@ -2585,6 +2738,58 @@ TEST(SceneLifecycleTests, SceneFile_SaveLoadRoundTripsPhysicsState) {
   EXPECT_FLOAT_EQ(DetailsIt->second.Physics->Mass, 4.0f);
   EXPECT_FLOAT_EQ(DetailsIt->second.Physics->Friction, 0.45f);
   EXPECT_FLOAT_EQ(DetailsIt->second.Physics->Restitution, 0.25f);
+}
+
+TEST(SceneLifecycleTests, SceneFile_SaveLoadRoundTripsStableHandlesForPhysicsObjects) {
+  EnsureLogInitialized();
+
+  const auto TempRoot =
+      std::filesystem::temp_directory_path() / "wraithengine-handle-scene-test";
+  std::error_code RemoveError;
+  std::filesystem::remove_all(TempRoot, RemoveError);
+  std::filesystem::create_directories(TempRoot / "Content");
+
+  Axiom::EditorSceneState Scene;
+  Scene.Items = {{
+      .Handle = Axiom::SceneObjectHandle{41},
+      .Id = "ball",
+      .DisplayName = "Ball",
+      .Kind = Axiom::EditorSceneItemKind::Actor,
+      .Visible = true,
+      .Children = {},
+  }};
+  Scene.ObjectDetailsById["ball"] = Axiom::EditorObjectDetails{
+      .Handle = Axiom::SceneObjectHandle{41},
+      .ObjectId = "ball",
+      .DisplayName = "Ball",
+      .Kind = Axiom::EditorSceneItemKind::Actor,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      .Transform = Axiom::EditorTransformDetails{},
+      .Physics = Axiom::EditorPhysicsProperties{
+          .BodyType = Axiom::EditorPhysicsBodyType::Dynamic,
+          .ColliderType = Axiom::EditorPhysicsColliderType::Sphere,
+      },
+  };
+
+  const auto ScenePath = TempRoot / "Content" / "scene.json";
+  ASSERT_TRUE(Axiom::Assets::SaveSceneToFile(ScenePath, Scene));
+
+  const auto Loaded = Axiom::Assets::LoadSceneFromFile(ScenePath);
+  ASSERT_TRUE(Loaded.has_value());
+  const auto DetailsIt = Loaded->ObjectDetailsById.find("ball");
+  ASSERT_NE(DetailsIt, Loaded->ObjectDetailsById.end());
+  EXPECT_EQ(DetailsIt->second.Handle, Axiom::SceneObjectHandle{41});
+  ASSERT_EQ(Loaded->Items.size(), 1u);
+  EXPECT_EQ(Loaded->Items.front().Handle, Axiom::SceneObjectHandle{41});
+
+  Axiom::EditorSession Session(Axiom::SessionId{1});
+  Session.SetSceneState(*Loaded);
+  EXPECT_EQ(Session.ResolveObjectHandle("ball"), Axiom::SceneObjectHandle{41});
+  ASSERT_NE(Session.FindObjectDetails(Axiom::SceneObjectHandle{41}), nullptr);
+  EXPECT_EQ(Session.FindObjectDetails(Axiom::SceneObjectHandle{41})->ObjectId,
+            "ball");
 }
 
 TEST(SceneLifecycleTests, SceneFile_LoadMigratesMissingMeshPhysicsToStaticBox) {

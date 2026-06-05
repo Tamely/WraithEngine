@@ -26,12 +26,12 @@ MeshData ConvertMesh(const aiMesh *AiMesh) {
   for (unsigned i = 0; i < AiMesh->mNumVertices; ++i) {
     MeshVertex V{};
     V.Position = {AiMesh->mVertices[i].x, AiMesh->mVertices[i].y,
-                  AiMesh->mVertices[i].z, 1.0f};
+                  AiMesh->mVertices[i].z};
     if (AiMesh->HasNormals()) {
       V.Normal = {AiMesh->mNormals[i].x, AiMesh->mNormals[i].y,
-                  AiMesh->mNormals[i].z, 0.0f};
+                  AiMesh->mNormals[i].z};
     } else {
-      V.Normal = {0.0f, 1.0f, 0.0f, 0.0f};
+      V.Normal = {0.0f, 1.0f, 0.0f};
     }
     if (AiMesh->HasTextureCoords(0)) {
       V.TexCoord = {AiMesh->mTextureCoords[0][i].x,
@@ -54,8 +54,9 @@ MeshData ConvertMesh(const aiMesh *AiMesh) {
   return Data;
 }
 
-MaterialInstanceRef ConvertMaterial(const aiScene *Scene, unsigned MatIndex,
-                                    const std::filesystem::path &AssetDir) {
+std::shared_ptr<MaterialInstance>
+ConvertMaterial(const aiScene *Scene, unsigned MatIndex,
+                const std::filesystem::path &AssetDir) {
   auto Mat = std::make_shared<MaterialInstance>();
   if (MatIndex >= Scene->mNumMaterials)
     return Mat;

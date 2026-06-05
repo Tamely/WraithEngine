@@ -4,9 +4,11 @@
 
 `AxiomRemoteViewportDevClient` is a companion dev executable that exercises the same authoritative session through the new transport seam and writes the frames it receives as a transport subscriber.
 
-`AxiomRemoteViewportServer` is now the primary remote viewport prototype backend. It runs the authoritative headless session and exposes the HTTP/WebRTC endpoints used by the browser editor.
+`AxiomRemoteViewportServer` is now the primary remote viewport prototype backend. It runs the authoritative headless session, registers the standalone `WraithNetworking` module, and exposes the browser-facing networking surface through that module.
 
-The current slice includes a macOS-first H.264 path that is wired into the native WebRTC sender. The browser viewport consumes the WebRTC video track as the only remote viewport media path.
+The current slice includes a macOS-first H.264 path that is wired into the native WebRTC sender. The browser viewport consumes the WebRTC video track as the only remote viewport media path, and that WebRTC path remains preserved inside the networking module as a protected subsystem rather than being rewritten during transport refactors.
+
+That macOS-specific media path now lives behind the engine-wide `HAL/` layer, so the higher-level networking/session code stays platform-agnostic.
 
 ## Current Status
 
@@ -21,16 +23,21 @@ The current slice includes a macOS-first H.264 path that is wired into the nativ
 - `AxiomSessionEndpoint` is the first in-process transport implementation
 - `AxiomRemoteViewportDevClient` is a dev harness for transport-delivered frames/events, not a browser client
 - `AxiomRemoteViewportServer` is the current browser-facing backend for remote viewport work
+- `WraithNetworking` is now the toggleable engine module that owns browser-facing transport lifecycle for the headless server
 - the current server/browser slice has moved from SSE plus HTTP image polling to WebRTC video plus data channels
+- custom socket, HTTP, and WebSocket server code has been removed from the headless server path and replaced with vendored `uWebSockets`
 - encoded video packet delivery now exists as an additive transport seam beside raw viewport frame delivery
 - `IVideoEncoder` now exists as the engine-owned video encode boundary
 - a macOS `VideoToolbox` H.264 encoder path now exists for headless remote-viewport bring-up
 - `AxiomRemoteViewportServer` now treats WebRTC as the only supported remote viewport media path
+- the concrete H.264, WebRTC, socket, and related platform calls used by the remote viewport stack now route through `AxiomHAL`
+- `WraithNetworking` exposes initialization state and connection metrics so the runtime can later surface them through CVAR/config tooling
 - the old frame-ownership splitter and round-robin render-target path have been removed
 - headless remote rendering now uses one authoritative `EditorSession`, one shared GPU resource world, and one render view per connected remote client
 - the authoritative session scene is now renderer-agnostic and no longer stores renderer-owned mesh submissions as its source of truth
 - startup scene loading now populates logical scene mesh instances from the current `basicmesh.glb` asset mapping instead of calling directly into the renderer singleton
 - local windowed rendering and headless rendering both rebuild render submissions through a shared `EditorSceneRendererAdapter`
+- render submissions now cache their typed `VulkanMesh*` at build time and keep debug names in sidecar metadata, so the per-frame renderer hot loop avoids both RTTI casts and embedded submission-name strings
 - the headless host now performs one render pass per active remote render view during a single engine tick
 - remote `set_view_mode` is now per-client state, not a global remote-server toggle
 - the main-loop throttle in the headless remote viewport server has been removed so the runtime can tick at full cadence
@@ -39,6 +46,7 @@ The current slice includes a macOS-first H.264 path that is wired into the nativ
 - the browser client now pumps camera/input updates on `requestAnimationFrame` and flushes pointer-lock look input immediately instead of batching on a fixed timer
 - the current stream no longer has the severe FPS collapse seen in the older prototype, but there is still roughly half a second of residual input latency to investigate later
 - a multi-client frame-routing bug was fixed by stamping each offscreen capture with the submitting `SessionUserId` at render time instead of inferring ownership later from mutable active-pass state
+- the headless command/protocol layer and the remote project/script HTTP JSON helpers now use `rapidjson` internally; command/event/session payload schemas are unchanged, but the earlier handwritten JSON serializer/parser code on those paths has been removed
 - a root-level `EditorFrontend` workspace now hosts the primary browser editor shell using Next.js, React, and Tailwind CSS
 - `EditorFrontend` includes the docked editor layout, menu bar, toolbar, outliner, details panel, content browser, and the active WebRTC viewport client in `components/engine/viewport.tsx`
 - the old inline localhost:8080 page has been retired; the server now focuses on backend/session and diagnostics endpoints
@@ -50,12 +58,17 @@ The current remote viewport stack is organized as:
 
 - one authoritative `EditorSession`
 - one shared renderer and GPU resource cache
+- one `WraithNetworking` module registered with `ModuleManager`
+- one `uWebSockets` HTTP/WebSocket listener owned by that module
 - one headless render view per connected remote client
 - one WebRTC session and one encoder per connected remote client
 - one multi-pass headless engine tick that renders all active remote views sequentially
 
 Important implementation notes:
 
+- transport startup/shutdown now flows through `IModule` lifecycle hooks instead of direct server bootstrap calls
+- the browser-facing HTTP/WebSocket layer is replaceable at the module boundary without changing the WebRTC session implementation
+- first-party OS and hardware calls used by the remote viewport stack now live under `HAL/` rather than in `Headless/` or other higher-level engine modules
 - render-view state is per client and currently includes at least `SessionUserId`, client id, and view mode
 - per-client camera state remains authoritative in `EditorSession`
 - presence overlays are assembled per rendered user so a viewer sees other participants, not their own marker
@@ -97,6 +110,8 @@ Remote viewport server example:
 ```sh
 ./AxiomRemoteViewportServer --host 127.0.0.1 --port 8080 --width 1280 --height 720
 ```
+
+On startup, the process registers `WraithNetworking` with `ModuleManager`; the module initializes the `uWebSockets` transport, reports whether networking initialized successfully, and keeps per-connection metrics available for future runtime introspection.
 
 Then start the browser editor:
 
@@ -229,6 +244,7 @@ This prototype proves that:
 - remote-style command submission can reuse the same session authority path as the local adapter
 - a browser can connect to the headless authoritative session over a real network boundary and drive the existing viewport camera commands
 - the browser client can now receive the authoritative viewport over a WebRTC H.264 video track while using data channels for control/input traffic
+- the browser-facing transport can now be enabled, initialized, and queried as a standalone engine module instead of being hardwired into the executable bootstrap path
 - the major FPS bottlenecks in the remote viewport prototype have been removed through server-loop, duplicate-work, encoder, and input-pump latency fixes
 - multiple connected browser clients now have distinct render views instead of sharing a split single-frame ownership path
 
@@ -258,6 +274,7 @@ The authoritative scene-authoring loop has advanced on the `scene-editing` branc
 - `ComputeWorldTransformMatrix` walks the instance parent chain and multiplies each ancestor's local matrix to produce the object's world matrix
 - `DecomposeMatrix` extracts position, YXZ Euler angles (matching `BuildTransformMatrix` rotation order), and scale from a world matrix
 - `RecomputeSubtreeWorldTransforms` recomputes `WorldTransform` and updates the renderer mesh instance matrix for a moved object and all its descendants in one pass
+- that scene/tree/transform responsibility now lives in `EditorSceneStateManager`, with `EditorSession` acting as the coordinator
 - reparenting a child object preserves its stored local `Transform` values unchanged; the rendered world position shifts to be relative to the new parent's world transform
 - `SetTransformCommand` (gizmo drag output) arrives in world space; the handler inverts the parent's world matrix to derive local-space storage, then propagates new world transforms to any children
 - `SerializeObjectDetails` serializes `WorldTransform` to the browser so the properties panel and gizmo always work in world space regardless of hierarchy depth
@@ -325,7 +342,7 @@ Object locking, selection/lock visibility, presence indicators, and heartbeat-dr
 - `ObjectLockChangedEvent` is added to the `EditorEventPayload` variant and serialized as `{ "type": "object_lock_changed", "objectId": ..., "lockState": "locked"|"unlocked", "lockOwnerUserId": n|null }`
 - `EditorSession` exposes three public methods: `AcquireLock(ObjectId, UserId)`, `ReleaseLock(ObjectId, UserId)`, and `ReleaseAllLocksForUser(UserId)`; each publishes an `ObjectLockChangedEvent` broadcast to all clients
 - `RemoteViewportServer` calls `AcquireLock` at gizmo drag start and `ReleaseLock` at gizmo drag end, so the dragging user holds an exclusive transform lock for the duration of the interaction
-- `ValidateCommand` in `EditorSession` rejects `SetTransform`, `Rename`, `SetObjectVisibility`, `Delete`, and `Reparent` commands on an object locked by a different user; the command is dropped with a `CommandRejected` event
+- `EditorSessionValidationModule` rejects `SetTransform`, `Rename`, `SetObjectVisibility`, `Delete`, and `Reparent` commands on an object locked by a different user; the command is dropped with a `CommandRejected` event
 
 ### Selection and Lock Visibility in the Outliner
 

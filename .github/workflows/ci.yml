@@ -13,6 +13,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Cache Homebrew packages
         uses: actions/cache@v4
@@ -79,6 +81,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       # pnpm must be set up before setup-node so the built-in cache can locate the store.
       - uses: pnpm/action-setup@v4

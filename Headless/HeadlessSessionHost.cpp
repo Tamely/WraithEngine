@@ -1,8 +1,10 @@
 #include "HeadlessSessionHost.h"
 
-#include <algorithm>
+#include <Core/ApplicationModules.h>
+#include <Core/HeadlessRuntimeInstrumentation.h>
+#include <Renderer/RendererFrameModule.h>
 
-#include <Renderer/VideoEncoderFactory.h>
+#include <algorithm>
 
 namespace Axiom {
 HeadlessSessionHost::HeadlessSessionHost(const ApplicationArgs &Args,
@@ -11,10 +13,14 @@ HeadlessSessionHost::HeadlessSessionHost(const ApplicationArgs &Args,
                    .Width = Width,
                    .Height = Height,
                    .Mode = RuntimeMode::HeadlessEditorSession},
-                  Args) {
-  m_Layer = new HeadlessSessionLayer();
-  m_Layer->SetSharedRendererAdapter(&m_SharedRendererAdapter);
-  m_Layer->SetRenderViewResolver(
+                  Args,
+                  {.RegisterDefaultModules = false}) {
+  GetModuleManager().RegisterModule(std::make_unique<WindowEventsModule>());
+
+  auto SessionModule = std::make_unique<HeadlessSessionModule>();
+  m_SessionModule = SessionModule.get();
+  m_SessionModule->SetSharedRendererAdapter(&m_SharedRendererAdapter);
+  m_SessionModule->SetRenderViewResolver(
       [this]() -> std::optional<HeadlessRenderViewState> {
         if (const HeadlessRenderViewState *View = GetActiveRenderView();
             View != nullptr) {
@@ -22,72 +28,141 @@ HeadlessSessionHost::HeadlessSessionHost(const ApplicationArgs &Args,
         }
         return std::nullopt;
       });
-  PushLayer(m_Layer);
-  m_Endpoint = std::make_unique<AxiomSessionEndpoint>(m_Layer->GetSession());
-  m_Endpoint->SetVideoEncoder(CreateDefaultVideoEncoder());
-  m_RenderViews.EnsureLocalView(m_Layer->GetLocalUserId());
-  m_FrameBridge = std::make_unique<HeadlessViewportFrameBridge>(
-      *m_Endpoint, [this]() -> std::optional<HeadlessRenderViewState> {
+  GetModuleManager().RegisterModule(std::move(SessionModule));
+  GetModuleManager().RegisterModule(std::make_unique<RendererFrameModule>());
+
+  m_RenderViews.EnsureLocalView(m_SessionModule->GetLocalUserId());
+  auto TransportModule = std::make_unique<HeadlessSessionTransportModule>(
+      m_SessionModule->GetSession(),
+      [this]() -> std::optional<HeadlessRenderViewState> {
         if (const HeadlessRenderViewState *View = GetActiveRenderView();
             View != nullptr) {
           return *View;
         }
         return std::nullopt;
       });
-  SetViewportFrameOutput(m_FrameBridge.get());
-  m_ScriptHost.Initialize(
-      AXIOM_CORAL_MANAGED_DIR,
-      AXIOM_SCRIPTING_TRUST_RESTRICTED ? ScriptTrustProfile::Restricted
-                                       : ScriptTrustProfile::Trusted);
-  m_ScriptHost.LoadEngineAssembly(AXIOM_MANAGED_DIR);
-  m_ScriptHost.RegisterInternalCalls(m_Layer->GetSession(),
-                                     SessionId{1},
-                                     m_Layer->GetLocalUserId());
-  m_Layer->GetSession().Subscribe(&m_ScriptHost);
-  m_Layer->SetScriptHost(&m_ScriptHost);
+  m_TransportModule = TransportModule.get();
+  GetModuleManager().RegisterModule(std::move(TransportModule));
+
+#if AXIOM_WITH_SCRIPTING
+  auto ScriptingModule = std::make_unique<SessionScriptHostModule>(
+      "Headless.SessionScriptHost", m_SessionModule->GetSession(),
+      SessionId{1}, m_SessionModule->GetLocalUserId());
+  m_ScriptingModule = ScriptingModule.get();
+  GetModuleManager().RegisterModule(std::move(ScriptingModule));
+#endif
 }
 
 bool HeadlessSessionHost::Step() { return Application::Step(); }
 
+std::vector<HeadlessRenderViewState>
+HeadlessSessionHost::BuildScheduledRenderPassViews(
+    HeadlessRenderViewRegistry &RenderViews, SessionUserId LocalUserId) {
+  RenderViews.AdvanceRenderSchedulingTick();
+
+  std::vector<HeadlessRenderViewState> RenderPassViews =
+      RenderViews.BuildRemoteViewSnapshot();
+  std::sort(RenderPassViews.begin(), RenderPassViews.end(),
+            [](const HeadlessRenderViewState &Left,
+               const HeadlessRenderViewState &Right) {
+              return Left.User.Value < Right.User.Value;
+            });
+
+  if (RenderPassViews.empty()) {
+    if (const HeadlessRenderViewState *LocalView =
+            RenderViews.FindView(LocalUserId);
+        LocalView != nullptr) {
+      RenderPassViews.push_back(*LocalView);
+    }
+    return RenderPassViews;
+  }
+
+  std::vector<HeadlessRenderViewState> ScheduledViews;
+  ScheduledViews.reserve(RenderPassViews.size());
+  std::vector<size_t> IdleCandidateIndices;
+  IdleCandidateIndices.reserve(RenderPassViews.size());
+  for (size_t Index = 0; Index < RenderPassViews.size(); ++Index) {
+    const auto &View = RenderPassViews[Index];
+    if (View.NeedsRender || View.ActiveBurstTicksRemaining > 0u) {
+      ScheduledViews.push_back(View);
+      continue;
+    }
+    IdleCandidateIndices.push_back(Index);
+  }
+
+  if (!IdleCandidateIndices.empty()) {
+    const uint64_t IdleInterval =
+        std::max<uint64_t>(1u, HeadlessRenderViewRegistry::IdleRenderIntervalTicks);
+    const bool ShouldServiceIdleClient =
+        ScheduledViews.empty() ||
+        ((RenderViews.GetSchedulingTick() % IdleInterval) == 0u);
+    if (ShouldServiceIdleClient) {
+      const uint64_t IdleStep =
+          ScheduledViews.empty()
+              ? (RenderViews.GetSchedulingTick() - 1u)
+              : (RenderViews.GetSchedulingTick() / IdleInterval);
+      const size_t CandidateIndex =
+          static_cast<size_t>(IdleStep % IdleCandidateIndices.size());
+      ScheduledViews.push_back(RenderPassViews[IdleCandidateIndices[CandidateIndex]]);
+    }
+  }
+
+  for (const auto &View : ScheduledViews) {
+    RenderViews.MarkViewRendered(View.User);
+  }
+
+  return ScheduledViews;
+}
+
 void HeadlessSessionHost::LoadUserScripts(
     const std::filesystem::path &AssemblyPath) {
-  m_ScriptHost.LoadUserAssembly(AssemblyPath);
-  m_ScriptHost.StartFileWatcher();
+#if AXIOM_WITH_SCRIPTING
+  GetScriptingModule().GetScriptHost().LoadUserAssembly(AssemblyPath);
+  GetScriptingModule().GetScriptHost().StartFileWatcher();
+#else
+  (void)AssemblyPath;
+#endif
 }
 
 void HeadlessSessionHost::ReloadUserScripts() {
-  m_ScriptHost.ReloadUserAssembly();
+#if AXIOM_WITH_SCRIPTING
+  GetScriptingModule().GetScriptHost().ReloadUserAssembly();
+#endif
 }
 
 bool HeadlessSessionHost::LoadStartupSceneIntoSession() {
-  return m_Layer->LoadStartupSceneIntoSession();
+  return m_SessionModule->LoadStartupSceneIntoSession();
 }
 
 bool HeadlessSessionHost::LoadStartupSceneIntoSession(
     const std::filesystem::path &ContentDir) {
-  return m_Layer->LoadStartupSceneIntoSession(ContentDir);
+  return m_SessionModule->LoadStartupSceneIntoSession(ContentDir);
 }
 
 void HeadlessSessionHost::SubmitLocalCommand(const EditorCommand &Command) {
-  m_Layer->Submit(Command);
+  m_RenderViews.MarkAllRemoteViewsDirty();
+  m_SessionModule->Submit(Command);
 }
 
 void HeadlessSessionHost::SubmitRemoteCommand(const EditorCommand &Command) {
-  m_Layer->SubmitToTransport(*m_Endpoint, Command);
+  m_RenderViews.MarkAllRemoteViewsDirty();
+  m_SessionModule->SubmitToTransport(GetTransport(), Command);
 }
 
 void HeadlessSessionHost::SubmitRemoteCommand(SessionUserId User,
                                               const EditorCommand &Command) {
-  m_Layer->SubmitToTransport(*m_Endpoint, User, Command);
+  m_RenderViews.MarkAllRemoteViewsDirty();
+  m_RenderViews.MarkViewActive(User);
+  m_SessionModule->SubmitToTransport(GetTransport(), User, Command);
 }
 
 void HeadlessSessionHost::SetTransportVideoEncoder(
     std::unique_ptr<IVideoEncoder> Encoder) {
-  m_Endpoint->SetVideoEncoder(std::move(Encoder));
+  m_TransportModule->SetVideoEncoder(std::move(Encoder));
 }
 
 void HeadlessSessionHost::SetRemoteViewMode(RendererViewMode ViewMode) {
-  m_RenderViews.SetViewMode(m_Layer->GetLocalUserId(), ViewMode);
+  m_RenderViews.SetViewMode(m_SessionModule->GetLocalUserId(), ViewMode);
 }
 
 void HeadlessSessionHost::SetRemoteViewMode(SessionUserId User,
@@ -96,7 +171,8 @@ void HeadlessSessionHost::SetRemoteViewMode(SessionUserId User,
 }
 
 void HeadlessSessionHost::SetRemoteShowColliders(bool ShowColliders) {
-  m_RenderViews.SetShowColliders(m_Layer->GetLocalUserId(), ShowColliders);
+  m_RenderViews.SetShowColliders(m_SessionModule->GetLocalUserId(),
+                                 ShowColliders);
 }
 
 void HeadlessSessionHost::SetRemoteShowColliders(SessionUserId User,
@@ -142,26 +218,22 @@ size_t HeadlessSessionHost::BeginRenderPasses() {
   m_ActiveRenderPassViews.clear();
   m_CurrentRenderPassIndex = 0;
 
-  m_ActiveRenderPassViews = m_RenderViews.BuildRemoteViewSnapshot();
-  std::sort(m_ActiveRenderPassViews.begin(), m_ActiveRenderPassViews.end(),
-            [](const HeadlessRenderViewState &Left,
-               const HeadlessRenderViewState &Right) {
-              return Left.User.Value < Right.User.Value;
-            });
-
-  if (m_ActiveRenderPassViews.empty()) {
-    if (const HeadlessRenderViewState *LocalView = m_RenderViews.FindView(
-            m_Layer->GetLocalUserId());
-        LocalView != nullptr) {
-      m_ActiveRenderPassViews.push_back(*LocalView);
-    }
-  }
-
+  m_ActiveRenderPassViews =
+      BuildScheduledRenderPassViews(m_RenderViews,
+                                    m_SessionModule->GetLocalUserId());
+  HeadlessRuntimeInstrumentation::RecordHeadlessTick(
+      GetFrameIndex(), m_ActiveRenderPassViews.size(),
+      m_RenderViews.GetRemoteViewCount());
   return m_ActiveRenderPassViews.size();
 }
 
 void HeadlessSessionHost::PrepareRenderPass(size_t PassIndex) {
   m_CurrentRenderPassIndex = PassIndex;
+  if (PassIndex < m_ActiveRenderPassViews.size()) {
+    const auto &View = m_ActiveRenderPassViews[PassIndex];
+    HeadlessRuntimeInstrumentation::RecordHeadlessRenderPass(
+        GetFrameIndex(), PassIndex, View.ClientId, View.User, View.IsLocal);
+  }
 }
 
 bool HeadlessSessionHost::ShouldRenderImGuiForPass(size_t PassIndex,

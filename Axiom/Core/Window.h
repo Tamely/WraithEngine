@@ -6,6 +6,16 @@
 #include <string>
 
 namespace Axiom {
+enum class PresentationBackendType : uint8_t {
+  Vulkan = 0,
+};
+
+enum class PresentationSurfaceResult : int32_t {
+  Success = 0,
+  Unsupported = 1,
+  InitializationFailed = 2,
+};
+
 class Window {
 public:
   Window(std::string Title, uint32_t Width, uint32_t Height);
@@ -21,8 +31,14 @@ public:
   virtual void SetCursorMode(CursorMode Mode) = 0;
   [[nodiscard]] virtual CursorMode GetCursorMode() const = 0;
   [[nodiscard]] virtual bool ShouldClose() const = 0;
+  [[nodiscard]] virtual bool IsMinimized() const = 0;
   virtual void RequestClose() = 0;
   [[nodiscard]] virtual void *GetNativeHandle() const = 0;
+  [[nodiscard]] virtual bool
+  SupportsPresentationBackend(PresentationBackendType Backend) const = 0;
+  virtual PresentationSurfaceResult
+  CreatePresentationSurface(PresentationBackendType Backend, void *Instance,
+                            void *Surface) const = 0;
 
   [[nodiscard]] uint32_t GetWidth() const { return m_Width; }
   [[nodiscard]] uint32_t GetHeight() const { return m_Height; }
