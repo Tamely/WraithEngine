@@ -13,7 +13,7 @@
 namespace Axiom::Jobs {
 struct JobState {
   std::unique_ptr<enki::ITaskSet> Task;
-  std::vector<enki::Dependency> Dependencies;
+  std::vector<JobHandle> DependencyHandles;
 };
 
 namespace {
@@ -86,16 +86,26 @@ public:
 
   JobHandle ScheduleJobAfter(JobFn Function, std::span<JobHandle> Deps) {
     auto State = std::make_shared<JobState>();
-    State->Task = std::make_unique<LambdaTaskSet>(std::move(Function));
-    State->Dependencies.reserve(Deps.size());
+    State->DependencyHandles.reserve(Deps.size());
     for (const JobHandle &Dependency : Deps) {
       if (!Dependency.IsValid() || Dependency.State->Task == nullptr) {
         continue;
       }
-
-      State->Dependencies.emplace_back(Dependency.State->Task.get(),
-                                       State->Task.get());
+      State->DependencyHandles.push_back(Dependency);
     }
+
+    State->Task = std::make_unique<LambdaTaskSet>(
+        [this, State, Function = std::move(Function)]() mutable {
+          for (const JobHandle &Dependency : State->DependencyHandles) {
+            if (!Dependency.IsValid() || Dependency.State->Task == nullptr) {
+              continue;
+            }
+
+            m_Scheduler->WaitforTask(Dependency.State->Task.get());
+          }
+
+          Function();
+        });
     m_Scheduler->AddTaskSetToPipe(State->Task.get());
     return {.State = std::move(State)};
   }
