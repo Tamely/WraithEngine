@@ -64,7 +64,7 @@ EditorCommandDispatcher::EditorCommandDispatcher(EditorSession &Session)
 void EditorCommandDispatcher::ProcessCommand(
     const QueuedEditorCommand &QueuedCommand) {
   std::string FailureReason;
-  if (!m_Session.m_ValidationModule->ValidateCommand(QueuedCommand, FailureReason)) {
+  if (!m_Session.ValidateCommand(QueuedCommand, FailureReason)) {
     m_Session.PublishEvent({.Payload = CommandRejectedEvent{
                                 .User = QueuedCommand.Context.User,
                                 .RejectedCommand = QueuedCommand.Id,
@@ -107,9 +107,11 @@ void EditorCommandDispatcher::HandleCommand(
       if (Delta.x != 0.0 || Delta.y != 0.0) {
         Viewport.Camera.SetRotation(
             Viewport.Camera.GetYawDegrees() +
-                static_cast<float>(Delta.x) * m_Session.m_Config.MouseSensitivity,
+                static_cast<float>(Delta.x) *
+                    m_Session.GetConfig().MouseSensitivity,
             Viewport.Camera.GetPitchDegrees() -
-                static_cast<float>(Delta.y) * m_Session.m_Config.MouseSensitivity);
+                static_cast<float>(Delta.y) *
+                    m_Session.GetConfig().MouseSensitivity);
         CameraChanged = true;
       }
     }
@@ -149,13 +151,15 @@ void EditorCommandDispatcher::HandleCommand(
   Viewport.ProjectionType = Command.ProjectionType;
   if (Command.ProjectionType == CameraProjectionType::Orthographic) {
     Viewport.Camera.SetOrthographic(
-        Viewport.OrthoHeight, m_Session.m_Config.CameraAspectRatio,
-        m_Session.m_Config.CameraNearPlane, m_Session.m_Config.CameraFarPlane);
+        Viewport.OrthoHeight, m_Session.GetConfig().CameraAspectRatio,
+        m_Session.GetConfig().CameraNearPlane,
+        m_Session.GetConfig().CameraFarPlane);
   } else {
     Viewport.Camera.SetPerspective(
-        m_Session.m_Config.CameraVerticalFovDegrees,
-        m_Session.m_Config.CameraAspectRatio, m_Session.m_Config.CameraNearPlane,
-        m_Session.m_Config.CameraFarPlane);
+        m_Session.GetConfig().CameraVerticalFovDegrees,
+        m_Session.GetConfig().CameraAspectRatio,
+        m_Session.GetConfig().CameraNearPlane,
+        m_Session.GetConfig().CameraFarPlane);
   }
 }
 
@@ -188,14 +192,12 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
   if (!Handle) {
     return;
   }
-  const auto Existing = m_Session.m_SelectedObjectHandles.find(QueuedCommand.Context.User);
-  if (Existing != m_Session.m_SelectedObjectHandles.end() &&
-      Existing->second == Handle) {
+  if (m_Session.HasSelectedObjectHandle(QueuedCommand.Context.User, Handle)) {
     return;
   }
 
-  m_Session.m_SelectedObjectHandles[QueuedCommand.Context.User] = Handle;
-  m_Session.m_State.SelectedObjectIds[QueuedCommand.Context.User] = Command.ObjectId;
+  m_Session.SetSelectedObject(QueuedCommand.Context.User, Command.ObjectId,
+                              Handle);
   m_Session.PublishEvent({.Payload = SelectionChangedEvent{
                               .User = QueuedCommand.Context.User,
                               .ObjectId = Command.ObjectId,
@@ -205,13 +207,12 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
 void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                             const RenameObjectCommand &Command) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
-  auto DetailsIt = m_Session.m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
-  if (DetailsIt == m_Session.m_State.Scene.ObjectDetailsById.end()) return;
-  if (DetailsIt->second.DisplayName == Command.DisplayName) return;
+  EditorObjectDetails *Details = m_Session.FindMutableObjectDetails(Command.ObjectId);
+  if (Details == nullptr) return;
+  if (Details->DisplayName == Command.DisplayName) return;
 
-  DetailsIt->second.DisplayName = Command.DisplayName;
-  m_Session.m_SceneStateManager->UpdateSceneItemDisplayName(
-      m_Session.m_State.Scene.Items, Command.ObjectId, Command.DisplayName);
+  Details->DisplayName = Command.DisplayName;
+  m_Session.UpdateSceneItemDisplayName(Command.ObjectId, Command.DisplayName);
   m_Session.PublishEvent({.Payload = ObjectRenamedEvent{
                               .User = QueuedCommand.Context.User,
                               .ObjectId = Command.ObjectId,
@@ -223,13 +224,12 @@ void EditorCommandDispatcher::HandleCommand(
     const QueuedEditorCommand &QueuedCommand,
     const SetObjectVisibilityCommand &Command) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
-  auto DetailsIt = m_Session.m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
-  if (DetailsIt == m_Session.m_State.Scene.ObjectDetailsById.end()) return;
-  if (DetailsIt->second.Visible == Command.Visible) return;
+  EditorObjectDetails *Details = m_Session.FindMutableObjectDetails(Command.ObjectId);
+  if (Details == nullptr) return;
+  if (Details->Visible == Command.Visible) return;
 
-  DetailsIt->second.Visible = Command.Visible;
-  m_Session.m_SceneStateManager->UpdateSceneItemVisibility(
-      m_Session.m_State.Scene.Items, Command.ObjectId, Command.Visible);
+  Details->Visible = Command.Visible;
+  m_Session.UpdateSceneItemVisibility(Command.ObjectId, Command.Visible);
   m_Session.PublishEvent({.Payload = ObjectVisibilityChangedEvent{
                               .User = QueuedCommand.Context.User,
                               .ObjectId = Command.ObjectId,
@@ -240,7 +240,7 @@ void EditorCommandDispatcher::HandleCommand(
 void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                             const CreateObjectCommand &Command) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
-  const InstanceHandle WorldFolder = m_Session.m_SceneStateManager->EnsureWorldFolder();
+  const InstanceHandle WorldFolder = m_Session.EnsureWorldFolder();
   if (!WorldFolder) return;
 
   const EditorSceneItemKind Kind =
@@ -250,36 +250,34 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
       Command.TemplateId == "Actor"  ? EditorSceneItemKind::Actor :
                                        EditorSceneItemKind::Folder;
   const std::string ObjectId =
-      m_Session.m_SceneStateManager->BuildUniqueObjectId(Command.TemplateId);
+      m_Session.BuildUniqueObjectId(Command.TemplateId);
   const std::string DisplayName =
-      m_Session.m_SceneStateManager->BuildUniqueDisplayName(Command.TemplateId);
+      m_Session.BuildUniqueDisplayName(Command.TemplateId);
   const bool Transformable = Kind != EditorSceneItemKind::Folder;
   const std::optional<EditorTransformDetails> InitTransform =
       Transformable ? std::optional{EditorTransformDetails{}} : std::nullopt;
 
-  m_Session.m_State.Scene.ObjectDetailsById.emplace(
-      ObjectId, EditorObjectDetails{
-                    .Handle = m_Session.EnsureHandleForObjectId(ObjectId),
-                    .ObjectId = ObjectId,
-                    .DisplayName = DisplayName,
-                    .Kind = Kind,
-                    .Visible = true,
-                    .SupportsTransform = Transformable,
-                    .TransformReadOnly = false,
-                    .Transform = InitTransform,
-                    .WorldTransform = InitTransform,
-                });
+  m_Session.InsertObjectDetails(EditorObjectDetails{
+      .Handle = m_Session.EnsureHandleForObjectId(ObjectId),
+      .ObjectId = ObjectId,
+      .DisplayName = DisplayName,
+      .Kind = Kind,
+      .Visible = true,
+      .SupportsTransform = Transformable,
+      .TransformReadOnly = false,
+      .Transform = InitTransform,
+      .WorldTransform = InitTransform,
+  });
 
   if (const InstanceHandle Node =
-          m_Session.m_SceneStateManager->CreateInstanceForTemplate(Command.TemplateId,
-                                                                   ObjectId);
+          m_Session.CreateInstanceForTemplate(Command.TemplateId, ObjectId);
       Node) {
-    Instance *NodePtr = m_Session.m_InstancePool.Resolve(Node);
+    Instance *NodePtr = m_Session.GetInstancePool().Resolve(Node);
     if (NodePtr == nullptr) return;
     NodePtr->SetParent(WorldFolder);
   }
 
-  m_Session.m_SceneStateManager->SyncItemsFromTree();
+  m_Session.SyncItemsFromTree();
   m_Session.RebuildSceneHandleState();
   m_Session.PublishEvent({.Payload = ObjectCreatedEvent{
                               .User = QueuedCommand.Context.User,
@@ -292,41 +290,40 @@ void EditorCommandDispatcher::HandleCommand(
     const QueuedEditorCommand &QueuedCommand,
     const CreateMeshObjectCommand &Command) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
-  const InstanceHandle WorldFolder = m_Session.m_SceneStateManager->EnsureWorldFolder();
+  const InstanceHandle WorldFolder = m_Session.EnsureWorldFolder();
   if (!WorldFolder) return;
 
   const std::string ObjectId =
-      m_Session.m_SceneStateManager->BuildUniqueObjectId("Mesh");
+      m_Session.BuildUniqueObjectId("Mesh");
   const std::string DisplayName =
-      m_Session.m_SceneStateManager->BuildUniqueDisplayName("Mesh");
+      m_Session.BuildUniqueDisplayName("Mesh");
   const EditorTransformDetails Transform{
       .Location = Command.Location,
       .RotationDegrees = Command.RotationDegrees,
       .Scale = Command.Scale,
   };
 
-  m_Session.m_State.Scene.ObjectDetailsById.emplace(
-      ObjectId, EditorObjectDetails{
-                    .Handle = m_Session.EnsureHandleForObjectId(ObjectId),
-                    .ObjectId = ObjectId,
-                    .DisplayName = DisplayName,
-                    .Kind = EditorSceneItemKind::Mesh,
-                    .Visible = true,
-                    .SupportsTransform = true,
-                    .TransformReadOnly = false,
-                    .Transform = Transform,
-                    .WorldTransform = Transform,
-                });
+  m_Session.InsertObjectDetails(EditorObjectDetails{
+      .Handle = m_Session.EnsureHandleForObjectId(ObjectId),
+      .ObjectId = ObjectId,
+      .DisplayName = DisplayName,
+      .Kind = EditorSceneItemKind::Mesh,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      .Transform = Transform,
+      .WorldTransform = Transform,
+  });
 
   if (const InstanceHandle Node =
-          m_Session.m_SceneStateManager->CreateInstanceForTemplate("Mesh", ObjectId);
+          m_Session.CreateInstanceForTemplate("Mesh", ObjectId);
       Node) {
-    Instance *NodePtr = m_Session.m_InstancePool.Resolve(Node);
+    Instance *NodePtr = m_Session.GetInstancePool().Resolve(Node);
     if (NodePtr == nullptr) return;
     NodePtr->SetParent(WorldFolder);
   }
 
-  m_Session.m_SceneStateManager->SyncItemsFromTree();
+  m_Session.SyncItemsFromTree();
   m_Session.RebuildSceneHandleState();
   m_Session.PublishEvent({.Payload = ObjectCreatedEvent{
                               .User = QueuedCommand.Context.User,
@@ -352,14 +349,14 @@ void EditorCommandDispatcher::HandleCommand(
   m_Session.EnsurePresence(QueuedCommand.Context.User);
   const InstanceHandle Source = m_Session.FindInstanceById(Command.ObjectId);
   if (!Source) return;
-  const Instance *SourceNode = m_Session.m_InstancePool.Resolve(Source);
+  const Instance *SourceNode = m_Session.GetInstancePool().Resolve(Source);
   if (SourceNode == nullptr) return;
   const InstanceHandle Parent = SourceNode->GetParent();
   if (!Parent) return;
 
   std::vector<EditorObjectDetails> NewDetails;
-  m_Session.m_SceneStateManager->DeepCloneSubtree(Source, Parent, NewDetails);
-  m_Session.m_SceneStateManager->SyncItemsFromTree();
+  m_Session.DeepCloneSubtree(Source, Parent, NewDetails);
+  m_Session.SyncItemsFromTree();
   m_Session.RebuildSceneHandleState();
   if (!NewDetails.empty()) {
     m_Session.PublishEvent({.Payload = ObjectCreatedEvent{
@@ -377,13 +374,13 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
   if (!Target) return;
 
   for (const std::string &Id :
-      m_Session.m_SceneStateManager->CollectDescendantIds(Target)) {
-    m_Session.m_SceneStateManager->RemoveSceneObject(Id);
-    m_Session.m_SceneStateManager->ClearSelectionsForObject(Id);
+      m_Session.CollectDescendantIds(Target)) {
+    m_Session.RemoveSceneObject(Id);
+    m_Session.ClearSelectionsForObject(Id);
   }
 
-  m_Session.m_InstancePool.Destroy(Target);
-  m_Session.m_SceneStateManager->SyncItemsFromTree();
+  m_Session.GetInstancePool().Destroy(Target);
+  m_Session.SyncItemsFromTree();
   m_Session.RebuildSceneHandleState();
   m_Session.PublishEvent({.Payload = ObjectDeletedEvent{
                               .User = QueuedCommand.Context.User,
@@ -398,14 +395,14 @@ void EditorCommandDispatcher::HandleCommand(
   const InstanceHandle Target = m_Session.FindInstanceById(Command.ObjectId);
   const InstanceHandle NewParent = m_Session.FindInstanceById(Command.NewParentId);
   if (!Target || !NewParent) return;
-  Instance *TargetNode = m_Session.m_InstancePool.Resolve(Target);
+  Instance *TargetNode = m_Session.GetInstancePool().Resolve(Target);
   if (TargetNode == nullptr) return;
   if (TargetNode->GetParent() == NewParent) return;
 
   TargetNode->SetParent(NewParent);
-  m_Session.m_SceneStateManager->SyncItemsFromTree();
+  m_Session.SyncItemsFromTree();
   m_Session.RebuildSceneHandleState();
-  m_Session.m_SceneStateManager->RecomputeSubtreeWorldTransforms(Target);
+  m_Session.RecomputeSubtreeWorldTransforms(Target);
   m_Session.PublishEvent({.Payload = ObjectReparentedEvent{
                               .User = QueuedCommand.Context.User,
                               .ObjectId = Command.ObjectId,
@@ -416,7 +413,7 @@ void EditorCommandDispatcher::HandleCommand(
 void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                             const SetTransformCommand &Command) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
-  m_Session.m_SceneStateManager->ApplyWorldTransform(
+  m_Session.ApplyWorldTransform(
       Command.ObjectId,
       EditorTransformDetails{
           .Location = Command.Location,
@@ -428,9 +425,9 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
 
 void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &,
                                             const AttachScriptCommand &Command) {
-  auto It = m_Session.m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
-  if (It == m_Session.m_State.Scene.ObjectDetailsById.end()) return;
-  It->second.ScriptClass = Command.ScriptClassName;
+  EditorObjectDetails *Details = m_Session.FindMutableObjectDetails(Command.ObjectId);
+  if (Details == nullptr) return;
+  Details->ScriptClass = Command.ScriptClassName;
   A_CORE_INFO("EditorSession: attached script '{}' to '{}'",
               Command.ScriptClassName, Command.ObjectId);
   m_Session.PublishEvent({ScriptClassChangedEvent{
@@ -441,9 +438,9 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &,
 
 void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &,
                                             const DetachScriptCommand &Command) {
-  auto It = m_Session.m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
-  if (It == m_Session.m_State.Scene.ObjectDetailsById.end()) return;
-  It->second.ScriptClass = std::nullopt;
+  EditorObjectDetails *Details = m_Session.FindMutableObjectDetails(Command.ObjectId);
+  if (Details == nullptr) return;
+  Details->ScriptClass = std::nullopt;
   A_CORE_INFO("EditorSession: detached script from '{}'", Command.ObjectId);
   m_Session.PublishEvent({ScriptClassChangedEvent{
       .ObjectId = Command.ObjectId,

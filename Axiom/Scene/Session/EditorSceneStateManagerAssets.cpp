@@ -113,20 +113,20 @@ std::string ResolveGeneratedAssetChildDisplayName(std::string_view InstanceName,
 void EditorSceneStateManager::RemoveGeneratedAssetChildren(
     std::string_view RootObjectId) {
   const InstanceHandle RootHandle =
-      FindInstanceById(m_Session.m_InstancePool, m_Session.m_SceneRoot, RootObjectId);
-  const Instance *Root = m_Session.m_InstancePool.Resolve(RootHandle);
+      FindInstanceById(m_Session.GetInstancePool(), m_Session.GetSceneRoot(),
+                       RootObjectId);
+  const Instance *Root = m_Session.GetInstancePool().Resolve(RootHandle);
   if (Root == nullptr) return;
 
   std::vector<std::string> GeneratedChildIds;
   for (const InstanceHandle ChildHandle : Root->GetChildren()) {
-    const Instance *Child = m_Session.m_InstancePool.Resolve(ChildHandle);
+    const Instance *Child = m_Session.GetInstancePool().Resolve(ChildHandle);
     if (Child == nullptr) continue;
-    const auto DetailsIt =
-        m_Session.m_State.Scene.ObjectDetailsById.find(Child->GetName());
-    if (DetailsIt == m_Session.m_State.Scene.ObjectDetailsById.end()) continue;
-    if (!DetailsIt->second.IsGeneratedAssetChild ||
-        !DetailsIt->second.GeneratedFromAssetRootId.has_value() ||
-        *DetailsIt->second.GeneratedFromAssetRootId != RootObjectId) {
+    const EditorObjectDetails *Details = m_Session.FindObjectDetails(Child->GetName());
+    if (Details == nullptr) continue;
+    if (!Details->IsGeneratedAssetChild ||
+        !Details->GeneratedFromAssetRootId.has_value() ||
+        *Details->GeneratedFromAssetRootId != RootObjectId) {
       continue;
     }
     GeneratedChildIds.push_back(Child->GetName());
@@ -134,51 +134,44 @@ void EditorSceneStateManager::RemoveGeneratedAssetChildren(
 
   for (const std::string &ChildId : GeneratedChildIds) {
     const InstanceHandle ChildHandle =
-        FindInstanceById(m_Session.m_InstancePool, m_Session.m_SceneRoot, ChildId);
+        FindInstanceById(m_Session.GetInstancePool(), m_Session.GetSceneRoot(),
+                         ChildId);
     if (!ChildHandle) continue;
     for (const std::string &DescendantId : CollectDescendantIds(ChildHandle)) {
       RemoveSceneObject(DescendantId);
       ClearSelectionsForObject(DescendantId);
     }
-    m_Session.m_InstancePool.Destroy(ChildHandle);
+    m_Session.GetInstancePool().Destroy(ChildHandle);
   }
 }
 
 void EditorSceneStateManager::ExpandMeshAssetIntoScene(
     std::string_view RootObjectId, const MeshSceneData &SceneData,
     std::string_view AssetPath) {
-  auto DetailsIt =
-      m_Session.m_State.Scene.ObjectDetailsById.find(std::string(RootObjectId));
-  if (DetailsIt == m_Session.m_State.Scene.ObjectDetailsById.end()) return;
+  EditorObjectDetails *RootDetails = m_Session.FindMutableObjectDetails(RootObjectId);
+  if (RootDetails == nullptr) return;
 
   const InstanceHandle RootHandle =
-      FindInstanceById(m_Session.m_InstancePool, m_Session.m_SceneRoot, RootObjectId);
-  Instance *Root = m_Session.m_InstancePool.Resolve(RootHandle);
+      FindInstanceById(m_Session.GetInstancePool(), m_Session.GetSceneRoot(),
+                       RootObjectId);
+  Instance *Root = m_Session.GetInstancePool().Resolve(RootHandle);
   if (Root == nullptr) return;
 
   RemoveGeneratedAssetChildren(RootObjectId);
-  m_Session.m_State.Scene.MeshInstances.erase(
-      std::remove_if(m_Session.m_State.Scene.MeshInstances.begin(),
-                     m_Session.m_State.Scene.MeshInstances.end(),
-                     [&](const EditorSceneMeshInstance &Instance) {
-                       return Instance.ObjectHandle ==
-                              m_Session.ResolveObjectHandle(RootObjectId);
-                     }),
-      m_Session.m_State.Scene.MeshInstances.end());
+  m_Session.RemoveSceneMeshInstances(RootObjectId);
 
-  EditorObjectDetails &RootDetails = DetailsIt->second;
-  RootDetails.IsGeneratedAssetChild = false;
-  RootDetails.GeneratedFromAssetRootId = std::nullopt;
-  RootDetails.AssetRelativePath = std::string(AssetPath);
-  if (!RootDetails.Physics.has_value()) {
+  RootDetails->IsGeneratedAssetChild = false;
+  RootDetails->GeneratedFromAssetRootId = std::nullopt;
+  RootDetails->AssetRelativePath = std::string(AssetPath);
+  if (!RootDetails->Physics.has_value()) {
     const EditorTransformDetails RootTransform =
-        RootDetails.Transform.value_or(EditorTransformDetails{});
-    RootDetails.Physics = BuildDefaultStaticMeshPhysics(SceneData, RootTransform);
+        RootDetails->Transform.value_or(EditorTransformDetails{});
+    RootDetails->Physics = BuildDefaultStaticMeshPhysics(SceneData, RootTransform);
   }
 
   if (SceneData.Instances.size() == 1) {
     const auto &First = SceneData.Instances.front();
-    m_Session.m_State.Scene.MeshInstances.push_back(EditorSceneMeshInstance{
+    m_Session.AddSceneMeshInstance(EditorSceneMeshInstance{
         .ObjectHandle = m_Session.ResolveObjectHandle(RootObjectId),
         .ObjectId = std::string(RootObjectId),
         .Mesh = First.Mesh,
@@ -188,7 +181,7 @@ void EditorSceneStateManager::ExpandMeshAssetIntoScene(
         .AssetRelativePath = std::string(AssetPath),
     });
     if (First.Material) {
-      RootDetails.Material = EditorMaterialProperties{
+      RootDetails->Material = EditorMaterialProperties{
           .BaseColorFactor = First.Material->BaseColorFactor,
           .Metallic = First.Material->Metallic,
           .Roughness = First.Material->Roughness,
@@ -202,7 +195,7 @@ void EditorSceneStateManager::ExpandMeshAssetIntoScene(
     return;
   }
 
-  RootDetails.Material = std::nullopt;
+  RootDetails->Material = std::nullopt;
   for (size_t InstanceIndex = 0; InstanceIndex < SceneData.Instances.size();
        ++InstanceIndex) {
     const auto &SourceInstance = SceneData.Instances[InstanceIndex];
@@ -213,12 +206,12 @@ void EditorSceneStateManager::ExpandMeshAssetIntoScene(
     const EditorTransformDetails ChildLocalTransform =
         DecomposeMatrix(SourceInstance.Transform);
 
-    m_Session.m_State.Scene.ObjectDetailsById[ChildId] = EditorObjectDetails{
+    m_Session.UpsertObjectDetails(EditorObjectDetails{
         .Handle = m_Session.EnsureHandleForObjectId(ChildId),
         .ObjectId = ChildId,
         .DisplayName = ChildDisplayName,
         .Kind = EditorSceneItemKind::Mesh,
-        .Visible = RootDetails.Visible,
+        .Visible = RootDetails->Visible,
         .IsGeneratedAssetChild = true,
         .SupportsTransform = true,
         .TransformReadOnly = true,
@@ -239,14 +232,15 @@ void EditorSceneStateManager::ExpandMeshAssetIntoScene(
                               })
                         : std::nullopt,
         .GeneratedFromAssetRootId = std::string(RootObjectId),
-    };
+    });
 
     const InstanceHandle Child = CreateInstanceForTemplate("Mesh", ChildId);
-    if (Instance *ChildNode = m_Session.m_InstancePool.Resolve(Child); ChildNode != nullptr) {
+    if (Instance *ChildNode = m_Session.GetInstancePool().Resolve(Child);
+        ChildNode != nullptr) {
       ChildNode->SetParent(RootHandle);
     }
 
-    m_Session.m_State.Scene.MeshInstances.push_back(EditorSceneMeshInstance{
+    m_Session.AddSceneMeshInstance(EditorSceneMeshInstance{
         .ObjectHandle = m_Session.ResolveObjectHandle(ChildId),
         .ObjectId = ChildId,
         .Mesh = SourceInstance.Mesh,
@@ -262,30 +256,10 @@ void EditorSceneStateManager::ExpandMeshAssetIntoScene(
 
 void EditorSceneStateManager::ClearSelectionsForObject(std::string_view ObjectId) {
   const SceneObjectHandle Handle = m_Session.ResolveObjectHandle(ObjectId);
-  for (auto It = m_Session.m_SelectedObjectHandles.begin();
-       It != m_Session.m_SelectedObjectHandles.end();) {
-    if (It->second == Handle) {
-      m_Session.m_State.SelectedObjectIds.erase(It->first);
-      It = m_Session.m_SelectedObjectHandles.erase(It);
-    } else {
-      ++It;
-    }
-  }
+  m_Session.ClearSelectedObjectsForHandle(Handle);
 }
 
 void EditorSceneStateManager::PruneInvalidSelections() {
-  for (auto It = m_Session.m_SelectedObjectHandles.begin();
-       It != m_Session.m_SelectedObjectHandles.end();) {
-    if (m_Session.FindSceneItem(It->second) == nullptr) {
-      m_Session.m_State.SelectedObjectIds.erase(It->first);
-      It = m_Session.m_SelectedObjectHandles.erase(It);
-    } else {
-      if (const std::string *ObjectId = m_Session.ResolveObjectId(It->second);
-          ObjectId != nullptr) {
-        m_Session.m_State.SelectedObjectIds[It->first] = *ObjectId;
-      }
-      ++It;
-    }
-  }
+  m_Session.PruneInvalidSelectedObjects();
 }
 } // namespace Axiom

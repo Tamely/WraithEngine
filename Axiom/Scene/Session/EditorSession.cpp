@@ -1,10 +1,17 @@
 #include "Session/EditorSession.h"
 
+#include "Assets/AssetCooker.h"
+#include "Assets/CookedTextureAsset.h"
+#include "Assets/IAssetSource.h"
+#include "Assets/MeshAsset.h"
 #include "Session/EditorCommandDispatcher.h"
 #include "Session/EditorRuntimePhysicsController.h"
 #include "Session/EditorSceneStateManager.h"
 #include "Session/EditorSessionValidationModule.h"
 
+#include <Core/Log.h>
+
+#include <algorithm>
 #include <functional>
 #include <unordered_set>
 
@@ -41,6 +48,113 @@ bool IsHostUser(SessionUserId User) {
 bool IsWhitespace(char Value) {
   return Value == ' ' || Value == '\t' || Value == '\n' || Value == '\r' ||
          Value == '\f' || Value == '\v';
+}
+
+TextureSourceDataRef CloneTextureSourceData(
+    const TextureSourceDataRef &Texture) {
+  if (!Texture) {
+    return nullptr;
+  }
+
+  auto Copy = std::make_shared<TextureSourceData>();
+  Copy->Width = Texture->Width;
+  Copy->Height = Texture->Height;
+  Copy->Pixels = Texture->Pixels;
+  return Copy;
+}
+
+std::shared_ptr<MaterialInstance>
+CloneMaterialInstance(const std::shared_ptr<MaterialInstance> &Material) {
+  if (!Material) {
+    return nullptr;
+  }
+
+  auto Copy = std::make_shared<MaterialInstance>();
+  Copy->BaseColorTexture = CloneTextureSourceData(Material->BaseColorTexture);
+  Copy->BaseColorFactor = Material->BaseColorFactor;
+  Copy->Metallic = Material->Metallic;
+  Copy->Roughness = Material->Roughness;
+  Copy->TextureAssetPath = Material->TextureAssetPath;
+  return Copy;
+}
+
+EditorSceneState CloneEditorSceneState(const EditorSceneState &Scene) {
+  EditorSceneState Copy = Scene;
+  for (auto &MeshInstance : Copy.MeshInstances) {
+    MeshInstance.Material = CloneMaterialInstance(MeshInstance.Material);
+  }
+  return Copy;
+}
+
+void CookHDRTextureAssetBestEffort(const std::filesystem::path &ContentDir,
+                                   std::string_view RelativeAssetPath) {
+  if (ContentDir.empty() || RelativeAssetPath.empty()) {
+    return;
+  }
+
+  const auto Cooked = Assets::CookHDRTextureAsset(ContentDir, RelativeAssetPath);
+  if (!Cooked.has_value()) {
+    A_CORE_WARN("EditorSession: failed to cook HDR texture asset '{}'",
+                std::string(RelativeAssetPath));
+  }
+}
+
+void HydrateWorldSettingsHDRData(EditorWorldSettings &Settings,
+                                 const std::filesystem::path &ContentDir,
+                                 const std::filesystem::path &EngineContentDir,
+                                 std::string_view LogContext) {
+  if (Settings.SkyboxHDRPath.empty()) {
+    Settings.SkyboxHDRData = nullptr;
+    return;
+  }
+  if (Settings.SkyboxHDRData) {
+    return;
+  }
+  if (ContentDir.empty()) {
+    A_CORE_WARN("{}: content directory not configured; cannot load HDR '{}'",
+                LogContext, Settings.SkyboxHDRPath);
+    return;
+  }
+
+  const std::filesystem::path HDRRelativePath(Settings.SkyboxHDRPath);
+  const bool IsEngineAsset =
+      !HDRRelativePath.empty() && *HDRRelativePath.begin() == "Engine";
+  std::filesystem::path EffectiveContentDir = ContentDir;
+  std::filesystem::path EffectiveRelativePath = HDRRelativePath;
+  if (IsEngineAsset && !EngineContentDir.empty()) {
+    EffectiveContentDir = EngineContentDir;
+    auto It = HDRRelativePath.begin();
+    ++It;
+    EffectiveRelativePath.clear();
+    for (; It != HDRRelativePath.end(); ++It) {
+      EffectiveRelativePath /= *It;
+    }
+  }
+
+  const auto FullPath = EffectiveContentDir / EffectiveRelativePath;
+  if (std::filesystem::exists(FullPath)) {
+    CookHDRTextureAssetBestEffort(EffectiveContentDir,
+                                  EffectiveRelativePath.generic_string());
+  }
+  auto Loaded = Assets::LoadHDRTextureFromFile(FullPath);
+  if (!Loaded) {
+    const Assets::CookedAssetSource CookedSource(EffectiveContentDir);
+    if (CookedSource.HasManifest()) {
+      const auto CookedPath = CookedSource.Resolve(
+          Assets::AssetIdFromRelativePath(EffectiveRelativePath));
+      if (CookedPath.has_value()) {
+        const auto CookedHDR = Assets::LoadCookedHDRTextureAsset(*CookedPath);
+        if (CookedHDR.has_value()) {
+          Loaded = std::make_shared<HDRTextureSourceData>(*CookedHDR);
+        }
+      }
+    }
+  }
+  if (!Loaded) {
+    A_CORE_WARN("{}: failed to load HDR '{}'", LogContext,
+                Settings.SkyboxHDRPath);
+  }
+  Settings.SkyboxHDRData = std::move(Loaded);
 }
 
 InstanceHandle FindInstanceByIdRecursive(const InstancePool &Pool,
@@ -110,16 +224,16 @@ void EditorSession::Unsubscribe(IEditorEventSubscriber *Subscriber) {
 void EditorSession::SetContentDir(std::filesystem::path ContentDir) {
   m_ContentDir = std::move(ContentDir);
   if (!m_State.Scene.WorldSettings.SkyboxHDRPath.empty()) {
-    m_State.Scene.WorldSettings.SkyboxHDRData = nullptr;
-    m_SceneStateManager->RefreshWorldSettingsHDR("SetContentDir");
+    SetWorldSettingsHDRData(nullptr);
+    RefreshWorldSettingsHDR("SetContentDir");
   }
 }
 
 void EditorSession::SetEngineContentDir(std::filesystem::path EngineContentDir) {
   m_EngineContentDir = std::move(EngineContentDir);
   if (!m_State.Scene.WorldSettings.SkyboxHDRPath.empty()) {
-    m_State.Scene.WorldSettings.SkyboxHDRData = nullptr;
-    m_SceneStateManager->RefreshWorldSettingsHDR("SetEngineContentDir");
+    SetWorldSettingsHDRData(nullptr);
+    RefreshWorldSettingsHDR("SetEngineContentDir");
   }
 }
 
@@ -148,7 +262,7 @@ void EditorSession::SetSceneState(EditorSceneState SceneState) {
 
 void EditorSession::SetSceneMeshInstances(
     std::vector<EditorSceneMeshInstance> SceneMeshInstances) {
-  m_State.Scene.MeshInstances = std::move(SceneMeshInstances);
+  ReplaceSceneMeshInstances(std::move(SceneMeshInstances));
   RebuildSceneHandleState();
 }
 
@@ -159,6 +273,31 @@ void EditorSession::SetSceneItems(std::vector<EditorSceneItem> SceneItems) {
 void EditorSession::SetObjectDetails(
     std::vector<EditorObjectDetails> ObjectDetails) {
   m_SceneStateManager->SetObjectDetails(std::move(ObjectDetails));
+}
+
+void EditorSession::ReplaceSceneItems(std::vector<EditorSceneItem> SceneItems) {
+  m_State.Scene.Items = std::move(SceneItems);
+}
+
+void EditorSession::ClearSceneItems() {
+  m_State.Scene.Items.clear();
+}
+
+void EditorSession::AddSceneItem(EditorSceneItem Item) {
+  m_State.Scene.Items.push_back(std::move(Item));
+}
+
+void EditorSession::ReplaceSceneMeshInstances(
+    std::vector<EditorSceneMeshInstance> SceneMeshInstances) {
+  m_State.Scene.MeshInstances = std::move(SceneMeshInstances);
+}
+
+void EditorSession::ReplaceWorldSettings(EditorWorldSettings Settings) {
+  m_State.Scene.WorldSettings = std::move(Settings);
+}
+
+void EditorSession::SetWorldSettingsHDRData(HDRTextureSourceDataRef HDRData) {
+  m_State.Scene.WorldSettings.SkyboxHDRData = std::move(HDRData);
 }
 
 void EditorSession::SetPresence(std::vector<EditorUserPresence> Presence) {
@@ -204,6 +343,45 @@ const SceneObjectHandle *EditorSession::FindSelectedObjectHandle(
   return It != m_SelectedObjectHandles.end() ? &It->second : nullptr;
 }
 
+bool EditorSession::HasSelectedObjectHandle(SessionUserId User,
+                                            SceneObjectHandle Handle) const {
+  const SceneObjectHandle *SelectedHandle = FindSelectedObjectHandle(User);
+  return SelectedHandle != nullptr && *SelectedHandle == Handle;
+}
+
+void EditorSession::SetSelectedObject(SessionUserId User, std::string_view ObjectId,
+                                      SceneObjectHandle Handle) {
+  m_SelectedObjectHandles[User] = Handle;
+  m_State.SelectedObjectIds[User] = std::string(ObjectId);
+}
+
+void EditorSession::ClearSelectedObjectsForHandle(SceneObjectHandle Handle) {
+  for (auto It = m_SelectedObjectHandles.begin(); It != m_SelectedObjectHandles.end();) {
+    if (It->second == Handle) {
+      m_State.SelectedObjectIds.erase(It->first);
+      It = m_SelectedObjectHandles.erase(It);
+    } else {
+      ++It;
+    }
+  }
+}
+
+void EditorSession::PruneInvalidSelectedObjects() {
+  for (auto It = m_SelectedObjectHandles.begin(); It != m_SelectedObjectHandles.end();) {
+    if (FindSceneItem(It->second) == nullptr) {
+      m_State.SelectedObjectIds.erase(It->first);
+      It = m_SelectedObjectHandles.erase(It);
+      continue;
+    }
+
+    if (const std::string *ObjectId = ResolveObjectId(It->second);
+        ObjectId != nullptr) {
+      m_State.SelectedObjectIds[It->first] = *ObjectId;
+    }
+    ++It;
+  }
+}
+
 const EditorObjectDetails *EditorSession::FindObjectDetails(
     std::string_view ObjectId) const {
   const auto It = m_State.Scene.ObjectDetailsById.find(std::string(ObjectId));
@@ -216,6 +394,48 @@ const EditorObjectDetails *EditorSession::FindObjectDetails(
     return FindObjectDetails(*ObjectId);
   }
   return nullptr;
+}
+
+EditorObjectDetails *EditorSession::FindMutableObjectDetails(
+    std::string_view ObjectId) {
+  const auto It = m_State.Scene.ObjectDetailsById.find(std::string(ObjectId));
+  return It != m_State.Scene.ObjectDetailsById.end() ? &It->second : nullptr;
+}
+
+bool EditorSession::HasObjectDetails(std::string_view ObjectId) const {
+  return m_State.Scene.ObjectDetailsById.count(std::string(ObjectId)) > 0;
+}
+
+bool EditorSession::HasObjectDisplayName(std::string_view DisplayName) const {
+  for (const auto &[ObjectId, Details] : m_State.Scene.ObjectDetailsById) {
+    (void)ObjectId;
+    if (Details.DisplayName == DisplayName) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool EditorSession::InsertObjectDetails(EditorObjectDetails Details) {
+  const std::string ObjectId = Details.ObjectId;
+  return m_State.Scene.ObjectDetailsById
+      .emplace(ObjectId, std::move(Details))
+      .second;
+}
+
+bool EditorSession::UpsertObjectDetails(EditorObjectDetails Details) {
+  const std::string ObjectId = Details.ObjectId;
+  m_State.Scene.ObjectDetailsById[ObjectId] = std::move(Details);
+  return true;
+}
+
+void EditorSession::EraseObjectDetails(std::string_view ObjectId) {
+  m_State.Scene.ObjectDetailsById.erase(std::string(ObjectId));
+}
+
+void EditorSession::ReplaceObjectDetails(
+    std::unordered_map<std::string, EditorObjectDetails> ObjectDetailsById) {
+  m_State.Scene.ObjectDetailsById = std::move(ObjectDetailsById);
 }
 
 const EditorObjectDetails *EditorSession::FindSelectedObjectDetails(
@@ -304,6 +524,18 @@ const EditorObjectCollaborationState *EditorSession::FindCollaborationState(
     SceneObjectHandle Handle) const {
   const auto It = m_CollaborationByHandle.find(Handle);
   return It != m_CollaborationByHandle.end() ? &It->second : nullptr;
+}
+
+void EditorSession::ReplaceCollaborationStatesByObjectId(
+    std::unordered_map<std::string, EditorObjectCollaborationState>
+        CollaborationByObjectId) {
+  m_State.Scene.CollaborationByObjectId = std::move(CollaborationByObjectId);
+}
+
+void EditorSession::RemoveCollaborationState(std::string_view ObjectId) {
+  const std::string Key(ObjectId);
+  m_State.Scene.CollaborationByObjectId.erase(Key);
+  m_CollaborationByHandle.erase(ResolveObjectHandle(Key));
 }
 
 SceneObjectHandle EditorSession::ResolveObjectHandle(std::string_view ObjectId) const {
@@ -537,6 +769,194 @@ bool EditorSession::IsValidTemplateId(const std::string &TemplateId) const {
 std::vector<std::string>
 EditorSession::CollectDescendantIds(InstanceHandle Root) const {
   return m_SceneStateManager->CollectDescendantIds(Root);
+}
+
+bool EditorSession::ValidateCommand(const QueuedEditorCommand &QueuedCommand,
+                                    std::string &FailureReason) const {
+  return m_ValidationModule != nullptr &&
+         m_ValidationModule->ValidateCommand(QueuedCommand, FailureReason);
+}
+
+InstanceHandle EditorSession::EnsureWorldFolder() {
+  return m_SceneStateManager != nullptr ? m_SceneStateManager->EnsureWorldFolder()
+                                        : InstanceHandle{};
+}
+
+std::string EditorSession::BuildUniqueObjectId(std::string_view BaseObjectId) const {
+  return m_SceneStateManager != nullptr
+             ? m_SceneStateManager->BuildUniqueObjectId(BaseObjectId)
+             : std::string(BaseObjectId);
+}
+
+std::string
+EditorSession::BuildUniqueDisplayName(std::string_view BaseDisplayName) const {
+  return m_SceneStateManager != nullptr
+             ? m_SceneStateManager->BuildUniqueDisplayName(BaseDisplayName)
+             : std::string(BaseDisplayName);
+}
+
+InstanceHandle EditorSession::CreateInstanceForTemplate(
+    const std::string &TemplateId, const std::string &ObjectId) const {
+  return m_SceneStateManager != nullptr
+             ? m_SceneStateManager->CreateInstanceForTemplate(TemplateId, ObjectId)
+             : InstanceHandle{};
+}
+
+void EditorSession::SyncItemsFromTree() {
+  if (m_SceneStateManager != nullptr) {
+    m_SceneStateManager->SyncItemsFromTree();
+  }
+}
+
+void EditorSession::DeepCloneSubtree(
+    InstanceHandle Source, InstanceHandle DestParent,
+    std::vector<EditorObjectDetails> &OutNewDetails) {
+  if (m_SceneStateManager != nullptr) {
+    m_SceneStateManager->DeepCloneSubtree(Source, DestParent, OutNewDetails);
+  }
+}
+
+void EditorSession::RemoveSceneObject(std::string_view ObjectId) {
+  if (m_SceneStateManager != nullptr) {
+    m_SceneStateManager->RemoveSceneObject(ObjectId);
+  }
+}
+
+bool EditorSession::UpdateSceneItemDisplayName(std::string_view ObjectId,
+                                               std::string_view DisplayName) {
+  return EditorSceneStateManager::UpdateSceneItemDisplayName(
+      m_State.Scene.Items, ObjectId, DisplayName);
+}
+
+bool EditorSession::UpdateSceneItemVisibility(std::string_view ObjectId,
+                                              bool Visible) {
+  return EditorSceneStateManager::UpdateSceneItemVisibility(
+      m_State.Scene.Items, ObjectId, Visible);
+}
+
+void EditorSession::RemoveGeneratedAssetChildren(std::string_view RootObjectId) {
+  if (m_SceneStateManager != nullptr) {
+    m_SceneStateManager->RemoveGeneratedAssetChildren(RootObjectId);
+  }
+}
+
+void EditorSession::ExpandMeshAssetIntoScene(std::string_view RootObjectId,
+                                             const MeshSceneData &SceneData,
+                                             std::string_view AssetPath) {
+  if (m_SceneStateManager != nullptr) {
+    m_SceneStateManager->ExpandMeshAssetIntoScene(RootObjectId, SceneData,
+                                                  AssetPath);
+  }
+}
+
+EditorSceneMeshInstance *
+EditorSession::FindMutableSceneMeshInstance(std::string_view ObjectId) {
+  const auto It = std::find_if(
+      m_State.Scene.MeshInstances.begin(), m_State.Scene.MeshInstances.end(),
+      [&ObjectId](const EditorSceneMeshInstance &MeshInstance) {
+        return MeshInstance.ObjectId == ObjectId;
+      });
+  return It != m_State.Scene.MeshInstances.end() ? &*It : nullptr;
+}
+
+void EditorSession::AddSceneMeshInstance(EditorSceneMeshInstance Instance) {
+  m_State.Scene.MeshInstances.push_back(std::move(Instance));
+}
+
+void EditorSession::RemoveSceneMeshInstances(std::string_view ObjectId) {
+  const std::string Id(ObjectId);
+  m_State.Scene.MeshInstances.erase(
+      std::remove_if(m_State.Scene.MeshInstances.begin(),
+                     m_State.Scene.MeshInstances.end(),
+      [&Id](const EditorSceneMeshInstance &MeshInstance) {
+        return MeshInstance.ObjectId == Id;
+      }),
+      m_State.Scene.MeshInstances.end());
+}
+
+bool EditorSession::UpdateSceneMeshInstanceTransform(
+    SceneObjectHandle Handle, const glm::mat4 &Transform) {
+  for (EditorSceneMeshInstance &Instance : m_State.Scene.MeshInstances) {
+    if (Instance.ObjectHandle == Handle) {
+      Instance.Transform = Transform;
+      return true;
+    }
+  }
+  return false;
+}
+
+void EditorSession::ClearSelectionsForObject(std::string_view ObjectId) {
+  if (m_SceneStateManager != nullptr) {
+    m_SceneStateManager->ClearSelectionsForObject(ObjectId);
+  }
+}
+
+void EditorSession::PruneInvalidSelections() {
+  if (m_SceneStateManager != nullptr) {
+    m_SceneStateManager->PruneInvalidSelections();
+  }
+}
+
+void EditorSession::RecomputeSubtreeWorldTransforms(InstanceHandle Node) {
+  if (m_SceneStateManager != nullptr) {
+    m_SceneStateManager->RecomputeSubtreeWorldTransforms(Node);
+  }
+}
+
+void EditorSession::RecomputeAllWorldTransforms() {
+  if (m_SceneStateManager != nullptr) {
+    m_SceneStateManager->RecomputeAllWorldTransforms();
+  }
+}
+
+void EditorSession::ApplyWorldTransform(
+    std::string_view ObjectId, const EditorTransformDetails &WorldTransform,
+    SessionUserId User, bool ShouldPublishEvent) {
+  if (m_SceneStateManager != nullptr) {
+    m_SceneStateManager->ApplyWorldTransform(ObjectId, WorldTransform, User,
+                                             ShouldPublishEvent);
+  }
+}
+
+void EditorSession::SetWorldSettings(const EditorWorldSettings &Settings) {
+  const std::string PreviousHDRPath = m_State.Scene.WorldSettings.SkyboxHDRPath;
+  HDRTextureSourceDataRef PreviousHDRData = m_State.Scene.WorldSettings.SkyboxHDRData;
+
+  ReplaceWorldSettings(Settings);
+  if (Settings.SkyboxHDRPath.empty()) {
+    SetWorldSettingsHDRData(nullptr);
+  } else if (Settings.SkyboxHDRPath == PreviousHDRPath && PreviousHDRData) {
+    SetWorldSettingsHDRData(std::move(PreviousHDRData));
+  } else {
+    RefreshWorldSettingsHDR("SetWorldSettings");
+  }
+}
+
+void EditorSession::RefreshWorldSettingsHDR(std::string_view LogContext) {
+  HydrateWorldSettingsHDRData(m_State.Scene.WorldSettings, m_ContentDir,
+                              m_EngineContentDir, LogContext);
+}
+
+void EditorSession::CaptureRuntimeSceneSnapshot() {
+  m_RuntimeSceneSnapshot = RuntimeSceneSnapshot{
+      .Scene = CloneEditorSceneState(m_State.Scene),
+      .SelectedObjectIds = m_State.SelectedObjectIds,
+      .SelectedObjectHandles = m_SelectedObjectHandles,
+  };
+}
+
+bool EditorSession::RestoreRuntimeSceneSnapshot() {
+  if (!m_RuntimeSceneSnapshot.has_value()) {
+    return false;
+  }
+
+  SetSceneState(std::move(m_RuntimeSceneSnapshot->Scene));
+  m_State.SelectedObjectIds = std::move(m_RuntimeSceneSnapshot->SelectedObjectIds);
+  m_SelectedObjectHandles =
+      std::move(m_RuntimeSceneSnapshot->SelectedObjectHandles);
+  PruneInvalidSelections();
+  m_RuntimeSceneSnapshot.reset();
+  return true;
 }
 
 bool EditorSession::IsBlankString(std::string_view Value) {

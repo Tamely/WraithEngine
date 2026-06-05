@@ -10,8 +10,6 @@ public:
   void SetSceneState(EditorSceneState SceneState);
   void SetSceneItems(std::vector<EditorSceneItem> SceneItems);
   void SetObjectDetails(std::vector<EditorObjectDetails> ObjectDetails);
-  void SetWorldSettings(const EditorWorldSettings &Settings);
-  void RefreshWorldSettingsHDR(std::string_view LogContext);
 
   const EditorSceneItem *FindSceneItem(std::string_view ObjectId) const;
   const EditorSceneItem *
@@ -38,11 +36,11 @@ public:
 
   std::string BuildUniqueObjectId(std::string_view BaseObjectId) const;
   std::string BuildUniqueDisplayName(std::string_view BaseDisplayName) const;
-  bool UpdateSceneItemDisplayName(std::vector<EditorSceneItem> &Items,
-                                  std::string_view ObjectId,
-                                  std::string_view DisplayName) const;
-  bool UpdateSceneItemVisibility(std::vector<EditorSceneItem> &Items,
-                                 std::string_view ObjectId, bool Visible) const;
+  static bool UpdateSceneItemDisplayName(std::vector<EditorSceneItem> &Items,
+                                         std::string_view ObjectId,
+                                         std::string_view DisplayName);
+  static bool UpdateSceneItemVisibility(std::vector<EditorSceneItem> &Items,
+                                        std::string_view ObjectId, bool Visible);
   void RemoveSceneObject(std::string_view ObjectId);
   void RemoveGeneratedAssetChildren(std::string_view RootObjectId);
   void ExpandMeshAssetIntoScene(std::string_view RootObjectId,

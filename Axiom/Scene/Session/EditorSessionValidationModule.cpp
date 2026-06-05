@@ -68,7 +68,7 @@ EditorSessionValidationModule::EditorSessionValidationModule(
 
 bool EditorSessionValidationModule::ValidateCommand(
     const QueuedEditorCommand &QueuedCommand, std::string &FailureReason) const {
-  if (QueuedCommand.Context.Session != m_Session.m_State.Session) {
+  if (QueuedCommand.Context.Session != m_Session.GetState().Session) {
     FailureReason = "Command targeted a different session.";
     return false;
   }
@@ -88,7 +88,7 @@ bool EditorSessionValidationModule::ValidateCommand(
   }
 
   if (!QueuedCommand.Context.IsScriptContext &&
-      m_Session.m_State.RuntimeState != EditorRuntimeState::Edit &&
+      m_Session.GetRuntimeState() != EditorRuntimeState::Edit &&
       IsAuthoringMutationCommand(QueuedCommand.Command.Payload)) {
     FailureReason =
         "Authoring edits are disabled while shared simulation is active.";
@@ -277,13 +277,13 @@ bool EditorSessionValidationModule::ValidateCommand(
       FailureReason = "Scale values must be greater than zero.";
       return false;
     }
-    if (m_Session.m_ContentDir.empty()) {
+    if (m_Session.GetContentDir().empty()) {
       FailureReason = "CreateMeshObject requires a configured content directory.";
       return false;
     }
-    CookMeshAssetBestEffort(m_Session.m_ContentDir, CreateMeshCmd->AssetPath);
+    CookMeshAssetBestEffort(m_Session.GetContentDir(), CreateMeshCmd->AssetPath);
     const std::filesystem::path FullPath =
-        m_Session.m_ContentDir / CreateMeshCmd->AssetPath;
+        m_Session.GetContentDir() / CreateMeshCmd->AssetPath;
     const auto SceneData = Assets::LoadBasicMeshAsset(FullPath);
     if (!SceneData.has_value() || SceneData->Instances.empty()) {
       FailureReason = "CreateMeshObject failed to load mesh asset: " +
@@ -347,7 +347,7 @@ bool EditorSessionValidationModule::ValidateCommand(
       return false;
     }
     const InstanceHandle TargetHandle =
-        FindInstanceById(m_Session.m_InstancePool, m_Session.m_SceneRoot,
+        FindInstanceById(m_Session.GetInstancePool(), m_Session.GetSceneRoot(),
                          ReparentCmd->ObjectId);
     if (TargetHandle) {
       for (const std::string &DescId :
@@ -461,7 +461,7 @@ bool EditorSessionValidationModule::ValidateCommand(
   }
 
   if (std::holds_alternative<PlaySessionCommand>(QueuedCommand.Command.Payload)) {
-    if (m_Session.m_State.RuntimeState != EditorRuntimeState::Edit) {
+    if (m_Session.GetRuntimeState() != EditorRuntimeState::Edit) {
       FailureReason = "PlaySession is only valid while in edit mode.";
       return false;
     }
@@ -469,7 +469,7 @@ bool EditorSessionValidationModule::ValidateCommand(
 
   if (std::holds_alternative<PauseSessionCommand>(
           QueuedCommand.Command.Payload)) {
-    if (m_Session.m_State.RuntimeState != EditorRuntimeState::Playing) {
+    if (m_Session.GetRuntimeState() != EditorRuntimeState::Playing) {
       FailureReason = "PauseSession is only valid while playing.";
       return false;
     }
@@ -477,14 +477,14 @@ bool EditorSessionValidationModule::ValidateCommand(
 
   if (std::holds_alternative<ResumeSessionCommand>(
           QueuedCommand.Command.Payload)) {
-    if (m_Session.m_State.RuntimeState != EditorRuntimeState::Paused) {
+    if (m_Session.GetRuntimeState() != EditorRuntimeState::Paused) {
       FailureReason = "ResumeSession is only valid while paused.";
       return false;
     }
   }
 
   if (std::holds_alternative<StopSessionCommand>(QueuedCommand.Command.Payload)) {
-    if (m_Session.m_State.RuntimeState == EditorRuntimeState::Edit) {
+    if (m_Session.GetRuntimeState() == EditorRuntimeState::Edit) {
       FailureReason = "StopSession is only valid while simulation is active.";
       return false;
     }

@@ -1,11 +1,6 @@
 #include "Session/EditorSceneStateManager.h"
 
-#include "Assets/AssetCooker.h"
-#include "Assets/CookedTextureAsset.h"
-#include "Assets/IAssetSource.h"
 #include "Assets/MeshAsset.h"
-
-#include <Core/Log.h>
 
 #include <glm/common.hpp>
 #include <glm/ext/matrix_transform.hpp>
@@ -18,77 +13,6 @@
 
 namespace Axiom {
 namespace {
-void CookHDRTextureAssetBestEffort(const std::filesystem::path &ContentDir,
-                                   std::string_view RelativeAssetPath) {
-  if (ContentDir.empty() || RelativeAssetPath.empty()) {
-    return;
-  }
-
-  const auto Cooked = Assets::CookHDRTextureAsset(ContentDir, RelativeAssetPath);
-  if (!Cooked.has_value()) {
-    A_CORE_WARN("EditorSession: failed to cook HDR texture asset '{}'",
-                std::string(RelativeAssetPath));
-  }
-}
-
-void HydrateWorldSettingsHDRData(EditorWorldSettings &Settings,
-                                 const std::filesystem::path &ContentDir,
-                                 const std::filesystem::path &EngineContentDir,
-                                 std::string_view LogContext) {
-  if (Settings.SkyboxHDRPath.empty()) {
-    Settings.SkyboxHDRData = nullptr;
-    return;
-  }
-  if (Settings.SkyboxHDRData) {
-    return;
-  }
-  if (ContentDir.empty()) {
-    A_CORE_WARN("{}: content directory not configured; cannot load HDR '{}'",
-                LogContext, Settings.SkyboxHDRPath);
-    return;
-  }
-
-  const std::filesystem::path HDRRelativePath(Settings.SkyboxHDRPath);
-  const bool IsEngineAsset =
-      !HDRRelativePath.empty() && *HDRRelativePath.begin() == "Engine";
-  std::filesystem::path EffectiveContentDir = ContentDir;
-  std::filesystem::path EffectiveRelativePath = HDRRelativePath;
-  if (IsEngineAsset && !EngineContentDir.empty()) {
-    EffectiveContentDir = EngineContentDir;
-    auto It = HDRRelativePath.begin();
-    ++It;
-    EffectiveRelativePath.clear();
-    for (; It != HDRRelativePath.end(); ++It) {
-      EffectiveRelativePath /= *It;
-    }
-  }
-
-  const auto FullPath = EffectiveContentDir / EffectiveRelativePath;
-  if (std::filesystem::exists(FullPath)) {
-    CookHDRTextureAssetBestEffort(EffectiveContentDir,
-                                  EffectiveRelativePath.generic_string());
-  }
-  auto Loaded = Assets::LoadHDRTextureFromFile(FullPath);
-  if (!Loaded) {
-    const Assets::CookedAssetSource CookedSource(EffectiveContentDir);
-    if (CookedSource.HasManifest()) {
-      const auto CookedPath = CookedSource.Resolve(
-          Assets::AssetIdFromRelativePath(EffectiveRelativePath));
-      if (CookedPath.has_value()) {
-        const auto CookedHDR = Assets::LoadCookedHDRTextureAsset(*CookedPath);
-        if (CookedHDR.has_value()) {
-          Loaded = std::make_shared<HDRTextureSourceData>(*CookedHDR);
-        }
-      }
-    }
-  }
-  if (!Loaded) {
-    A_CORE_WARN("{}: failed to load HDR '{}'", LogContext,
-                Settings.SkyboxHDRPath);
-  }
-  Settings.SkyboxHDRData = std::move(Loaded);
-}
-
 EditorSceneItemKind KindForType(InstanceType Type) {
   switch (Type) {
   case InstanceType::SceneMeshObject: return EditorSceneItemKind::Mesh;
@@ -178,67 +102,47 @@ EditorSceneStateManager::EditorSceneStateManager(EditorSession &Session)
     : m_Session(Session) {}
 
 void EditorSceneStateManager::SetSceneState(EditorSceneState SceneState) {
-  m_Session.m_State.Scene = std::move(SceneState);
+  m_Session.ReplaceSceneItems(std::move(SceneState.Items));
+  m_Session.ReplaceSceneMeshInstances(std::move(SceneState.MeshInstances));
+  m_Session.ReplaceObjectDetails(std::move(SceneState.ObjectDetailsById));
+  m_Session.ReplaceCollaborationStatesByObjectId(
+      std::move(SceneState.CollaborationByObjectId));
+  m_Session.ReplaceWorldSettings(std::move(SceneState.WorldSettings));
   m_Session.RebuildSceneHandleState();
-  RefreshWorldSettingsHDR("SetSceneState");
-  for (const auto &MeshInst : m_Session.m_State.Scene.MeshInstances) {
-    auto DetailsIt =
-        m_Session.m_State.Scene.ObjectDetailsById.find(MeshInst.ObjectId);
-    if (DetailsIt != m_Session.m_State.Scene.ObjectDetailsById.end() &&
-        MeshInst.Material && !DetailsIt->second.Material.has_value()) {
-      DetailsIt->second.Material = EditorMaterialProperties{
+  m_Session.RefreshWorldSettingsHDR("SetSceneState");
+  for (const auto &MeshInst : m_Session.GetSceneMeshInstances()) {
+    EditorObjectDetails *Details = m_Session.FindMutableObjectDetails(MeshInst.ObjectId);
+    if (Details != nullptr && MeshInst.Material && !Details->Material.has_value()) {
+      Details->Material = EditorMaterialProperties{
           .BaseColorFactor = MeshInst.Material->BaseColorFactor,
           .Metallic = MeshInst.Material->Metallic,
           .Roughness = MeshInst.Material->Roughness,
       };
     }
   }
-  RebuildInstanceTree(m_Session.m_State.Scene.Items, m_Session.m_SceneRoot);
+  RebuildInstanceTree(m_Session.GetSceneItems(), m_Session.GetSceneRoot());
   PruneInvalidSelections();
   RecomputeAllWorldTransforms();
 }
 
 void EditorSceneStateManager::SetSceneItems(std::vector<EditorSceneItem> SceneItems) {
-  m_Session.m_State.Scene.Items = std::move(SceneItems);
+  m_Session.ReplaceSceneItems(std::move(SceneItems));
   m_Session.RebuildSceneHandleState();
-  RebuildInstanceTree(m_Session.m_State.Scene.Items, m_Session.m_SceneRoot);
+  RebuildInstanceTree(m_Session.GetSceneItems(), m_Session.GetSceneRoot());
   PruneInvalidSelections();
   RecomputeAllWorldTransforms();
 }
 
 void EditorSceneStateManager::SetObjectDetails(
     std::vector<EditorObjectDetails> ObjectDetails) {
-  m_Session.m_State.Scene.ObjectDetailsById =
-      BuildObjectDetailsMap(std::move(ObjectDetails));
+  m_Session.ReplaceObjectDetails(BuildObjectDetailsMap(std::move(ObjectDetails)));
   m_Session.RebuildSceneHandleState();
   RecomputeAllWorldTransforms();
 }
 
-void EditorSceneStateManager::SetWorldSettings(const EditorWorldSettings &Settings) {
-  const std::string PreviousHDRPath = m_Session.m_State.Scene.WorldSettings.SkyboxHDRPath;
-  HDRTextureSourceDataRef PreviousHDRData =
-      m_Session.m_State.Scene.WorldSettings.SkyboxHDRData;
-
-  m_Session.m_State.Scene.WorldSettings = Settings;
-  if (Settings.SkyboxHDRPath.empty()) {
-    m_Session.m_State.Scene.WorldSettings.SkyboxHDRData = nullptr;
-  } else if (Settings.SkyboxHDRPath == PreviousHDRPath && PreviousHDRData) {
-    m_Session.m_State.Scene.WorldSettings.SkyboxHDRData =
-        std::move(PreviousHDRData);
-  } else {
-    RefreshWorldSettingsHDR("SetWorldSettings");
-  }
-}
-
-void EditorSceneStateManager::RefreshWorldSettingsHDR(std::string_view LogContext) {
-  HydrateWorldSettingsHDRData(m_Session.m_State.Scene.WorldSettings,
-                              m_Session.m_ContentDir,
-                              m_Session.m_EngineContentDir, LogContext);
-}
-
 const EditorSceneItem *
 EditorSceneStateManager::FindSceneItem(std::string_view ObjectId) const {
-  return FindSceneItemRecursive(m_Session.m_State.Scene.Items, ObjectId);
+  return FindSceneItemRecursive(m_Session.GetSceneItems(), ObjectId);
 }
 
 std::unordered_map<std::string, EditorObjectDetails>
@@ -253,19 +157,22 @@ EditorSceneStateManager::BuildObjectDetailsMap(
 }
 
 void EditorSceneStateManager::InitSceneRoot() {
-  m_Session.m_SceneRoot = m_Session.m_InstancePool.Create<DataModel>();
-  const InstanceHandle World = m_Session.m_InstancePool.Create<SceneFolder>("world");
-  if (Instance *WorldNode = m_Session.m_InstancePool.Resolve(World); WorldNode != nullptr) {
-    WorldNode->SetParent(m_Session.m_SceneRoot);
+  m_Session.SetSceneRoot(m_Session.GetInstancePool().Create<DataModel>());
+  const InstanceHandle World =
+      m_Session.GetInstancePool().Create<SceneFolder>("world");
+  if (Instance *WorldNode = m_Session.GetInstancePool().Resolve(World);
+      WorldNode != nullptr) {
+    WorldNode->SetParent(m_Session.GetSceneRoot());
   }
 }
 
 InstanceHandle EditorSceneStateManager::FindWorldFolder() const {
-  if (!m_Session.m_SceneRoot) return {};
-  const Instance *Root = m_Session.m_InstancePool.Resolve(m_Session.m_SceneRoot);
+  if (!m_Session.GetSceneRoot()) return {};
+  const Instance *Root =
+      m_Session.GetInstancePool().Resolve(m_Session.GetSceneRoot());
   if (Root == nullptr) return {};
   for (const InstanceHandle ChildHandle : Root->GetChildren()) {
-    const Instance *Child = m_Session.m_InstancePool.Resolve(ChildHandle);
+    const Instance *Child = m_Session.GetInstancePool().Resolve(ChildHandle);
     if (Child != nullptr && Child->GetType() == InstanceType::SceneFolder &&
         Child->GetName() == "world") {
       return ChildHandle;
@@ -275,25 +182,23 @@ InstanceHandle EditorSceneStateManager::FindWorldFolder() const {
 }
 
 InstanceHandle EditorSceneStateManager::EnsureWorldFolder() {
-  if (!m_Session.m_SceneRoot) {
+  if (!m_Session.GetSceneRoot()) {
     InitSceneRoot();
   }
 
   auto EnsureWorldDetails = [this]() {
-    if (m_Session.m_State.Scene.ObjectDetailsById.find("world") !=
-        m_Session.m_State.Scene.ObjectDetailsById.end()) {
+    if (m_Session.HasObjectDetails("world")) {
       return;
     }
-    m_Session.m_State.Scene.ObjectDetailsById.emplace(
-        "world", EditorObjectDetails{
-                     .Handle = m_Session.EnsureHandleForObjectId("world"),
-                     .ObjectId = "world",
-                     .DisplayName = "World",
-                     .Kind = EditorSceneItemKind::Folder,
-                     .Visible = true,
-                     .SupportsTransform = false,
-                     .TransformReadOnly = true,
-                 });
+    m_Session.InsertObjectDetails(EditorObjectDetails{
+        .Handle = m_Session.EnsureHandleForObjectId("world"),
+        .ObjectId = "world",
+        .DisplayName = "World",
+        .Kind = EditorSceneItemKind::Folder,
+        .Visible = true,
+        .SupportsTransform = false,
+        .TransformReadOnly = true,
+    });
   };
 
   if (const InstanceHandle World = FindWorldFolder(); World) {
@@ -302,9 +207,11 @@ InstanceHandle EditorSceneStateManager::EnsureWorldFolder() {
   }
 
   EnsureWorldDetails();
-  const InstanceHandle World = m_Session.m_InstancePool.Create<SceneFolder>("world");
-  if (Instance *WorldNode = m_Session.m_InstancePool.Resolve(World); WorldNode != nullptr) {
-    WorldNode->SetParent(m_Session.m_SceneRoot);
+  const InstanceHandle World =
+      m_Session.GetInstancePool().Create<SceneFolder>("world");
+  if (Instance *WorldNode = m_Session.GetInstancePool().Resolve(World);
+      WorldNode != nullptr) {
+    WorldNode->SetParent(m_Session.GetSceneRoot());
   }
   SyncItemsFromTree();
   return World;
@@ -312,17 +219,18 @@ InstanceHandle EditorSceneStateManager::EnsureWorldFolder() {
 
 void EditorSceneStateManager::RebuildInstanceTree(
     const std::vector<EditorSceneItem> &Items, InstanceHandle Parent) {
-  Instance *ParentNode = m_Session.m_InstancePool.Resolve(Parent);
+  Instance *ParentNode = m_Session.GetInstancePool().Resolve(Parent);
   if (!ParentNode) return;
   const std::vector<InstanceHandle> OldChildren = ParentNode->GetChildren();
   for (const InstanceHandle Child : OldChildren) {
-    m_Session.m_InstancePool.Destroy(Child);
+    m_Session.GetInstancePool().Destroy(Child);
   }
   for (const EditorSceneItem &Item : Items) {
     const InstanceHandle Node =
         CreateInstanceForTemplate(std::string(TemplateIdForKind(Item.Kind)), Item.Id);
     if (!Node) continue;
-    if (Instance *NodePtr = m_Session.m_InstancePool.Resolve(Node); NodePtr != nullptr) {
+    if (Instance *NodePtr = m_Session.GetInstancePool().Resolve(Node);
+        NodePtr != nullptr) {
       NodePtr->SetParent(Parent);
     }
     if (!Item.Children.empty()) {
@@ -332,17 +240,18 @@ void EditorSceneStateManager::RebuildInstanceTree(
 }
 
 void EditorSceneStateManager::SyncItemsFromTree() {
-  m_Session.m_State.Scene.Items.clear();
-  if (!m_Session.m_SceneRoot) return;
-  const Instance *Root = m_Session.m_InstancePool.Resolve(m_Session.m_SceneRoot);
+  m_Session.ClearSceneItems();
+  if (!m_Session.GetSceneRoot()) return;
+  const Instance *Root =
+      m_Session.GetInstancePool().Resolve(m_Session.GetSceneRoot());
   if (Root == nullptr) return;
   for (const InstanceHandle Child : Root->GetChildren()) {
-    m_Session.m_State.Scene.Items.push_back(BuildItemFromInstance(Child));
+    m_Session.AddSceneItem(BuildItemFromInstance(Child));
   }
 }
 
 EditorSceneItem EditorSceneStateManager::BuildItemFromInstance(InstanceHandle Node) const {
-  const Instance *NodePtr = m_Session.m_InstancePool.Resolve(Node);
+  const Instance *NodePtr = m_Session.GetInstancePool().Resolve(Node);
   if (NodePtr == nullptr) {
     return {};
   }
@@ -352,12 +261,12 @@ EditorSceneItem EditorSceneStateManager::BuildItemFromInstance(InstanceHandle No
   Item.Kind = KindForInstance(Node);
   Item.Visible = true;
   Item.DisplayName = NodePtr->GetName();
-  const auto It =
-      m_Session.m_State.Scene.ObjectDetailsById.find(NodePtr->GetName());
-  if (It != m_Session.m_State.Scene.ObjectDetailsById.end()) {
-    Item.DisplayName = It->second.DisplayName;
-    Item.Visible = It->second.Visible;
-    Item.Kind = It->second.Kind;
+  if (const EditorObjectDetails *Details =
+          m_Session.FindObjectDetails(NodePtr->GetName());
+      Details != nullptr) {
+    Item.DisplayName = Details->DisplayName;
+    Item.Visible = Details->Visible;
+    Item.Kind = Details->Kind;
   }
   for (const InstanceHandle Child : NodePtr->GetChildren()) {
     Item.Children.push_back(BuildItemFromInstance(Child));
@@ -367,17 +276,22 @@ EditorSceneItem EditorSceneStateManager::BuildItemFromInstance(InstanceHandle No
 
 InstanceHandle EditorSceneStateManager::CreateInstanceForTemplate(
     const std::string &TemplateId, const std::string &ObjectId) const {
-  if (TemplateId == "Folder") return m_Session.m_InstancePool.Create<SceneFolder>(ObjectId);
-  if (TemplateId == "Mesh") return m_Session.m_InstancePool.Create<SceneMeshObject>(ObjectId);
-  if (TemplateId == "Light") return m_Session.m_InstancePool.Create<SceneLight>(ObjectId);
-  if (TemplateId == "Camera") return m_Session.m_InstancePool.Create<SceneCamera>(ObjectId);
-  if (TemplateId == "Actor") return m_Session.m_InstancePool.Create<SceneActor>(ObjectId);
+  if (TemplateId == "Folder")
+    return m_Session.GetInstancePool().Create<SceneFolder>(ObjectId);
+  if (TemplateId == "Mesh")
+    return m_Session.GetInstancePool().Create<SceneMeshObject>(ObjectId);
+  if (TemplateId == "Light")
+    return m_Session.GetInstancePool().Create<SceneLight>(ObjectId);
+  if (TemplateId == "Camera")
+    return m_Session.GetInstancePool().Create<SceneCamera>(ObjectId);
+  if (TemplateId == "Actor")
+    return m_Session.GetInstancePool().Create<SceneActor>(ObjectId);
   return {};
 }
 
 EditorSceneItemKind
 EditorSceneStateManager::KindForInstance(InstanceHandle Node) const {
-  const Instance *NodePtr = m_Session.m_InstancePool.Resolve(Node);
+  const Instance *NodePtr = m_Session.GetInstancePool().Resolve(Node);
   return NodePtr != nullptr ? KindForType(NodePtr->GetType())
                             : EditorSceneItemKind::Folder;
 }
@@ -395,7 +309,7 @@ EditorSceneStateManager::CollectDescendantIds(InstanceHandle Root) const {
   while (!Stack.empty()) {
     const InstanceHandle CurHandle = Stack.back();
     Stack.pop_back();
-    const Instance *Cur = m_Session.m_InstancePool.Resolve(CurHandle);
+    const Instance *Cur = m_Session.GetInstancePool().Resolve(CurHandle);
     if (Cur == nullptr) continue;
     Ids.push_back(Cur->GetName());
     for (const InstanceHandle Child : Cur->GetChildren()) {
@@ -408,7 +322,7 @@ EditorSceneStateManager::CollectDescendantIds(InstanceHandle Root) const {
 void EditorSceneStateManager::DeepCloneSubtree(
     InstanceHandle Source, InstanceHandle DestParent,
     std::vector<EditorObjectDetails> &OutNewDetails) {
-  const Instance *SourceNode = m_Session.m_InstancePool.Resolve(Source);
+  const Instance *SourceNode = m_Session.GetInstancePool().Resolve(Source);
   if (SourceNode == nullptr) return;
   const std::string NewId = BuildUniqueObjectId(SourceNode->GetName());
   const EditorSceneItemKind Kind = KindForInstance(Source);
@@ -419,13 +333,13 @@ void EditorSceneStateManager::DeepCloneSubtree(
   NewDetails.SupportsTransform = SupportsTransformForKind(Kind);
   NewDetails.TransformReadOnly = false;
 
-  const auto ExistIt =
-      m_Session.m_State.Scene.ObjectDetailsById.find(SourceNode->GetName());
-  if (ExistIt != m_Session.m_State.Scene.ObjectDetailsById.end()) {
-    BaseDisplayName = ExistIt->second.DisplayName;
-    NewDetails.Visible = ExistIt->second.Visible;
-    NewDetails.Transform = ExistIt->second.Transform;
-    NewDetails.WorldTransform = ExistIt->second.WorldTransform;
+  if (const EditorObjectDetails *ExistingDetails =
+          m_Session.FindObjectDetails(SourceNode->GetName());
+      ExistingDetails != nullptr) {
+    BaseDisplayName = ExistingDetails->DisplayName;
+    NewDetails.Visible = ExistingDetails->Visible;
+    NewDetails.Transform = ExistingDetails->Transform;
+    NewDetails.WorldTransform = ExistingDetails->WorldTransform;
   } else if (NewDetails.SupportsTransform) {
     NewDetails.Transform = EditorTransformDetails{};
     NewDetails.WorldTransform = EditorTransformDetails{};
@@ -434,13 +348,14 @@ void EditorSceneStateManager::DeepCloneSubtree(
   NewDetails.ObjectId = NewId;
   NewDetails.Handle = m_Session.EnsureHandleForObjectId(NewId);
   NewDetails.DisplayName = BuildUniqueDisplayName(BaseDisplayName);
-  m_Session.m_State.Scene.ObjectDetailsById.emplace(NewId, NewDetails);
+  m_Session.InsertObjectDetails(NewDetails);
   OutNewDetails.push_back(NewDetails);
 
   const InstanceHandle Clone =
       CreateInstanceForTemplate(std::string(TemplateIdForKind(Kind)), NewId);
   if (Clone) {
-    if (Instance *CloneNode = m_Session.m_InstancePool.Resolve(Clone); CloneNode != nullptr) {
+    if (Instance *CloneNode = m_Session.GetInstancePool().Resolve(Clone);
+        CloneNode != nullptr) {
       CloneNode->SetParent(DestParent);
     }
     for (const InstanceHandle Child : SourceNode->GetChildren()) {
@@ -473,7 +388,7 @@ std::string EditorSceneStateManager::BuildUniqueDisplayName(
 
 bool EditorSceneStateManager::UpdateSceneItemDisplayName(
     std::vector<EditorSceneItem> &Items, std::string_view ObjectId,
-    std::string_view DisplayName) const {
+    std::string_view DisplayName) {
   for (EditorSceneItem &Item : Items) {
     if (Item.Id == ObjectId) {
       Item.DisplayName = std::string(DisplayName);
@@ -488,7 +403,7 @@ bool EditorSceneStateManager::UpdateSceneItemDisplayName(
 
 bool EditorSceneStateManager::UpdateSceneItemVisibility(
     std::vector<EditorSceneItem> &Items, std::string_view ObjectId,
-    bool Visible) const {
+    bool Visible) {
   for (EditorSceneItem &Item : Items) {
     if (Item.Id == ObjectId) {
       Item.Visible = Visible;
@@ -503,16 +418,9 @@ bool EditorSceneStateManager::UpdateSceneItemVisibility(
 
 void EditorSceneStateManager::RemoveSceneObject(std::string_view ObjectId) {
   const std::string Id(ObjectId);
-  m_Session.m_State.Scene.ObjectDetailsById.erase(Id);
-  m_Session.m_State.Scene.CollaborationByObjectId.erase(Id);
-  m_Session.m_CollaborationByHandle.erase(m_Session.ResolveObjectHandle(Id));
-  m_Session.m_State.Scene.MeshInstances.erase(
-      std::remove_if(m_Session.m_State.Scene.MeshInstances.begin(),
-                     m_Session.m_State.Scene.MeshInstances.end(),
-                     [&Id](const EditorSceneMeshInstance &Mesh) {
-                       return Mesh.ObjectId == Id;
-                     }),
-      m_Session.m_State.Scene.MeshInstances.end());
+  m_Session.EraseObjectDetails(Id);
+  m_Session.RemoveCollaborationState(Id);
+  m_Session.RemoveSceneMeshInstances(Id);
 }
 
 glm::mat4
@@ -520,8 +428,8 @@ EditorSceneStateManager::ComputeWorldTransformMatrix(InstanceHandle Node) const 
   if (!Node) return glm::mat4(1.0f);
   std::vector<InstanceHandle> Chain;
   InstanceHandle Cur = Node;
-  while (Cur && Cur != m_Session.m_SceneRoot) {
-    const Instance *CurrentNode = m_Session.m_InstancePool.Resolve(Cur);
+  while (Cur && Cur != m_Session.GetSceneRoot()) {
+    const Instance *CurrentNode = m_Session.GetInstancePool().Resolve(Cur);
     if (CurrentNode == nullptr) {
       break;
     }
@@ -531,15 +439,14 @@ EditorSceneStateManager::ComputeWorldTransformMatrix(InstanceHandle Node) const 
 
   glm::mat4 World(1.0f);
   for (auto It = Chain.rbegin(); It != Chain.rend(); ++It) {
-    const Instance *NodePtr = m_Session.m_InstancePool.Resolve(*It);
+    const Instance *NodePtr = m_Session.GetInstancePool().Resolve(*It);
     if (NodePtr == nullptr) {
       continue;
     }
-    const auto DetailsIt =
-        m_Session.m_State.Scene.ObjectDetailsById.find(NodePtr->GetName());
-    if (DetailsIt != m_Session.m_State.Scene.ObjectDetailsById.end() &&
-        DetailsIt->second.Transform.has_value()) {
-      World = World * BuildTransformMatrix(*DetailsIt->second.Transform);
+    if (const EditorObjectDetails *Details =
+            m_Session.FindObjectDetails(NodePtr->GetName());
+        Details != nullptr && Details->Transform.has_value()) {
+      World = World * BuildTransformMatrix(*Details->Transform);
     }
   }
   return World;
@@ -569,21 +476,15 @@ EditorSceneStateManager::DecomposeMatrix(const glm::mat4 &Matrix) const {
 }
 
 void EditorSceneStateManager::RecomputeSubtreeWorldTransforms(InstanceHandle Node) {
-  const Instance *NodePtr = m_Session.m_InstancePool.Resolve(Node);
+  const Instance *NodePtr = m_Session.GetInstancePool().Resolve(Node);
   if (!NodePtr) return;
   const SceneObjectHandle Handle = m_Session.ResolveObjectHandle(NodePtr->GetName());
   const std::string &Id = NodePtr->GetName();
-  auto DetailsIt = m_Session.m_State.Scene.ObjectDetailsById.find(Id);
-  if (DetailsIt != m_Session.m_State.Scene.ObjectDetailsById.end() &&
-      DetailsIt->second.Transform.has_value()) {
+  EditorObjectDetails *Details = m_Session.FindMutableObjectDetails(Id);
+  if (Details != nullptr && Details->Transform.has_value()) {
     const glm::mat4 WorldMatrix = ComputeWorldTransformMatrix(Node);
-    DetailsIt->second.WorldTransform = DecomposeMatrix(WorldMatrix);
-    for (EditorSceneMeshInstance &Instance : m_Session.m_State.Scene.MeshInstances) {
-      if (Instance.ObjectHandle == Handle) {
-        Instance.Transform = WorldMatrix;
-        break;
-      }
-    }
+    Details->WorldTransform = DecomposeMatrix(WorldMatrix);
+    m_Session.UpdateSceneMeshInstanceTransform(Handle, WorldMatrix);
   }
 
   for (const InstanceHandle Child : NodePtr->GetChildren()) {
@@ -592,8 +493,9 @@ void EditorSceneStateManager::RecomputeSubtreeWorldTransforms(InstanceHandle Nod
 }
 
 void EditorSceneStateManager::RecomputeAllWorldTransforms() {
-  if (!m_Session.m_SceneRoot) return;
-  const Instance *Root = m_Session.m_InstancePool.Resolve(m_Session.m_SceneRoot);
+  if (!m_Session.GetSceneRoot()) return;
+  const Instance *Root =
+      m_Session.GetInstancePool().Resolve(m_Session.GetSceneRoot());
   if (Root == nullptr) return;
   for (const InstanceHandle Child : Root->GetChildren()) {
     RecomputeSubtreeWorldTransforms(Child);
@@ -603,29 +505,24 @@ void EditorSceneStateManager::RecomputeAllWorldTransforms() {
 void EditorSceneStateManager::ApplyWorldTransform(
     std::string_view ObjectId, const EditorTransformDetails &WorldTransform,
     SessionUserId User, bool ShouldPublishEvent) {
-  auto DetailsIt =
-      m_Session.m_State.Scene.ObjectDetailsById.find(std::string(ObjectId));
-  if (DetailsIt == m_Session.m_State.Scene.ObjectDetailsById.end()) return;
+  EditorObjectDetails *Details = m_Session.FindMutableObjectDetails(ObjectId);
+  if (Details == nullptr) return;
   const SceneObjectHandle Handle = m_Session.ResolveObjectHandle(ObjectId);
 
   const glm::mat4 WorldMatrix = BuildTransformMatrix(WorldTransform);
   EditorTransformDetails LocalTransform = WorldTransform;
   const InstanceHandle NodeHandle =
-      FindInstanceById(m_Session.m_InstancePool, m_Session.m_SceneRoot, ObjectId);
-  const Instance *Node = m_Session.m_InstancePool.Resolve(NodeHandle);
-  if (Node != nullptr && Node->GetParent() && Node->GetParent() != m_Session.m_SceneRoot) {
+      FindInstanceById(m_Session.GetInstancePool(), m_Session.GetSceneRoot(), ObjectId);
+  const Instance *Node = m_Session.GetInstancePool().Resolve(NodeHandle);
+  if (Node != nullptr && Node->GetParent() &&
+      Node->GetParent() != m_Session.GetSceneRoot()) {
     const glm::mat4 ParentWorld = ComputeWorldTransformMatrix(Node->GetParent());
     LocalTransform = DecomposeMatrix(glm::inverse(ParentWorld) * WorldMatrix);
   }
 
-  DetailsIt->second.Transform = LocalTransform;
-  DetailsIt->second.WorldTransform = WorldTransform;
-  for (EditorSceneMeshInstance &Instance : m_Session.m_State.Scene.MeshInstances) {
-    if (Instance.ObjectHandle == Handle) {
-      Instance.Transform = WorldMatrix;
-      break;
-    }
-  }
+  Details->Transform = LocalTransform;
+  Details->WorldTransform = WorldTransform;
+  m_Session.UpdateSceneMeshInstanceTransform(Handle, WorldMatrix);
 
   if (Node != nullptr) {
     for (const InstanceHandle Child : Node->GetChildren()) {
@@ -660,14 +557,11 @@ const EditorSceneItem *EditorSceneStateManager::FindSceneItemRecursive(
 }
 
 bool EditorSceneStateManager::IsSceneObjectIdInUse(std::string_view ObjectId) const {
-  return m_Session.m_State.Scene.ObjectDetailsById.count(std::string(ObjectId)) > 0;
+  return m_Session.HasObjectDetails(ObjectId);
 }
 
 bool EditorSceneStateManager::IsSceneDisplayNameInUse(
     std::string_view DisplayName) const {
-  for (const auto &[Id, Details] : m_Session.m_State.Scene.ObjectDetailsById) {
-    if (Details.DisplayName == DisplayName) return true;
-  }
-  return false;
+  return m_Session.HasObjectDisplayName(DisplayName);
 }
 } // namespace Axiom

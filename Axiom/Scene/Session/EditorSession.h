@@ -192,17 +192,33 @@ public:
   const EditorSessionState &GetState() const { return m_State; }
   const EditorSessionConfig &GetConfig() const { return m_Config; }
   InstanceHandle GetSceneRoot() const { return m_SceneRoot; }
+  void SetSceneRoot(InstanceHandle SceneRoot) { m_SceneRoot = SceneRoot; }
   const InstancePool &GetInstancePool() const { return m_InstancePool; }
   InstancePool &GetInstancePool() { return m_InstancePool; }
   const EditorViewportState *FindViewport(SessionUserId User) const;
+  EditorViewportState &EnsureViewport(SessionUserId User);
   const EditorSceneItem *FindSceneItem(std::string_view ObjectId) const;
   const EditorSceneItem *FindSceneItem(SceneObjectHandle Handle) const;
   const std::string *FindSelectedObjectId(SessionUserId User) const;
   const SceneObjectHandle *FindSelectedObjectHandle(SessionUserId User) const;
+  bool HasSelectedObjectHandle(SessionUserId User, SceneObjectHandle Handle) const;
+  void SetSelectedObject(SessionUserId User, std::string_view ObjectId,
+                         SceneObjectHandle Handle);
+  void ClearSelectedObjectsForHandle(SceneObjectHandle Handle);
+  void PruneInvalidSelectedObjects();
   const EditorObjectDetails *FindObjectDetails(std::string_view ObjectId) const;
   const EditorObjectDetails *FindObjectDetails(SceneObjectHandle Handle) const;
+  EditorObjectDetails *FindMutableObjectDetails(std::string_view ObjectId);
+  bool HasObjectDetails(std::string_view ObjectId) const;
+  bool HasObjectDisplayName(std::string_view DisplayName) const;
+  bool InsertObjectDetails(EditorObjectDetails Details);
+  bool UpsertObjectDetails(EditorObjectDetails Details);
+  void EraseObjectDetails(std::string_view ObjectId);
+  void ReplaceObjectDetails(
+      std::unordered_map<std::string, EditorObjectDetails> ObjectDetailsById);
   const EditorObjectDetails *FindSelectedObjectDetails(SessionUserId User) const;
   const EditorUserPresence *FindPresence(SessionUserId User) const;
+  EditorUserPresence &EnsurePresence(SessionUserId User);
   EditorParticipant BuildParticipant(SessionUserId User) const;
   std::vector<EditorParticipant> BuildParticipants(SessionUserId CurrentUser) const;
   SessionUserId ResolveRuntimeControllerUser() const;
@@ -210,9 +226,74 @@ public:
       std::string_view ObjectId) const;
   const EditorObjectCollaborationState *FindCollaborationState(
       SceneObjectHandle Handle) const;
+  const auto &GetCollaborationByObjectId() const {
+    return m_State.Scene.CollaborationByObjectId;
+  }
+  void ReplaceCollaborationStatesByObjectId(
+      std::unordered_map<std::string, EditorObjectCollaborationState>
+          CollaborationByObjectId);
+  void RemoveCollaborationState(std::string_view ObjectId);
   EditorRuntimeState GetRuntimeState() const { return m_State.RuntimeState; }
   SceneObjectHandle ResolveObjectHandle(std::string_view ObjectId) const;
   const std::string *ResolveObjectId(SceneObjectHandle Handle) const;
+  SceneObjectHandle EnsureHandleForObjectId(
+      std::string_view ObjectId, SceneObjectHandle PreferredHandle = {});
+  void RebuildSceneHandleState();
+  InstanceHandle FindInstanceById(std::string_view ObjectId) const;
+  bool IsValidTemplateId(const std::string &TemplateId) const;
+  std::vector<std::string> CollectDescendantIds(InstanceHandle Root) const;
+
+  const auto &GetSceneItems() const { return m_State.Scene.Items; }
+  void ReplaceSceneItems(std::vector<EditorSceneItem> SceneItems);
+  void ClearSceneItems();
+  void AddSceneItem(EditorSceneItem Item);
+  const auto &GetSceneMeshInstances() const { return m_State.Scene.MeshInstances; }
+  void ReplaceSceneMeshInstances(
+      std::vector<EditorSceneMeshInstance> SceneMeshInstances);
+  void ReplaceWorldSettings(EditorWorldSettings Settings);
+  const EditorWorldSettings &GetWorldSettings() const {
+    return m_State.Scene.WorldSettings;
+  }
+  void SetWorldSettingsHDRData(HDRTextureSourceDataRef HDRData);
+
+  bool ValidateCommand(const QueuedEditorCommand &QueuedCommand,
+                       std::string &FailureReason) const;
+  void PublishEvent(const EditorEvent &Event);
+  InstanceHandle EnsureWorldFolder();
+  std::string BuildUniqueObjectId(std::string_view BaseObjectId) const;
+  std::string BuildUniqueDisplayName(std::string_view BaseDisplayName) const;
+  InstanceHandle CreateInstanceForTemplate(const std::string &TemplateId,
+                                           const std::string &ObjectId) const;
+  void SyncItemsFromTree();
+  void DeepCloneSubtree(InstanceHandle Source, InstanceHandle DestParent,
+                        std::vector<EditorObjectDetails> &OutNewDetails);
+  void RemoveSceneObject(std::string_view ObjectId);
+  bool UpdateSceneItemDisplayName(std::string_view ObjectId,
+                                  std::string_view DisplayName);
+  bool UpdateSceneItemVisibility(std::string_view ObjectId, bool Visible);
+  void RemoveGeneratedAssetChildren(std::string_view RootObjectId);
+  void ExpandMeshAssetIntoScene(std::string_view RootObjectId,
+                                const MeshSceneData &SceneData,
+                                std::string_view AssetPath);
+  EditorSceneMeshInstance *FindMutableSceneMeshInstance(std::string_view ObjectId);
+  void AddSceneMeshInstance(EditorSceneMeshInstance Instance);
+  void RemoveSceneMeshInstances(std::string_view ObjectId);
+  bool UpdateSceneMeshInstanceTransform(SceneObjectHandle Handle,
+                                        const glm::mat4 &Transform);
+  void ClearSelectionsForObject(std::string_view ObjectId);
+  void PruneInvalidSelections();
+  void RecomputeSubtreeWorldTransforms(InstanceHandle Node);
+  void RecomputeAllWorldTransforms();
+  void ApplyWorldTransform(std::string_view ObjectId,
+                           const EditorTransformDetails &WorldTransform,
+                           SessionUserId User, bool PublishEvent);
+  void SetWorldSettings(const EditorWorldSettings &Settings);
+  void RefreshWorldSettingsHDR(std::string_view LogContext);
+  void CaptureRuntimeSceneSnapshot();
+  bool RestoreRuntimeSceneSnapshot();
+  void SetRuntimeState(EditorRuntimeState State) { m_State.RuntimeState = State; }
+  void EnsureRuntimePhysicsWorldStarted();
+  void StopRuntimePhysicsWorld();
 
   void AcquireLock(const std::string &ObjectId, SessionUserId User);
   void ReleaseLock(const std::string &ObjectId, SessionUserId User);
@@ -222,12 +303,9 @@ public:
                                   const EditorTransformDetails &Transform);
   void SetRuntimePhysicsController(
       std::unique_ptr<IEditorRuntimePhysicsController> Controller);
+  static bool IsBlankString(std::string_view Value);
 
 private:
-  friend class EditorCommandDispatcher;
-  friend class EditorSceneStateManager;
-  friend class EditorSessionValidationModule;
-
   struct RuntimeSceneSnapshot {
     EditorSceneState Scene;
     std::unordered_map<SessionUserId, std::string, SessionUserIdHash>
@@ -236,21 +314,8 @@ private:
         SelectedObjectHandles;
   };
 
-  static bool IsBlankString(std::string_view Value);
-
   void PublishPresenceChangedEvent(SessionUserId User);
-  EditorUserPresence &EnsurePresence(SessionUserId User);
-  EditorViewportState &EnsureViewport(SessionUserId User);
   SceneObjectHandle AllocateSceneObjectHandle();
-  SceneObjectHandle EnsureHandleForObjectId(std::string_view ObjectId,
-                                            SceneObjectHandle PreferredHandle = {});
-  void RebuildSceneHandleState();
-  InstanceHandle FindInstanceById(std::string_view ObjectId) const;
-  bool IsValidTemplateId(const std::string &TemplateId) const;
-  std::vector<std::string> CollectDescendantIds(InstanceHandle Root) const;
-  void PublishEvent(const EditorEvent &Event);
-  void EnsureRuntimePhysicsWorldStarted();
-  void StopRuntimePhysicsWorld();
   void StepRuntimePhysics(float DeltaTimeSeconds);
 
   EditorSessionConfig m_Config;

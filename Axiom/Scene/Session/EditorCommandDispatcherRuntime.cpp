@@ -10,42 +10,6 @@
 
 namespace Axiom {
 namespace {
-TextureSourceDataRef CloneTextureSourceData(
-    const TextureSourceDataRef &Texture) {
-  if (!Texture) {
-    return nullptr;
-  }
-
-  auto Copy = std::make_shared<TextureSourceData>();
-  Copy->Width = Texture->Width;
-  Copy->Height = Texture->Height;
-  Copy->Pixels = Texture->Pixels;
-  return Copy;
-}
-
-std::shared_ptr<MaterialInstance>
-CloneMaterialInstance(const std::shared_ptr<MaterialInstance> &Material) {
-  if (!Material) {
-    return nullptr;
-  }
-
-  auto Copy = std::make_shared<MaterialInstance>();
-  Copy->BaseColorTexture = CloneTextureSourceData(Material->BaseColorTexture);
-  Copy->BaseColorFactor = Material->BaseColorFactor;
-  Copy->Metallic = Material->Metallic;
-  Copy->Roughness = Material->Roughness;
-  Copy->TextureAssetPath = Material->TextureAssetPath;
-  return Copy;
-}
-
-EditorSceneState CloneEditorSceneState(const EditorSceneState &Scene) {
-  EditorSceneState Copy = Scene;
-  for (auto &MeshInstance : Copy.MeshInstances) {
-    MeshInstance.Material = CloneMaterialInstance(MeshInstance.Material);
-  }
-  return Copy;
-}
-
 void CookMeshAssetBestEffort(const std::filesystem::path &ContentDir,
                              std::string_view RelativeAssetPath) {
   if (ContentDir.empty() || RelativeAssetPath.empty()) {
@@ -76,7 +40,7 @@ void CookTextureAssetBestEffort(const std::filesystem::path &ContentDir,
 void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                             const SetMeshAssetCommand &Command) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
-  if (m_Session.m_ContentDir.empty()) {
+  if (m_Session.GetContentDir().empty()) {
     A_CORE_WARN("SetMeshAsset: content directory not configured");
     return;
   }
@@ -84,10 +48,10 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
   const std::filesystem::path AssetRelative{Command.AssetPath};
   const bool IsEngineAsset =
       !AssetRelative.empty() && *AssetRelative.begin() == "Engine";
-  std::filesystem::path EffectiveContentDir = m_Session.m_ContentDir;
+  std::filesystem::path EffectiveContentDir = m_Session.GetContentDir();
   std::filesystem::path EffectiveRelative = AssetRelative;
-  if (IsEngineAsset && !m_Session.m_EngineContentDir.empty()) {
-    EffectiveContentDir = m_Session.m_EngineContentDir;
+  if (IsEngineAsset && !m_Session.GetEngineContentDir().empty()) {
+    EffectiveContentDir = m_Session.GetEngineContentDir();
     auto It = AssetRelative.begin();
     ++It;
     EffectiveRelative.clear();
@@ -105,9 +69,9 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
     return;
   }
 
-  m_Session.m_SceneStateManager->ExpandMeshAssetIntoScene(
-      Command.ObjectId, *SceneData, Command.AssetPath);
-  m_Session.m_SceneStateManager->RecomputeSubtreeWorldTransforms(
+  m_Session.ExpandMeshAssetIntoScene(Command.ObjectId, *SceneData,
+                                     Command.AssetPath);
+  m_Session.RecomputeSubtreeWorldTransforms(
       m_Session.FindInstanceById(Command.ObjectId));
 
   A_CORE_INFO("SetMeshAsset: assigned '{}' to object '{}'",
@@ -122,14 +86,14 @@ void EditorCommandDispatcher::HandleCommand(
     const QueuedEditorCommand &QueuedCommand,
     const SetLightPropertiesCommand &Command) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
-  auto DetailsIt = m_Session.m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
-  if (DetailsIt == m_Session.m_State.Scene.ObjectDetailsById.end()) return;
+  EditorObjectDetails *Details = m_Session.FindMutableObjectDetails(Command.ObjectId);
+  if (Details == nullptr) return;
 
-  if (!DetailsIt->second.Light.has_value()) {
-    DetailsIt->second.Light = EditorLightProperties{};
+  if (!Details->Light.has_value()) {
+    Details->Light = EditorLightProperties{};
   }
-  DetailsIt->second.Light->Color = Command.Color;
-  DetailsIt->second.Light->Intensity = Command.Intensity;
+  Details->Light->Color = Command.Color;
+  Details->Light->Intensity = Command.Intensity;
   m_Session.PublishEvent({.Payload = LightPropertiesChangedEvent{
                               .ObjectId = Command.ObjectId,
                               .Color = Command.Color,
@@ -141,26 +105,23 @@ void EditorCommandDispatcher::HandleCommand(
     const QueuedEditorCommand &QueuedCommand,
     const SetMaterialPropertiesCommand &Command) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
-  auto DetailsIt = m_Session.m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
-  if (DetailsIt == m_Session.m_State.Scene.ObjectDetailsById.end()) return;
+  EditorObjectDetails *Details = m_Session.FindMutableObjectDetails(Command.ObjectId);
+  if (Details == nullptr) return;
 
-  if (!DetailsIt->second.Material.has_value()) {
-    DetailsIt->second.Material = EditorMaterialProperties{};
+  if (!Details->Material.has_value()) {
+    Details->Material = EditorMaterialProperties{};
   }
-  DetailsIt->second.Material->BaseColorFactor = Command.BaseColorFactor;
-  DetailsIt->second.Material->Metallic = Command.Metallic;
-  DetailsIt->second.Material->Roughness = Command.Roughness;
+  Details->Material->BaseColorFactor = Command.BaseColorFactor;
+  Details->Material->Metallic = Command.Metallic;
+  Details->Material->Roughness = Command.Roughness;
 
-  auto MeshIt = std::find_if(m_Session.m_State.Scene.MeshInstances.begin(),
-                             m_Session.m_State.Scene.MeshInstances.end(),
-                             [&](const EditorSceneMeshInstance &Mesh) {
-                               return Mesh.ObjectId == Command.ObjectId;
-                             });
-  if (MeshIt != m_Session.m_State.Scene.MeshInstances.end() && MeshIt->Material) {
-    MeshIt->Material->BaseColorFactor = Command.BaseColorFactor;
-    MeshIt->Material->Metallic = Command.Metallic;
-    MeshIt->Material->Roughness = Command.Roughness;
-    MarkMaterialInstanceDirty(*MeshIt->Material);
+  if (EditorSceneMeshInstance *MeshInstance =
+          m_Session.FindMutableSceneMeshInstance(Command.ObjectId);
+      MeshInstance != nullptr && MeshInstance->Material) {
+    MeshInstance->Material->BaseColorFactor = Command.BaseColorFactor;
+    MeshInstance->Material->Metallic = Command.Metallic;
+    MeshInstance->Material->Roughness = Command.Roughness;
+    MarkMaterialInstanceDirty(*MeshInstance->Material);
   }
 
   m_Session.PublishEvent({.Payload = MaterialPropertiesChangedEvent{
@@ -175,43 +136,40 @@ void EditorCommandDispatcher::HandleCommand(
     const QueuedEditorCommand &QueuedCommand,
     const SetMaterialTextureCommand &Command) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
-  auto DetailsIt = m_Session.m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
-  if (DetailsIt == m_Session.m_State.Scene.ObjectDetailsById.end()) return;
+  EditorObjectDetails *Details = m_Session.FindMutableObjectDetails(Command.ObjectId);
+  if (Details == nullptr) return;
 
-  auto MeshIt = std::find_if(m_Session.m_State.Scene.MeshInstances.begin(),
-                             m_Session.m_State.Scene.MeshInstances.end(),
-                             [&](const EditorSceneMeshInstance &Mesh) {
-                               return Mesh.ObjectId == Command.ObjectId;
-                             });
-  if (MeshIt == m_Session.m_State.Scene.MeshInstances.end() || !MeshIt->Material) {
+  EditorSceneMeshInstance *MeshInstance =
+      m_Session.FindMutableSceneMeshInstance(Command.ObjectId);
+  if (MeshInstance == nullptr || !MeshInstance->Material) {
     return;
   }
 
   if (Command.TextureAssetPath.empty()) {
-    MeshIt->Material->BaseColorTexture = nullptr;
-    MeshIt->Material->TextureAssetPath.clear();
+    MeshInstance->Material->BaseColorTexture = nullptr;
+    MeshInstance->Material->TextureAssetPath.clear();
   } else {
-    if (m_Session.m_ContentDir.empty()) {
+    if (m_Session.GetContentDir().empty()) {
       A_CORE_WARN("SetMaterialTexture: content directory not configured");
       return;
     }
-    CookTextureAssetBestEffort(m_Session.m_ContentDir, Command.TextureAssetPath);
-    const auto FullPath = m_Session.m_ContentDir / Command.TextureAssetPath;
+    CookTextureAssetBestEffort(m_Session.GetContentDir(), Command.TextureAssetPath);
+    const auto FullPath = m_Session.GetContentDir() / Command.TextureAssetPath;
     auto Loaded = Assets::LoadTextureFromFile(FullPath);
     if (!Loaded) {
       A_CORE_WARN("SetMaterialTexture: failed to load '{}' for object '{}'",
                   Command.TextureAssetPath, Command.ObjectId);
       return;
     }
-    MeshIt->Material->BaseColorTexture = std::move(Loaded);
-    MeshIt->Material->TextureAssetPath = Command.TextureAssetPath;
+    MeshInstance->Material->BaseColorTexture = std::move(Loaded);
+    MeshInstance->Material->TextureAssetPath = Command.TextureAssetPath;
   }
-  MarkMaterialInstanceDirty(*MeshIt->Material);
+  MarkMaterialInstanceDirty(*MeshInstance->Material);
 
-  if (!DetailsIt->second.Material.has_value()) {
-    DetailsIt->second.Material = EditorMaterialProperties{};
+  if (!Details->Material.has_value()) {
+    Details->Material = EditorMaterialProperties{};
   }
-  DetailsIt->second.Material->TextureAssetPath =
+  Details->Material->TextureAssetPath =
       Command.TextureAssetPath.empty()
           ? std::nullopt
           : std::optional<std::string>(Command.TextureAssetPath);
@@ -226,18 +184,18 @@ void EditorCommandDispatcher::HandleCommand(
 
 void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &,
                                             const SetPhysicsPropertiesCommand &Command) {
-  auto DetailsIt = m_Session.m_State.Scene.ObjectDetailsById.find(Command.ObjectId);
-  if (DetailsIt == m_Session.m_State.Scene.ObjectDetailsById.end()) return;
+  EditorObjectDetails *Details = m_Session.FindMutableObjectDetails(Command.ObjectId);
+  if (Details == nullptr) return;
 
-  DetailsIt->second.Physics = Command.Physics;
+  Details->Physics = Command.Physics;
   if (Command.Physics.BodyType == EditorPhysicsBodyType::None &&
       Command.Physics.ColliderType == EditorPhysicsColliderType::None) {
-    DetailsIt->second.Physics.reset();
+    Details->Physics.reset();
   }
 
   m_Session.PublishEvent({.Payload = PhysicsPropertiesChangedEvent{
                               .ObjectId = Command.ObjectId,
-                              .Physics = DetailsIt->second.Physics.value_or(
+                              .Physics = Details->Physics.value_or(
                                   EditorPhysicsProperties{}),
                           }});
 }
@@ -245,36 +203,32 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &,
 void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                             const PlaySessionCommand &) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
-  m_Session.m_RuntimeSceneSnapshot = EditorSession::RuntimeSceneSnapshot{
-      .Scene = CloneEditorSceneState(m_Session.m_State.Scene),
-      .SelectedObjectIds = m_Session.m_State.SelectedObjectIds,
-      .SelectedObjectHandles = m_Session.m_SelectedObjectHandles,
-  };
-  m_Session.m_State.RuntimeState = EditorRuntimeState::Playing;
+  m_Session.CaptureRuntimeSceneSnapshot();
+  m_Session.SetRuntimeState(EditorRuntimeState::Playing);
   m_Session.EnsureRuntimePhysicsWorldStarted();
   m_Session.PublishEvent({.Payload = RuntimeStateChangedEvent{
                               .User = QueuedCommand.Context.User,
-                              .State = m_Session.m_State.RuntimeState,
+                              .State = m_Session.GetRuntimeState(),
                           }});
 }
 
 void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                             const PauseSessionCommand &) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
-  m_Session.m_State.RuntimeState = EditorRuntimeState::Paused;
+  m_Session.SetRuntimeState(EditorRuntimeState::Paused);
   m_Session.PublishEvent({.Payload = RuntimeStateChangedEvent{
                               .User = QueuedCommand.Context.User,
-                              .State = m_Session.m_State.RuntimeState,
+                              .State = m_Session.GetRuntimeState(),
                           }});
 }
 
 void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                             const ResumeSessionCommand &) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
-  m_Session.m_State.RuntimeState = EditorRuntimeState::Playing;
+  m_Session.SetRuntimeState(EditorRuntimeState::Playing);
   m_Session.PublishEvent({.Payload = RuntimeStateChangedEvent{
                               .User = QueuedCommand.Context.User,
-                              .State = m_Session.m_State.RuntimeState,
+                              .State = m_Session.GetRuntimeState(),
                           }});
 }
 
@@ -282,54 +236,42 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
                                             const StopSessionCommand &) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
   m_Session.StopRuntimePhysicsWorld();
-  if (m_Session.m_RuntimeSceneSnapshot.has_value()) {
-    m_Session.m_SceneStateManager->SetSceneState(
-        std::move(m_Session.m_RuntimeSceneSnapshot->Scene));
-    m_Session.m_State.SelectedObjectIds =
-        std::move(m_Session.m_RuntimeSceneSnapshot->SelectedObjectIds);
-    m_Session.m_SelectedObjectHandles =
-        std::move(m_Session.m_RuntimeSceneSnapshot->SelectedObjectHandles);
-    m_Session.m_SceneStateManager->PruneInvalidSelections();
-    m_Session.m_RuntimeSceneSnapshot.reset();
-  }
-  m_Session.m_State.RuntimeState = EditorRuntimeState::Edit;
+  m_Session.RestoreRuntimeSceneSnapshot();
+  m_Session.SetRuntimeState(EditorRuntimeState::Edit);
   m_Session.PublishEvent({.Payload = RuntimeStateChangedEvent{
                               .User = QueuedCommand.Context.User,
-                              .State = m_Session.m_State.RuntimeState,
+                              .State = m_Session.GetRuntimeState(),
                           }});
 }
 
 void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &,
                                             const SetWorldSettingsCommand &Command) {
-  m_Session.m_SceneStateManager->SetWorldSettings(Command.Settings);
+  m_Session.SetWorldSettings(Command.Settings);
 }
 
 void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCommand,
                                             const PlaceActorCommand &Command) {
   m_Session.EnsurePresence(QueuedCommand.Context.User);
-  const InstanceHandle WorldFolder = m_Session.m_SceneStateManager->EnsureWorldFolder();
+  const InstanceHandle WorldFolder = m_Session.EnsureWorldFolder();
   if (!WorldFolder) return;
 
-  const std::string ActorId =
-      m_Session.m_SceneStateManager->BuildUniqueObjectId("Actor");
-  const std::string ActorDisplayName =
-      m_Session.m_SceneStateManager->BuildUniqueDisplayName("Actor");
+  const std::string ActorId = m_Session.BuildUniqueObjectId("Actor");
+  const std::string ActorDisplayName = m_Session.BuildUniqueDisplayName("Actor");
   const EditorTransformDetails ActorTransform{.Location = Command.Location};
-  m_Session.m_State.Scene.ObjectDetailsById.emplace(
-      ActorId, EditorObjectDetails{
-                   .Handle = m_Session.EnsureHandleForObjectId(ActorId),
-                   .ObjectId = ActorId,
-                   .DisplayName = ActorDisplayName,
-                   .Kind = EditorSceneItemKind::Actor,
-                   .Visible = true,
-                   .SupportsTransform = true,
-                   .TransformReadOnly = false,
-                   .Transform = ActorTransform,
-                   .WorldTransform = ActorTransform,
-               });
+  m_Session.InsertObjectDetails(EditorObjectDetails{
+      .Handle = m_Session.EnsureHandleForObjectId(ActorId),
+      .ObjectId = ActorId,
+      .DisplayName = ActorDisplayName,
+      .Kind = EditorSceneItemKind::Actor,
+      .Visible = true,
+      .SupportsTransform = true,
+      .TransformReadOnly = false,
+      .Transform = ActorTransform,
+      .WorldTransform = ActorTransform,
+  });
   const InstanceHandle ActorNodeHandle =
-      m_Session.m_SceneStateManager->CreateInstanceForTemplate("Actor", ActorId);
-  if (Instance *ActorNode = m_Session.m_InstancePool.Resolve(ActorNodeHandle);
+      m_Session.CreateInstanceForTemplate("Actor", ActorId);
+  if (Instance *ActorNode = m_Session.GetInstancePool().Resolve(ActorNodeHandle);
       ActorNode != nullptr) {
     ActorNode->SetParent(WorldFolder);
   }
@@ -343,37 +285,34 @@ void EditorCommandDispatcher::HandleCommand(const QueuedEditorCommand &QueuedCom
         Command.ChildTemplateId == "Camera" ? EditorSceneItemKind::Camera :
         Command.ChildTemplateId == "Actor"  ? EditorSceneItemKind::Actor :
                                               EditorSceneItemKind::Folder;
-    ChildId =
-        m_Session.m_SceneStateManager->BuildUniqueObjectId(Command.ChildTemplateId);
-    ChildDisplayName = m_Session.m_SceneStateManager->BuildUniqueDisplayName(
-        Command.ChildTemplateId);
+    ChildId = m_Session.BuildUniqueObjectId(Command.ChildTemplateId);
+    ChildDisplayName =
+        m_Session.BuildUniqueDisplayName(Command.ChildTemplateId);
     const bool ChildTransformable = ChildKind != EditorSceneItemKind::Folder;
-    m_Session.m_State.Scene.ObjectDetailsById.emplace(
-        ChildId, EditorObjectDetails{
-                     .Handle = m_Session.EnsureHandleForObjectId(ChildId),
-                     .ObjectId = ChildId,
-                     .DisplayName = ChildDisplayName,
-                     .Kind = ChildKind,
-                     .Visible = true,
-                     .SupportsTransform = ChildTransformable,
-                     .TransformReadOnly = false,
-                     .Transform = ChildTransformable
-                                      ? std::optional{EditorTransformDetails{}}
-                                      : std::nullopt,
-                     .WorldTransform = ChildTransformable
-                                           ? std::optional{EditorTransformDetails{}}
-                                           : std::nullopt,
-                 });
+    m_Session.InsertObjectDetails(EditorObjectDetails{
+        .Handle = m_Session.EnsureHandleForObjectId(ChildId),
+        .ObjectId = ChildId,
+        .DisplayName = ChildDisplayName,
+        .Kind = ChildKind,
+        .Visible = true,
+        .SupportsTransform = ChildTransformable,
+        .TransformReadOnly = false,
+        .Transform = ChildTransformable
+                         ? std::optional{EditorTransformDetails{}}
+                         : std::nullopt,
+        .WorldTransform = ChildTransformable
+                              ? std::optional{EditorTransformDetails{}}
+                              : std::nullopt,
+    });
     const InstanceHandle ChildNodeHandle =
-        m_Session.m_SceneStateManager->CreateInstanceForTemplate(
-            Command.ChildTemplateId, ChildId);
-    if (Instance *ChildNode = m_Session.m_InstancePool.Resolve(ChildNodeHandle);
+        m_Session.CreateInstanceForTemplate(Command.ChildTemplateId, ChildId);
+    if (Instance *ChildNode = m_Session.GetInstancePool().Resolve(ChildNodeHandle);
         ChildNode != nullptr) {
       ChildNode->SetParent(ActorNodeHandle ? ActorNodeHandle : WorldFolder);
     }
   }
 
-  m_Session.m_SceneStateManager->SyncItemsFromTree();
+  m_Session.SyncItemsFromTree();
   m_Session.RebuildSceneHandleState();
   m_Session.PublishEvent({.Payload = ObjectCreatedEvent{
                               .User = QueuedCommand.Context.User,
