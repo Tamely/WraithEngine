@@ -4,26 +4,21 @@
 #include "HeadlessSessionHost.h"
 #include "WebRtcSession.h"
 
-#include <Assets/IAssetSource.h>
-#include <Project/ProjectSystem.h>
 #include <Remote/SessionTransport.h>
-#include <Renderer/RendererTypes.h>
-#include <Renderer/RenderScene.h>
-#include <Renderer/VideoEncoding.h>
 
 #include <atomic>
-#include <chrono>
-#include <cstdint>
 #include <memory>
-#include <mutex>
-#include <optional>
 #include <string>
 #include <thread>
-#include <unordered_map>
-#include <vector>
 
 namespace Axiom {
 class RemoteViewportServerUwsState;
+class RemoteViewportGridSnap;
+class RemoteViewportGizmoController;
+class RemoteViewportHttpRouter;
+class RemoteViewportPresence;
+class RemoteViewportWebRtcSessionManager;
+class RemoteViewportWebSocketDispatch;
 
 struct RemoteViewportServerOptions {
   std::string Host{"127.0.0.1"};
@@ -76,169 +71,26 @@ public:
   void OnSessionTransportViewportFrame(const ViewportFrame &Frame) override;
 
 private:
-  struct PendingHttpResponse {
-    void *Response{nullptr};
-    bool Aborted{false};
-  };
+  friend class RemoteViewportGridSnap;
+  friend class RemoteViewportGizmoController;
+  friend class RemoteViewportHttpRouter;
+  friend class RemoteViewportPresence;
+  friend class RemoteViewportWebRtcSessionManager;
+  friend class RemoteViewportWebSocketDispatch;
 
-  struct GridSnapSettings {
-    bool Enabled{true};
-    float TranslationStep{1.0f};
-    float RotationStepDegrees{15.0f};
-    float ScaleStep{0.1f};
-  };
-
-  struct WebSocketClient {
-    uintptr_t ConnectionId{static_cast<uintptr_t>(~0ull)};
-    void *Socket{nullptr};
-    bool IsOpen{true};
-  };
-
-  struct ActiveGizmoDrag {
-    GizmoDragState Math;
-    std::string ObjectId;
-    glm::vec3 StartRotDeg{0.0f};
-    glm::vec3 StartScale{1.0f};
-    GizmoMode Mode{GizmoMode::Translate};
-    float GizmoScaleAtDragStart{1.0f};
-  };
-
-  struct RemoteClientSession {
-    struct PacketOutput;
-
-    std::string ClientId;
-    SessionUserId User;
-    std::chrono::steady_clock::time_point LastActivity;
-    std::unique_ptr<IWebRtcSession> WebRtcSession;
-    std::unique_ptr<IVideoEncoder> VideoEncoder;
-    std::unique_ptr<PacketOutput> VideoPacketOutput;
-    std::optional<ActiveGizmoDrag> GizmoDrag;
-    GizmoMode CurrentGizmoMode{GizmoMode::Translate};
-    GridSnapSettings GridSnap;
-  };
-
-  struct ClientSessionResolution {
-    std::shared_ptr<RemoteClientSession> Session;
-    bool ResumedExisting{false};
-  };
-
-  class ClientSessionRegistry;
-  class ProjectWorkspaceService;
-  class AssetLibraryService;
-  class BrowserCommandRouter;
-
-private:
-  void PresenceLoop();
-  void BroadcastTextMessage(std::string Message);
-  void CloseAllClients();
-  void RemoveWebSocketClient(uintptr_t ClientSocketValue);
-  bool SendTextMessage(uintptr_t ClientSocketValue, std::string_view Message);
-  bool SendBinaryMessage(uintptr_t ClientSocketValue, const void *Data,
-                         size_t Size);
-  bool HandleGetRequest(uintptr_t ClientSocketValue, std::string_view Path,
-                        std::string_view HeaderBlock);
-  bool HandlePostRequest(uintptr_t ClientSocketValue, std::string_view Path,
-                         std::string_view HeaderBlock,
-                         std::string_view Body);
-  bool HandleCreateProjectRequest(uintptr_t ClientSocketValue,
-                                  std::string_view Body);
-  bool HandleOpenProjectRequest(uintptr_t ClientSocketValue,
-                                std::string_view Body);
-  bool HandleCookProjectRequest(uintptr_t ClientSocketValue);
-  bool HandlePackageProjectRequest(uintptr_t ClientSocketValue);
-  bool HandleListScriptsRequest(uintptr_t ClientSocketValue);
-  bool HandleListScriptClassesRequest(uintptr_t ClientSocketValue);
-  bool HandleReadScriptFileRequest(uintptr_t ClientSocketValue,
-                                   std::string_view Path);
-  bool HandleCreateScriptFileRequest(uintptr_t ClientSocketValue,
-                                     std::string_view Body);
-  bool HandleSaveScriptFileRequest(uintptr_t ClientSocketValue,
-                                   std::string_view Body);
-  bool HandleRenameScriptFileRequest(uintptr_t ClientSocketValue,
-                                     std::string_view Body);
-  bool HandleDeleteScriptFileRequest(uintptr_t ClientSocketValue,
-                                     std::string_view Body);
-  bool HandleSessionConnectRequest(uintptr_t ClientSocketValue,
-                                   std::string_view HeaderBlock,
-                                   std::string_view Body);
-  bool HandleWebRtcOfferRequest(uintptr_t ClientSocketValue,
-                                std::string_view HeaderBlock,
-                                std::string_view Body);
-  bool HandleWebRtcIceCandidateRequest(uintptr_t ClientSocketValue,
-                                       std::string_view HeaderBlock,
-                                       std::string_view Body);
-  bool HandleWebRtcCloseRequest(uintptr_t ClientSocketValue,
-                                std::string_view HeaderBlock,
-                                std::string_view Body);
-  bool HandleAssetUploadRequest(uintptr_t ClientSocketValue,
-                                std::string_view Path,
-                                std::string_view HeaderBlock,
-                                std::string_view Body);
-  bool HandleWebSocketMessage(uintptr_t ClientSocketValue,
-                              std::string_view Payload);
-  bool HandleClientWebRtcMessage(std::string_view ClientId,
-                                 std::string_view Payload);
-  void HandleTextureDropCommand(SessionUserId User,
-                                const HeadlessCommand &Command);
-  void HandleMeshDropCommand(SessionUserId User,
-                             const HeadlessCommand &Command);
-  void HandlePlaceActorCommand(SessionUserId User,
-                                const HeadlessCommand &Command);
-  void HandleClientEncodedVideoPacket(std::string_view ClientId,
-                                      const EncodedVideoPacket &Packet);
-  std::optional<SessionUserId> ResolveClientUser(
-      std::string_view HeaderBlock) const;
-  std::shared_ptr<RemoteClientSession>
-  FindClientSession(std::string_view ClientId);
-  std::shared_ptr<const RemoteClientSession>
-  FindClientSession(std::string_view ClientId) const;
-  WebRtcSessionStatus GetClientWebRtcStatus(std::string_view ClientId) const;
-  std::vector<IWebRtcSession *> CollectClientWebRtcSessions() const;
-  ClientSessionResolution CreateOrResumeClientSession(
-      const std::optional<std::string> &ClientIdHint);
-  void TouchClientSession(const std::string &ClientId);
-  std::vector<Project::ProjectDescriptor> ListProjects() const;
-  std::optional<Project::ProjectDescriptor> GetActiveProject() const;
-  std::optional<Project::ProjectDescriptor>
-  SetActiveProjectBySlug(std::string_view ProjectSlug);
-  std::filesystem::path GetActiveContentDir() const;
-  std::filesystem::path GetActiveScriptsDir() const;
-  std::filesystem::path GetEngineContentDir() const;
-  bool LoadActiveProjectIntoSession(std::string *FailureReason = nullptr);
-  std::vector<std::string> ListScriptFiles() const;
-  std::vector<std::pair<std::string, std::string>> ListScriptClasses() const;
-  std::optional<std::filesystem::path>
-  ResolveActiveScriptPath(std::string_view RelativePath,
-                          bool AllowMissingLeaf = false) const;
-  std::vector<Assets::AssetDescriptor> CollectVisibleAssets() const;
-  std::optional<std::filesystem::path>
-  ResolveVisibleAssetPath(std::string_view RelativePath) const;
-  uintptr_t AllocateConnectionId();
-  void RegisterPendingHttpResponse(uintptr_t ClientSocketValue, void *Response);
-  void MarkPendingHttpResponseAborted(uintptr_t ClientSocketValue);
-  bool SendHttpResponse(uintptr_t ClientSocketValue, std::string_view Response);
-
-private:
   HeadlessSessionHost &m_Host;
   RemoteViewportServerOptions m_Options;
   std::atomic<bool> m_StopRequested{false};
   std::atomic<bool> m_TransportConnected{false};
-  std::atomic<uintptr_t> m_NextClientConnectionId{1};
   std::unique_ptr<RemoteViewportServerUwsState> m_UwsState;
   std::thread m_ServerThread;
   std::thread m_PresenceThread;
-
-  mutable std::mutex m_WebSocketMutex;
-  std::vector<WebSocketClient> m_WebSocketClients;
-  mutable std::mutex m_HttpResponseMutex;
-  std::unordered_map<uintptr_t, PendingHttpResponse> m_PendingHttpResponses;
-  mutable std::mutex m_SendMutex;
-  std::atomic<uint64_t> m_TotalHttpRequests{0};
-  std::atomic<uint64_t> m_TotalWebSocketMessages{0};
-  std::unique_ptr<ClientSessionRegistry> m_ClientRegistry;
-  std::unique_ptr<ProjectWorkspaceService> m_ProjectWorkspace;
-  std::unique_ptr<AssetLibraryService> m_AssetLibrary;
-  std::unique_ptr<BrowserCommandRouter> m_CommandRouter;
+  std::unique_ptr<RemoteViewportGridSnap> m_GridSnap;
+  std::unique_ptr<RemoteViewportGizmoController> m_GizmoController;
+  std::unique_ptr<RemoteViewportHttpRouter> m_HttpRouter;
+  std::unique_ptr<RemoteViewportPresence> m_Presence;
+  std::unique_ptr<RemoteViewportWebRtcSessionManager> m_WebRtcSessions;
+  std::unique_ptr<RemoteViewportWebSocketDispatch> m_WebSocketDispatch;
 };
 
 bool ParseRemoteViewportServerOptions(int argc, char **argv,

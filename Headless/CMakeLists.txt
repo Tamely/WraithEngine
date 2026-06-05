@@ -21,7 +21,13 @@ target_include_directories(uWebSocketsVendor INTERFACE
 target_link_libraries(uWebSocketsVendor INTERFACE uSockets)
 
 add_library(WraithNetworking STATIC
+  RemoteViewportGizmoController.cpp
+  RemoteViewportGridSnap.cpp
+  RemoteViewportHttpRouter.cpp
+  RemoteViewportPresence.cpp
   RemoteViewportServer.cpp
+  RemoteViewportWebRtcSessionManager.cpp
+  RemoteViewportWebSocketDispatch.cpp
   WraithNetworkingModule.cpp
 )
 
