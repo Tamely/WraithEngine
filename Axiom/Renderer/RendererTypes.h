@@ -6,10 +6,15 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <vector>
 
 namespace Axiom {
+#ifndef AXIOM_THREADED_RENDER
+#define AXIOM_THREADED_RENDER 0
+#endif
+
 enum class RendererBackendType : uint32_t {
   Vulkan = 0,
 };
@@ -31,6 +36,9 @@ struct RendererCreateInfo {
   IViewportFrameOutput *FrameOutput{nullptr};
   uint32_t Width{0};
   uint32_t Height{0};
+  bool EnableThreadedRendering{AXIOM_THREADED_RENDER != 0};
+  std::function<void(uint64_t)> ThreadedRenderSceneStartCallback;
+  std::function<void(uint64_t)> ThreadedRenderSceneCompleteCallback;
   RendererBackendType BackendType{RendererBackendType::Vulkan};
   RendererTechniqueType Technique{RendererTechniqueType::Forward};
   RendererAttachmentRequirements AttachmentRequirements{};

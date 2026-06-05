@@ -1,10 +1,9 @@
 #include "Renderer/RenderCommand.h"
 
 namespace Axiom {
-RenderScene *RenderCommand::s_ActiveScene = nullptr;
+thread_local RenderScene *RenderCommand::s_ActiveScene = nullptr;
 
 void RenderCommand::BeginScene(RenderScene &Scene) {
-  Scene.Reset();
   s_ActiveScene = &Scene;
 }
 

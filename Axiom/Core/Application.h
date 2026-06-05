@@ -12,6 +12,10 @@
 #include "Core/Window.h"
 
 namespace Axiom {
+#ifndef AXIOM_THREADED_RENDER
+#define AXIOM_THREADED_RENDER 0
+#endif
+
 class Renderer;
 struct RendererDeleter {
   void operator()(Renderer *Value) const;
@@ -35,6 +39,7 @@ struct ApplicationConfig {
   uint32_t Height{900};
   RuntimeMode Mode{RuntimeMode::LocalWindowedEditor};
   IViewportFrameOutput *FrameOutput{nullptr};
+  bool EnableThreadedRendering{AXIOM_THREADED_RENDER != 0};
 };
 
 class Application {

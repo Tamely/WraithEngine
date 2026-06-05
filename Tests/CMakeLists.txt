@@ -8,6 +8,7 @@ add_executable(AxiomTests
   ProjectTests.cpp
   RenderSubmissionTests.cpp
   SceneLifecycleTests.cpp
+  ThreadingTests.cpp
   UWebSocketsVendorTests.cpp
   WraithNetworkingModuleTests.cpp
   ../Headless/HeadlessOverlayModule.cpp
@@ -49,7 +50,16 @@ target_compile_definitions(AxiomTests PRIVATE
   AXIOM_PROJECTS_DIR="${CMAKE_SOURCE_DIR}/Projects"
   AXIOM_WITH_PHYSICS=$<IF:$<BOOL:${AXIOM_ENABLE_PHYSICS}>,1,0>
   AXIOM_WITH_SCRIPTING=$<IF:$<BOOL:${AXIOM_ENABLE_SCRIPTING}>,1,0>
+  AXIOM_THREAD_SANITIZER=$<IF:$<BOOL:${AXIOM_ENABLE_TSAN}>,1,0>
 )
+
+if(AXIOM_ENABLE_TSAN)
+  target_compile_options(AxiomTests PRIVATE
+    -fsanitize=thread
+    -fno-omit-frame-pointer
+  )
+  target_link_options(AxiomTests PRIVATE -fsanitize=thread)
+endif()
 
 # ---------------------------------------------------------------------------
 # Scripting tests — only compiled when the scripting subsystem is enabled

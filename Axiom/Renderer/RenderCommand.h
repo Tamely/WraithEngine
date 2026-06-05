@@ -18,6 +18,6 @@ public:
   static void EndScene();
 
 private:
-  static RenderScene *s_ActiveScene;
+  static thread_local RenderScene *s_ActiveScene;
 };
 } // namespace Axiom

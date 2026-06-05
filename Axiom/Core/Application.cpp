@@ -4,6 +4,8 @@
 #include "Core/GlfwWindow.h"
 #include "Core/HeadlessWindow.h"
 #include "Core/Log.h"
+#include "Core/Threading.h"
+#include "Jobs/JobSystem.h"
 #include "Renderer/Renderer.h"
 
 #include <algorithm>
@@ -35,6 +37,7 @@ Application::Application(const ApplicationConfig &Config,
   (void)Args;
   s_Instance = this;
   Log::Init();
+  Threading::SetCurrentThreadName("Axiom Game Thread");
 
   if (m_Window == nullptr || m_RenderSurface == nullptr) {
     switch (m_Config.Mode) {
@@ -62,8 +65,10 @@ Application::Application(const ApplicationConfig &Config,
         .FrameOutput = m_Config.FrameOutput,
         .Width = m_Window->GetWidth(),
         .Height = m_Window->GetHeight(),
+        .EnableThreadedRendering = m_Config.EnableThreadedRendering,
     });
   }
+  Jobs::Startup();
   if (Dependencies.RegisterDefaultModules) {
     RegisterDefaultModules();
   }
@@ -74,6 +79,7 @@ Application::Application(const ApplicationConfig &Config,
 Application::~Application() {
   m_ModuleManager.ShutdownModules(*this);
   m_Renderer.reset();
+  Jobs::Shutdown();
   m_Window.reset();
   if (s_Instance == this) {
     s_Instance = nullptr;

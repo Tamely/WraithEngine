@@ -17,6 +17,10 @@ option(AXIOM_ENABLE_WEBRTC
        "Enable the macOS WebRTC transport integration seam" OFF)
 option(AXIOM_ENABLE_PHYSICS
        "Enable the JoltPhysics runtime simulation seam" ON)
+option(AXIOM_THREADED_RENDER
+       "Enable the experimental threaded renderer and worker job system" OFF)
+option(AXIOM_ENABLE_TSAN
+       "Build with ThreadSanitizer instrumentation" OFF)
 set(AXIOM_WEBRTC_FRAMEWORK_PATH "" CACHE PATH
     "Optional path to a locally built WebRTC.framework for macOS WebRTC integration")
 set(AXIOM_WEBRTC_LIBRARY_PATH "" CACHE FILEPATH

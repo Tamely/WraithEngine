@@ -12,6 +12,7 @@ _deps
 CMakeUserPresets.json
 Build/
 build/
+build-tsan/
 .cache/
 .vs/
 .idea/

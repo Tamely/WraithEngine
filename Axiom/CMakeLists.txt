@@ -5,8 +5,11 @@ set(AXIOM_CORE_SOURCES
   Core/GlfwWindow.cpp
   Core/HeadlessRuntimeInstrumentation.cpp
   Core/HeadlessWindow.cpp
+  Jobs/JobSystem.cpp
+  Jobs/TaskScheduler.cpp
   Core/Log.cpp
   Core/ModuleManager.cpp
+  Core/Threading.cpp
   Core/VulkanLoader.cpp
   Core/Window.cpp
   Core/WindowInputPlatform.cpp
@@ -347,6 +350,7 @@ function(axiom_configure_module_target target_name)
     AXIOM_PROJECTS_DIR="${CMAKE_SOURCE_DIR}/Projects"
     AXIOM_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
     AXIOM_ENABLE_WEBRTC=$<IF:$<BOOL:${AXIOM_ENABLE_WEBRTC}>,1,0>
+    AXIOM_THREADED_RENDER=$<IF:$<BOOL:${AXIOM_THREADED_RENDER}>,1,0>
     AXIOM_WEBRTC_LINKED=${AXIOM_WEBRTC_LINKED}
   )
 
@@ -372,6 +376,20 @@ function(axiom_configure_module_target target_name)
       $<$<CONFIG:RelWithDebInfo>:-O2 -g -march=native>
       $<$<CONFIG:MinSizeRel>:-Os>
     )
+  endif()
+
+  if(AXIOM_ENABLE_TSAN)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+      message(FATAL_ERROR "AXIOM_ENABLE_TSAN requires Clang or GCC")
+    endif()
+    target_compile_options(${target_name} PUBLIC
+      -fsanitize=thread
+      -fno-omit-frame-pointer
+    )
+    target_link_options(${target_name} PUBLIC -fsanitize=thread)
+    target_compile_definitions(${target_name} PUBLIC AXIOM_THREAD_SANITIZER=1)
+  else()
+    target_compile_definitions(${target_name} PUBLIC AXIOM_THREAD_SANITIZER=0)
   endif()
 endfunction()
 
@@ -520,8 +538,15 @@ target_compile_definitions(AxiomRendererVulkanObjects PRIVATE
   AXIOM_PROJECTS_DIR="${CMAKE_SOURCE_DIR}/Projects"
   AXIOM_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
   AXIOM_ENABLE_WEBRTC=$<IF:$<BOOL:${AXIOM_ENABLE_WEBRTC}>,1,0>
+  AXIOM_THREADED_RENDER=$<IF:$<BOOL:${AXIOM_THREADED_RENDER}>,1,0>
   AXIOM_WEBRTC_LINKED=${AXIOM_WEBRTC_LINKED}
 )
+if(AXIOM_ENABLE_TSAN)
+  target_compile_options(AxiomRendererVulkanObjects PRIVATE
+    -fsanitize=thread
+    -fno-omit-frame-pointer
+  )
+endif()
 
 if(AXIOM_ENABLE_SCRIPTING)
   set(AXIOM_CORAL_MANAGED_DIR
