@@ -31,6 +31,146 @@ void VulkanCommandList::End() {
   m_IsRecording = false;
 }
 
+void VulkanCommandList::BeginRendering(const void *RenderingInfo) {
+  vkCmdBeginRendering(
+      m_CommandBuffer, static_cast<const VkRenderingInfo *>(RenderingInfo));
+}
+
+void VulkanCommandList::EndRendering() { vkCmdEndRendering(m_CommandBuffer); }
+
+void VulkanCommandList::SetViewport(const void *Viewport) {
+  vkCmdSetViewport(m_CommandBuffer, 0, 1,
+                   static_cast<const VkViewport *>(Viewport));
+}
+
+void VulkanCommandList::SetScissor(const void *Scissor) {
+  vkCmdSetScissor(m_CommandBuffer, 0, 1, static_cast<const VkRect2D *>(Scissor));
+}
+
+void VulkanCommandList::BindPipeline(RHIBindPoint BindPoint,
+                                     RHINativeHandle Pipeline) {
+  vkCmdBindPipeline(m_CommandBuffer, ToVulkanBindPoint(BindPoint),
+                    DecodeNativeHandle<VkPipeline>(Pipeline));
+}
+
+void VulkanCommandList::BindDescriptorSet(
+    RHIBindPoint BindPoint, RHINativeHandle PipelineLayout, uint32_t FirstSet,
+    std::span<const RHINativeHandle> Sets) {
+  std::vector<VkDescriptorSet> DescriptorSets;
+  DescriptorSets.reserve(Sets.size());
+  for (RHINativeHandle Set : Sets) {
+    DescriptorSets.push_back(DecodeNativeHandle<VkDescriptorSet>(Set));
+  }
+
+  vkCmdBindDescriptorSets(
+      m_CommandBuffer, ToVulkanBindPoint(BindPoint),
+      DecodeNativeHandle<VkPipelineLayout>(PipelineLayout), FirstSet,
+      static_cast<uint32_t>(DescriptorSets.size()), DescriptorSets.data(), 0,
+      VK_NULL_HANDLE);
+}
+
+void VulkanCommandList::PushConstants(RHINativeHandle PipelineLayout,
+                                      uint32_t ShaderStages, uint32_t Offset,
+                                      uint32_t Size, const void *Data) {
+  vkCmdPushConstants(m_CommandBuffer,
+                     DecodeNativeHandle<VkPipelineLayout>(PipelineLayout),
+                     static_cast<VkShaderStageFlags>(ShaderStages), Offset, Size,
+                     Data);
+}
+
+void VulkanCommandList::BindVertexBuffer(uint32_t FirstBinding,
+                                         RHINativeHandle Buffer,
+                                         uint64_t Offset) {
+  const VkBuffer VulkanBuffer = DecodeNativeHandle<VkBuffer>(Buffer);
+  const VkDeviceSize VulkanOffset = static_cast<VkDeviceSize>(Offset);
+  vkCmdBindVertexBuffers(m_CommandBuffer, FirstBinding, 1, &VulkanBuffer,
+                         &VulkanOffset);
+}
+
+void VulkanCommandList::BindIndexBuffer(RHINativeHandle Buffer, uint64_t Offset,
+                                        RHIIndexType IndexType) {
+  vkCmdBindIndexBuffer(m_CommandBuffer, DecodeNativeHandle<VkBuffer>(Buffer),
+                       static_cast<VkDeviceSize>(Offset),
+                       ToVulkanIndexType(IndexType));
+}
+
+void VulkanCommandList::DrawIndexed(uint32_t IndexCount, uint32_t InstanceCount,
+                                    uint32_t FirstIndex, int32_t VertexOffset,
+                                    uint32_t FirstInstance) {
+  vkCmdDrawIndexed(m_CommandBuffer, IndexCount, InstanceCount, FirstIndex,
+                   VertexOffset, FirstInstance);
+}
+
+void VulkanCommandList::DrawIndexedIndirect(RHINativeHandle Buffer,
+                                            uint64_t Offset, uint32_t DrawCount,
+                                            uint32_t Stride) {
+  vkCmdDrawIndexedIndirect(m_CommandBuffer, DecodeNativeHandle<VkBuffer>(Buffer),
+                           static_cast<VkDeviceSize>(Offset), DrawCount, Stride);
+}
+
+void VulkanCommandList::Dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
+                                 uint32_t GroupCountZ) {
+  vkCmdDispatch(m_CommandBuffer, GroupCountX, GroupCountY, GroupCountZ);
+}
+
+void VulkanCommandList::CopyBuffer(RHINativeHandle SourceBuffer,
+                                   RHINativeHandle DestinationBuffer,
+                                   const void *CopyRegion) {
+  vkCmdCopyBuffer(m_CommandBuffer, DecodeNativeHandle<VkBuffer>(SourceBuffer),
+                  DecodeNativeHandle<VkBuffer>(DestinationBuffer), 1,
+                  static_cast<const VkBufferCopy *>(CopyRegion));
+}
+
+void VulkanCommandList::CopyBufferToImage(RHINativeHandle SourceBuffer,
+                                          RHINativeHandle DestinationImage,
+                                          uint32_t DestinationImageLayout,
+                                          const void *CopyRegion) {
+  vkCmdCopyBufferToImage(
+      m_CommandBuffer, DecodeNativeHandle<VkBuffer>(SourceBuffer),
+      DecodeNativeHandle<VkImage>(DestinationImage),
+      static_cast<VkImageLayout>(DestinationImageLayout), 1,
+      static_cast<const VkBufferImageCopy *>(CopyRegion));
+}
+
+void VulkanCommandList::CopyImageToBuffer(RHINativeHandle SourceImage,
+                                          uint32_t SourceImageLayout,
+                                          RHINativeHandle DestinationBuffer,
+                                          const void *CopyRegion) {
+  vkCmdCopyImageToBuffer(
+      m_CommandBuffer, DecodeNativeHandle<VkImage>(SourceImage),
+      static_cast<VkImageLayout>(SourceImageLayout),
+      DecodeNativeHandle<VkBuffer>(DestinationBuffer), 1,
+      static_cast<const VkBufferImageCopy *>(CopyRegion));
+}
+
+void VulkanCommandList::PipelineBarrier(const void *DependencyInfo) {
+  vkCmdPipelineBarrier2(
+      m_CommandBuffer, static_cast<const VkDependencyInfo *>(DependencyInfo));
+}
+
+VkPipelineBindPoint
+VulkanCommandList::ToVulkanBindPoint(RHIBindPoint BindPoint) {
+  switch (BindPoint) {
+  case RHIBindPoint::Graphics:
+    return VK_PIPELINE_BIND_POINT_GRAPHICS;
+  case RHIBindPoint::Compute:
+    return VK_PIPELINE_BIND_POINT_COMPUTE;
+  }
+
+  return VK_PIPELINE_BIND_POINT_GRAPHICS;
+}
+
+VkIndexType VulkanCommandList::ToVulkanIndexType(RHIIndexType IndexType) {
+  switch (IndexType) {
+  case RHIIndexType::UInt16:
+    return VK_INDEX_TYPE_UINT16;
+  case RHIIndexType::UInt32:
+    return VK_INDEX_TYPE_UINT32;
+  }
+
+  return VK_INDEX_TYPE_UINT32;
+}
+
 VulkanFence::~VulkanFence() {
   if (m_OwnsFence && m_Device != VK_NULL_HANDLE && m_Fence != VK_NULL_HANDLE) {
     vkDestroyFence(m_Device, m_Fence, VK_NULL_HANDLE);

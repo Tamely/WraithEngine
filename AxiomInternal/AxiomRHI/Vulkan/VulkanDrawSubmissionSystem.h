@@ -2,6 +2,7 @@
 
 #include "Renderer/RenderScene.h"
 #include "Renderer/RenderSurface.h"
+#include "RHI/IRHI.h"
 #include "AxiomRHI/Vulkan/VulkanCommandContext.h"
 #include "AxiomRHI/Vulkan/VulkanDeletionQueue.h"
 #include "AxiomRHI/Vulkan/VulkanDevice.h"
@@ -34,7 +35,7 @@ public:
     VulkanOcclusionCulling &OcclusionCulling;
     bool EnableImGui{false};
     bool HasPresentationSurface{false};
-    std::function<void(VkCommandBuffer, RenderScene &, uint64_t,
+    std::function<void(IRHICommandList &, RenderScene &, uint64_t,
                        RendererViewMode)>
         RecordPreparedScenePasses;
     std::function<void()> DestroyResourceManagerHDRTexture;
@@ -51,7 +52,7 @@ public:
   void Init(const CreateInfo &CreateInfo);
   void Shutdown();
   void SetRecordPreparedScenePasses(
-      std::function<void(VkCommandBuffer, RenderScene &, uint64_t,
+      std::function<void(IRHICommandList &, RenderScene &, uint64_t,
                          RendererViewMode)> RecordPreparedScenePasses);
 
   void BeginFrame(bool StopRendering);
@@ -80,7 +81,7 @@ private:
   void CollectCompletedTransfers();
   void CollectFrameStats(MeshFrameResources &Frame);
   void ClearDepthImage(VkCommandBuffer CommandBuffer, uint64_t FrameNumber);
-  void DrawMeshes(VkCommandBuffer CommandBuffer, RenderScene &Scene,
+  void DrawMeshes(IRHICommandList &CommandList, RenderScene &Scene,
                   uint64_t FrameNumber, RendererViewMode ViewMode);
   void RecordOffscreenCapture(VkCommandBuffer CommandBuffer,
                               const AllocatedBuffer &ReadbackBuffer,
@@ -108,7 +109,7 @@ private:
   bool m_EnableImGui{false};
   bool m_HasPresentationSurface{false};
   bool m_IsInitialized{false};
-  std::function<void(VkCommandBuffer, RenderScene &, uint64_t, RendererViewMode)>
+  std::function<void(IRHICommandList &, RenderScene &, uint64_t, RendererViewMode)>
       m_RecordPreparedScenePasses;
 
   VulkanGizmoRenderer m_GizmoRenderer;

@@ -19,6 +19,16 @@ enum class RHIPipelineType : uint8_t {
   Compute,
 };
 
+enum class RHIBindPoint : uint8_t {
+  Graphics = 0,
+  Compute,
+};
+
+enum class RHIIndexType : uint8_t {
+  UInt16 = 0,
+  UInt32,
+};
+
 enum class RHICommandStage : uint8_t {
   All = 0,
   Draw,
@@ -118,6 +128,8 @@ class IRHISwapchain;
 class IRHIFence;
 class IRHISemaphore;
 
+using RHINativeHandle = uintptr_t;
+
 struct RHIQueueWaitInfo {
   IRHISemaphore *Semaphore{nullptr};
   uint64_t Value{0};
@@ -138,6 +150,44 @@ public:
   virtual void End() = 0;
   [[nodiscard]] virtual bool IsRecording() const = 0;
   [[nodiscard]] virtual RHIQueueType GetQueueType() const = 0;
+  [[nodiscard]] virtual RHINativeHandle GetNativeCommandBuffer() const = 0;
+
+  virtual void BeginRendering(const void *RenderingInfo) = 0;
+  virtual void EndRendering() = 0;
+  virtual void SetViewport(const void *Viewport) = 0;
+  virtual void SetScissor(const void *Scissor) = 0;
+  virtual void BindPipeline(RHIBindPoint BindPoint,
+                            RHINativeHandle Pipeline) = 0;
+  virtual void BindDescriptorSet(RHIBindPoint BindPoint,
+                                 RHINativeHandle PipelineLayout,
+                                 uint32_t FirstSet,
+                                 std::span<const RHINativeHandle> Sets) = 0;
+  virtual void PushConstants(RHINativeHandle PipelineLayout,
+                             uint32_t ShaderStages, uint32_t Offset,
+                             uint32_t Size, const void *Data) = 0;
+  virtual void BindVertexBuffer(uint32_t FirstBinding, RHINativeHandle Buffer,
+                                uint64_t Offset) = 0;
+  virtual void BindIndexBuffer(RHINativeHandle Buffer, uint64_t Offset,
+                               RHIIndexType IndexType) = 0;
+  virtual void DrawIndexed(uint32_t IndexCount, uint32_t InstanceCount,
+                           uint32_t FirstIndex, int32_t VertexOffset,
+                           uint32_t FirstInstance) = 0;
+  virtual void DrawIndexedIndirect(RHINativeHandle Buffer, uint64_t Offset,
+                                   uint32_t DrawCount, uint32_t Stride) = 0;
+  virtual void Dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
+                        uint32_t GroupCountZ) = 0;
+  virtual void CopyBuffer(RHINativeHandle SourceBuffer,
+                          RHINativeHandle DestinationBuffer,
+                          const void *CopyRegion) = 0;
+  virtual void CopyBufferToImage(RHINativeHandle SourceBuffer,
+                                 RHINativeHandle DestinationImage,
+                                 uint32_t DestinationImageLayout,
+                                 const void *CopyRegion) = 0;
+  virtual void CopyImageToBuffer(RHINativeHandle SourceImage,
+                                 uint32_t SourceImageLayout,
+                                 RHINativeHandle DestinationBuffer,
+                                 const void *CopyRegion) = 0;
+  virtual void PipelineBarrier(const void *DependencyInfo) = 0;
 };
 
 class IRHIQueue {

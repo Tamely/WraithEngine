@@ -25,20 +25,28 @@ glm::vec3 TransformPoint(const glm::mat4 &Transform, const glm::vec3 &Point) {
 
 namespace Axiom {
 namespace {
-VulkanRhiDevice *RequireVulkanDevice(IRHIDevice &Device) {
-  return dynamic_cast<VulkanRhiDevice *>(&Device);
+RHINativeHandle RHIHandle(auto Handle) {
+  return VulkanCommandList::EncodeNativeHandle(Handle);
+}
+
+std::array<RHINativeHandle, 1> RHIDescriptorSets(VkDescriptorSet Set) {
+  return {RHIHandle(Set)};
+}
+
+VkCommandBuffer GetVulkanCommandBuffer(const IRHICommandList &CommandList) {
+  return reinterpret_cast<VkCommandBuffer>(CommandList.GetNativeCommandBuffer());
 }
 } // namespace
 
 void VulkanSceneRenderer::Init(IRHIDevice &Device,
                                const RendererCreateInfo &CreateInfo) {
-  m_Device = RequireVulkanDevice(Device);
+  m_Device = static_cast<VulkanRhiDevice *>(&Device);
   if (m_Device != nullptr) {
     m_FrameOutput = CreateInfo.FrameOutput;
     m_Device->GetDrawSubmissionSystem().SetRecordPreparedScenePasses(
-        [this](VkCommandBuffer CommandBuffer, RenderScene &Scene,
+        [this](IRHICommandList &CommandList, RenderScene &Scene,
                uint64_t FrameNumber, RendererViewMode ViewMode) {
-          RecordPreparedScenePasses(CommandBuffer, Scene, FrameNumber, ViewMode);
+          RecordPreparedScenePasses(CommandList, Scene, FrameNumber, ViewMode);
         });
   }
 }
@@ -346,7 +354,7 @@ void VulkanSceneRenderer::RenderFallbackBackground(RenderScene &Scene) {
 }
 
 void VulkanSceneRenderer::RecordPreparedScenePasses(
-    VkCommandBuffer CommandBuffer, RenderScene &Scene, uint64_t FrameNumber,
+    IRHICommandList &CommandList, RenderScene &Scene, uint64_t FrameNumber,
     RendererViewMode ViewMode) {
   m_ActiveScene = &Scene;
   m_ViewMode = ViewMode;
@@ -361,38 +369,38 @@ void VulkanSceneRenderer::RecordPreparedScenePasses(
   for (const ScenePassPrimitive Pass : m_QueuedScenePasses) {
     switch (Pass) {
     case ScenePassPrimitive::Background:
-      EnsureDrawImageLayout(CommandBuffer, VK_IMAGE_LAYOUT_GENERAL);
-      DrawBackgroundPass(CommandBuffer, m_ActiveScene);
+      EnsureDrawImageLayout(CommandList, VK_IMAGE_LAYOUT_GENERAL);
+      DrawBackgroundPass(CommandList, m_ActiveScene);
       break;
     case ScenePassPrimitive::DepthPrepass:
-      EnsureRasterDepthLayout(CommandBuffer, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
-      RecordDepthPrepassPass(CommandBuffer, Frame);
+      EnsureRasterDepthLayout(CommandList, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+      RecordDepthPrepassPass(CommandList, Frame);
       break;
     case ScenePassPrimitive::Hzb:
-      EnsureRasterDepthLayout(CommandBuffer, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
-      BuildHzbPass(CommandBuffer, Frame);
+      EnsureRasterDepthLayout(CommandList, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+      BuildHzbPass(CommandList, Frame);
       break;
     case ScenePassPrimitive::ComputeMeshPath:
-      EnsureRasterDepthLayout(CommandBuffer,
+      EnsureRasterDepthLayout(CommandList,
                               VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
-      EnsureDrawImageLayout(CommandBuffer, VK_IMAGE_LAYOUT_GENERAL);
-      RecordComputeMeshPathPass(CommandBuffer, Frame);
+      EnsureDrawImageLayout(CommandList, VK_IMAGE_LAYOUT_GENERAL);
+      RecordComputeMeshPathPass(CommandList, Frame);
       break;
     case ScenePassPrimitive::OpaqueForward:
-      EnsureRasterDepthLayout(CommandBuffer, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
-      EnsureDrawImageLayout(CommandBuffer, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-      RecordOpaqueForwardPass(CommandBuffer, Frame);
+      EnsureRasterDepthLayout(CommandList, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+      EnsureDrawImageLayout(CommandList, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+      RecordOpaqueForwardPass(CommandList, Frame);
       break;
     case ScenePassPrimitive::TranslucentForward:
-      EnsureRasterDepthLayout(CommandBuffer, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
-      EnsureDrawImageLayout(CommandBuffer, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-      RecordTranslucentForwardPass(CommandBuffer, Frame);
+      EnsureRasterDepthLayout(CommandList, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+      EnsureDrawImageLayout(CommandList, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+      RecordTranslucentForwardPass(CommandList, Frame);
       break;
     }
   }
 }
 
-void VulkanSceneRenderer::DrawBackgroundPass(VkCommandBuffer CommandBuffer,
+void VulkanSceneRenderer::DrawBackgroundPass(IRHICommandList &CommandList,
                                              RenderScene *Scene) {
   auto &ResourceManager = m_Device->GetResourceManager();
   ResourceManager.SyncHDRSkyboxTexture(
@@ -407,36 +415,39 @@ void VulkanSceneRenderer::DrawBackgroundPass(VkCommandBuffer CommandBuffer,
       !Scene->ActiveCamera->IsOrthographic();
 
   if (UseHDR) {
-    vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                      m_Device->GetPipelineLibrary().GetHDRSkyboxPipeline());
-    const std::array<VkDescriptorSet, 2> Sets = {
-        ResourceManager.GetDrawImageDescriptorSet(),
-        ResourceManager.GetHDRSkyboxDescriptorSet()};
-    vkCmdBindDescriptorSets(
-        CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-        m_Device->GetPipelineLibrary().GetHDRSkyboxPipelineLayout(), 0,
-        static_cast<uint32_t>(Sets.size()), Sets.data(), 0, VK_NULL_HANDLE);
+    CommandList.BindPipeline(RHIBindPoint::Compute,
+                             RHIHandle(m_Device->GetPipelineLibrary()
+                                           .GetHDRSkyboxPipeline()));
+    const std::array<RHINativeHandle, 2> Sets = {
+        RHIHandle(ResourceManager.GetDrawImageDescriptorSet()),
+        RHIHandle(ResourceManager.GetHDRSkyboxDescriptorSet())};
+    CommandList.BindDescriptorSet(
+        RHIBindPoint::Compute,
+        RHIHandle(m_Device->GetPipelineLibrary().GetHDRSkyboxPipelineLayout()),
+        0, Sets);
 
     const glm::mat4 InverseViewProj =
         glm::inverse(Scene->ActiveCamera->GetViewProjectionMatrix());
-    vkCmdPushConstants(
-        CommandBuffer, m_Device->GetPipelineLibrary().GetHDRSkyboxPipelineLayout(),
+    CommandList.PushConstants(
+        RHIHandle(m_Device->GetPipelineLibrary().GetHDRSkyboxPipelineLayout()),
         VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(glm::mat4),
         glm::value_ptr(InverseViewProj));
-    vkCmdDispatch(CommandBuffer,
-                  static_cast<uint32_t>(std::ceil(DrawExtent.width / 16.0f)),
-                  static_cast<uint32_t>(std::ceil(DrawExtent.height / 16.0f)), 1);
+    CommandList.Dispatch(
+        static_cast<uint32_t>(std::ceil(DrawExtent.width / 16.0f)),
+        static_cast<uint32_t>(std::ceil(DrawExtent.height / 16.0f)), 1);
     return;
   }
 
-  vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                    m_Device->GetPipelineLibrary().GetGradientPipeline());
+  CommandList.BindPipeline(
+      RHIBindPoint::Compute,
+      RHIHandle(m_Device->GetPipelineLibrary().GetGradientPipeline()));
   const VkDescriptorSet DrawImageDescriptorSet =
       ResourceManager.GetDrawImageDescriptorSet();
-  vkCmdBindDescriptorSets(
-      CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-      m_Device->GetPipelineLibrary().GetGradientPipelineLayout(), 0, 1,
-      &DrawImageDescriptorSet, 0, VK_NULL_HANDLE);
+  const auto Sets = RHIDescriptorSets(DrawImageDescriptorSet);
+  CommandList.BindDescriptorSet(
+      RHIBindPoint::Compute,
+      RHIHandle(m_Device->GetPipelineLibrary().GetGradientPipelineLayout()), 0,
+      Sets);
 
   ComputePushConstants PC;
   if (Scene != nullptr) {
@@ -447,22 +458,23 @@ void VulkanSceneRenderer::DrawBackgroundPass(VkCommandBuffer CommandBuffer,
     PC.data2 = glm::vec4(0.14f, 0.24f, 0.38f, 1.0f);
   }
 
-  vkCmdPushConstants(CommandBuffer,
-                     m_Device->GetPipelineLibrary().GetGradientPipelineLayout(),
-                     VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PC), &PC);
-  vkCmdDispatch(CommandBuffer,
-                static_cast<uint32_t>(std::ceil(DrawExtent.width / 16.0f)),
-                static_cast<uint32_t>(std::ceil(DrawExtent.height / 16.0f)), 1);
+  CommandList.PushConstants(
+      RHIHandle(m_Device->GetPipelineLibrary().GetGradientPipelineLayout()),
+      VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PC), &PC);
+  CommandList.Dispatch(
+      static_cast<uint32_t>(std::ceil(DrawExtent.width / 16.0f)),
+      static_cast<uint32_t>(std::ceil(DrawExtent.height / 16.0f)), 1);
 }
 
-void VulkanSceneRenderer::BuildHzbPass(VkCommandBuffer CommandBuffer,
+void VulkanSceneRenderer::BuildHzbPass(IRHICommandList &CommandList,
                                        MeshFrameResources &Frame) {
-  if (CommandBuffer == VK_NULL_HANDLE) {
+  if (CommandList.GetNativeCommandBuffer() == 0) {
     QueueScenePass(ScenePassPrimitive::Hzb);
     return;
   }
 
-  m_Device->GetDrawSubmissionSystem().BuildHzb(CommandBuffer, Frame);
+  m_Device->GetDrawSubmissionSystem().BuildHzb(GetVulkanCommandBuffer(CommandList),
+                                               Frame);
   if (m_PreparedSceneState.HasPreparedCamera) {
     Frame.HzbViewProjection = m_PreparedSceneState.CameraData.ViewProjection;
     Frame.HzbViewportSize = glm::vec2(m_PreparedSceneState.CameraData.ViewportSize);
@@ -640,7 +652,7 @@ void VulkanSceneRenderer::PrepareGraphicsMaterialDescriptors() {
 }
 
 void VulkanSceneRenderer::RecordDepthPrepassPass(
-    VkCommandBuffer CommandBuffer, const MeshFrameResources &Frame) const {
+    IRHICommandList &CommandList, const MeshFrameResources &Frame) const {
   const auto &OpaqueGraphicsSubmissions =
       m_PreparedSceneState.VisibleSubmissions.OpaqueGraphics;
   const auto &ComputeSubmissions = m_PreparedSceneState.VisibleSubmissions.Compute;
@@ -666,15 +678,17 @@ void VulkanSceneRenderer::RecordDepthPrepassPass(
       .pDepthAttachment = &DepthOnlyAttachment,
       .pStencilAttachment = VK_NULL_HANDLE};
 
-  vkCmdBeginRendering(CommandBuffer, &DepthOnlyRenderingInfo);
-  vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    m_Device->GetPipelineLibrary().GetMeshDepthPipeline());
-  vkCmdSetViewport(CommandBuffer, 0, 1, &Viewport);
-  vkCmdSetScissor(CommandBuffer, 0, 1, &Scissor);
-  vkCmdBindDescriptorSets(
-      CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-      m_Device->GetPipelineLibrary().GetMeshDepthPipelineLayout(), 0, 1,
-      &Frame.DepthFrameDescriptorSet, 0, VK_NULL_HANDLE);
+  CommandList.BeginRendering(&DepthOnlyRenderingInfo);
+  CommandList.BindPipeline(
+      RHIBindPoint::Graphics,
+      RHIHandle(m_Device->GetPipelineLibrary().GetMeshDepthPipeline()));
+  CommandList.SetViewport(&Viewport);
+  CommandList.SetScissor(&Scissor);
+  const auto DepthFrameSets = RHIDescriptorSets(Frame.DepthFrameDescriptorSet);
+  CommandList.BindDescriptorSet(
+      RHIBindPoint::Graphics,
+      RHIHandle(m_Device->GetPipelineLibrary().GetMeshDepthPipelineLayout()), 0,
+      DepthFrameSets);
 
   auto RecordSubmission = [&](const VisibleSubmission &Visible) {
     const RenderMeshSubmission &Submission = GetSubmission(Visible.SubmissionIndex);
@@ -685,12 +699,12 @@ void VulkanSceneRenderer::RecordDepthPrepassPass(
 
     MeshGraphicsPushConstants PushConstants{};
     PushConstants.Model = Submission.Transform;
-    vkCmdPushConstants(
-        CommandBuffer, m_Device->GetPipelineLibrary().GetMeshDepthPipelineLayout(),
+    CommandList.PushConstants(
+        RHIHandle(m_Device->GetPipelineLibrary().GetMeshDepthPipelineLayout()),
         VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshGraphicsPushConstants),
         &PushConstants);
-    BindMeshBuffers(CommandBuffer, *Mesh);
-    vkCmdDrawIndexed(CommandBuffer, Mesh->IndexCount, 1, 0, 0, 0);
+    BindMeshBuffers(CommandList, *Mesh);
+    CommandList.DrawIndexed(Mesh->IndexCount, 1, 0, 0, 0);
   };
 
   for (const VisibleSubmission &Visible : OpaqueGraphicsSubmissions) {
@@ -700,11 +714,11 @@ void VulkanSceneRenderer::RecordDepthPrepassPass(
     RecordSubmission(Visible);
   }
 
-  vkCmdEndRendering(CommandBuffer);
+  CommandList.EndRendering();
 }
 
 void VulkanSceneRenderer::RecordComputeMeshPathPass(
-    VkCommandBuffer CommandBuffer, const MeshFrameResources &Frame) const {
+    IRHICommandList &CommandList, const MeshFrameResources &Frame) const {
   for (const VisibleSubmission &Visible :
        m_PreparedSceneState.VisibleSubmissions.Compute) {
     VulkanMesh *Mesh = ResolveVisibleMesh(Visible);
@@ -712,27 +726,27 @@ void VulkanSceneRenderer::RecordComputeMeshPathPass(
       continue;
     }
 
-    std::array<VkDescriptorSet, 2> DescriptorSets = {
-        Frame.ComputeFrameDescriptorSet, Mesh->DescriptorSet};
+    const std::array<RHINativeHandle, 2> DescriptorSets = {
+        RHIHandle(Frame.ComputeFrameDescriptorSet), RHIHandle(Mesh->DescriptorSet)};
 
-    vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                      m_Device->GetPipelineLibrary().GetMeshProjectPipeline());
-    vkCmdBindDescriptorSets(
-        CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-        m_Device->GetPipelineLibrary().GetMeshProjectPipelineLayout(), 0,
-        static_cast<uint32_t>(DescriptorSets.size()), DescriptorSets.data(), 0,
-        VK_NULL_HANDLE);
+    CommandList.BindPipeline(
+        RHIBindPoint::Compute,
+        RHIHandle(m_Device->GetPipelineLibrary().GetMeshProjectPipeline()));
+    CommandList.BindDescriptorSet(
+        RHIBindPoint::Compute,
+        RHIHandle(m_Device->GetPipelineLibrary().GetMeshProjectPipelineLayout()),
+        0, DescriptorSets);
 
     MeshProjectPushConstants ProjectPushConstants{};
     ProjectPushConstants.Model = GetSubmission(Visible.SubmissionIndex).Transform;
     ProjectPushConstants.Counts.x = Mesh->VertexCount;
-    vkCmdPushConstants(
-        CommandBuffer, m_Device->GetPipelineLibrary().GetMeshProjectPipelineLayout(),
+    CommandList.PushConstants(
+        RHIHandle(m_Device->GetPipelineLibrary().GetMeshProjectPipelineLayout()),
         VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(MeshProjectPushConstants),
         &ProjectPushConstants);
 
     const uint32_t VertexGroupCount = std::max(1u, (Mesh->VertexCount + 63u) / 64u);
-    vkCmdDispatch(CommandBuffer, VertexGroupCount, 1, 1);
+    CommandList.Dispatch(VertexGroupCount, 1, 1);
 
     VkBufferMemoryBarrier2 ProjectedVertexBarrier{
         .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
@@ -751,25 +765,25 @@ void VulkanSceneRenderer::RecordComputeMeshPathPass(
         .pNext = VK_NULL_HANDLE,
         .bufferMemoryBarrierCount = 1,
         .pBufferMemoryBarriers = &ProjectedVertexBarrier};
-    vkCmdPipelineBarrier2(CommandBuffer, &ProjectDependencyInfo);
+    CommandList.PipelineBarrier(&ProjectDependencyInfo);
 
-    vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                      m_Device->GetPipelineLibrary().GetMeshPipeline());
-    vkCmdBindDescriptorSets(
-        CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-        m_Device->GetPipelineLibrary().GetMeshPipelineLayout(), 0,
-        static_cast<uint32_t>(DescriptorSets.size()), DescriptorSets.data(), 0,
-        VK_NULL_HANDLE);
+    CommandList.BindPipeline(
+        RHIBindPoint::Compute,
+        RHIHandle(m_Device->GetPipelineLibrary().GetMeshPipeline()));
+    CommandList.BindDescriptorSet(
+        RHIBindPoint::Compute,
+        RHIHandle(m_Device->GetPipelineLibrary().GetMeshPipelineLayout()), 0,
+        DescriptorSets);
 
     MeshRasterPushConstants RasterPushConstants{};
     RasterPushConstants.Counts.x = Mesh->TriangleCount;
-    vkCmdPushConstants(
-        CommandBuffer, m_Device->GetPipelineLibrary().GetMeshPipelineLayout(),
+    CommandList.PushConstants(
+        RHIHandle(m_Device->GetPipelineLibrary().GetMeshPipelineLayout()),
         VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(MeshRasterPushConstants),
         &RasterPushConstants);
 
     const uint32_t GroupCount = std::max(1u, (Mesh->TriangleCount + 63u) / 64u);
-    vkCmdDispatch(CommandBuffer, GroupCount, 1, 1);
+    CommandList.Dispatch(GroupCount, 1, 1);
 
     VkImageMemoryBarrier2 DrawImageBarrier{
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -791,12 +805,12 @@ void VulkanSceneRenderer::RecordComputeMeshPathPass(
         .pNext = VK_NULL_HANDLE,
         .imageMemoryBarrierCount = 1,
         .pImageMemoryBarriers = &DrawImageBarrier};
-    vkCmdPipelineBarrier2(CommandBuffer, &ComputeDependencyInfo);
+    CommandList.PipelineBarrier(&ComputeDependencyInfo);
   }
 }
 
 void VulkanSceneRenderer::RecordOpaqueForwardPass(
-    VkCommandBuffer CommandBuffer, const MeshFrameResources &Frame) {
+    IRHICommandList &CommandList, const MeshFrameResources &Frame) {
   const auto &GraphicsSubmissions =
       m_PreparedSceneState.VisibleSubmissions.OpaqueGraphics;
   if (GraphicsSubmissions.empty()) {
@@ -821,18 +835,20 @@ void VulkanSceneRenderer::RecordOpaqueForwardPass(
   VkRenderingInfo RenderingInfo =
       VkInit::RenderingInfo(DrawExtent, &ColorAttachment, &DepthAttachment);
 
-  vkCmdBeginRendering(CommandBuffer, &RenderingInfo);
-  vkCmdBindPipeline(
-      CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-      m_PreparedSceneState.ForceWireframe
-          ? m_Device->GetPipelineLibrary().GetMeshWireframePipeline()
-          : m_Device->GetPipelineLibrary().GetMeshGraphicsPipeline());
-  vkCmdSetViewport(CommandBuffer, 0, 1, &Viewport);
-  vkCmdSetScissor(CommandBuffer, 0, 1, &Scissor);
-  vkCmdBindDescriptorSets(
-      CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-      m_Device->GetPipelineLibrary().GetMeshGraphicsPipelineLayout(), 0, 1,
-      &Frame.GraphicsFrameDescriptorSet, 0, VK_NULL_HANDLE);
+  CommandList.BeginRendering(&RenderingInfo);
+  CommandList.BindPipeline(
+      RHIBindPoint::Graphics,
+      RHIHandle(m_PreparedSceneState.ForceWireframe
+                    ? m_Device->GetPipelineLibrary().GetMeshWireframePipeline()
+                    : m_Device->GetPipelineLibrary().GetMeshGraphicsPipeline()));
+  CommandList.SetViewport(&Viewport);
+  CommandList.SetScissor(&Scissor);
+  const auto GraphicsFrameSets =
+      RHIDescriptorSets(Frame.GraphicsFrameDescriptorSet);
+  CommandList.BindDescriptorSet(
+      RHIBindPoint::Graphics,
+      RHIHandle(m_Device->GetPipelineLibrary().GetMeshGraphicsPipelineLayout()),
+      0, GraphicsFrameSets);
 
   VkDescriptorSet BoundMaterialDescriptorSet = VK_NULL_HANDLE;
 #if !defined(NDEBUG)
@@ -849,10 +865,11 @@ void VulkanSceneRenderer::RecordOpaqueForwardPass(
         m_Device->GetMaterialResources().ResolveMaterialDescriptorSet(
             m_Device->ResolveMaterialHandle(Submission.MaterialHandle));
     if (MaterialDescriptorSet != BoundMaterialDescriptorSet) {
-      vkCmdBindDescriptorSets(
-          CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-          m_Device->GetPipelineLibrary().GetMeshGraphicsPipelineLayout(), 1, 1,
-          &MaterialDescriptorSet, 0, VK_NULL_HANDLE);
+      const auto MaterialSets = RHIDescriptorSets(MaterialDescriptorSet);
+      CommandList.BindDescriptorSet(
+          RHIBindPoint::Graphics,
+          RHIHandle(m_Device->GetPipelineLibrary().GetMeshGraphicsPipelineLayout()),
+          1, MaterialSets);
       BoundMaterialDescriptorSet = MaterialDescriptorSet;
 #if !defined(NDEBUG)
       ++MaterialDescriptorBindCount;
@@ -867,15 +884,15 @@ void VulkanSceneRenderer::RecordOpaqueForwardPass(
       PushConstants.Metallic = Material->Metallic;
       PushConstants.Roughness = Material->Roughness;
     }
-    vkCmdPushConstants(
-        CommandBuffer, m_Device->GetPipelineLibrary().GetMeshGraphicsPipelineLayout(),
+    CommandList.PushConstants(
+        RHIHandle(m_Device->GetPipelineLibrary().GetMeshGraphicsPipelineLayout()),
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
         sizeof(MeshGraphicsPushConstants), &PushConstants);
-    BindMeshBuffers(CommandBuffer, *Mesh);
-    vkCmdDrawIndexed(CommandBuffer, Mesh->IndexCount, 1, 0, 0, 0);
+    BindMeshBuffers(CommandList, *Mesh);
+    CommandList.DrawIndexed(Mesh->IndexCount, 1, 0, 0, 0);
   }
 
-  vkCmdEndRendering(CommandBuffer);
+  CommandList.EndRendering();
 
 #if !defined(NDEBUG)
   AccessFrameStats().DebugGraphicsMaterialDescriptorUpdates =
@@ -886,7 +903,7 @@ void VulkanSceneRenderer::RecordOpaqueForwardPass(
 }
 
 void VulkanSceneRenderer::RecordTranslucentForwardPass(
-    VkCommandBuffer CommandBuffer, const MeshFrameResources &Frame) {
+    IRHICommandList &CommandList, const MeshFrameResources &Frame) {
   auto &GraphicsSubmissions =
       m_PreparedSceneState.VisibleSubmissions.TranslucentGraphics;
   if (GraphicsSubmissions.empty()) {
@@ -916,18 +933,21 @@ void VulkanSceneRenderer::RecordTranslucentForwardPass(
   VkRenderingInfo RenderingInfo =
       VkInit::RenderingInfo(DrawExtent, &ColorAttachment, &DepthAttachment);
 
-  vkCmdBeginRendering(CommandBuffer, &RenderingInfo);
-  vkCmdBindPipeline(
-      CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-      m_PreparedSceneState.ForceWireframe
-          ? m_Device->GetPipelineLibrary().GetMeshWireframePipeline()
-          : m_Device->GetPipelineLibrary().GetMeshGraphicsAlphaBlendPipeline());
-  vkCmdSetViewport(CommandBuffer, 0, 1, &Viewport);
-  vkCmdSetScissor(CommandBuffer, 0, 1, &Scissor);
-  vkCmdBindDescriptorSets(
-      CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-      m_Device->GetPipelineLibrary().GetMeshGraphicsPipelineLayout(), 0, 1,
-      &Frame.GraphicsFrameDescriptorSet, 0, VK_NULL_HANDLE);
+  CommandList.BeginRendering(&RenderingInfo);
+  CommandList.BindPipeline(
+      RHIBindPoint::Graphics,
+      RHIHandle(m_PreparedSceneState.ForceWireframe
+                    ? m_Device->GetPipelineLibrary().GetMeshWireframePipeline()
+                    : m_Device->GetPipelineLibrary()
+                          .GetMeshGraphicsAlphaBlendPipeline()));
+  CommandList.SetViewport(&Viewport);
+  CommandList.SetScissor(&Scissor);
+  const auto GraphicsFrameSets =
+      RHIDescriptorSets(Frame.GraphicsFrameDescriptorSet);
+  CommandList.BindDescriptorSet(
+      RHIBindPoint::Graphics,
+      RHIHandle(m_Device->GetPipelineLibrary().GetMeshGraphicsPipelineLayout()),
+      0, GraphicsFrameSets);
 
   VkDescriptorSet BoundMaterialDescriptorSet = VK_NULL_HANDLE;
 #if !defined(NDEBUG)
@@ -944,10 +964,11 @@ void VulkanSceneRenderer::RecordTranslucentForwardPass(
         m_Device->GetMaterialResources().ResolveMaterialDescriptorSet(
             m_Device->ResolveMaterialHandle(Submission.MaterialHandle));
     if (MaterialDescriptorSet != BoundMaterialDescriptorSet) {
-      vkCmdBindDescriptorSets(
-          CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-          m_Device->GetPipelineLibrary().GetMeshGraphicsPipelineLayout(), 1, 1,
-          &MaterialDescriptorSet, 0, VK_NULL_HANDLE);
+      const auto MaterialSets = RHIDescriptorSets(MaterialDescriptorSet);
+      CommandList.BindDescriptorSet(
+          RHIBindPoint::Graphics,
+          RHIHandle(m_Device->GetPipelineLibrary().GetMeshGraphicsPipelineLayout()),
+          1, MaterialSets);
       BoundMaterialDescriptorSet = MaterialDescriptorSet;
 #if !defined(NDEBUG)
       ++MaterialDescriptorBindCount;
@@ -962,15 +983,15 @@ void VulkanSceneRenderer::RecordTranslucentForwardPass(
       PushConstants.Metallic = Material->Metallic;
       PushConstants.Roughness = Material->Roughness;
     }
-    vkCmdPushConstants(
-        CommandBuffer, m_Device->GetPipelineLibrary().GetMeshGraphicsPipelineLayout(),
+    CommandList.PushConstants(
+        RHIHandle(m_Device->GetPipelineLibrary().GetMeshGraphicsPipelineLayout()),
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
         sizeof(MeshGraphicsPushConstants), &PushConstants);
-    BindMeshBuffers(CommandBuffer, *Mesh);
-    vkCmdDrawIndexed(CommandBuffer, Mesh->IndexCount, 1, 0, 0, 0);
+    BindMeshBuffers(CommandList, *Mesh);
+    CommandList.DrawIndexed(Mesh->IndexCount, 1, 0, 0, 0);
   }
 
-  vkCmdEndRendering(CommandBuffer);
+  CommandList.EndRendering();
 
 #if !defined(NDEBUG)
   AccessFrameStats().DebugGraphicsMaterialDescriptorUpdates =
@@ -981,36 +1002,68 @@ void VulkanSceneRenderer::RecordTranslucentForwardPass(
 }
 
 void VulkanSceneRenderer::EnsureDrawImageLayout(
-    VkCommandBuffer CommandBuffer, VkImageLayout DesiredLayout) {
+    IRHICommandList &CommandList, VkImageLayout DesiredLayout) {
   if (m_SceneDrawImageLayout == DesiredLayout) {
     return;
   }
 
-  VkUtil::TransitionImage(CommandBuffer,
-                          m_Device->GetResourceManager().GetDrawImage().Image,
-                          m_SceneDrawImageLayout, DesiredLayout);
+  VkImageMemoryBarrier2 ImageBarrier{
+      .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+      .pNext = VK_NULL_HANDLE,
+      .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+      .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+      .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+      .dstAccessMask =
+          VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT,
+      .oldLayout = m_SceneDrawImageLayout,
+      .newLayout = DesiredLayout,
+      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .image = m_Device->GetResourceManager().GetDrawImage().Image,
+      .subresourceRange =
+          VkInit::ImageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT)};
+  VkDependencyInfo DependencyInfo{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                                  .pNext = VK_NULL_HANDLE,
+                                  .imageMemoryBarrierCount = 1,
+                                  .pImageMemoryBarriers = &ImageBarrier};
+  CommandList.PipelineBarrier(&DependencyInfo);
   m_SceneDrawImageLayout = DesiredLayout;
 }
 
 void VulkanSceneRenderer::EnsureRasterDepthLayout(
-    VkCommandBuffer CommandBuffer, VkImageLayout DesiredLayout) {
+    IRHICommandList &CommandList, VkImageLayout DesiredLayout) {
   if (m_SceneRasterDepthLayout == DesiredLayout) {
     return;
   }
 
-  VkUtil::TransitionImage(CommandBuffer,
-                          m_Device->GetResourceManager().GetRasterDepthImage().Image,
-                          m_SceneRasterDepthLayout, DesiredLayout);
+  VkImageMemoryBarrier2 ImageBarrier{
+      .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+      .pNext = VK_NULL_HANDLE,
+      .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+      .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+      .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+      .dstAccessMask =
+          VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT,
+      .oldLayout = m_SceneRasterDepthLayout,
+      .newLayout = DesiredLayout,
+      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .image = m_Device->GetResourceManager().GetRasterDepthImage().Image,
+      .subresourceRange =
+          VkInit::ImageSubresourceRange(VK_IMAGE_ASPECT_DEPTH_BIT)};
+  VkDependencyInfo DependencyInfo{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                                  .pNext = VK_NULL_HANDLE,
+                                  .imageMemoryBarrierCount = 1,
+                                  .pImageMemoryBarriers = &ImageBarrier};
+  CommandList.PipelineBarrier(&DependencyInfo);
   m_SceneRasterDepthLayout = DesiredLayout;
 }
 
-void VulkanSceneRenderer::BindMeshBuffers(VkCommandBuffer CommandBuffer,
+void VulkanSceneRenderer::BindMeshBuffers(IRHICommandList &CommandList,
                                           const VulkanMesh &Mesh) const {
-  VkDeviceSize VertexOffset = 0;
-  vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &Mesh.VertexBuffer.Buffer,
-                         &VertexOffset);
-  vkCmdBindIndexBuffer(CommandBuffer, Mesh.IndexBuffer.Buffer, 0,
-                       VK_INDEX_TYPE_UINT32);
+  CommandList.BindVertexBuffer(0, RHIHandle(Mesh.VertexBuffer.Buffer), 0);
+  CommandList.BindIndexBuffer(RHIHandle(Mesh.IndexBuffer.Buffer), 0,
+                              RHIIndexType::UInt32);
 }
 
 const RenderMeshSubmission &

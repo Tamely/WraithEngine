@@ -29,7 +29,7 @@ public:
   std::optional<CapturedFrame> ConsumeCapturedFrame() override;
   RendererFrameStats &AccessFrameStats() override;
   const RendererFrameStats &GetFrameStats() const override;
-  void RecordPreparedScenePasses(VkCommandBuffer CommandBuffer, RenderScene &Scene,
+  void RecordPreparedScenePasses(IRHICommandList &CommandList, RenderScene &Scene,
                                  uint64_t FrameNumber,
                                  RendererViewMode ViewMode);
 
@@ -68,8 +68,8 @@ private:
   void RecordTranslucentForward();
   void FinalizeSceneFrame();
   void RenderFallbackBackground(RenderScene &Scene);
-  void DrawBackgroundPass(VkCommandBuffer CommandBuffer, RenderScene *Scene);
-  void BuildHzbPass(VkCommandBuffer CommandBuffer, MeshFrameResources &Frame);
+  void DrawBackgroundPass(IRHICommandList &CommandList, RenderScene *Scene);
+  void BuildHzbPass(IRHICommandList &CommandList, MeshFrameResources &Frame);
   void QueueScenePass(ScenePassPrimitive Pass);
   void ResetPreparedSceneState();
   glm::vec3 ComputeWorldCenter(const RenderMeshSubmission &Submission,
@@ -80,19 +80,19 @@ private:
   void UpdateDepthFrameDescriptors(const MeshFrameResources &Frame) const;
   void UpdateGraphicsFrameDescriptors(const MeshFrameResources &Frame) const;
   void PrepareGraphicsMaterialDescriptors();
-  void RecordDepthPrepassPass(VkCommandBuffer CommandBuffer,
+  void RecordDepthPrepassPass(IRHICommandList &CommandList,
                               const MeshFrameResources &Frame) const;
-  void RecordComputeMeshPathPass(VkCommandBuffer CommandBuffer,
+  void RecordComputeMeshPathPass(IRHICommandList &CommandList,
                                  const MeshFrameResources &Frame) const;
-  void RecordOpaqueForwardPass(VkCommandBuffer CommandBuffer,
+  void RecordOpaqueForwardPass(IRHICommandList &CommandList,
                                const MeshFrameResources &Frame);
-  void RecordTranslucentForwardPass(VkCommandBuffer CommandBuffer,
+  void RecordTranslucentForwardPass(IRHICommandList &CommandList,
                                     const MeshFrameResources &Frame);
-  void EnsureDrawImageLayout(VkCommandBuffer CommandBuffer,
+  void EnsureDrawImageLayout(IRHICommandList &CommandList,
                              VkImageLayout DesiredLayout);
-  void EnsureRasterDepthLayout(VkCommandBuffer CommandBuffer,
+  void EnsureRasterDepthLayout(IRHICommandList &CommandList,
                                VkImageLayout DesiredLayout);
-  void BindMeshBuffers(VkCommandBuffer CommandBuffer, const VulkanMesh &Mesh) const;
+  void BindMeshBuffers(IRHICommandList &CommandList, const VulkanMesh &Mesh) const;
   const RenderMeshSubmission &GetSubmission(uint32_t SubmissionIndex) const;
   VulkanMesh *ResolveVisibleMesh(const VisibleSubmission &Visible) const;
   VkExtent2D GetDrawExtent2D() const;
