@@ -23,6 +23,7 @@ void VulkanDevice::Init(VulkanContext &Context) {
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
   Features12.bufferDeviceAddress = true;
   Features12.descriptorIndexing = true;
+  Features12.shaderSampledImageArrayNonUniformIndexing = true;
 
   vkb::PhysicalDeviceSelector Selector{Context.BootstrapInstance};
   Selector.set_minimum_version(1, 3)

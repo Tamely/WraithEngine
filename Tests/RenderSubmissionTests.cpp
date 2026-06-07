@@ -165,10 +165,11 @@ TEST(RenderSubmissionTests, EditorSceneRendererAdapterDropsDeletedObjectsFromCac
   EXPECT_NE(Recreated[0].MeshHandle, First[0].MeshHandle);
 }
 
-TEST(RenderSubmissionTests, VulkanRendererRendersAllThousandSubmittedMeshesOffscreen) {
+TEST(RenderSubmissionTests,
+     VulkanRendererRendersAllFiveThousandSubmittedMeshesOffscreen) {
   constexpr uint32_t Width = 1280;
   constexpr uint32_t Height = 720;
-  constexpr size_t MeshCount = 1000;
+  constexpr size_t MeshCount = 5000;
 
   EnsureLoggingInitialized();
   if (!Axiom::CanInitializeHeadlessVulkan()) {
@@ -194,8 +195,8 @@ TEST(RenderSubmissionTests, VulkanRendererRendersAllThousandSubmittedMeshesOffsc
     Renderer.BeginFrame();
     Axiom::RenderCommand::SetCamera(Camera);
     for (size_t Index = 0; Index < MeshCount; ++Index) {
-      const float X = static_cast<float>(Index % 40u) * 0.12f - 2.34f;
-      const float Y = static_cast<float>(Index / 40u) * 0.10f - 1.20f;
+      const float X = static_cast<float>(Index % 100u) * 0.05f - 2.5f;
+      const float Y = static_cast<float>(Index / 100u) * 0.05f - 1.25f;
       Axiom::RenderCommand::Submit({
           .MeshHandle = MeshHandle,
           .DebugDataId = Axiom::RegisterRenderMeshSubmissionDebugData(

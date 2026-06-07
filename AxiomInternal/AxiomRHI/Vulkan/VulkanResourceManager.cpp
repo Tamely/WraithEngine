@@ -9,6 +9,8 @@
 
 namespace Axiom {
 namespace {
+constexpr uint32_t MaxGraphicsMaterialTextures = 1024;
+
 uint32_t ComputeHzbMipCount(VkExtent2D BaseExtent) {
   uint32_t Width = BaseExtent.width;
   uint32_t Height = BaseExtent.height;
@@ -80,6 +82,8 @@ void VulkanResourceManager::Shutdown() {
       Frame.TimestampQueryPool = VK_NULL_HANDLE;
     }
     VkBufferUtil::DestroyBuffer(m_Device->Allocator, Frame.CameraBuffer);
+    VkBufferUtil::DestroyBuffer(m_Device->Allocator, Frame.OpaqueObjectBuffer);
+    VkBufferUtil::DestroyBuffer(m_Device->Allocator, Frame.OpaqueIndirectBuffer);
     VkBufferUtil::DestroyBuffer(m_Device->Allocator, Frame.HzbReadbackBuffer);
   }
 
@@ -298,7 +302,7 @@ void VulkanResourceManager::InitDescriptors() {
   std::vector<DescriptorAllocator::PoolSizeRatio> Sizes = {
       {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 4.0f},
       {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 6.0f},
-      {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 2.0f},
+      {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 20.0f},
       {VK_DESCRIPTOR_TYPE_SAMPLER, 2.0f},
       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4.0f},
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2.0f}};
@@ -320,13 +324,15 @@ void VulkanResourceManager::InitDescriptors() {
   {
     DescriptorLayoutBuilder Builder;
     Builder.AddBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    Builder.AddBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     m_MeshGraphicsFrameDescriptorLayout =
         Builder.Build(m_Device->Device,
                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
   }
   {
     DescriptorLayoutBuilder Builder;
-    Builder.AddBinding(1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
+    Builder.AddBinding(1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                       MaxGraphicsMaterialTextures);
     Builder.AddBinding(2, VK_DESCRIPTOR_TYPE_SAMPLER);
     m_MeshGraphicsMaterialDescriptorLayout =
         Builder.Build(m_Device->Device,
@@ -439,6 +445,18 @@ void VulkanResourceManager::InitMeshFrameResources() {
         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
+    Frame.OpaqueObjectBuffer = VkBufferUtil::CreateBuffer(
+        m_Device->Allocator, sizeof(MeshGraphicsObjectData),
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+            VMA_ALLOCATION_CREATE_MAPPED_BIT);
+    Frame.OpaqueIndirectBuffer = VkBufferUtil::CreateBuffer(
+        m_Device->Allocator, sizeof(VkDrawIndexedIndirectCommand),
+        VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+            VMA_ALLOCATION_CREATE_MAPPED_BIT);
+    Frame.OpaqueObjectCapacity = 1;
+    Frame.OpaqueIndirectCapacity = 1;
     Frame.HzbReadbackBuffer = VkBufferUtil::CreateBuffer(
         m_Device->Allocator, static_cast<size_t>(m_HzbReadbackBufferSize),
         VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU,
@@ -459,7 +477,58 @@ void VulkanResourceManager::InitMeshFrameResources() {
         .queryCount = TimestampQueryCount};
     VK_CHECK(vkCreateQueryPool(m_Device->Device, &QueryPoolInfo, VK_NULL_HANDLE,
                                &Frame.TimestampQueryPool));
+    UpdateGraphicsFrameDescriptor(Frame);
   }
+}
+
+void VulkanResourceManager::EnsureOpaqueIndirectCapacity(
+    MeshFrameResources &Frame, size_t DrawCapacity) {
+  const size_t WantedCapacity = std::max<size_t>(1, DrawCapacity);
+  if (Frame.OpaqueObjectCapacity >= WantedCapacity &&
+      Frame.OpaqueIndirectCapacity >= WantedCapacity) {
+    return;
+  }
+
+  size_t NewCapacity =
+      std::max(Frame.OpaqueObjectCapacity, Frame.OpaqueIndirectCapacity);
+  NewCapacity = std::max<size_t>(1, NewCapacity);
+  while (NewCapacity < WantedCapacity) {
+    NewCapacity *= 2;
+  }
+
+  VkBufferUtil::DestroyBuffer(m_Device->Allocator, Frame.OpaqueObjectBuffer);
+  VkBufferUtil::DestroyBuffer(m_Device->Allocator, Frame.OpaqueIndirectBuffer);
+  Frame.OpaqueObjectBuffer = VkBufferUtil::CreateBuffer(
+      m_Device->Allocator, NewCapacity * sizeof(MeshGraphicsObjectData),
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU,
+      VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+          VMA_ALLOCATION_CREATE_MAPPED_BIT);
+  Frame.OpaqueIndirectBuffer = VkBufferUtil::CreateBuffer(
+      m_Device->Allocator, NewCapacity * sizeof(VkDrawIndexedIndirectCommand),
+      VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU,
+      VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+          VMA_ALLOCATION_CREATE_MAPPED_BIT);
+  Frame.OpaqueObjectCapacity = NewCapacity;
+  Frame.OpaqueIndirectCapacity = NewCapacity;
+  UpdateGraphicsFrameDescriptor(Frame);
+}
+
+void VulkanResourceManager::UpdateGraphicsFrameDescriptor(
+    const MeshFrameResources &Frame) const {
+  VkDescriptorBufferInfo CameraBufferInfo =
+      VkInit::BufferInfo(Frame.CameraBuffer.Buffer, 0, Frame.CameraBuffer.Size);
+  VkDescriptorBufferInfo ObjectBufferInfo =
+      VkInit::BufferInfo(Frame.OpaqueObjectBuffer.Buffer, 0,
+                         Frame.OpaqueObjectBuffer.Size);
+  const std::array<VkWriteDescriptorSet, 2> Writes = {
+      VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                    Frame.GraphicsFrameDescriptorSet,
+                                    &CameraBufferInfo, 0),
+      VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                    Frame.GraphicsFrameDescriptorSet,
+                                    &ObjectBufferInfo, 1)};
+  vkUpdateDescriptorSets(m_Device->Device, static_cast<uint32_t>(Writes.size()),
+                         Writes.data(), 0, VK_NULL_HANDLE);
 }
 
 AllocatedImage

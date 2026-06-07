@@ -6,12 +6,25 @@
 #include <cassert>
 
 namespace Axiom {
+namespace {
+constexpr uint32_t MaxGraphicsMaterialTextures = 1024;
+}
+
 void VulkanMaterialResources::Init(const CreateInfo &CreateInfo) {
   m_Device = CreateInfo.Device;
   m_DescriptorAllocator = CreateInfo.DescriptorAllocator;
   m_MaterialDescriptorSetLayout = CreateInfo.MaterialDescriptorSetLayout;
   m_TextureSampler = CreateInfo.TextureSampler;
   m_CreateTextureImage = CreateInfo.CreateTextureImage;
+  m_BindlessMaterialDescriptorSet =
+      m_DescriptorAllocator->Allocate(m_Device, m_MaterialDescriptorSetLayout);
+
+  VkDescriptorImageInfo GraphicsTextureSamplerInfo{};
+  GraphicsTextureSamplerInfo.sampler = m_TextureSampler;
+  const VkWriteDescriptorSet SamplerWrite = VkInit::WriteDescriptorSet(
+      VK_DESCRIPTOR_TYPE_SAMPLER, m_BindlessMaterialDescriptorSet,
+      &GraphicsTextureSamplerInfo, 2);
+  vkUpdateDescriptorSets(m_Device, 1, &SamplerWrite, 0, VK_NULL_HANDLE);
 }
 
 void VulkanMaterialResources::Shutdown() {
@@ -19,7 +32,9 @@ void VulkanMaterialResources::Shutdown() {
   m_MaterialImageViews.clear();
   m_MaterialDescriptorSets.clear();
   m_FallbackTexture = {};
+  m_BindlessMaterialDescriptorSet = VK_NULL_HANDLE;
   m_NextMaterialHandleValue = 1;
+  m_NextTextureIndex = 1;
 #if !defined(NDEBUG)
   m_DebugGraphicsMaterialDescriptorUpdates = 0;
 #endif
@@ -50,6 +65,10 @@ void VulkanMaterialResources::InitFallbackTexture() {
   }
 
   m_FallbackTexture = m_CreateTextureImage(CheckerTexture);
+  for (uint32_t TextureIndex = 0; TextureIndex < MaxGraphicsMaterialTextures;
+       ++TextureIndex) {
+    WriteTextureDescriptor(TextureIndex, m_FallbackTexture.ImageView);
+  }
 }
 
 MaterialHandle
@@ -111,8 +130,8 @@ VulkanMaterialResources::ResolveMaterialTextureView(const MaterialInstance *Mate
   return TextureImage.ImageView;
 }
 
-VkDescriptorSet
-VulkanMaterialResources::ResolveMaterialDescriptorSet(const MaterialInstance *Material) {
+uint32_t VulkanMaterialResources::ResolveMaterialTextureIndex(
+    const MaterialInstance *Material) {
   const MaterialInstance *MaterialKey = Material;
   const uint64_t MaterialRevision = Material ? Material->Revision : 0;
   const TextureSourceData *TextureSource =
@@ -131,14 +150,19 @@ VulkanMaterialResources::ResolveMaterialDescriptorSet(const MaterialInstance *Ma
   if (It != m_MaterialDescriptorSets.end() &&
       It->second.Revision == MaterialRevision &&
       It->second.TextureView == TextureView) {
-    return It->second.DescriptorSet;
+    return It->second.TextureIndex;
   }
 
   MaterialDescriptorCacheEntry *Entry = nullptr;
   if (It == m_MaterialDescriptorSets.end()) {
     MaterialDescriptorCacheEntry NewEntry{};
-    NewEntry.DescriptorSet = m_DescriptorAllocator->Allocate(
-        m_Device, m_MaterialDescriptorSetLayout);
+    NewEntry.DescriptorSet = m_BindlessMaterialDescriptorSet;
+    NewEntry.TextureIndex = MaterialKey == nullptr ? 0 : m_NextTextureIndex++;
+    assert(NewEntry.TextureIndex < MaxGraphicsMaterialTextures &&
+           "Vulkan graphics material texture table exhausted");
+    if (NewEntry.TextureIndex >= MaxGraphicsMaterialTextures) {
+      NewEntry.TextureIndex = 0;
+    }
     auto [InsertedIt, Inserted] =
         m_MaterialDescriptorSets.emplace(MaterialKey, NewEntry);
     (void)Inserted;
@@ -147,30 +171,34 @@ VulkanMaterialResources::ResolveMaterialDescriptorSet(const MaterialInstance *Ma
     Entry = &It->second;
   }
 
-  VkDescriptorImageInfo GraphicsTextureImageInfo{};
-  GraphicsTextureImageInfo.imageView = TextureView;
-  GraphicsTextureImageInfo.imageLayout =
-      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-  VkDescriptorImageInfo GraphicsTextureSamplerInfo{};
-  GraphicsTextureSamplerInfo.sampler = m_TextureSampler;
-
-  const std::array<VkWriteDescriptorSet, 2> GraphicsMaterialWrites = {
-      VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-                                 Entry->DescriptorSet, &GraphicsTextureImageInfo,
-                                 1),
-      VkInit::WriteDescriptorSet(VK_DESCRIPTOR_TYPE_SAMPLER,
-                                 Entry->DescriptorSet,
-                                 &GraphicsTextureSamplerInfo, 2)};
-  vkUpdateDescriptorSets(m_Device,
-                         static_cast<uint32_t>(GraphicsMaterialWrites.size()),
-                         GraphicsMaterialWrites.data(), 0, VK_NULL_HANDLE);
+  WriteTextureDescriptor(Entry->TextureIndex, TextureView);
   Entry->TextureView = TextureView;
   Entry->TextureSource = TextureSource;
   Entry->Revision = MaterialRevision;
 #if !defined(NDEBUG)
   ++m_DebugGraphicsMaterialDescriptorUpdates;
 #endif
-  return Entry->DescriptorSet;
+  return Entry->TextureIndex;
+}
+
+VkDescriptorSet
+VulkanMaterialResources::ResolveMaterialDescriptorSet(
+    const MaterialInstance *Material) {
+  (void)ResolveMaterialTextureIndex(Material);
+  return m_BindlessMaterialDescriptorSet;
+}
+
+void VulkanMaterialResources::WriteTextureDescriptor(uint32_t TextureIndex,
+                                                     VkImageView TextureView) {
+  VkDescriptorImageInfo GraphicsTextureImageInfo{};
+  GraphicsTextureImageInfo.imageView = TextureView;
+  GraphicsTextureImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+  VkWriteDescriptorSet Write = VkInit::WriteDescriptorSet(
+      VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, m_BindlessMaterialDescriptorSet,
+      &GraphicsTextureImageInfo, 1);
+  Write.dstArrayElement = TextureIndex;
+  vkUpdateDescriptorSets(m_Device, 1, &Write, 0, VK_NULL_HANDLE);
 }
 
 #if !defined(NDEBUG)

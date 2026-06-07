@@ -27,6 +27,7 @@ public:
   void UpdateMaterialHandle(MaterialHandle Handle, const MaterialInstance &Material);
   const MaterialInstance *ResolveMaterialHandle(MaterialHandle Handle) const;
   VkImageView ResolveMaterialTextureView(const MaterialInstance *Material);
+  uint32_t ResolveMaterialTextureIndex(const MaterialInstance *Material);
   VkDescriptorSet ResolveMaterialDescriptorSet(const MaterialInstance *Material);
   VkImageView GetFallbackTextureView() const { return m_FallbackTexture.ImageView; }
 #if !defined(NDEBUG)
@@ -42,7 +43,10 @@ private:
     VkImageView TextureView{VK_NULL_HANDLE};
     const TextureSourceData *TextureSource{nullptr};
     uint64_t Revision{0};
+    uint32_t TextureIndex{0};
   };
+
+  void WriteTextureDescriptor(uint32_t TextureIndex, VkImageView TextureView);
 
   VkDevice m_Device{VK_NULL_HANDLE};
   DescriptorAllocator *m_DescriptorAllocator{nullptr};
@@ -50,12 +54,14 @@ private:
   VkSampler m_TextureSampler{VK_NULL_HANDLE};
   std::function<AllocatedImage(const TextureSourceData &)> m_CreateTextureImage;
   AllocatedImage m_FallbackTexture;
+  VkDescriptorSet m_BindlessMaterialDescriptorSet{VK_NULL_HANDLE};
   std::unordered_map<MaterialHandle, std::unique_ptr<MaterialInstance>,
                      MaterialHandleHash>
       m_MaterialsByHandle;
   std::unordered_map<const MaterialInstance *, VkImageView> m_MaterialImageViews;
   std::unordered_map<const MaterialInstance *, MaterialDescriptorCacheEntry>
       m_MaterialDescriptorSets;
+  uint32_t m_NextTextureIndex{1};
   uint32_t m_NextMaterialHandleValue{1};
 #if !defined(NDEBUG)
   uint32_t m_DebugGraphicsMaterialDescriptorUpdates{0};

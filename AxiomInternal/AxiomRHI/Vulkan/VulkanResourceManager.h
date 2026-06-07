@@ -115,6 +115,8 @@ public:
   MeshFrameResources &GetMeshFrame(uint64_t FrameNumber) {
     return m_MeshFrames[FrameNumber % FRAME_OVERLAP];
   }
+  void EnsureOpaqueIndirectCapacity(MeshFrameResources &Frame,
+                                    size_t DrawCapacity);
 
   std::array<OffscreenCaptureFrame, FRAME_OVERLAP> &GetOffscreenCaptureFrames() {
     return m_OffscreenCaptureFrames;
@@ -129,6 +131,7 @@ private:
   void InitHzbResources();
   void InitDescriptors();
   void InitMeshFrameResources();
+  void UpdateGraphicsFrameDescriptor(const MeshFrameResources &Frame) const;
   AllocatedImage CreateTextureImage(const TextureSourceData &TextureData,
                                     bool TrackForShutdown);
   AllocatedImage CreateTextureImage(const HDRTextureSourceData &TextureData,

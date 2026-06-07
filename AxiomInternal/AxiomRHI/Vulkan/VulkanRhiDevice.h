@@ -54,6 +54,8 @@ public:
     return m_MaterialResources;
   }
   VulkanOcclusionCulling &GetOcclusionCulling() { return m_OcclusionCulling; }
+  VkBuffer GetPooledVertexBuffer() const { return m_PooledVertexBuffer.Buffer; }
+  VkBuffer GetPooledIndexBuffer() const { return m_PooledIndexBuffer.Buffer; }
   const std::shared_ptr<GPUResourceQueue> &GetGpuResourceQueue() const {
     return m_GpuResourceQueue;
   }
@@ -70,10 +72,14 @@ public:
                             const MaterialInstance &Material);
   bool IsInitialized() const { return m_IsInitialized; }
   MeshHandle AllocateMeshHandle();
+  void AllocateMeshGeometry(VulkanMesh &Mesh, const MeshData &MeshSource);
   VulkanMesh *ResolveMeshHandle(MeshHandle Handle) const;
   const MaterialInstance *ResolveMaterialHandle(MaterialHandle Handle) const;
 
 private:
+  void InitMeshGeometryPool();
+  VkDeviceSize AlignPoolOffset(VkDeviceSize Offset, VkDeviceSize Alignment) const;
+
   bool m_IsInitialized{false};
   uint64_t m_FrameNumber{0};
   VkExtent2D m_WindowExtent{1700, 900};
@@ -90,6 +96,10 @@ private:
   VulkanDrawSubmissionSystem m_DrawSubmissionSystem;
   VulkanMaterialResources m_MaterialResources;
   VulkanOcclusionCulling m_OcclusionCulling;
+  AllocatedBuffer m_PooledVertexBuffer;
+  AllocatedBuffer m_PooledIndexBuffer;
+  VkDeviceSize m_PooledVertexHead{0};
+  VkDeviceSize m_PooledIndexHead{0};
   std::unique_ptr<VulkanQueue> m_GraphicsQueue;
   std::unique_ptr<VulkanQueue> m_ComputeQueue;
   std::unique_ptr<VulkanQueue> m_TransferQueue;
