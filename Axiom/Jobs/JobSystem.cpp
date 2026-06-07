@@ -3,7 +3,10 @@
 #include "Core/Threading.h"
 #include "Jobs/TaskScheduler.h"
 
+#include <array>
 #include <algorithm>
+#include <atomic>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -11,23 +14,37 @@
 #include <vector>
 
 namespace Axiom::Jobs {
-struct JobState {
-  std::unique_ptr<enki::ITaskSet> Task;
-  std::vector<JobHandle> DependencyHandles;
-};
-
 namespace {
+constexpr size_t kJobPoolCapacity = 131072;
+constexpr size_t kMaxInlineDependencies = 16;
+
 void OnWorkerThreadStart(uint32_t ThreadNum);
 
 class LambdaTaskSet final : public enki::ITaskSet {
 public:
-  explicit LambdaTaskSet(JobFn Function)
-      : enki::ITaskSet(1), m_Function(std::move(Function)) {}
+  LambdaTaskSet() : enki::ITaskSet(1) {}
 
-  void ExecuteRange(enki::TaskSetPartition, uint32_t) override { m_Function(); }
+  void Reset(JobFn Function, std::span<const JobHandle> Dependencies) {
+    m_SetSize = 1;
+    m_MinRange = 1;
+    m_Function = std::move(Function);
+    m_DependencyCount = std::min(Dependencies.size(), m_Dependencies.size());
+    for (size_t Index = 0; Index < m_DependencyCount; ++Index) {
+      m_Dependencies[Index] = Dependencies[Index];
+    }
+  }
+
+  void Clear() {
+    m_Function.Reset();
+    m_DependencyCount = 0;
+  }
+
+  void ExecuteRange(enki::TaskSetPartition, uint32_t) override;
 
 private:
   JobFn m_Function;
+  std::array<JobHandle, kMaxInlineDependencies> m_Dependencies;
+  size_t m_DependencyCount{0};
 };
 
 class ParallelForTaskSet final : public enki::ITaskSet {
@@ -51,6 +68,16 @@ private:
   ParallelForFn m_Function;
 };
 
+} // namespace
+
+struct JobState {
+  LambdaTaskSet Task;
+  std::atomic<uint32_t> Generation{0};
+  std::atomic<bool> Recycled{true};
+};
+
+namespace {
+
 class JobSystem {
 public:
   void Startup() {
@@ -62,6 +89,7 @@ public:
       Config.profilerCallbacks.threadStart = &OnWorkerThreadStart;
       Config.numExternalTaskThreads = 4;
       m_Scheduler->Initialize(Config);
+      ResetPool();
     }
   }
 
@@ -75,6 +103,7 @@ public:
     if (m_StartupCount == 0 && m_Scheduler != nullptr) {
       m_Scheduler->WaitforAllAndShutdown();
       m_Scheduler.reset();
+      ResetPool();
     }
   }
 
@@ -84,10 +113,14 @@ public:
       return {};
     }
 
-    auto State = std::make_shared<JobState>();
-    State->Task = std::make_unique<LambdaTaskSet>(std::move(Function));
-    m_Scheduler->AddTaskSetToPipe(State->Task.get());
-    return {.State = std::move(State)};
+    JobHandle Handle = AcquireTask(Function, {});
+    if (!Handle.IsValid()) {
+      Function();
+      return {};
+    }
+
+    m_Scheduler->AddTaskSetToPipe(&Handle.State->Task);
+    return Handle;
   }
 
   JobHandle ScheduleJobAfter(JobFn Function, std::span<JobHandle> Deps) {
@@ -99,37 +132,36 @@ public:
       return {};
     }
 
-    auto State = std::make_shared<JobState>();
-    State->DependencyHandles.reserve(Deps.size());
-    for (const JobHandle &Dependency : Deps) {
-      if (!Dependency.IsValid() || Dependency.State->Task == nullptr) {
-        continue;
+    if (Deps.size() > kMaxInlineDependencies) {
+      for (size_t Index = kMaxInlineDependencies; Index < Deps.size();
+           ++Index) {
+        Wait(Deps[Index]);
       }
-      State->DependencyHandles.push_back(Dependency);
     }
 
-    State->Task = std::make_unique<LambdaTaskSet>(
-        [this, State, Function = std::move(Function)]() mutable {
-          for (const JobHandle &Dependency : State->DependencyHandles) {
-            if (!Dependency.IsValid() || Dependency.State->Task == nullptr) {
-              continue;
-            }
+    const size_t InlineDependencyCount =
+        std::min(Deps.size(), kMaxInlineDependencies);
+    JobHandle Handle =
+        AcquireTask(Function, Deps.first(InlineDependencyCount));
+    if (!Handle.IsValid()) {
+      for (size_t Index = 0; Index < InlineDependencyCount; ++Index) {
+        Wait(Deps[Index]);
+      }
+      Function();
+      return {};
+    }
 
-            m_Scheduler->WaitforTask(Dependency.State->Task.get());
-          }
-
-          Function();
-        });
-    m_Scheduler->AddTaskSetToPipe(State->Task.get());
-    return {.State = std::move(State)};
+    m_Scheduler->AddTaskSetToPipe(&Handle.State->Task);
+    return Handle;
   }
 
   void Wait(JobHandle Handle) {
-    if (!Handle.IsValid() || Handle.State->Task == nullptr) {
+    if (m_Scheduler == nullptr || !IsCurrent(Handle)) {
       return;
     }
 
-    m_Scheduler->WaitforTask(Handle.State->Task.get());
+    m_Scheduler->WaitforTask(&Handle.State->Task);
+    ReleaseTask(Handle);
   }
 
   void ParallelFor(size_t Count, ParallelForFn Function) {
@@ -151,7 +183,62 @@ public:
 private:
   std::mutex m_Mutex;
   std::unique_ptr<enki::TaskScheduler> m_Scheduler;
+  std::unique_ptr<JobState[]> m_TaskPool;
+  std::vector<JobState *> m_FreeList;
   size_t m_StartupCount{0};
+
+  void ResetPool() {
+    if (m_TaskPool == nullptr) {
+      m_TaskPool = std::make_unique<JobState[]>(kJobPoolCapacity);
+    }
+
+    m_FreeList.reserve(kJobPoolCapacity);
+    m_FreeList.clear();
+    for (size_t Index = 0; Index < kJobPoolCapacity; ++Index) {
+      JobState &State = m_TaskPool[Index];
+      State.Task.Clear();
+      State.Generation.fetch_add(1, std::memory_order_relaxed);
+      State.Recycled.store(true, std::memory_order_relaxed);
+      m_FreeList.push_back(&State);
+    }
+  }
+
+  JobHandle AcquireTask(JobFn &Function, std::span<const JobHandle> Deps) {
+    std::scoped_lock Lock(m_Mutex);
+    if (m_TaskPool == nullptr || m_FreeList.empty()) {
+      return {};
+    }
+
+    JobState *State = m_FreeList.back();
+    m_FreeList.pop_back();
+    State->Recycled.store(false, std::memory_order_relaxed);
+    const uint32_t Generation =
+        State->Generation.fetch_add(1, std::memory_order_relaxed) + 1;
+    State->Task.Reset(std::move(Function), Deps);
+    return {.State = State, .Generation = Generation};
+  }
+
+  void ReleaseTask(JobHandle Handle) {
+    JobState *State = Handle.State;
+    if (State == nullptr ||
+        State->Generation.load(std::memory_order_acquire) !=
+            Handle.Generation ||
+        State->Recycled.exchange(true, std::memory_order_acq_rel)) {
+      return;
+    }
+
+    State->Task.Clear();
+
+    std::scoped_lock Lock(m_Mutex);
+    m_FreeList.push_back(State);
+  }
+
+  bool IsCurrent(JobHandle Handle) const {
+    return Handle.State != nullptr &&
+           Handle.State->Generation.load(std::memory_order_acquire) ==
+               Handle.Generation &&
+           !Handle.State->Recycled.load(std::memory_order_acquire);
+  }
 
   bool CanUseScheduler() {
     if (m_Scheduler == nullptr) {
@@ -172,6 +259,14 @@ JobSystem &GetJobSystem() {
 void OnWorkerThreadStart(uint32_t ThreadNum) {
   Threading::SetCurrentThreadName("Axiom Job Worker " +
                                   std::to_string(ThreadNum));
+}
+
+void LambdaTaskSet::ExecuteRange(enki::TaskSetPartition, uint32_t) {
+  for (size_t Index = 0; Index < m_DependencyCount; ++Index) {
+    GetJobSystem().Wait(m_Dependencies[Index]);
+  }
+
+  m_Function();
 }
 } // namespace
 

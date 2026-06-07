@@ -16,11 +16,16 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <mutex>
+#include <new>
 #include <string>
 #include <thread>
 
 namespace {
+std::atomic<bool> g_CountAllocations{false};
+std::atomic<size_t> g_AllocationCount{0};
+
 void EnsureLoggingInitialized() {
   static bool Initialized = false;
   if (!Initialized) {
@@ -60,6 +65,65 @@ Axiom::CommandContext MakeContext(uint64_t FrameIndex = 1,
 }
 } // namespace
 
+void *operator new(std::size_t Size) {
+  if (g_CountAllocations.load(std::memory_order_relaxed)) {
+    g_AllocationCount.fetch_add(1, std::memory_order_relaxed);
+  }
+  if (void *Pointer = std::malloc(Size)) {
+    return Pointer;
+  }
+  throw std::bad_alloc();
+}
+
+void *operator new[](std::size_t Size) {
+  if (g_CountAllocations.load(std::memory_order_relaxed)) {
+    g_AllocationCount.fetch_add(1, std::memory_order_relaxed);
+  }
+  if (void *Pointer = std::malloc(Size)) {
+    return Pointer;
+  }
+  throw std::bad_alloc();
+}
+
+void *operator new(std::size_t Size, std::align_val_t Alignment) {
+  if (g_CountAllocations.load(std::memory_order_relaxed)) {
+    g_AllocationCount.fetch_add(1, std::memory_order_relaxed);
+  }
+  void *Pointer = nullptr;
+  if (posix_memalign(&Pointer, static_cast<std::size_t>(Alignment), Size) == 0) {
+    return Pointer;
+  }
+  throw std::bad_alloc();
+}
+
+void *operator new[](std::size_t Size, std::align_val_t Alignment) {
+  if (g_CountAllocations.load(std::memory_order_relaxed)) {
+    g_AllocationCount.fetch_add(1, std::memory_order_relaxed);
+  }
+  void *Pointer = nullptr;
+  if (posix_memalign(&Pointer, static_cast<std::size_t>(Alignment), Size) == 0) {
+    return Pointer;
+  }
+  throw std::bad_alloc();
+}
+
+void operator delete(void *Pointer) noexcept { std::free(Pointer); }
+void operator delete[](void *Pointer) noexcept { std::free(Pointer); }
+void operator delete(void *Pointer, std::size_t) noexcept { std::free(Pointer); }
+void operator delete[](void *Pointer, std::size_t) noexcept { std::free(Pointer); }
+void operator delete(void *Pointer, std::align_val_t) noexcept {
+  std::free(Pointer);
+}
+void operator delete[](void *Pointer, std::align_val_t) noexcept {
+  std::free(Pointer);
+}
+void operator delete(void *Pointer, std::size_t, std::align_val_t) noexcept {
+  std::free(Pointer);
+}
+void operator delete[](void *Pointer, std::size_t, std::align_val_t) noexcept {
+  std::free(Pointer);
+}
+
 TEST(ThreadingTests, JobsRunWithDependenciesAndParallelFor) {
   Axiom::Jobs::Startup();
 
@@ -83,6 +147,34 @@ TEST(ThreadingTests, JobsRunWithDependenciesAndParallelFor) {
   EXPECT_EQ(ParallelSum.load(std::memory_order_relaxed), (256u * 257u) / 2u);
 
   Axiom::Jobs::Shutdown();
+}
+
+TEST(ThreadingTests, SchedulingTrivialJobsDoesNotAllocatePerJob) {
+  constexpr size_t JobCount = 100000;
+  static std::array<Axiom::Jobs::JobHandle, JobCount> Handles;
+
+  Axiom::Jobs::Startup();
+
+  Axiom::Jobs::JobHandle Warmup = Axiom::Jobs::ScheduleJob([]() {});
+  Axiom::Jobs::Wait(Warmup);
+
+  g_AllocationCount.store(0, std::memory_order_relaxed);
+  g_CountAllocations.store(true, std::memory_order_release);
+
+  for (Axiom::Jobs::JobHandle &Handle : Handles) {
+    Handle = Axiom::Jobs::ScheduleJob([]() {});
+  }
+  for (Axiom::Jobs::JobHandle Handle : Handles) {
+    Axiom::Jobs::Wait(Handle);
+  }
+
+  g_CountAllocations.store(false, std::memory_order_release);
+  const size_t AllocationCount =
+      g_AllocationCount.load(std::memory_order_relaxed);
+
+  Axiom::Jobs::Shutdown();
+
+  EXPECT_EQ(AllocationCount, 0u);
 }
 
 TEST(ThreadingTests, ThreadedRendererRunsHeadlessForThousandFramesWithoutDeadlock) {
