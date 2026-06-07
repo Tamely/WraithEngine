@@ -12,6 +12,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <unordered_set>
 
 #include <glm/geometric.hpp>
@@ -35,6 +36,25 @@ std::array<RHINativeHandle, 1> RHIDescriptorSets(VkDescriptorSet Set) {
 
 VkCommandBuffer GetVulkanCommandBuffer(const IRHICommandList &CommandList) {
   return reinterpret_cast<VkCommandBuffer>(CommandList.GetNativeCommandBuffer());
+}
+
+uint64_t PackOpaqueSortKey(MaterialHandle Material, MeshHandle Mesh) {
+  return (static_cast<uint64_t>(Material.Value) << 32) |
+         static_cast<uint32_t>(Mesh.Value);
+}
+
+uint64_t PackTranslucentSortKey(float SortDepth, uint32_t SubmissionIndex) {
+  if (!std::isfinite(SortDepth) || SortDepth <= 0.0f) {
+    return (static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) << 32) |
+           SubmissionIndex;
+  }
+
+  uint32_t QuantizedDepth = 0;
+  static_assert(sizeof(QuantizedDepth) == sizeof(SortDepth));
+  std::memcpy(&QuantizedDepth, &SortDepth, sizeof(QuantizedDepth));
+  const uint32_t BackToFrontDepth =
+      std::numeric_limits<uint32_t>::max() - QuantizedDepth;
+  return (static_cast<uint64_t>(BackToFrontDepth) << 32) | SubmissionIndex;
 }
 } // namespace
 
@@ -291,8 +311,12 @@ void VulkanSceneRenderer::PrepareSceneFrame(RenderScene &Scene) {
         Submission.RenderPath == MeshRenderPath::Compute) {
       VisibleSubmissions.Compute.push_back(Visible);
     } else if (Submission.Translucent) {
+      Visible.SortKey =
+          PackTranslucentSortKey(Candidate.SortDepth, Candidate.SubmissionIndex);
       VisibleSubmissions.TranslucentGraphics.push_back(Visible);
     } else {
+      Visible.SortKey =
+          PackOpaqueSortKey(Submission.MaterialHandle, Candidate.MeshHandle);
       VisibleSubmissions.OpaqueGraphics.push_back(Visible);
     }
 
@@ -302,17 +326,8 @@ void VulkanSceneRenderer::PrepareSceneFrame(RenderScene &Scene) {
 
   std::sort(VisibleSubmissions.OpaqueGraphics.begin(),
             VisibleSubmissions.OpaqueGraphics.end(),
-            [this](const VisibleSubmission &Left, const VisibleSubmission &Right) {
-              const MaterialInstance *LeftMaterial =
-                  m_Device->ResolveMaterialHandle(
-                      GetSubmission(Left.SubmissionIndex).MaterialHandle);
-              const MaterialInstance *RightMaterial =
-                  m_Device->ResolveMaterialHandle(
-                      GetSubmission(Right.SubmissionIndex).MaterialHandle);
-              if (LeftMaterial != RightMaterial) {
-                return LeftMaterial < RightMaterial;
-              }
-              return Left.SubmissionIndex < Right.SubmissionIndex;
+            [](const VisibleSubmission &Left, const VisibleSubmission &Right) {
+              return Left.SortKey < Right.SortKey;
             });
 
   PrepareGraphicsMaterialDescriptors();
@@ -636,7 +651,7 @@ void VulkanSceneRenderer::PrepareGraphicsMaterialDescriptors() {
   std::sort(SortedTranslucentSubmissions.begin(),
             SortedTranslucentSubmissions.end(),
             [](const VisibleSubmission &Left, const VisibleSubmission &Right) {
-              return Left.SortDepth > Right.SortDepth;
+              return Left.SortKey < Right.SortKey;
             });
   for (const VisibleSubmission &Visible : SortedTranslucentSubmissions) {
     TranslucentMaterials.insert(m_Device->ResolveMaterialHandle(
@@ -961,7 +976,7 @@ void VulkanSceneRenderer::RecordTranslucentForwardPass(
 
   std::sort(GraphicsSubmissions.begin(), GraphicsSubmissions.end(),
             [](const VisibleSubmission &Left, const VisibleSubmission &Right) {
-              return Left.SortDepth > Right.SortDepth;
+              return Left.SortKey < Right.SortKey;
             });
 
   const VkExtent2D DrawExtent = GetDrawExtent2D();

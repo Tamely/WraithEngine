@@ -41,6 +41,7 @@ struct VisibleSubmission {
   uint32_t SubmissionIndex{0};
   MeshHandle MeshHandle{};
   float SortDepth{0.0f};
+  uint64_t SortKey{0};
 };
 
 struct VisibleSubmissionList {
