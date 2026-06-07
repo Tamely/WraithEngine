@@ -8,10 +8,15 @@
 
 void DescriptorLayoutBuilder::AddBinding(uint32_t Binding,
                                          VkDescriptorType Type) {
+  AddBinding(Binding, Type, 1);
+}
+
+void DescriptorLayoutBuilder::AddBinding(uint32_t Binding, VkDescriptorType Type,
+                                         uint32_t DescriptorCount) {
   VkDescriptorSetLayoutBinding NewBind{};
   NewBind.binding = Binding;
   NewBind.descriptorType = Type;
-  NewBind.descriptorCount = 1;
+  NewBind.descriptorCount = DescriptorCount;
 
   Bindings.push_back(NewBind);
 }

@@ -2,6 +2,7 @@
 
 #include "Renderer/Camera.h"
 #include "Renderer/RenderScene.h"
+#include "AxiomRHI/Vulkan/VulkanBuffer.h"
 #include "AxiomRHI/Vulkan/VulkanImage.h"
 #include "AxiomRHI/Vulkan/VulkanInitializers.h"
 #include "AxiomRHI/Vulkan/VulkanMesh.h"
@@ -12,6 +13,7 @@
 #include <array>
 #include <cassert>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <unordered_set>
 
@@ -22,6 +24,9 @@ namespace {
 glm::vec3 TransformPoint(const glm::mat4 &Transform, const glm::vec3 &Point) {
   return glm::vec3(Transform * glm::vec4(Point, 1.0f));
 }
+
+constexpr VkDeviceSize MeshVertexPoolSize = 512ull * 1024ull * 1024ull;
+constexpr VkDeviceSize MeshIndexPoolSize = 256ull * 1024ull * 1024ull;
 } // namespace
 
 namespace Axiom {
@@ -56,7 +61,8 @@ void VulkanRhiDevice::Init(const RHIDeviceCreateInfo &CreateInfo) {
                                      std::function<void()> &&Cleanup) {
                                 m_DrawSubmissionSystem.SubmitTransferUpload(
                                     std::move(Record), std::move(Cleanup));
-                              }});
+                          }});
+  InitMeshGeometryPool();
 
   m_MaterialResources.Init(
       {.Device = m_Device.Device,
@@ -118,6 +124,10 @@ void VulkanRhiDevice::Shutdown() {
   m_GraphicsQueue.reset();
   m_MeshesByHandle.clear();
   m_NextMeshHandleValue = 1;
+  VkBufferUtil::DestroyBuffer(m_Device.Allocator, m_PooledVertexBuffer);
+  VkBufferUtil::DestroyBuffer(m_Device.Allocator, m_PooledIndexBuffer);
+  m_PooledVertexHead = 0;
+  m_PooledIndexHead = 0;
   m_GpuResourceQueue->Flush();
   m_GpuResourceQueue.reset();
   m_PipelineLibrary.Shutdown();
@@ -221,6 +231,7 @@ VulkanRhiDevice::CreateMesh(const MeshData &MeshSource,
   if (Mesh == nullptr) {
     return nullptr;
   }
+  AllocateMeshGeometry(*Mesh, MeshSource);
 
   const MeshHandle Handle = AllocateMeshHandle();
   Mesh->AssignHandle(Handle);
@@ -246,6 +257,72 @@ MeshHandle VulkanRhiDevice::AllocateMeshHandle() {
   MeshHandle Handle{m_NextMeshHandleValue++};
   assert(Handle.IsValid() && "Opaque mesh handle allocation overflowed");
   return Handle;
+}
+
+void VulkanRhiDevice::InitMeshGeometryPool() {
+  const VkBufferUsageFlags VertexUsage =
+      VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+      VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+  const VkBufferUsageFlags IndexUsage =
+      VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+      VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+  m_PooledVertexBuffer = VkBufferUtil::CreateBuffer(
+      m_Device.Allocator, static_cast<size_t>(MeshVertexPoolSize), VertexUsage,
+      VMA_MEMORY_USAGE_CPU_TO_GPU,
+      VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+          VMA_ALLOCATION_CREATE_MAPPED_BIT);
+  m_PooledIndexBuffer = VkBufferUtil::CreateBuffer(
+      m_Device.Allocator, static_cast<size_t>(MeshIndexPoolSize), IndexUsage,
+      VMA_MEMORY_USAGE_CPU_TO_GPU,
+      VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+          VMA_ALLOCATION_CREATE_MAPPED_BIT);
+  m_PooledVertexHead = 0;
+  m_PooledIndexHead = 0;
+}
+
+VkDeviceSize VulkanRhiDevice::AlignPoolOffset(VkDeviceSize Offset,
+                                              VkDeviceSize Alignment) const {
+  return (Offset + Alignment - 1) & ~(Alignment - 1);
+}
+
+void VulkanRhiDevice::AllocateMeshGeometry(VulkanMesh &Mesh,
+                                           const MeshData &MeshSource) {
+  const VkDeviceSize VertexBytes =
+      static_cast<VkDeviceSize>(MeshSource.Vertices.size() * sizeof(MeshVertex));
+  const VkDeviceSize IndexBytes =
+      static_cast<VkDeviceSize>(MeshSource.Indices.size() * sizeof(uint32_t));
+
+  const VkDeviceSize VertexOffset =
+      AlignPoolOffset(m_PooledVertexHead, alignof(MeshVertex));
+  const VkDeviceSize IndexOffset =
+      AlignPoolOffset(m_PooledIndexHead, alignof(uint32_t));
+  assert(VertexOffset + VertexBytes <= m_PooledVertexBuffer.Size &&
+         "Merged Vulkan vertex buffer pool exhausted");
+  assert(IndexOffset + IndexBytes <= m_PooledIndexBuffer.Size &&
+         "Merged Vulkan index buffer pool exhausted");
+  if (VertexOffset + VertexBytes > m_PooledVertexBuffer.Size ||
+      IndexOffset + IndexBytes > m_PooledIndexBuffer.Size) {
+    return;
+  }
+
+  std::memcpy(static_cast<std::byte *>(m_PooledVertexBuffer.Info.pMappedData) +
+                  VertexOffset,
+              MeshSource.Vertices.data(), static_cast<size_t>(VertexBytes));
+  std::memcpy(static_cast<std::byte *>(m_PooledIndexBuffer.Info.pMappedData) +
+                  IndexOffset,
+              MeshSource.Indices.data(), static_cast<size_t>(IndexBytes));
+  vmaFlushAllocation(m_Device.Allocator, m_PooledVertexBuffer.Allocation,
+                     VertexOffset, VertexBytes);
+  vmaFlushAllocation(m_Device.Allocator, m_PooledIndexBuffer.Allocation,
+                     IndexOffset, IndexBytes);
+
+  Mesh.PooledVertexOffset = VertexOffset;
+  Mesh.PooledIndexOffset = IndexOffset;
+  Mesh.PooledVertexBase =
+      static_cast<int32_t>(VertexOffset / static_cast<VkDeviceSize>(sizeof(MeshVertex)));
+  m_PooledVertexHead = VertexOffset + VertexBytes;
+  m_PooledIndexHead = IndexOffset + IndexBytes;
 }
 
 VulkanMesh *VulkanRhiDevice::ResolveMeshHandle(MeshHandle Handle) const {

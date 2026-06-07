@@ -28,6 +28,9 @@ public:
   AllocatedBuffer VertexBuffer;
   AllocatedBuffer IndexBuffer;
   AllocatedBuffer ProjectedVertexBuffer;
+  VkDeviceSize PooledVertexOffset{0};
+  VkDeviceSize PooledIndexOffset{0};
+  int32_t PooledVertexBase{0};
   VkDescriptorSet DescriptorSet{VK_NULL_HANDLE};
   glm::vec3 BoundsMin{0.0f};
   glm::vec3 BoundsMax{0.0f};

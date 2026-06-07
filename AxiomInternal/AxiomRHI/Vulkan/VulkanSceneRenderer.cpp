@@ -570,10 +570,16 @@ void VulkanSceneRenderer::UpdateGraphicsFrameDescriptors(
   VkDescriptorBufferInfo CameraBufferInfo =
       VkInit::BufferInfo(Frame.CameraBuffer.Buffer, 0, Frame.CameraBuffer.Size);
   VkDescriptorBufferInfo MutableCameraBufferInfo = CameraBufferInfo;
-  std::array<VkWriteDescriptorSet, 1> GraphicsFrameWrites = {
+  VkDescriptorBufferInfo ObjectBufferInfo =
+      VkInit::BufferInfo(Frame.OpaqueObjectBuffer.Buffer, 0,
+                         Frame.OpaqueObjectBuffer.Size);
+  std::array<VkWriteDescriptorSet, 2> GraphicsFrameWrites = {
       VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                                     Frame.GraphicsFrameDescriptorSet,
-                                    &MutableCameraBufferInfo, 0)};
+                                    &MutableCameraBufferInfo, 0),
+      VkInit::WriteDescriptorBuffer(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                    Frame.GraphicsFrameDescriptorSet,
+                                    &ObjectBufferInfo, 1)};
   vkUpdateDescriptorSets(m_Device->GetVulkanDevice().Device,
                          static_cast<uint32_t>(GraphicsFrameWrites.size()),
                          GraphicsFrameWrites.data(), 0, VK_NULL_HANDLE);
@@ -850,10 +856,18 @@ void VulkanSceneRenderer::RecordOpaqueForwardPass(
       RHIHandle(m_Device->GetPipelineLibrary().GetMeshGraphicsPipelineLayout()),
       0, GraphicsFrameSets);
 
-  VkDescriptorSet BoundMaterialDescriptorSet = VK_NULL_HANDLE;
-#if !defined(NDEBUG)
-  uint32_t MaterialDescriptorBindCount = 0;
-#endif
+  auto &MutableFrame =
+      const_cast<MeshFrameResources &>(Frame);
+  m_Device->GetResourceManager().EnsureOpaqueIndirectCapacity(
+      MutableFrame, GraphicsSubmissions.size());
+
+  auto *ObjectData = static_cast<MeshGraphicsObjectData *>(
+      MutableFrame.OpaqueObjectBuffer.Info.pMappedData);
+  auto *IndirectCommands = static_cast<VkDrawIndexedIndirectCommand *>(
+      MutableFrame.OpaqueIndirectBuffer.Info.pMappedData);
+
+  VkDescriptorSet FirstMaterialDescriptorSet = VK_NULL_HANDLE;
+  uint32_t DrawCount = 0;
   for (const VisibleSubmission &Visible : GraphicsSubmissions) {
     const RenderMeshSubmission &Submission = GetSubmission(Visible.SubmissionIndex);
     VulkanMesh *Mesh = ResolveVisibleMesh(Visible);
@@ -861,44 +875,79 @@ void VulkanSceneRenderer::RecordOpaqueForwardPass(
       continue;
     }
 
-    const VkDescriptorSet MaterialDescriptorSet =
-        m_Device->GetMaterialResources().ResolveMaterialDescriptorSet(
-            m_Device->ResolveMaterialHandle(Submission.MaterialHandle));
-    if (MaterialDescriptorSet != BoundMaterialDescriptorSet) {
-      const auto MaterialSets = RHIDescriptorSets(MaterialDescriptorSet);
-      CommandList.BindDescriptorSet(
-          RHIBindPoint::Graphics,
-          RHIHandle(m_Device->GetPipelineLibrary().GetMeshGraphicsPipelineLayout()),
-          1, MaterialSets);
-      BoundMaterialDescriptorSet = MaterialDescriptorSet;
-#if !defined(NDEBUG)
-      ++MaterialDescriptorBindCount;
-#endif
+    const MaterialInstance *Material =
+        m_Device->ResolveMaterialHandle(Submission.MaterialHandle);
+    if (FirstMaterialDescriptorSet == VK_NULL_HANDLE) {
+      FirstMaterialDescriptorSet =
+          m_Device->GetMaterialResources().ResolveMaterialDescriptorSet(Material);
     }
-    MeshGraphicsPushConstants PushConstants{};
-    PushConstants.Model = Submission.Transform;
-    if (const MaterialInstance *Material =
-            m_Device->ResolveMaterialHandle(Submission.MaterialHandle);
-        Material != nullptr) {
-      PushConstants.BaseColorFactor = Material->BaseColorFactor;
-      PushConstants.Metallic = Material->Metallic;
-      PushConstants.Roughness = Material->Roughness;
+
+    MeshGraphicsObjectData &Object = ObjectData[DrawCount];
+    Object.Model = Submission.Transform;
+    if (Material != nullptr) {
+      Object.BaseColorFactor = Material->BaseColorFactor;
+      Object.MaterialParams =
+          glm::vec4(Material->Metallic, Material->Roughness,
+                    static_cast<float>(
+                        m_Device->GetMaterialResources()
+                            .ResolveMaterialTextureIndex(Material)),
+                    0.0f);
+    } else {
+      Object.BaseColorFactor = glm::vec4(1.0f);
+      Object.MaterialParams = glm::vec4(0.0f, 0.5f, 0.0f, 0.0f);
     }
-    CommandList.PushConstants(
-        RHIHandle(m_Device->GetPipelineLibrary().GetMeshGraphicsPipelineLayout()),
-        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-        sizeof(MeshGraphicsPushConstants), &PushConstants);
-    BindMeshBuffers(CommandList, *Mesh);
-    CommandList.DrawIndexed(Mesh->IndexCount, 1, 0, 0, 0);
+
+    IndirectCommands[DrawCount] = VkDrawIndexedIndirectCommand{
+        .indexCount = Mesh->IndexCount,
+        .instanceCount = 1,
+        .firstIndex =
+            static_cast<uint32_t>(Mesh->PooledIndexOffset / sizeof(uint32_t)),
+        .vertexOffset = Mesh->PooledVertexBase,
+        .firstInstance = DrawCount};
+    ++DrawCount;
   }
+  if (DrawCount == 0) {
+    CommandList.EndRendering();
+    return;
+  }
+
+  vmaFlushAllocation(m_Device->GetVulkanDevice().Allocator,
+                     MutableFrame.OpaqueObjectBuffer.Allocation, 0,
+                     DrawCount * sizeof(MeshGraphicsObjectData));
+  vmaFlushAllocation(m_Device->GetVulkanDevice().Allocator,
+                     MutableFrame.OpaqueIndirectBuffer.Allocation, 0,
+                     DrawCount * sizeof(VkDrawIndexedIndirectCommand));
+
+  if (FirstMaterialDescriptorSet == VK_NULL_HANDLE) {
+    FirstMaterialDescriptorSet =
+        m_Device->GetMaterialResources().ResolveMaterialDescriptorSet(nullptr);
+  }
+  const auto MaterialSets = RHIDescriptorSets(FirstMaterialDescriptorSet);
+  CommandList.BindDescriptorSet(
+      RHIBindPoint::Graphics,
+      RHIHandle(m_Device->GetPipelineLibrary().GetMeshGraphicsPipelineLayout()), 1,
+      MaterialSets);
+
+  MeshGraphicsPushConstants PushConstants{};
+  PushConstants.DrawOptions.x = 0u;
+  CommandList.PushConstants(
+      RHIHandle(m_Device->GetPipelineLibrary().GetMeshGraphicsPipelineLayout()),
+      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+      sizeof(MeshGraphicsPushConstants), &PushConstants);
+
+  CommandList.BindVertexBuffer(0, RHIHandle(m_Device->GetPooledVertexBuffer()), 0);
+  CommandList.BindIndexBuffer(RHIHandle(m_Device->GetPooledIndexBuffer()), 0,
+                              RHIIndexType::UInt32);
+  CommandList.DrawIndexedIndirect(RHIHandle(MutableFrame.OpaqueIndirectBuffer.Buffer),
+                                  0, DrawCount,
+                                  sizeof(VkDrawIndexedIndirectCommand));
 
   CommandList.EndRendering();
 
 #if !defined(NDEBUG)
   AccessFrameStats().DebugGraphicsMaterialDescriptorUpdates =
       m_Device->GetMaterialResources().GetDebugGraphicsMaterialDescriptorUpdates();
-  AccessFrameStats().DebugOpaqueMaterialDescriptorBinds =
-      MaterialDescriptorBindCount;
+  AccessFrameStats().DebugOpaqueMaterialDescriptorBinds = 1;
 #endif
 }
 
@@ -982,6 +1031,8 @@ void VulkanSceneRenderer::RecordTranslucentForwardPass(
       PushConstants.BaseColorFactor = Material->BaseColorFactor;
       PushConstants.Metallic = Material->Metallic;
       PushConstants.Roughness = Material->Roughness;
+      PushConstants.DrawOptions.y =
+          m_Device->GetMaterialResources().ResolveMaterialTextureIndex(Material);
     }
     CommandList.PushConstants(
         RHIHandle(m_Device->GetPipelineLibrary().GetMeshGraphicsPipelineLayout()),

@@ -2,6 +2,8 @@
 
 #include "AxiomRHI/Vulkan/VulkanTypes.h"
 
+#include <cstddef>
+
 #include <glm/ext/vector_uint4.hpp>
 #include <glm/mat4x4.hpp>
 #include <glm/vec2.hpp>
@@ -44,6 +46,16 @@ struct MeshGraphicsPushConstants {
   glm::vec4 BaseColorFactor{1.0f};
   float Metallic{0.0f};
   float Roughness{0.5f};
+  glm::vec2 Padding{0.0f};
+  glm::uvec4 DrawOptions{0xffffffffu, 0u, 0u, 0u};
+};
+static_assert(offsetof(MeshGraphicsPushConstants, DrawOptions) == 96);
+static_assert(sizeof(MeshGraphicsPushConstants) == 112);
+
+struct MeshGraphicsObjectData {
+  glm::mat4 Model{1.0f};
+  glm::vec4 BaseColorFactor{1.0f};
+  glm::vec4 MaterialParams{0.0f};
 };
 
 struct HzbReducePushConstants {
@@ -58,7 +70,11 @@ struct ProjectedMeshVertexGpu {
 
 struct MeshFrameResources {
   AllocatedBuffer CameraBuffer;
+  AllocatedBuffer OpaqueObjectBuffer;
+  AllocatedBuffer OpaqueIndirectBuffer;
   AllocatedBuffer HzbReadbackBuffer;
+  size_t OpaqueObjectCapacity{0};
+  size_t OpaqueIndirectCapacity{0};
   VkDescriptorSet DepthFrameDescriptorSet{VK_NULL_HANDLE};
   VkDescriptorSet GraphicsFrameDescriptorSet{VK_NULL_HANDLE};
   VkDescriptorSet ComputeFrameDescriptorSet{VK_NULL_HANDLE};
