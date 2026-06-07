@@ -14,6 +14,12 @@ namespace Axiom {
 #ifndef AXIOM_THREADED_RENDER
 #define AXIOM_THREADED_RENDER 0
 #endif
+#ifndef AXIOM_PARALLEL_CULL
+#define AXIOM_PARALLEL_CULL 0
+#endif
+#ifndef AXIOM_VERIFY_PARALLEL_CULL
+#define AXIOM_VERIFY_PARALLEL_CULL 0
+#endif
 
 enum class RendererBackendType : uint32_t {
   Vulkan = 0,
@@ -37,6 +43,8 @@ struct RendererCreateInfo {
   uint32_t Width{0};
   uint32_t Height{0};
   bool EnableThreadedRendering{AXIOM_THREADED_RENDER != 0};
+  bool EnableParallelCull{AXIOM_PARALLEL_CULL != 0};
+  bool VerifyParallelCull{AXIOM_VERIFY_PARALLEL_CULL != 0};
   std::function<void(uint64_t)> ThreadedRenderSceneStartCallback;
   std::function<void(uint64_t)> ThreadedRenderSceneCompleteCallback;
   RendererBackendType BackendType{RendererBackendType::Vulkan};

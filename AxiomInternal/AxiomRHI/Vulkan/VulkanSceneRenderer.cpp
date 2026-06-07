@@ -6,6 +6,7 @@
 #include "AxiomRHI/Vulkan/VulkanInitializers.h"
 #include "AxiomRHI/Vulkan/VulkanMesh.h"
 #include "AxiomRHI/Vulkan/VulkanRhiDevice.h"
+#include "Jobs/JobSystem.h"
 
 #include <algorithm>
 #include <array>
@@ -13,6 +14,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <thread>
 #include <unordered_set>
 
 #include <glm/geometric.hpp>
@@ -61,6 +63,8 @@ uint64_t PackTranslucentSortKey(float SortDepth, uint32_t SubmissionIndex) {
 void VulkanSceneRenderer::Init(IRHIDevice &Device,
                                const RendererCreateInfo &CreateInfo) {
   m_Device = static_cast<VulkanRhiDevice *>(&Device);
+  m_EnableParallelCull = CreateInfo.EnableParallelCull;
+  m_VerifyParallelCull = CreateInfo.VerifyParallelCull;
   if (m_Device != nullptr) {
     m_FrameOutput = CreateInfo.FrameOutput;
     m_Device->GetDrawSubmissionSystem().SetRecordPreparedScenePasses(
@@ -238,35 +242,37 @@ void VulkanSceneRenderer::PrepareSceneFrame(RenderScene &Scene) {
 
   auto &Candidates = m_CandidateScratch;
   auto &VisibleSubmissions = m_PreparedSceneState.VisibleSubmissions;
+  auto &CullInputs = m_CullInputScratch;
   Candidates.clear();
   VisibleSubmissions.Clear();
+  CullInputs.clear();
   Candidates.reserve(SubmissionCount);
+  CullInputs.resize(SubmissionCount);
   VisibleSubmissions.OpaqueGraphics.reserve(SubmissionCount);
   VisibleSubmissions.TranslucentGraphics.reserve(SubmissionCount);
   VisibleSubmissions.Compute.reserve(SubmissionCount);
 
   for (size_t Index = 0; Index < SubmissionCount; ++Index) {
     const auto &Submission = Scene.Submissions[Index];
-    VulkanMesh *VulkanMeshRef = m_Device->ResolveMeshHandle(Submission.MeshHandle);
-    if (VulkanMeshRef == nullptr) {
-      continue;
-    }
-
-    if (!m_PreparedSceneState.ForceWireframe &&
-        !m_Device->GetOcclusionCulling().IsBoundsVisible(
-            m_PreparedSceneState.CameraData.ViewProjection, Submission.Transform,
-            VulkanMeshRef->BoundsMin, VulkanMeshRef->BoundsMax)) {
-      ++FrameStats.FrustumCulledMeshCount;
-      continue;
-    }
-
-    const glm::vec3 WorldCenter = ComputeWorldCenter(Submission, *VulkanMeshRef);
-    const glm::vec3 Delta = WorldCenter - Scene.ActiveCamera->GetPosition();
-    Candidates.push_back({.SubmissionIndex = static_cast<uint32_t>(Index),
-                          .MeshHandle = Submission.MeshHandle,
-                          .Mesh = VulkanMeshRef,
-                          .SortDepth = glm::dot(Delta, Delta)});
+    CullInputs[Index].Mesh = m_Device->ResolveMeshHandle(Submission.MeshHandle);
   }
+
+  size_t FrustumCulledCount = 0;
+  if (ShouldUseParallelCull(SubmissionCount)) {
+    FrustumCulledCount = BuildCullCandidatesParallel(Scene, CullInputs, Candidates);
+    if (m_VerifyParallelCull) {
+      auto &SerialCandidates = m_VerificationCandidateScratch;
+      const size_t SerialFrustumCulledCount =
+          BuildCullCandidatesSerial(Scene, CullInputs, SerialCandidates);
+      assert(SerialFrustumCulledCount == FrustumCulledCount &&
+             "Parallel cull frustum count diverged from serial cull");
+      assert(SerialCandidates == Candidates &&
+             "Parallel cull candidates diverged from serial cull");
+    }
+  } else {
+    FrustumCulledCount = BuildCullCandidatesSerial(Scene, CullInputs, Candidates);
+  }
+  FrameStats.FrustumCulledMeshCount = static_cast<uint32_t>(FrustumCulledCount);
 
   if (!m_PreparedSceneState.ForceWireframe) {
     std::sort(Candidates.begin(), Candidates.end(),
@@ -331,6 +337,103 @@ void VulkanSceneRenderer::PrepareSceneFrame(RenderScene &Scene) {
             });
 
   PrepareGraphicsMaterialDescriptors();
+}
+
+size_t VulkanSceneRenderer::BuildCullCandidatesSerial(
+    const RenderScene &Scene, std::span<const SubmissionCullInput> Inputs,
+    std::vector<CandidateSubmission> &Candidates) const {
+  Candidates.clear();
+  Candidates.reserve(Inputs.size());
+
+  size_t FrustumCulledCount = 0;
+  const glm::vec3 CameraPosition = Scene.ActiveCamera->GetPosition();
+  for (size_t Index = 0; Index < Inputs.size(); ++Index) {
+    const auto &Submission = Scene.Submissions[Index];
+    VulkanMesh *VulkanMeshRef = Inputs[Index].Mesh;
+    if (VulkanMeshRef == nullptr) {
+      continue;
+    }
+
+    if (!m_PreparedSceneState.ForceWireframe &&
+        !m_Device->GetOcclusionCulling().IsBoundsVisible(
+            m_PreparedSceneState.CameraData.ViewProjection, Submission.Transform,
+            VulkanMeshRef->BoundsMin, VulkanMeshRef->BoundsMax)) {
+      ++FrustumCulledCount;
+      continue;
+    }
+
+    const glm::vec3 WorldCenter = ComputeWorldCenter(Submission, *VulkanMeshRef);
+    const glm::vec3 Delta = WorldCenter - CameraPosition;
+    Candidates.push_back({.SubmissionIndex = static_cast<uint32_t>(Index),
+                          .MeshHandle = Submission.MeshHandle,
+                          .Mesh = VulkanMeshRef,
+                          .SortDepth = glm::dot(Delta, Delta)});
+  }
+
+  return FrustumCulledCount;
+}
+
+size_t VulkanSceneRenderer::BuildCullCandidatesParallel(
+    const RenderScene &Scene, std::span<const SubmissionCullInput> Inputs,
+    std::vector<CandidateSubmission> &Candidates) const {
+  Candidates.clear();
+  Candidates.reserve(Inputs.size());
+
+  const unsigned HardwareThreads = std::max(1u, std::thread::hardware_concurrency());
+  const size_t BucketCount =
+      std::min<size_t>(Inputs.size(), std::max<size_t>(1u, HardwareThreads));
+  const size_t BucketSize = (Inputs.size() + BucketCount - 1u) / BucketCount;
+  const glm::vec3 CameraPosition = Scene.ActiveCamera->GetPosition();
+
+  struct CandidateBucket {
+    std::vector<CandidateSubmission> Candidates;
+    size_t FrustumCulledCount{0};
+  };
+  std::vector<CandidateBucket> Buckets(BucketCount);
+
+  Jobs::ParallelFor(BucketCount, [&](size_t BucketIndex) {
+    const size_t Begin = BucketIndex * BucketSize;
+    const size_t End = std::min(Inputs.size(), Begin + BucketSize);
+    CandidateBucket &Bucket = Buckets[BucketIndex];
+    Bucket.Candidates.reserve(End - Begin);
+
+    for (size_t Index = Begin; Index < End; ++Index) {
+      const auto &Submission = Scene.Submissions[Index];
+      VulkanMesh *VulkanMeshRef = Inputs[Index].Mesh;
+      if (VulkanMeshRef == nullptr) {
+        continue;
+      }
+
+      if (!m_PreparedSceneState.ForceWireframe &&
+          !m_Device->GetOcclusionCulling().IsBoundsVisible(
+              m_PreparedSceneState.CameraData.ViewProjection, Submission.Transform,
+              VulkanMeshRef->BoundsMin, VulkanMeshRef->BoundsMax)) {
+        ++Bucket.FrustumCulledCount;
+        continue;
+      }
+
+      const glm::vec3 WorldCenter = ComputeWorldCenter(Submission, *VulkanMeshRef);
+      const glm::vec3 Delta = WorldCenter - CameraPosition;
+      Bucket.Candidates.push_back({.SubmissionIndex = static_cast<uint32_t>(Index),
+                                   .MeshHandle = Submission.MeshHandle,
+                                   .Mesh = VulkanMeshRef,
+                                   .SortDepth = glm::dot(Delta, Delta)});
+    }
+  });
+
+  size_t FrustumCulledCount = 0;
+  for (const CandidateBucket &Bucket : Buckets) {
+    FrustumCulledCount += Bucket.FrustumCulledCount;
+    Candidates.insert(Candidates.end(), Bucket.Candidates.begin(),
+                      Bucket.Candidates.end());
+  }
+
+  return FrustumCulledCount;
+}
+
+bool VulkanSceneRenderer::ShouldUseParallelCull(size_t SubmissionCount) const {
+  constexpr size_t kParallelCullSubmissionThreshold = 512;
+  return m_EnableParallelCull && SubmissionCount >= kParallelCullSubmissionThreshold;
 }
 
 void VulkanSceneRenderer::RecordBackground() {

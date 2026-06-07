@@ -66,6 +66,8 @@ Application::Application(const ApplicationConfig &Config,
         .Width = m_Window->GetWidth(),
         .Height = m_Window->GetHeight(),
         .EnableThreadedRendering = m_Config.EnableThreadedRendering,
+        .EnableParallelCull = m_Config.EnableParallelCull,
+        .VerifyParallelCull = m_Config.VerifyParallelCull,
     });
   }
   Jobs::Startup();

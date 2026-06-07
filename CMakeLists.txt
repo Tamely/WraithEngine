@@ -19,6 +19,12 @@ option(AXIOM_ENABLE_PHYSICS
        "Enable the JoltPhysics runtime simulation seam" ON)
 option(AXIOM_THREADED_RENDER
        "Enable the experimental threaded renderer and worker job system" OFF)
+option(AXIOM_PARALLEL_CULL
+       "Enable guarded parallel CPU culling in the Vulkan scene renderer" ON)
+option(AXIOM_VERIFY_PARALLEL_CULL
+       "Verify parallel CPU culling against the serial path in debug/test builds" OFF)
+option(AXIOM_FRAME_TASK_GRAPH
+       "Enable the minimal renderer frame task graph backed by enkiTS jobs" OFF)
 option(AXIOM_ENABLE_TSAN
        "Build with ThreadSanitizer instrumentation" OFF)
 set(AXIOM_WEBRTC_FRAMEWORK_PATH "" CACHE PATH

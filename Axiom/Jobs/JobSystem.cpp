@@ -60,6 +60,7 @@ public:
       m_Scheduler = std::make_unique<enki::TaskScheduler>();
       enki::TaskSchedulerConfig Config = m_Scheduler->GetConfig();
       Config.profilerCallbacks.threadStart = &OnWorkerThreadStart;
+      Config.numExternalTaskThreads = 4;
       m_Scheduler->Initialize(Config);
     }
   }
@@ -78,6 +79,11 @@ public:
   }
 
   JobHandle ScheduleJob(JobFn Function) {
+    if (!CanUseScheduler()) {
+      Function();
+      return {};
+    }
+
     auto State = std::make_shared<JobState>();
     State->Task = std::make_unique<LambdaTaskSet>(std::move(Function));
     m_Scheduler->AddTaskSetToPipe(State->Task.get());
@@ -85,6 +91,14 @@ public:
   }
 
   JobHandle ScheduleJobAfter(JobFn Function, std::span<JobHandle> Deps) {
+    if (!CanUseScheduler()) {
+      for (const JobHandle &Dependency : Deps) {
+        Wait(Dependency);
+      }
+      Function();
+      return {};
+    }
+
     auto State = std::make_shared<JobState>();
     State->DependencyHandles.reserve(Deps.size());
     for (const JobHandle &Dependency : Deps) {
@@ -122,6 +136,12 @@ public:
     if (Count == 0) {
       return;
     }
+    if (!CanUseScheduler()) {
+      for (size_t Index = 0; Index < Count; ++Index) {
+        Function(Index);
+      }
+      return;
+    }
 
     ParallelForTaskSet Task(Count, std::move(Function));
     m_Scheduler->AddTaskSetToPipe(&Task);
@@ -132,6 +152,16 @@ private:
   std::mutex m_Mutex;
   std::unique_ptr<enki::TaskScheduler> m_Scheduler;
   size_t m_StartupCount{0};
+
+  bool CanUseScheduler() {
+    if (m_Scheduler == nullptr) {
+      return false;
+    }
+    if (m_Scheduler->GetThreadNum() != enki::NO_THREAD_NUM) {
+      return true;
+    }
+    return m_Scheduler->RegisterExternalTaskThread();
+  }
 };
 
 JobSystem &GetJobSystem() {
