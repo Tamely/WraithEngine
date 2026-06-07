@@ -16,6 +16,8 @@ if(APPLE)
   )
 endif()
 
+axiom_apply_performance_options(AxiomHAL)
+
 target_include_directories(AxiomHAL PUBLIC
   "${CMAKE_SOURCE_DIR}"
   "${CMAKE_SOURCE_DIR}/Axiom"

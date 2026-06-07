@@ -245,6 +245,12 @@ cmake --build build/release
 | `AXIOM_SCRIPTING_TRUST_DEFAULT` | `STRING` | `Restricted` | Default sandbox tier for user scripts. `Restricted` (hosted — blocks `System.Net.*`, `System.Reflection.Emit`, etc.) or `Trusted` (local dev — full BCL access) |
 | `AXIOM_ENABLE_WEBRTC` | `BOOL` | `OFF` | Enable the macOS WebRTC transport |
 | `AXIOM_ENABLE_PHYSICS` | `BOOL` | `ON` | Enable the JoltPhysics runtime simulation seam |
+| `AXIOM_THREADED_RENDER` | `BOOL` | `ON` | Enable the threaded renderer and worker job system |
+| `AXIOM_PARALLEL_CULL` | `BOOL` | `ON` | Enable guarded parallel CPU culling in the Vulkan scene renderer |
+| `AXIOM_FRAME_TASK_GRAPH` | `BOOL` | `ON` | Enable the renderer frame task graph backed by enkiTS jobs |
+| `AXIOM_ENABLE_PERFORMANCE_DEFAULTS` | `BOOL` | `ON` | Apply optimized compile/link defaults to first-party targets |
+| `AXIOM_OPTIMIZE_FOR_NATIVE_ARCH` | `BOOL` | `ON` | Tune optimized builds for the host CPU architecture |
+| `AXIOM_ENABLE_IPO` | `BOOL` | `ON` | Enable interprocedural optimization/LTO for optimized builds when supported |
 | `AXIOM_WEBRTC_FRAMEWORK_PATH` | `PATH` | _(empty)_ | Path to a `WebRTC.framework` bundle (macOS framework variant) |
 | `AXIOM_WEBRTC_LIBRARY_PATH` | `FILEPATH` | _(empty)_ | Path to a `libwebrtc` static/shared binary (non-framework variant) |
 | `AXIOM_WEBRTC_INCLUDE_DIR` | `PATH` | _(empty)_ | Include directory for the non-framework libwebrtc variant |

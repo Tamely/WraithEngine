@@ -4,6 +4,8 @@ add_executable(AxiomEditor
   GlfwEditorModule.cpp
 )
 
+axiom_apply_performance_options(AxiomEditor)
+
 target_link_libraries(AxiomEditor PRIVATE AxiomCore)
 target_link_libraries(AxiomEditor PRIVATE
   AxiomScene

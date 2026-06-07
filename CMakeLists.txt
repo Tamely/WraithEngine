@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+include(cmake/AxiomCompilerOptions.cmake)
+
 option(BUILD_TESTING "Build tests" OFF)
 option(AXIOM_ENABLE_SCRIPTING
        "Enable the Coral C# scripting host" OFF)
@@ -18,13 +20,13 @@ option(AXIOM_ENABLE_WEBRTC
 option(AXIOM_ENABLE_PHYSICS
        "Enable the JoltPhysics runtime simulation seam" ON)
 option(AXIOM_THREADED_RENDER
-       "Enable the experimental threaded renderer and worker job system" OFF)
+       "Enable the threaded renderer and worker job system" ON)
 option(AXIOM_PARALLEL_CULL
        "Enable guarded parallel CPU culling in the Vulkan scene renderer" ON)
 option(AXIOM_VERIFY_PARALLEL_CULL
        "Verify parallel CPU culling against the serial path in debug/test builds" OFF)
 option(AXIOM_FRAME_TASK_GRAPH
-       "Enable the minimal renderer frame task graph backed by enkiTS jobs" OFF)
+       "Enable the minimal renderer frame task graph backed by enkiTS jobs" ON)
 option(AXIOM_ENABLE_TSAN
        "Build with ThreadSanitizer instrumentation" OFF)
 set(AXIOM_WEBRTC_FRAMEWORK_PATH "" CACHE PATH

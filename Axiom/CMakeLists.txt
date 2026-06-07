@@ -373,13 +373,7 @@ function(axiom_configure_module_target target_name)
     target_link_options(${target_name} PUBLIC ${AXIOM_WEBRTC_LINK_OPTIONS})
   endif()
 
-  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    target_compile_options(${target_name} PRIVATE
-      $<$<CONFIG:Release>:-O3 -march=native>
-      $<$<CONFIG:RelWithDebInfo>:-O2 -g -march=native>
-      $<$<CONFIG:MinSizeRel>:-Os>
-    )
-  endif()
+  axiom_apply_performance_options(${target_name})
 
   if(AXIOM_ENABLE_TSAN)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
@@ -553,6 +547,7 @@ if(AXIOM_ENABLE_TSAN)
     -fno-omit-frame-pointer
   )
 endif()
+axiom_apply_performance_options(AxiomRendererVulkanObjects)
 
 if(AXIOM_ENABLE_SCRIPTING)
   set(AXIOM_CORAL_MANAGED_DIR
