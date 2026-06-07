@@ -1,8 +1,8 @@
 # WraithEngine Refactor Plan
 
 ## Document Status
-- Status: Draft
-- Date: 2026-05-25
+- Status: Draft, updated after Phase 1 headless scalability work
+- Date: 2026-06-07
 - Audience: Engine, rendering, headless runtime, and editor contributors
 - Intended outcome: Turn the current engineering audit into an executable refactor roadmap ordered by dependency, risk, and team size
 
@@ -14,8 +14,8 @@ The most important current facts are:
 
 - Scene authority already lives in editor-owned structs in `EditorSession`, but that data is mirrored into a recursive heap-owned `Instance` tree for hierarchy operations and projection.
 - Render submission still carries `shared_ptr` ownership and still recovers backend-specific Vulkan types through `dynamic_cast` in the submission build path.
-- Headless offscreen rendering still blocks on `vkWaitForFences` immediately after submit, which defeats frames-in-flight for the headless path.
-- Multi-client headless rendering still performs one render pass per remote client per engine tick.
+- Phase 1 headless offscreen rendering no longer waits immediately after submit; completed readbacks are polled and published on later ticks.
+- Multi-client headless rendering now has dirty/burst scheduling and idle-client throttling, but still needs broader policy tuning and production load validation.
 - `RemoteViewportServer` still mixes transport, WebRTC, project lifecycle, script workspace, asset upload, presence, input routing, and frame delivery in one class.
 - String-keyed maps remain widespread in editor, headless, scripting, physics, and scene serialization paths even where stable integer handles would make the authority layer simpler and cheaper.
 
@@ -54,12 +54,12 @@ Validation:
 Current implementation shape:
 
 - Headless uses an offscreen render surface and publishes captured frames through the renderer frame-output seam in [Axiom/Core/Application.cpp](/Users/joshua/Documents/GitHub/WraithEngine/Axiom/Core/Application.cpp:152), [Axiom/Renderer/Vulkan/VulkanRendererBackend.cpp](/Users/joshua/Documents/GitHub/WraithEngine/Axiom/Renderer/Vulkan/VulkanRendererBackend.cpp:150), and [Axiom/Renderer/Vulkan/VulkanDrawSubmissionSystem.cpp](/Users/joshua/Documents/GitHub/WraithEngine/Axiom/Renderer/Vulkan/VulkanDrawSubmissionSystem.cpp:633).
-- In the offscreen path, the draw submission system submits graphics work, marks the capture pending, then immediately waits on `CurrentFrame.RenderFence` before publishing the frame in [Axiom/Renderer/Vulkan/VulkanDrawSubmissionSystem.cpp](/Users/joshua/Documents/GitHub/WraithEngine/Axiom/Renderer/Vulkan/VulkanDrawSubmissionSystem.cpp:770).
+- In the offscreen path, the draw submission system submits graphics work, records capture ownership at submit time, and publishes completed readbacks from later polling rather than waiting immediately after submit.
 
 Validation:
 
-- This finding is fully accurate.
-- The current implementation preserves frame attribution correctness, but it serializes headless rendering at the point where frames-in-flight should be helping.
+- The original immediate-fence finding has been addressed by the Phase 1 implementation.
+- Remaining risk is around queue depth, capture latency, and production-scale scheduling policy rather than the old unconditional immediate wait.
 
 ### 4. Multi-client rendering
 
@@ -71,8 +71,8 @@ Current implementation shape:
 
 Validation:
 
-- This finding is fully accurate.
-- The engine currently re-renders once per active remote client per tick, even when the scene is shared and only camera/view overlays differ.
+- The original full-rate-per-client baseline has been improved by dirty/burst scheduling and idle-client throttling.
+- The engine still needs deeper policy tuning for many clients, shared-scene reuse, and active/idle fairness under real browser workloads.
 
 ### 5. `RemoteViewportServer`
 
@@ -105,19 +105,21 @@ Validation:
 
 ### Phase 1: Headless scalability slice
 
+Status: implemented. See [HeadlessPhase1ImplementationNote.md](/Users/joshua/Documents/GitHub/WraithEngine/Docs/HeadlessPhase1ImplementationNote.md).
+
 Why first:
 
 - Highest current scalability payoff.
 - Lowest semantic blast radius compared with scene storage rewrites.
 - Directly addresses the clearest N-client cost center.
 
-Target architecture:
+Implemented architecture:
 
 - Offscreen rendering uses true asynchronous readback.
 - Completed frames are published when fences signal on a later tick rather than by waiting immediately after submit.
-- Headless render scheduling becomes policy-driven per view, with at least dirty-state or cadence-based throttling for inactive clients.
+- Headless render scheduling is policy-driven per view, with dirty-state and cadence-based throttling for inactive clients.
 
-Migration strategy:
+Completed migration:
 
 1. Remove the immediate fence wait from the headless offscreen path.
 2. Let pending readbacks complete in later frames through the existing `PublishCompletedOffscreenFrames()` path.
@@ -143,9 +145,9 @@ Test strategy:
 - Add a renderer-level regression test or harness for two queued offscreen frames with distinct users.
 - Add instrumentation assertions in headless integration tests for render-pass count versus active-client count.
 
-Incremental or staged:
+Follow-up:
 
-- Incremental.
+- Use the instrumentation baseline to tune policy thresholds and validate many-client behavior.
 
 ### Phase 2: Render submission cleanup
 

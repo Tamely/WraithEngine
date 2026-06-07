@@ -13,8 +13,8 @@ That macOS-specific media path now lives behind the engine-wide `HAL/` layer, so
 ## Current Status
 
 - Status: working prototype
-- Verified on Windows as of 2026-05-05
-- Builds on macOS as of 2026-05-07
+- Current state reviewed on 2026-06-07
+- Builds on macOS with the `debug`, `release`, and `minsizerel` CMake presets
 - Runtime validation on macOS requires a Vulkan/MoltenVK-capable environment with Metal available
 - This subphase is complete for the runtime-side seam restoration work
 - `AxiomHeadless` is a command-driven authoritative runtime, not a full editor client
@@ -46,6 +46,9 @@ That macOS-specific media path now lives behind the engine-wide `HAL/` layer, so
 - the browser client now pumps camera/input updates on `requestAnimationFrame` and flushes pointer-lock look input immediately instead of batching on a fixed timer
 - the current stream no longer has the severe FPS collapse seen in the older prototype, but there is still roughly half a second of residual input latency to investigate later
 - a multi-client frame-routing bug was fixed by stamping each offscreen capture with the submitting `SessionUserId` at render time instead of inferring ownership later from mutable active-pass state
+- headless offscreen capture no longer waits immediately after graphics submit; completed readbacks are polled and published on later ticks with submit-time user attribution preserved
+- remote render views now have dirty/burst scheduling state, so idle views are throttled instead of forcing one full render pass per connected client every engine tick
+- high-performance release builds now enable threaded rendering, the renderer frame task graph, parallel CPU culling, native CPU tuning, and IPO/LTO when supported
 - the headless command/protocol layer and the remote project/script HTTP JSON helpers now use `rapidjson` internally; command/event/session payload schemas are unchanged, but the earlier handwritten JSON serializer/parser code on those paths has been removed
 - a root-level `EditorFrontend` workspace now hosts the primary browser editor shell using Next.js, React, and Tailwind CSS
 - `EditorFrontend` includes the docked editor layout, menu bar, toolbar, outliner, details panel, content browser, and the active WebRTC viewport client in `components/engine/viewport.tsx`
@@ -108,8 +111,12 @@ Dev-client example:
 Remote viewport server example:
 
 ```sh
-./AxiomRemoteViewportServer --host 127.0.0.1 --port 8080 --width 1280 --height 720
+./build/release/Headless/AxiomRemoteViewportServer --host 127.0.0.1 --port 8080 --width 1280 --height 720
 ```
+
+For the browser WebRTC viewport, configure the server with
+`-DAXIOM_ENABLE_WEBRTC=ON` and a local WebRTC framework or library path before
+building `AxiomRemoteViewportServer`.
 
 On startup, the process registers `WraithNetworking` with `ModuleManager`; the module initializes the `uWebSockets` transport, reports whether networking initialized successfully, and keeps per-connection metrics available for future runtime introspection.
 
@@ -256,7 +263,7 @@ This prototype does not yet provide:
 
 ## Scene Authoring Progress
 
-The authoritative scene-authoring loop has advanced on the `scene-editing` branch:
+The authoritative scene-authoring loop is implemented in the current tree:
 
 - `CreateObjectCommand`, `DuplicateObjectCommand`, and `DeleteObjectCommand` are now implemented as validated authoritative commands with matching `ObjectCreatedEvent` and `ObjectDeletedEvent` events
 - all scene objects are now backed by a `DataModel`-rooted Instance hierarchy (`Axiom/CoreInstance/SceneInstances.h`); `EditorSession` owns the live tree and keeps `EditorSceneState::Items` synchronized as a derived projection
@@ -283,7 +290,7 @@ The authoritative scene-authoring loop has advanced on the `scene-editing` branc
 
 ## Gizmo System
 
-A server-side transform gizmo is now fully implemented on the `scene-editing` branch:
+A server-side transform gizmo is now fully implemented in the current tree:
 
 ### Rendering (`VulkanGizmoRenderer`)
 - a dedicated Vulkan pipeline draws gizmo handles as billboard line-segment quads inserted between mesh rendering and the offscreen capture step

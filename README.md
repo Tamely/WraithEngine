@@ -133,12 +133,34 @@ AxiomCore runtime flow
 
 ## Build
 
-### Quick start (minimal — no scripting, no WebRTC)
+By default, single-config CMake generators use `Release` when no build type is
+specified. The checked-in presets still provide explicit `debug`, `release`, and
+`minsizerel` configurations, and preset builds run with parallel jobs enabled.
+
+### Quick start (debug — no scripting, no WebRTC)
 
 ```bash
 cmake --preset debug
 cmake --build build/debug
 ```
+
+### Performance server build (scripting + WebRTC)
+
+This is the normal high-performance local command for the browser-facing server
+on macOS when using a locally built `WebRTC.framework`:
+
+```bash
+cmake --preset release \
+  -DAXIOM_ENABLE_SCRIPTING=ON \
+  -DAXIOM_ENABLE_WEBRTC=ON \
+  -DAXIOM_WEBRTC_FRAMEWORK_PATH=/Users/joshua/webrtc-checkout/src/out/Default/WebRTC.framework
+
+cmake --build build/release --target AxiomRemoteViewportServer
+```
+
+The release preset uses optimized first-party compile defaults, native CPU
+tuning, IPO/LTO when the toolchain supports it, threaded rendering, the renderer
+frame task graph, parallel CPU culling, and parallel build jobs.
 
 ### With physics enabled
 
@@ -233,6 +255,9 @@ cmake --preset release -DAXIOM_ENABLE_SCRIPTING=ON
 cmake --build build/release
 ```
 
+The release preset is the recommended baseline for runtime performance. Use the
+debug preset for development diagnostics and tests.
+
 ---
 
 ## CMake Options Reference
@@ -268,10 +293,24 @@ cmake --build build/release
 
 ### Remote viewport server
 
+Release build:
+
+```bash
+./build/release/Headless/AxiomRemoteViewportServer \
+  --host 127.0.0.1 --port 8080 --width 1280 --height 720
+```
+
+Debug build:
+
 ```bash
 ./build/debug/Headless/AxiomRemoteViewportServer \
   --host 127.0.0.1 --port 8080 --width 1280 --height 720
 ```
+
+If WebRTC was not enabled at configure time, the server starts but the browser
+viewport cannot receive the H.264 WebRTC media path. Reconfigure with
+`-DAXIOM_ENABLE_WEBRTC=ON` and either `AXIOM_WEBRTC_FRAMEWORK_PATH` or the
+`AXIOM_WEBRTC_LIBRARY_PATH` / `AXIOM_WEBRTC_INCLUDE_DIR` pair.
 
 At startup, `AxiomRemoteViewportServer` registers the toggleable `WraithNetworking` module with `ModuleManager`. That module owns transport initialization, publishes connection metrics/state snapshots, and keeps the existing WebRTC session logic active behind the same public server API.
 
@@ -315,7 +354,7 @@ To test the packaged runtime binary built in `build/` against an existing staged
 package:
 
 ```bash
-./build/debug/Headless/AxiomPackagedRuntime \
+./build/release/Headless/AxiomPackagedRuntime \
   --package-root /absolute/path/to/Projects/<project-slug>/Package
 ```
 
@@ -324,7 +363,7 @@ Open `http://localhost:3000` in your browser.
 ### Local native editor (no browser required)
 
 ```bash
-./build/debug/Editor/AxiomEditor
+./build/release/Editor/AxiomEditor
 ```
 
 ---

@@ -1,13 +1,13 @@
 # Distributed Wraith Engine Design
 
 ## Document Status
-- Status: Draft
-- Date: 2026-05-25
+- Status: Draft, current-state refresh
+- Date: 2026-06-07
 - Audience: Engine, tools, networking, web, and infrastructure contributors
 - Intended outcome: Establish the target architecture for evolving WraithEngine into a distributed game engine and browser-based collaborative editor
 
 ## Implementation Progress
-- `event-system` branch now contains the first local authoritative editor-session slice
+- The current tree contains the first local authoritative editor-session slice
 - Added engine-owned `EditorSession`, `EditorCommand`, `EditorEvent`, `SessionId`, and `SessionUserId` foundations in `Axiom`
 - The native editor now translates GLFW input into commands and renders from session-owned camera/scene state instead of mutating camera state directly in the layer
 - Added deterministic in-process command draining, authoritative event publication, and focused tests for camera/look state transitions and command rejection
@@ -23,6 +23,9 @@
 - `AxiomRemoteViewportServer` now treats WebRTC as the only supported remote viewport media path
 - `WraithNetworking` now exposes initialization state and connection metrics for future CVAR/config integration
 - Removed the largest remote-viewport performance bottlenecks by unthrottling the headless server loop and tuning the encoder/input path for latency
+- Headless offscreen rendering now uses asynchronous readback polling instead of waiting immediately after graphics submit, with completed captures published on later ticks in submit order
+- Remote render views now track dirty/burst scheduling state; idle connected clients are throttled through round-robin cadence instead of forcing full-rate rendering for every client every tick
+- Performance-oriented defaults are enabled for first-party builds: Release is the implicit single-config default, preset builds run with parallel jobs, and optimized targets use native CPU tuning plus IPO/LTO when supported
 - The remote viewport now runs at acceptable frame rate, but still has noticeable residual input latency that likely requires deeper WebRTC sender/playout tuning
 - A root-level `EditorFrontend` workspace now serves as the longer-lived browser editor shell using Next.js, React, and Tailwind CSS
 - `EditorFrontend` contains a docked editor UI with a menu bar, toolbar, outliner, details panel, content browser, and the active WebRTC viewport client
@@ -33,7 +36,7 @@
 - a delayed-readback frame attribution bug in multi-pass headless rendering was fixed by stamping each offscreen capture with the submitting `SessionUserId` at submission time
 - The next browser-facing step after the migration is turning the browser shell plus authoritative session into a real single-user scene editor, not more work on a server-hosted prototype page
 - Collaboration should continue to follow that same authoritative command/event path after the single-user authoring loop is stable, rather than leading the roadmap ahead of core editor behavior
-- `scene-editing` branch introduces the first authoritative object-lifecycle commands: `CreateObjectCommand`, `DuplicateObjectCommand`, and `DeleteObjectCommand`, with matching `ObjectCreatedEvent` and `ObjectDeletedEvent` authoritative events
+- The current tree includes the first authoritative object-lifecycle commands: `CreateObjectCommand`, `DuplicateObjectCommand`, and `DeleteObjectCommand`, with matching `ObjectCreatedEvent` and `ObjectDeletedEvent` authoritative events
 - All scene objects are now backed by an Instance-class hierarchy rooted at a `DataModel` node, mimicking the Roblox object model; `EditorSession` owns the live `DataModel` tree and keeps `EditorSceneState::Items` synchronized as a derived projection
 - Concrete scene Instance subclasses introduced: `SceneFolder`, `SceneMeshObject`, `SceneLight`, `SceneCamera`, and `SceneActor` under `Axiom/CoreInstance/SceneInstances.h`
 - `SetSceneState` and `SetSceneItems` now rebuild the Instance tree from snapshot data, enabling round-trip snapshot rehydration
