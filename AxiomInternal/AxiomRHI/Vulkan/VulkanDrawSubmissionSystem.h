@@ -2,6 +2,7 @@
 
 #include "Renderer/RenderScene.h"
 #include "Renderer/RenderSurface.h"
+#include "RHI/IRHI.h"
 #include "AxiomRHI/Vulkan/VulkanCommandContext.h"
 #include "AxiomRHI/Vulkan/VulkanDeletionQueue.h"
 #include "AxiomRHI/Vulkan/VulkanDevice.h"
