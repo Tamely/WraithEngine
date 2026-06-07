@@ -12,6 +12,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <type_traits>
 #include <unordered_set>
 
 #include <glm/geometric.hpp>
@@ -25,20 +26,34 @@ glm::vec3 TransformPoint(const glm::mat4 &Transform, const glm::vec3 &Point) {
 
 namespace Axiom {
 namespace {
-VulkanRhiDevice *RequireVulkanDevice(IRHIDevice &Device) {
-  return dynamic_cast<VulkanRhiDevice *>(&Device);
+RHINativeHandle RHIHandle(auto Handle) {
+  return VulkanCommandList::EncodeNativeHandle(Handle);
+}
+
+std::array<RHINativeHandle, 1> RHIDescriptorSets(VkDescriptorSet Set) {
+  return {RHIHandle(Set)};
+}
+
+VkCommandBuffer GetVulkanCommandBuffer(const IRHICommandList &CommandList) {
+  const RHINativeHandle NativeCommandBuffer =
+      CommandList.GetNativeCommandBuffer();
+  if constexpr (std::is_pointer_v<VkCommandBuffer>) {
+    return reinterpret_cast<VkCommandBuffer>(NativeCommandBuffer);
+  } else {
+    return static_cast<VkCommandBuffer>(NativeCommandBuffer);
+  }
 }
 } // namespace
 
 void VulkanSceneRenderer::Init(IRHIDevice &Device,
                                const RendererCreateInfo &CreateInfo) {
-  m_Device = RequireVulkanDevice(Device);
+  m_Device = static_cast<VulkanRhiDevice *>(&Device);
   if (m_Device != nullptr) {
     m_FrameOutput = CreateInfo.FrameOutput;
     m_Device->GetDrawSubmissionSystem().SetRecordPreparedScenePasses(
-        [this](VkCommandBuffer CommandBuffer, RenderScene &Scene,
+        [this](IRHICommandList &CommandList, RenderScene &Scene,
                uint64_t FrameNumber, RendererViewMode ViewMode) {
-          RecordPreparedScenePasses(CommandBuffer, Scene, FrameNumber, ViewMode);
+          RecordPreparedScenePasses(CommandList, Scene, FrameNumber, ViewMode);
         });
   }
 }
@@ -346,7 +361,7 @@ void VulkanSceneRenderer::RenderFallbackBackground(RenderScene &Scene) {
 }
 
 void VulkanSceneRenderer::RecordPreparedScenePasses(
-    VkCommandBuffer CommandBuffer, RenderScene &Scene, uint64_t FrameNumber,
+    IRHICommandList &CommandList, RenderScene &Scene, uint64_t FrameNumber,
     RendererViewMode ViewMode) {
   m_ActiveScene = &Scene;
   m_ViewMode = ViewMode;
@@ -361,32 +376,32 @@ void VulkanSceneRenderer::RecordPreparedScenePasses(
   for (const ScenePassPrimitive Pass : m_QueuedScenePasses) {
     switch (Pass) {
     case ScenePassPrimitive::Background:
-      EnsureDrawImageLayout(CommandBuffer, VK_IMAGE_LAYOUT_GENERAL);
-      DrawBackgroundPass(CommandBuffer, m_ActiveScene);
+      EnsureDrawImageLayout(CommandList, VK_IMAGE_LAYOUT_GENERAL);
+      DrawBackgroundPass(CommandList, m_ActiveScene);
       break;
     case ScenePassPrimitive::DepthPrepass:
-      EnsureRasterDepthLayout(CommandBuffer, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
-      RecordDepthPrepassPass(CommandBuffer, Frame);
+      EnsureRasterDepthLayout(CommandList, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+      RecordDepthPrepassPass(CommandList, Frame);
       break;
     case ScenePassPrimitive::Hzb:
-      EnsureRasterDepthLayout(CommandBuffer, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
-      BuildHzbPass(CommandBuffer, Frame);
+      EnsureRasterDepthLayout(CommandList, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+      BuildHzbPass(CommandList, Frame);
       break;
     case ScenePassPrimitive::ComputeMeshPath:
-      EnsureRasterDepthLayout(CommandBuffer,
+      EnsureRasterDepthLayout(CommandList,
                               VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
-      EnsureDrawImageLayout(CommandBuffer, VK_IMAGE_LAYOUT_GENERAL);
-      RecordComputeMeshPathPass(CommandBuffer, Frame);
+      EnsureDrawImageLayout(CommandList, VK_IMAGE_LAYOUT_GENERAL);
+      RecordComputeMeshPathPass(CommandList, Frame);
       break;
     case ScenePassPrimitive::OpaqueForward:
-      EnsureRasterDepthLayout(CommandBuffer, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
-      EnsureDrawImageLayout(CommandBuffer, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-      RecordOpaqueForwardPass(CommandBuffer, Frame);
+      EnsureRasterDepthLayout(CommandList, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+      EnsureDrawImageLayout(CommandList, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+      RecordOpaqueForwardPass(CommandList, Frame);
       break;
     case ScenePassPrimitive::TranslucentForward:
-      EnsureRasterDepthLayout(CommandBuffer, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
-      EnsureDrawImageLayout(CommandBuffer, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-      RecordTranslucentForwardPass(CommandBuffer, Frame);
+      EnsureRasterDepthLayout(CommandList, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+      EnsureDrawImageLayout(CommandList, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+      RecordTranslucentForwardPass(CommandList, Frame);
       break;
     }
   }

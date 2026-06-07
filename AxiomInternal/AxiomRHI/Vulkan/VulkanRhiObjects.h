@@ -5,6 +5,7 @@
 #include "AxiomRHI/Vulkan/VulkanTypes.h"
 
 #include <memory>
+#include <type_traits>
 
 namespace Axiom {
 class VulkanCommandList final : public IRHICommandList {
@@ -18,10 +19,67 @@ public:
   void End() override;
   bool IsRecording() const override { return m_IsRecording; }
   RHIQueueType GetQueueType() const override { return m_QueueType; }
+  RHINativeHandle GetNativeCommandBuffer() const override {
+    return EncodeNativeHandle(m_CommandBuffer);
+  }
 
   VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
+  void BeginRendering(const void *RenderingInfo) override;
+  void EndRendering() override;
+  void SetViewport(const void *Viewport) override;
+  void SetScissor(const void *Scissor) override;
+  void BindPipeline(RHIBindPoint BindPoint, RHINativeHandle Pipeline) override;
+  void BindDescriptorSet(RHIBindPoint BindPoint, RHINativeHandle PipelineLayout,
+                         uint32_t FirstSet,
+                         std::span<const RHINativeHandle> Sets) override;
+  void PushConstants(RHINativeHandle PipelineLayout, uint32_t ShaderStages,
+                     uint32_t Offset, uint32_t Size, const void *Data) override;
+  void BindVertexBuffer(uint32_t FirstBinding, RHINativeHandle Buffer,
+                        uint64_t Offset) override;
+  void BindIndexBuffer(RHINativeHandle Buffer, uint64_t Offset,
+                       RHIIndexType IndexType) override;
+  void DrawIndexed(uint32_t IndexCount, uint32_t InstanceCount,
+                   uint32_t FirstIndex, int32_t VertexOffset,
+                   uint32_t FirstInstance) override;
+  void DrawIndexedIndirect(RHINativeHandle Buffer, uint64_t Offset,
+                           uint32_t DrawCount, uint32_t Stride) override;
+  void Dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
+                uint32_t GroupCountZ) override;
+  void CopyBuffer(RHINativeHandle SourceBuffer,
+                  RHINativeHandle DestinationBuffer,
+                  const void *CopyRegion) override;
+  void CopyBufferToImage(RHINativeHandle SourceBuffer,
+                         RHINativeHandle DestinationImage,
+                         uint32_t DestinationImageLayout,
+                         const void *CopyRegion) override;
+  void CopyImageToBuffer(RHINativeHandle SourceImage,
+                         uint32_t SourceImageLayout,
+                         RHINativeHandle DestinationBuffer,
+                         const void *CopyRegion) override;
+  void PipelineBarrier(const void *DependencyInfo) override;
+
+  template <typename VulkanHandle>
+  static RHINativeHandle EncodeNativeHandle(VulkanHandle Handle) {
+    if constexpr (std::is_pointer_v<VulkanHandle>) {
+      return reinterpret_cast<RHINativeHandle>(Handle);
+    } else {
+      return static_cast<RHINativeHandle>(Handle);
+    }
+  }
 
 private:
+  template <typename VulkanHandle>
+  static VulkanHandle DecodeNativeHandle(RHINativeHandle Handle) {
+    if constexpr (std::is_pointer_v<VulkanHandle>) {
+      return reinterpret_cast<VulkanHandle>(Handle);
+    } else {
+      return static_cast<VulkanHandle>(Handle);
+    }
+  }
+
+  static VkPipelineBindPoint ToVulkanBindPoint(RHIBindPoint BindPoint);
+  static VkIndexType ToVulkanIndexType(RHIIndexType IndexType);
+
   VkDevice m_Device{VK_NULL_HANDLE};
   VkCommandPool m_CommandPool{VK_NULL_HANDLE};
   VkCommandBuffer m_CommandBuffer{VK_NULL_HANDLE};

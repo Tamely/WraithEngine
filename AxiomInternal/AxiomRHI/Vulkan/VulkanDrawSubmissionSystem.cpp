@@ -96,7 +96,7 @@ void VulkanDrawSubmissionSystem::Init(const CreateInfo &CreateInfo) {
 }
 
 void VulkanDrawSubmissionSystem::SetRecordPreparedScenePasses(
-    std::function<void(VkCommandBuffer, RenderScene &, uint64_t, RendererViewMode)>
+    std::function<void(IRHICommandList &, RenderScene &, uint64_t, RendererViewMode)>
         RecordPreparedScenePasses) {
   m_RecordPreparedScenePasses = std::move(RecordPreparedScenePasses);
 }
@@ -396,14 +396,14 @@ void VulkanDrawSubmissionSystem::ClearDepthImage(VkCommandBuffer CommandBuffer,
                           PreviousLayout, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 }
 
-void VulkanDrawSubmissionSystem::DrawMeshes(VkCommandBuffer CommandBuffer,
+void VulkanDrawSubmissionSystem::DrawMeshes(IRHICommandList &CommandList,
                                             RenderScene &Scene,
                                             uint64_t FrameNumber,
                                             RendererViewMode ViewMode) {
   if (!m_RecordPreparedScenePasses) {
     return;
   }
-  m_RecordPreparedScenePasses(CommandBuffer, Scene, FrameNumber, ViewMode);
+  m_RecordPreparedScenePasses(CommandList, Scene, FrameNumber, ViewMode);
 }
 
 void VulkanDrawSubmissionSystem::RecordOffscreenCapture(
@@ -629,7 +629,7 @@ void VulkanDrawSubmissionSystem::DrawFrame(const FrameRequest &Request) {
                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                        MeshFrame.TimestampQueryPool, 2);
   if (Request.ActiveScene != nullptr) {
-    DrawMeshes(CommandBuffer, *Request.ActiveScene, Request.FrameNumber,
+    DrawMeshes(CommandList, *Request.ActiveScene, Request.FrameNumber,
                Request.ViewMode);
   }
   vkCmdWriteTimestamp2(CommandBuffer,
