@@ -1,6 +1,11 @@
 # Headless Scalability Baseline
 
-This note captures where to read the new Phase 0 / Phase 1 headless scalability counters before changing scheduling or asynchronous readback behavior.
+This note captures where to read the Phase 0 / Phase 1 headless scalability counters while tuning scheduling and asynchronous readback behavior.
+
+Phase 1 has landed: offscreen readbacks are now published after later fence polling
+instead of waiting immediately after submit, and idle remote views are throttled by
+dirty/burst scheduling. Treat this file as the current instrumentation guide, not
+as a pre-Phase-1 TODO.
 
 ## Where The Counters Live
 
@@ -8,7 +13,7 @@ This note captures where to read the new Phase 0 / Phase 1 headless scalability 
 - Headless render-pass scheduling hook in [Headless/HeadlessSessionHost.cpp](/Users/joshua/Documents/GitHub/WraithEngine/Headless/HeadlessSessionHost.cpp)
 - Offscreen readback hook in [Axiom/Renderer/Vulkan/VulkanDrawSubmissionSystem.cpp](/Users/joshua/Documents/GitHub/WraithEngine/Axiom/Renderer/Vulkan/VulkanDrawSubmissionSystem.cpp)
 
-## What To Capture Before Refactors
+## What To Capture During Tuning
 
 - `LastTickRenderPassCount`: current render passes scheduled for one engine tick.
 - `TotalRenderPasses`: cumulative render-pass work over a benchmark window.
@@ -35,4 +40,7 @@ For each run, record the snapshot after a fixed tick window and compare:
 - pending readbacks during steady state
 - per-client cadence symmetry between active and idle clients
 
-The current baseline is expected to show roughly one render pass per connected remote client per engine tick, with no scheduler distinction yet between active and idle remote clients.
+The old pre-Phase-1 baseline showed roughly one render pass per connected remote
+client per engine tick. The current expected behavior is different: active or
+recently mutated clients should receive a short full-rate burst, while idle
+clients should settle into the scheduler's throttled cadence.

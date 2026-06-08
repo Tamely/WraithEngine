@@ -351,6 +351,9 @@ function(axiom_configure_module_target target_name)
     AXIOM_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
     AXIOM_ENABLE_WEBRTC=$<IF:$<BOOL:${AXIOM_ENABLE_WEBRTC}>,1,0>
     AXIOM_THREADED_RENDER=$<IF:$<BOOL:${AXIOM_THREADED_RENDER}>,1,0>
+    AXIOM_PARALLEL_CULL=$<IF:$<BOOL:${AXIOM_PARALLEL_CULL}>,1,0>
+    AXIOM_VERIFY_PARALLEL_CULL=$<IF:$<BOOL:${AXIOM_VERIFY_PARALLEL_CULL}>,1,0>
+    AXIOM_FRAME_TASK_GRAPH=$<IF:$<BOOL:${AXIOM_FRAME_TASK_GRAPH}>,1,0>
     AXIOM_WEBRTC_LINKED=${AXIOM_WEBRTC_LINKED}
   )
 
@@ -370,13 +373,7 @@ function(axiom_configure_module_target target_name)
     target_link_options(${target_name} PUBLIC ${AXIOM_WEBRTC_LINK_OPTIONS})
   endif()
 
-  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    target_compile_options(${target_name} PRIVATE
-      $<$<CONFIG:Release>:-O3 -march=native>
-      $<$<CONFIG:RelWithDebInfo>:-O2 -g -march=native>
-      $<$<CONFIG:MinSizeRel>:-Os>
-    )
-  endif()
+  axiom_apply_performance_options(${target_name})
 
   if(AXIOM_ENABLE_TSAN)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
@@ -539,6 +536,9 @@ target_compile_definitions(AxiomRendererVulkanObjects PRIVATE
   AXIOM_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
   AXIOM_ENABLE_WEBRTC=$<IF:$<BOOL:${AXIOM_ENABLE_WEBRTC}>,1,0>
   AXIOM_THREADED_RENDER=$<IF:$<BOOL:${AXIOM_THREADED_RENDER}>,1,0>
+  AXIOM_PARALLEL_CULL=$<IF:$<BOOL:${AXIOM_PARALLEL_CULL}>,1,0>
+  AXIOM_VERIFY_PARALLEL_CULL=$<IF:$<BOOL:${AXIOM_VERIFY_PARALLEL_CULL}>,1,0>
+  AXIOM_FRAME_TASK_GRAPH=$<IF:$<BOOL:${AXIOM_FRAME_TASK_GRAPH}>,1,0>
   AXIOM_WEBRTC_LINKED=${AXIOM_WEBRTC_LINKED}
 )
 if(AXIOM_ENABLE_TSAN)
@@ -547,6 +547,7 @@ if(AXIOM_ENABLE_TSAN)
     -fno-omit-frame-pointer
   )
 endif()
+axiom_apply_performance_options(AxiomRendererVulkanObjects)
 
 if(AXIOM_ENABLE_SCRIPTING)
   set(AXIOM_CORAL_MANAGED_DIR

@@ -2,6 +2,7 @@
 #include <Core/VulkanLoader.h>
 #include <Renderer/Mesh.h>
 #include <Renderer/Camera.h>
+#include <Jobs/JobSystem.h>
 #include <Renderer/OffscreenRenderSurface.h>
 #include <Renderer/RenderCommand.h>
 #include <Renderer/Renderer.h>
@@ -107,6 +108,12 @@ Axiom::MeshData MakeTriangleMesh() {
       .BoundsMax = {0.25f, 0.25f, 0.0f},
   };
 }
+
+class ScopedJobSystem {
+public:
+  ScopedJobSystem() { Axiom::Jobs::Startup(); }
+  ~ScopedJobSystem() { Axiom::Jobs::Shutdown(); }
+};
 } // namespace
 
 TEST(RenderSubmissionTests, EditorSceneRendererAdapterReusesCachedMeshUntilAssetChanges) {
@@ -166,22 +173,25 @@ TEST(RenderSubmissionTests, EditorSceneRendererAdapterDropsDeletedObjectsFromCac
 }
 
 TEST(RenderSubmissionTests,
-     VulkanRendererRendersAllFiveThousandSubmittedMeshesOffscreen) {
+     VulkanRendererRendersAllTenThousandSubmittedMeshesOffscreen) {
   constexpr uint32_t Width = 1280;
   constexpr uint32_t Height = 720;
-  constexpr size_t MeshCount = 5000;
+  constexpr size_t MeshCount = 10000;
 
   EnsureLoggingInitialized();
   if (!Axiom::CanInitializeHeadlessVulkan()) {
     GTEST_SKIP() << "Headless Vulkan is unavailable on this host";
   }
 
+  ScopedJobSystem Jobs;
   auto Surface = std::make_shared<Axiom::OffscreenRenderSurface>(Width, Height);
   Axiom::Renderer Renderer;
   Renderer.Init({
       .TargetSurface = Surface,
       .Width = Width,
       .Height = Height,
+      .EnableParallelCull = true,
+      .VerifyParallelCull = true,
   });
   Renderer.SetViewMode(Axiom::RendererViewMode::Wireframe);
 

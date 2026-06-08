@@ -19,6 +19,8 @@ add_executable(AxiomTests
   ../Headless/WebRtcSession.cpp
 )
 
+axiom_apply_performance_options(AxiomTests)
+
 if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/Headless/MacOSWebRtcSession.mm")
   target_sources(AxiomTests PRIVATE
     ../Headless/MacOSWebRtcSession.mm

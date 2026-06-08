@@ -4,6 +4,7 @@
 #include "AxiomRHI/Vulkan/VulkanRendererTypes.h"
 
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace Axiom {
@@ -48,6 +49,12 @@ private:
     MeshHandle MeshHandle{};
     VulkanMesh *Mesh{nullptr};
     float SortDepth{0.0f};
+
+    constexpr bool operator==(const CandidateSubmission &) const = default;
+  };
+
+  struct SubmissionCullInput {
+    VulkanMesh *Mesh{nullptr};
   };
 
   struct PreparedSceneState {
@@ -60,6 +67,13 @@ private:
   };
 
   void PrepareSceneFrame(RenderScene &Scene);
+  size_t BuildCullCandidatesSerial(
+      const RenderScene &Scene, std::span<const SubmissionCullInput> Inputs,
+      std::vector<CandidateSubmission> &Candidates) const;
+  size_t BuildCullCandidatesParallel(
+      const RenderScene &Scene, std::span<const SubmissionCullInput> Inputs,
+      std::vector<CandidateSubmission> &Candidates) const;
+  bool ShouldUseParallelCull(size_t SubmissionCount) const;
   void RecordBackground();
   void RecordDepthPrepass();
   void BuildHzb();
@@ -107,7 +121,11 @@ private:
   IViewportFrameOutput *m_FrameOutput{nullptr};
   PreparedSceneState m_PreparedSceneState{};
   std::vector<CandidateSubmission> m_CandidateScratch;
+  std::vector<CandidateSubmission> m_VerificationCandidateScratch;
+  std::vector<SubmissionCullInput> m_CullInputScratch;
   std::vector<ScenePassPrimitive> m_QueuedScenePasses;
+  bool m_EnableParallelCull{AXIOM_PARALLEL_CULL != 0};
+  bool m_VerifyParallelCull{AXIOM_VERIFY_PARALLEL_CULL != 0};
   VkImageLayout m_SceneDrawImageLayout{VK_IMAGE_LAYOUT_UNDEFINED};
   VkImageLayout m_SceneRasterDepthLayout{VK_IMAGE_LAYOUT_UNDEFINED};
 };

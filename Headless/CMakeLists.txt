@@ -7,6 +7,8 @@ add_library(uSockets STATIC
   "${CMAKE_SOURCE_DIR}/ThirdParty/uWebSockets/uSockets/src/eventing/epoll_kqueue.c"
 )
 
+axiom_apply_performance_options(uSockets)
+
 target_include_directories(uSockets PUBLIC
   "${CMAKE_SOURCE_DIR}/ThirdParty/uWebSockets/uSockets/src"
 )
@@ -30,6 +32,8 @@ add_library(WraithNetworking STATIC
   RemoteViewportWebSocketDispatch.cpp
   WraithNetworkingModule.cpp
 )
+
+axiom_apply_performance_options(WraithNetworking)
 
 target_include_directories(WraithNetworking PUBLIC
   "${CMAKE_SOURCE_DIR}/Headless"
@@ -66,6 +70,8 @@ add_executable(AxiomHeadless
   WebRtcSession.cpp
 )
 
+axiom_apply_performance_options(AxiomHeadless)
+
 add_executable(AxiomRemoteViewportDevClient
   DevRemoteViewportClient.cpp
   HeadlessCommandProtocol.cpp
@@ -75,6 +81,8 @@ add_executable(AxiomRemoteViewportDevClient
   HeadlessSessionModule.cpp
   WebRtcSession.cpp
 )
+
+axiom_apply_performance_options(AxiomRemoteViewportDevClient)
 
 target_include_directories(AxiomHeadless PRIVATE
   "${CMAKE_SOURCE_DIR}/ThirdParty/glfw/deps"
@@ -121,6 +129,8 @@ add_executable(AxiomRemoteViewportServer
   WebRtcSession.cpp
 )
 
+axiom_apply_performance_options(AxiomRemoteViewportServer)
+
 add_executable(AxiomPackagedRuntime
   AxiomPackagedRuntime.cpp
   HeadlessOverlayModule.cpp
@@ -128,6 +138,8 @@ add_executable(AxiomPackagedRuntime
   PackagedRuntimeHost.cpp
   HeadlessSessionModule.cpp
 )
+
+axiom_apply_performance_options(AxiomPackagedRuntime)
 
 target_include_directories(AxiomRemoteViewportServer PRIVATE
   "${CMAKE_SOURCE_DIR}/ThirdParty/glfw/deps"

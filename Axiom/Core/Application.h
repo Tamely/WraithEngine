@@ -15,6 +15,15 @@ namespace Axiom {
 #ifndef AXIOM_THREADED_RENDER
 #define AXIOM_THREADED_RENDER 0
 #endif
+#ifndef AXIOM_PARALLEL_CULL
+#define AXIOM_PARALLEL_CULL 0
+#endif
+#ifndef AXIOM_VERIFY_PARALLEL_CULL
+#define AXIOM_VERIFY_PARALLEL_CULL 0
+#endif
+#ifndef AXIOM_FRAME_TASK_GRAPH
+#define AXIOM_FRAME_TASK_GRAPH 0
+#endif
 
 class Renderer;
 struct RendererDeleter {
@@ -40,6 +49,9 @@ struct ApplicationConfig {
   RuntimeMode Mode{RuntimeMode::LocalWindowedEditor};
   IViewportFrameOutput *FrameOutput{nullptr};
   bool EnableThreadedRendering{AXIOM_THREADED_RENDER != 0};
+  bool EnableParallelCull{AXIOM_PARALLEL_CULL != 0};
+  bool VerifyParallelCull{AXIOM_VERIFY_PARALLEL_CULL != 0};
+  bool EnableFrameTaskGraph{AXIOM_FRAME_TASK_GRAPH != 0};
 };
 
 class Application {
@@ -65,6 +77,9 @@ public:
   [[nodiscard]] float GetDeltaTime() const { return m_DeltaTime; }
   [[nodiscard]] uint64_t GetFrameIndex() const { return m_FrameIndex; }
   [[nodiscard]] RuntimeMode GetRuntimeMode() const { return m_Config.Mode; }
+  [[nodiscard]] bool IsFrameTaskGraphEnabled() const {
+    return m_Config.EnableFrameTaskGraph;
+  }
   [[nodiscard]] Renderer &GetRenderer() const;
   [[nodiscard]] Renderer *TryGetRenderer() const;
   [[nodiscard]] ModuleManager &GetModuleManager() { return m_ModuleManager; }
